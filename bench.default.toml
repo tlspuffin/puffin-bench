@@ -1,0 +1,29 @@
+commits = [
+    "3f648f016c84884d6470fc906735bb8c5da7891b",
+    "4f648f016c84884d6470fc906735bb8c5da7891b",
+    "5f648f016c84884d6470fc906735bb8c5da7891b",
+    "6f648f016c84884d6470fc906735bb8c5da7891b",
+    "7f648f016c84884d6470fc906735bb8c5da7891b",
+    "8f648f016c84884d6470fc906735bb8c5da7891b",
+]
+
+[vulnerabilities.SDOS1]
+cve = "2021-3449"
+
+[vulnerabilities.SIG]
+cve = "2022-25638"
+
+[vulnerabilities.SKIP]
+cve = "2022-25640"
+
+[vulnerabilities.SDOS2]
+cve = "2022-38152"
+
+[vulnerabilities.CDOS]
+cve = "2022-38153"
+
+[vulnerabilities.BUF]
+cve = "2022-39173"
+
+[vulnerabilities.HEAP]
+cve = "2022-42905"

@@ -1,0 +1,76 @@
+---
+title: "@COMMIT_ABBR@"
+tags: [main, HEAD]
+---
+
+```{python}
+# | tags: [parameters]
+commit: str = "@COMMIT_FULL@"
+```
+
+```{python}
+from pathlib import Path
+
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+import plotly.graph_objects as go
+```
+
+```{python}
+from puffin_bench import Bench
+
+bench = Bench()
+```
+
+## Vulnerabilities
+
+```{python}
+ttf_data = bench.dataset("ttf").load()
+ttf_commit_data = ttf_data[ttf_data["run.params.commit"] == commit]
+
+
+def boxplots(y) -> None:
+    labels = {
+        "run.params.commit": "commit",
+        "run.params.vulnerability": "vulnerability",
+        "ttf.seconds": "seconds)",
+        "ttf.nb_exec": "number of executions)",
+        "ttf.corpus_size": "corpus size",
+    }
+
+    fig = px.box(
+        ttf_commit_data,
+        x="run.params.commit",
+        y=y,
+        points="all",
+        facet_col="run.params.vulnerability",
+        facet_col_wrap=1,
+        facet_row_spacing=0.01,
+        height=600 * len(bench.vulnerabilities()),
+        labels=labels,
+        boxmode="overlay",
+    )
+    fig.update_yaxes(title=None, visible=True, showticklabels=True)
+    fig.update_xaxes(title=None, visible=False, showticklabels=False)
+    fig.show()
+```
+
+### Time to Find (in seconds)
+```{python}
+boxplots("ttf.seconds")
+```
+
+### Time to Find (in number of executions)
+```{python}
+boxplots("ttf.nb_exec")
+```
+
+### Corpus Size at TTF 
+```{python}
+boxplots("ttf.corpus_size")
+```
+
+## Performances
+
+## Coverage

@@ -1,0 +1,72 @@
+---
+title: Benchmark Results
+format:
+  html: default
+  ipynb: default
+---
+
+```{python}
+from pathlib import Path
+
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+import plotly.graph_objects as go
+```
+
+```{python}
+from puffin_bench import Bench
+
+bench = Bench()
+```
+
+## Vulnerabilities
+
+```{python}
+ttf_data = bench.dataset("ttf").load()
+
+ttf_data = ttf_data.groupby(["run.params.commit", "run.params.vulnerability"]).agg(
+    {
+        "ttf.seconds": ["mean"],
+        "ttf.nb_exec": ["mean"],
+        "ttf.corpus_size": ["mean"],
+    }
+)
+ttf_data.columns = [".".join(col) for col in ttf_data.columns]
+ttf_data = ttf_data.sort_values(
+    by=["run.params.commit"], key=lambda c: c.map(bench.commits().index)
+).reset_index()
+
+
+def lineplot(y) -> None:
+    labels = {
+        "run.params.commit": "commit",
+        "run.params.vulnerability": "vulnerability",
+        "ttf.seconds.mean": "mean TTF (seconds)",
+        "ttf.nb_exec.mean": "mean TTF (nb executions)",
+        "ttf.corpus_size.mean": "mean TTF (corpus size)",
+    }
+
+    fig = px.line(
+        ttf_data,
+        x="run.params.commit",
+        y=y,
+        color="run.params.vulnerability",
+        markers=True,
+    )
+
+    fig.update_yaxes(title="Time to Find (in seconds)")
+    fig.update_xaxes(title=None, showticklabels=False)
+    fig.show()
+```
+
+```{python}
+lineplot("ttf.seconds.mean")
+lineplot("ttf.nb_exec.mean")
+lineplot("ttf.corpus_size.mean")
+```
+
+
+## Performances
+
+## Coverage
