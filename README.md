@@ -7,6 +7,7 @@ A performance testbench for the puffin fuzzer
 ```sh
 nix-shell -p uv
 uv run ipython kernel install --name "puffin-bench" --user
+git clone https://github.com/tlspuffin/tlspuffin puffin
 ```
 
 ### running benchmark

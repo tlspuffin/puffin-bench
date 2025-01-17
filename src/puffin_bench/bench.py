@@ -4,7 +4,6 @@ from pathlib import Path
 import tomllib
 
 import puffin_bench
-from puffin_bench.datasets import TTFDataset
 from puffin_bench.vulnerability import Vulnerability
 
 
@@ -43,12 +42,10 @@ class Bench:
             ]
 
     def dataset(self, name: str):
+        from puffin_bench.datasets import TTFDataset
+
         if name == "ttf":
-            return TTFDataset(
-                cache_file=self._cachedir() / "ttf.csv",
-                commits=self.commits(),
-                vulnerabilities=self.vulnerabilities(),
-            )
+            return TTFDataset(bench=self)
 
         raise ValueError(f"Unknown dataset {name}")
 
