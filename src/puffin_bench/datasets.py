@@ -102,7 +102,11 @@ class TTFDataset:
         fuzzer: Fuzzer,
     ) -> FuzzerRun:
         out_dir = (
-            self.bench._workdir() / commit / str(vulnerability) / str(runtime.task_run.get_id())
+            self.bench._workdir()
+            / commit
+            / str(vulnerability)
+            / "runs"
+            / str(runtime.task_run.get_id())
         ).absolute()
 
         fuzz_result = fuzzer.run(
@@ -164,18 +168,37 @@ class TTFDataset:
 
 
 MD_CMD_REPORT: Final[str] = """
-<details><summary>stdout</summary>{stdout}</details>
-<details><summary>stderr</summary>{stderr}</details>
+<details>
+<summary>stdout</summary>
+<pre class="p-code-container p-code-container--block markdown-renderer__code">
+<code>{stdout}</code>
+</pre>
+</details>
+
+<details>
+<summary>stderr</summary>
+<pre class="p-code-container p-code-container--block markdown-renderer__code">
+<code>{stderr}</code>
+</pre>
+</details>
 """
 
 
 def create_artifact(r: ProcessResult, key: str | None = None) -> None:
+    import html
+
+    stdout = r.stdout().replace("\n\n", "\n")
+    stderr = r.stderr().replace("\n\n", "\n")
+
+    if not stdout:
+        stdout = "... stdout is empty ..."
+
+    if not stderr:
+        stderr = "... stderr is empty ..."
+
     create_markdown_artifact(
         key=key,
-        markdown=MD_CMD_REPORT.format(
-            stdout=r.stdout().replace("\n\n", "\n"),
-            stderr=r.stderr().replace("\n\n", "\n"),
-        ),
+        markdown=MD_CMD_REPORT.format(stdout=html.escape(stdout), stderr=html.escape(stderr)),
     )
 
 
