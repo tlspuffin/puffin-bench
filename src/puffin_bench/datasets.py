@@ -7,9 +7,9 @@ from prefect import flow, runtime, task
 from prefect.artifacts import create_markdown_artifact
 
 from puffin_bench.bench import Bench
-from puffin_bench.puffin import Fuzzer, FuzzerRun
+from puffin_bench.puffin import Fuzzer, FuzzerRun, objectives_found, timeout
 from puffin_bench.utils import ProcessResult
-from puffin_bench.vulnerability import BuildResult, Vulnerability
+from puffin_bench.vulnerability import Vulnerability
 
 if TYPE_CHECKING:
     from puffin_bench.puffin import Puffin
@@ -26,6 +26,7 @@ class TTFDataset:
             *[f"run.params.{p}" for p in cls.params],
             "run.start_time",
             "run.end_time",
+            "run.timed_out",
             "ttf.seconds",
             "ttf.nb_exec",
             "ttf.corpus_size",
@@ -72,8 +73,6 @@ class TTFDataset:
 
     @task(name="build")
     def _build(self, commit: str, vulnerability: Vulnerability) -> Fuzzer:
-        from prefect import Task
-
         from puffin_bench import puffin as pf
 
         workdir = (self.bench._workdir() / commit / str(vulnerability)).absolute()
@@ -87,7 +86,7 @@ class TTFDataset:
             src=self.bench._puffin_bench_dir() / "puffin",
         )
 
-        build_result: BuildResult = Task(fn=vulnerability.build)(puffin, out_dir=bld_dir)
+        build_result = vulnerability.build(puffin, out_dir=bld_dir)
         create_artifact(build_result, key=str.lower(f"{commit}-{vulnerability!s}-build"))
 
         if not build_result.is_success:
@@ -102,8 +101,22 @@ class TTFDataset:
         vulnerability: Vulnerability,
         fuzzer: Fuzzer,
     ) -> FuzzerRun:
-        # TODO implement `fuzz` task
-        return FuzzerRun()
+        out_dir = (
+            self.bench._workdir() / commit / str(vulnerability) / str(runtime.task_run.get_id())
+        ).absolute()
+
+        fuzz_result = fuzzer.run(
+            out_dir=out_dir,
+            nb_cores=4,
+            seed=True,
+            stop_on=lambda p: objectives_found(1)(p) or timeout(t=24 * 3600)(p),
+        )
+        create_artifact(fuzz_result, key=str.lower(f"{commit}-{vulnerability!s}-fuzz"))
+
+        if not fuzz_result.is_success:
+            raise RuntimeError(f"fuzz step failed for {vulnerability!s} at commit {commit[:12]!s}")
+
+        return fuzz_result
 
     @task(name="extract-stats")
     def _extract_stats(
@@ -112,24 +125,38 @@ class TTFDataset:
         vulnerability: Vulnerability,
         run: FuzzerRun,
     ) -> pd.DataFrame:
-        # TODO implement `extract_stats` task
-        import random
-
-        dummy_ttf = random.randrange(400, 600)
-        dummy_start_time = pd.Timestamp.now()
-        dummy_end_time = dummy_start_time + pd.Timedelta(seconds=dummy_ttf)
-        return pd.DataFrame(
+        run_data = pd.DataFrame(
             {
                 "run.id": [str(runtime.task_run.get_id())],
                 "run.params.commit": [commit],
                 "run.params.vulnerability": [vulnerability.vuln_id()],
-                "run.start_time": [dummy_start_time],
-                "run.end_time": [dummy_end_time],
-                "ttf.seconds": [dummy_ttf],
-                "ttf.nb_exec": [random.randrange(dummy_ttf * 200 - 100, dummy_ttf * 200 + 100)],
-                "ttf.corpus_size": [random.randrange(dummy_ttf * 10 - 100, dummy_ttf * 10 + 100)],
+                "run.start_time": [run.start_time()],
+                "run.end_time": [run.end_time()],
+                "run.timed_out": [run.duration().seconds >= 24 * 3600],
             }
         )
+
+        client_events, global_events = run.stats()
+        events_after_found = global_events[global_events.objective_size > 0]
+
+        if events_after_found.empty:
+            # vulnerability was not found, meaning the run timed out or crashed
+            run_data["ttf.seconds"] = [pd.NA]
+            run_data["ttf.nb_exec"] = [pd.NA]
+            run_data["ttf.corpus_size"] = [pd.NA]
+
+        else:
+            run_start_event = global_events.iloc[0]
+            run_found_event = events_after_found.iloc[0]
+
+            start_time = run_start_event["time.secs_since_epoch"]
+            found_time = run_found_event["time.secs_since_epoch"]
+
+            run_data["ttf.seconds"] = [found_time - start_time]
+            run_data["ttf.nb_exec"] = [run_found_event["total_execs"]]
+            run_data["ttf.corpus_size"] = [run_found_event["corpus_size"]]
+
+        return run_data
 
     @classmethod
     def empty_dataframe(cls) -> pd.DataFrame:
