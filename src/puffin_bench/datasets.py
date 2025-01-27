@@ -1,3 +1,4 @@
+from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -15,35 +16,46 @@ if TYPE_CHECKING:
 
 
 class TTFDataset:
+    name: Final[str] = "ttf"
+    params: Final[list[str]] = ["commit", "vulnerability"]
+
+    @classmethod
+    def columns(cls) -> list[str]:
+        return [
+            "run.id",
+            *[f"run.params.{p}" for p in cls.params],
+            "run.start_time",
+            "run.end_time",
+            "ttf.seconds",
+            "ttf.nb_exec",
+            "ttf.corpus_size",
+        ]
+
     def __init__(self, bench: Bench) -> None:
         self.bench = bench
+        self.cache = DatasetCache(self.bench, self.__class__)
 
     @flow(name="dataset-ttf")
     def generate(self) -> pd.DataFrame:
-        data = self.load()
+        results = []
+        for commit, vulnerability in product(self.bench.commits(), self.bench.vulnerabilities()):
+            if not self.cache.lookup(commit=commit, vulnerability=vulnerability).empty:
+                continue
 
-        for vulnerability in self.bench.vulnerabilities():
-            for commit in self.bench.commits():
-                if not data[
-                    (data["run.params.vulnerability"] == vulnerability.vuln_id())
-                    & (data["run.params.commit"] == commit)
-                ].empty:
-                    continue
+            results.append(self._generate_one.submit(commit, vulnerability))
 
-                results = self._generate_one(commit, vulnerability)
-                data = pd.concat([data, results], ignore_index=True)
+        if results:
+            generated_data = pd.concat([r.result() for r in results], ignore_index=True)
 
-        # update cache
-        self.cache_file().parent.mkdir(parents=True, exist_ok=True)
-        data.to_csv(self.cache_file(), index=False)
+            # update cache
+            self.cache.store(generated_data)
 
-        return data[data["run.params.commit"].isin(self.bench.commits())]
+        return self.cache.lookup(
+            commit=self.bench.commits(), vulnerability=self.bench.vulnerabilities()
+        )
 
     def load(self) -> pd.DataFrame:
-        if not self.cache_file().exists():
-            return pd.DataFrame(columns=["run.params.vulnerability", "run.params.commit"])
-
-        return pd.read_csv(self.cache_file())
+        return self.cache.fetch_all()
 
     @task(name="ttf", task_run_name="{commit}-{vulnerability._vuln_id}")
     def _generate_one(self, commit: str, vulnerability: Vulnerability) -> pd.DataFrame:
@@ -84,13 +96,21 @@ class TTFDataset:
         return build_result.fuzzer
 
     @task(name="fuzz")
-    def _fuzz(self) -> FuzzerRun:
+    def _fuzz(
+        self,
+        commit: str,
+        vulnerability: Vulnerability,
+        fuzzer: Fuzzer,
+    ) -> FuzzerRun:
         # TODO implement `fuzz` task
         return FuzzerRun()
 
     @task(name="extract-stats")
     def _extract_stats(
-        self, commit: str, vulnerability: Vulnerability, run: FuzzerRun
+        self,
+        commit: str,
+        vulnerability: Vulnerability,
+        run: FuzzerRun,
     ) -> pd.DataFrame:
         # TODO implement `extract_stats` task
         import random
@@ -111,8 +131,9 @@ class TTFDataset:
             }
         )
 
-    def cache_file(self) -> Path:
-        return self.bench._cachedir() / "ttf.csv"
+    @classmethod
+    def empty_dataframe(cls) -> pd.DataFrame:
+        return pd.DataFrame({c: [] for c in cls.columns()})
 
 
 MD_CMD_REPORT: Final[str] = """
@@ -129,3 +150,44 @@ def create_artifact(r: ProcessResult, key: str | None = None) -> None:
             stderr=r.stderr().replace("\n\n", "\n"),
         ),
     )
+
+
+class DatasetCache:
+    def __init__(self, bench: Bench, dataset: type[TTFDataset]) -> None:
+        self.bench = bench
+        self.dataset = dataset
+
+    def fetch_all(self) -> pd.DataFrame:
+        if not self.cache_file().exists():
+            return self.dataset.empty_dataframe()
+
+        return pd.read_csv(self.cache_file())
+
+    def lookup(self, **kwargs) -> pd.DataFrame:
+        def lookup_operator(p):
+            if isinstance(p, list):
+                return "in"
+            else:
+                return "=="
+
+        return self.fetch_all().query(
+            " & ".join(
+                [
+                    f"(`run.params.{p}` {lookup_operator(p)} {kwargs[p]!r})"
+                    for p in self.dataset.params
+                    if p in kwargs
+                ]
+            )
+        )
+
+    def store(self, data: pd.DataFrame) -> None:
+        # concat new data to existing cached entries
+        cached = self.fetch_all()
+        cached = pd.concat([data, cached], ignore_index=True)
+
+        # save to disk
+        self.cache_file().parent.mkdir(parents=True, exist_ok=True)
+        cached.to_csv(self.cache_file(), index=False)
+
+    def cache_file(self) -> Path:
+        return self.bench._cachedir() / f"{self.dataset.name}.csv"
