@@ -1,0 +1,58 @@
+services:
+
+  # nginx reverse proxy
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy
+    restart: unless-stopped
+    ports:
+      - ${PORT}:${PORT}
+    volumes:
+     - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - prefect-private
+      - prefect-public
+    environment:
+      - HTTP_PORT=${PORT}
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+        restart: true
+
+  # prefect server
+  prefect-server:
+    build:
+        dockerfile_inline: |
+          FROM python:3.12
+          RUN pip install --no-cache-dir prefect prefect_aws python-dotenv
+          RUN prefect block register -m prefect_aws
+          ENTRYPOINT ["prefect", "server", "start"]
+    ports:
+      - 5555:5555
+    expose:
+      - 5555
+    networks:
+      - prefect-private
+    environment:
+      VIRTUAL_HOST: ${HOST}
+      VIRTUAL_PORT: 5555
+      PREFECT_UI_URL:  http://${HOST}:${PORT}
+      PREFECT_API_URL: http://${HOST}:${PORT}/api
+      PREFECT_UI_SERVE_BASE: /
+      PREFECT_LOGGING_LEVEL: ${PREFECT_LOGGING_LEVEL}
+      PREFECT_SERVER_API_PORT: 5555
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/api/health"]
+      interval: 5s
+      retries: 5
+      start_period: 10s
+      timeout: 10s
+
+networks:
+  prefect-public:
+  prefect-private:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "10.0.0.0/19"
+          gateway: "10.0.0.1"

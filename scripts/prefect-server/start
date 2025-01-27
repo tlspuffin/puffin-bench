@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+NAME="prefect-server-start"
+
+die() {
+    printf 'error: %s: %s\n' "${NAME}" "$1" >&2
+    exit 1
+}
+
+need_cmd() {
+    if ! command -v "$1" > /dev/null 2>&1; then
+        die "required command not found: '$1'"
+    fi
+}
+
+normalize_path() {
+    if command -v readlink > /dev/null 2>&1; then
+        if readlink -f "$1" > /dev/null 2>&1; then
+            readlink -f "$1" 2> /dev/null
+            return
+        fi
+    fi
+
+    if command -v perl > /dev/null 2>&1; then
+        if perl -MCwd -le 'print Cwd::abs_path shift' "$1" > /dev/null 2>&1; then
+            perl -MCwd -le 'print Cwd::abs_path shift' "$1" 2> /dev/null
+            return
+        fi
+    fi
+
+    local dir="${1%/*}"
+    (cd "${dir}" && pwd -P)
+}
+
+need_cmd pwd
+need_cmd dirname
+
+SCRIPT_DIR=$(normalize_path "$( cd -P "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )")
+
+. "${SCRIPT_DIR}/.env"
+
+_docker() {
+    sudo docker "$@"
+}
+
+docker-compose() {
+    _docker compose -f "${SCRIPT_DIR}/compose.yaml" "$@"
+}
+
+docker-compose up -d
