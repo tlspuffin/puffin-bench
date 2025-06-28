@@ -14,12 +14,14 @@
 #include <rapidjson/document.h>
 #include <fstream>
 
-#include "schedule.hxx"
+#include "schedule/schedule.hxx"
 
 //#define SEC_PATH "/home/olivier/Desktop/restsrv/security"
 #define SEC_PATH "../security"
 //#define TESTJSON "/home/olivier/Desktop/restsrv/experiment.json"
 #define TESTJSON "../experiment.json"
+#define SCRIPT_PATH "../scripts"
+#define RUN_PATH "../runs"
 
 class MyRequestHandler : public Poco::Net::HTTPRequestHandler {
 public:
@@ -76,7 +78,10 @@ protected:
 
 int main(int argc, char *argv[]) {
 
-  Schedule schedule(4);
+  char* script_path = realpath(SCRIPT_PATH, nullptr);
+  char* run_path = realpath(RUN_PATH, nullptr);
+
+  ns_Schedule::Schedule schedule(script_path, run_path, 4);
   schedule.AddJob(TESTJSON, std::vector<std::string>());
 
   MyServerApp app;

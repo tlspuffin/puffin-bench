@@ -9,7 +9,7 @@ int main(int argc, char* argv[]) {
   if (pid == 0) {
     pid_t ssid = setsid();
     printf("%d\n", ssid);
-    char* args[] = { "prg.sh", "arg0", "arg1", NULL };
+    char* args[] = { "prg.sh", "arg0", "arg1", nullptr };
     execv("./test.sh", args);
     return 0;
   }
