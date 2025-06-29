@@ -37,6 +37,7 @@ public:
   uint64_t rank_id_;
   uint64_t attempt_id_;
   std::string run_path_;
+  std::string functions_path_;
   std::string function_;
   std::string args_;
   uint32_t nb_cpu_;

@@ -16,7 +16,8 @@ class Schedule {
 public:
   Schedule(ns_Schedule::Config const& config);
   ~Schedule();
-  uint64_t AddJob(std::string tasksList, std::vector<std::string> files);
+  uint64_t AddTask(std::string const& tasksList, 
+      std::string const& functions, std::vector<std::string> files);
 
 private:
   void ScheduleLoop();

@@ -11,16 +11,16 @@
 int main(int argc, char *argv[]) {
   Config config;
   config.server_.secure_ = false;
-  config.server_.key_ = SEC_PATH "/site.key";
-  config.server_.cert_ = SEC_PATH "/site.pem";
-  config.server_.CA_ = SEC_PATH "/CA.pem";
-  config.server_.userPath_ = USR_PATH;
+  config.server_.key_ = realpath(SEC_PATH "/site.key", nullptr);
+  config.server_.cert_ = realpath(SEC_PATH "/site.pem", nullptr);
+  config.server_.CA_ = realpath(SEC_PATH "/CA.pem", nullptr);
+  config.server_.userPath_ = realpath(USR_PATH, nullptr);
   config.server_.port_ = config.server_.secure_ ? 8443 : 8080;
 
   config.schedule_.maxCPU_ = 4;
-  config.schedule_.userPath_ = USR_PATH;  
-  config.schedule_.scriptPath_ = SCRIPT_PATH;
-  config.schedule_.runPath_ = RUN_PATH;
+  config.schedule_.userPath_ = realpath(USR_PATH, nullptr);  
+  config.schedule_.scriptPath_ = realpath(SCRIPT_PATH, nullptr);
+  config.schedule_.runPath_ = realpath(RUN_PATH, nullptr);
 
   ns_API::ScheduleAPI scheduleAPI(config.schedule_);
 

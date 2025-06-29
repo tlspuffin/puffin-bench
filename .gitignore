@@ -12,3 +12,6 @@ wheels/
 .venv
 
 /.quarto/
+
+.vscode/
+build/

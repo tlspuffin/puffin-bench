@@ -11,10 +11,11 @@ static uint64_t parseTimeout(const std::string& str) {
 
 ns_Schedule::Step::Step(std::string const& name) 
     : name_(name), uuid_((uint64_t)this), task_id_(0), step_id_(0), 
-      rank_id_(0), attempt_id_(0), run_path_(), function_(name), args_(), nb_cpu_(1), 
-      nb_retry_(0), timeout_(0), next_(this), previous_(this), 
-      dependencies_(), depend_from_(), state_(0), pid_(0), cpus_(), 
-      stdout_(), stderr_(), exit_code_(256), monitor_count_(0)
+      rank_id_(0), attempt_id_(0), run_path_(), functions_path_(), 
+      function_(name), args_(), nb_cpu_(1), nb_retry_(0), timeout_(0), 
+      next_(this), previous_(this), dependencies_(), depend_from_(), 
+      state_(0), pid_(0), cpus_(), stdout_(), stderr_(), exit_code_(256), 
+      monitor_count_(0)
 {
 }
 
