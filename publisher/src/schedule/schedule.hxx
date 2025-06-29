@@ -20,7 +20,8 @@ public:
 private:
   void ScheduleLoop();
   pid_t Execute(ns_Schedule::Step* step);
-  void ManageEndOfStep(ns_Schedule::Step* step);
+  void ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, std::list<ns_Schedule::Step*>& delayedSteps);
+  void ManageEndOfStep(std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step);
 
   static void DeleteTask(ns_Schedule::Step* rootStep);
   static std::list<ns_Schedule::Step*> SearchTaskToRun(uint64_t nbCPUsFree, std::list<ns_Schedule::Step*>& task);
