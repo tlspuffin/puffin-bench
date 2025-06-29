@@ -14,10 +14,10 @@
 #undef RAPIDJSON_ASSERT
 #define RAPIDJSON_ASSERT(x) { throw std::runtime_error(x); }
 
-ns_Schedule::Schedule::Schedule(std::string const& script_path, std::string const& run_path, 
-    uint64_t maxCPU) 
-    : tasksManager_(run_path), script_path_(script_path), run_path_(run_path), 
-      maxCPU_(maxCPU), threadRunning_(false)
+ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
+    : tasksManager_(config.runPath_), script_path_(config.scriptPath_), 
+      run_path_(config.runPath_), maxCPU_(config.maxCPU_), 
+      threadRunning_(false)
 {
 }
 
@@ -42,7 +42,7 @@ ns_Schedule::Schedule::~Schedule() {
   lockThread_.unlock();
 }
 
-bool ns_Schedule::Schedule::AddJob(std::string tasksList, std::vector<std::string> files) {
+uint64_t ns_Schedule::Schedule::AddJob(std::string tasksList, std::vector<std::string> files) {
   FILE* fTasksList = fopen(tasksList.c_str(), "r");
   char buffer[65536];
   rapidjson::FileReadStream isTasks(fTasksList, buffer, sizeof(buffer));
@@ -79,7 +79,7 @@ bool ns_Schedule::Schedule::AddJob(std::string tasksList, std::vector<std::strin
   }
   lockThread_.unlock();
 
-  return true;
+  return steps.front()->task_id_;
 }
 
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTaskToRun(uint64_t nbCPUsFree, std::list<ns_Schedule::Step*>& tasks) {
@@ -245,6 +245,9 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
         for (ns_Schedule::Step* step : toRun) {
           if (step->IsRunning() && step->IsTimedOut()) {
+            std::cout << "Tasks " << step->task_id_ << " step " << 
+                step->step_id_ << "-" << step->rank_id_ << "-" << step->attempt_id_ <<  
+                " timeouted" << std::endl;
             step->KillAndMarkTimedout();
           }
         }
