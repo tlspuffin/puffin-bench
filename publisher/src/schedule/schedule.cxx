@@ -15,7 +15,7 @@
 #define RAPIDJSON_ASSERT(x) { throw std::runtime_error(x); }
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
-    : tasksManager_(config.runPath_), script_path_(config.scriptPath_), 
+    : tasksManager_(config), script_path_(config.scriptPath_), 
       run_path_(config.runPath_), maxCPU_(config.maxCPU_), 
       threadRunning_(false)
 {
@@ -42,14 +42,10 @@ ns_Schedule::Schedule::~Schedule() {
   lockThread_.unlock();
 }
 
-uint64_t ns_Schedule::Schedule::AddJob(std::string tasksList, std::vector<std::string> files) {
-  FILE* fTasksList = fopen(tasksList.c_str(), "r");
-  char buffer[65536];
-  rapidjson::FileReadStream isTasks(fTasksList, buffer, sizeof(buffer));
-
+uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList, 
+    std::string const& functions, std::vector<std::string> files) {
   rapidjson::Document stepsJSON;
-  stepsJSON.ParseStream(isTasks);
-  fclose(fTasksList);
+  stepsJSON.Parse(tasksList.c_str());
 
   if (stepsJSON.HasParseError()) {
     throw std::runtime_error(
@@ -59,7 +55,10 @@ uint64_t ns_Schedule::Schedule::AddJob(std::string tasksList, std::vector<std::s
     );
   }
 
-  std::list<ns_Schedule::Step*> steps = tasksManager_.ReadJsonConfig(stepsJSON);
+  std::pair<uint64_t, std::list<ns_Schedule::Step*>> tasks = 
+      tasksManager_.CreateTask(stepsJSON, functions);
+  uint64_t tasks_id = tasks.first;
+  std::list<ns_Schedule::Step*>& steps = tasks.second;
 
   lockThread_.lock();
 
@@ -79,7 +78,7 @@ uint64_t ns_Schedule::Schedule::AddJob(std::string tasksList, std::vector<std::s
   }
   lockThread_.unlock();
 
-  return steps.front()->task_id_;
+  return tasks_id;
 }
 
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTaskToRun(uint64_t nbCPUsFree, std::list<ns_Schedule::Step*>& tasks) {
@@ -124,18 +123,17 @@ inline bool RedirectOutput(int outhandler, int errhandler) {
 }
 
 pid_t ns_Schedule::Schedule::Execute(ns_Schedule::Step* step) {
-  printf("%lu %lu %lu\n", step->step_id_, step->rank_id_, step->attempt_id_);
   if (step->IsFirstStepOfTask()) {
     if (mkdir(step->run_path_.c_str(), 0777) != 0) {
       throw std::runtime_error(
-          std::string("mkdir failed: errno=") +
+          std::string("mkdir ") + step->run_path_ + std::string(" failed: errno=") +
           std::to_string(errno) +
           " (" + std::strerror(errno) + ")"
       );
     }
     if (mkdir(std::string(step->run_path_ + "/.output").c_str(), 0777) != 0) {
       throw std::runtime_error(
-          std::string("mkdir failed: errno=") +
+          std::string("mkdir ") + step->run_path_ + std::string("/.output failed: errno=") +
           std::to_string(errno) +
           " (" + std::strerror(errno) + ")"
       );
@@ -170,8 +168,8 @@ pid_t ns_Schedule::Schedule::Execute(ns_Schedule::Step* step) {
     }
 
     std::vector<char*> arg_strings;
-    arg_strings.push_back(strdup("run_task"));
-    arg_strings.push_back(strdup(std::string(script_path_ + "/campaign.conf").c_str()));
+    arg_strings.push_back(strdup("task"));
+    arg_strings.push_back(strdup(step->functions_path_.c_str()));
     arg_strings.push_back(strdup(std::string(run_path_ + "/" + std::to_string(step->task_id_) +
         "/.taskenv").c_str()));
     arg_strings.push_back(strdup(std::to_string(spid).c_str()));
@@ -192,7 +190,8 @@ pid_t ns_Schedule::Schedule::Execute(ns_Schedule::Step* step) {
 
     int retval = execv(script.c_str(), arg_strings.data());
 
-    std::cerr << strerror(errno) << std::endl;
+    std::cerr << "Unable to excecute " << script << " : " 
+        << strerror(errno) << std::endl;
     exit(-1);
   }
 
@@ -339,7 +338,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     }
     if (allStepDone) {
       // todo signal end of the flow
-      std::string clean_cmd = "rm -rf " + step->run_path_;
+      std::string clean_cmd = "rm -rf " + step->run_path_ + " " + step->functions_path_;
       if (system(clean_cmd.c_str()) != 0 ) {
         throw std::runtime_error("Unable to clean folder: " +
             step->run_path_ + ", after strep name=" + step->name_);

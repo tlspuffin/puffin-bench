@@ -1,13 +1,58 @@
 #include "tasksmanager.hxx"
 #include <unordered_set>
 #include <stack>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
-ns_Schedule::TasksManager::TasksManager(std::string const& run_path)
-    : run_path_(run_path), next_task_id_(0)
+ns_Schedule::TasksManager::TasksManager(ns_Schedule::Config const& config)
+    : config_(config), next_task_id_(0)
 {
 }
 
-std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ReadJsonConfig(const rapidjson::Value& root) {
+std::pair<uint64_t, std::list<ns_Schedule::Step*>> ns_Schedule::TasksManager::CreateTask(
+      rapidjson::Value const& rootJSON, std::string const& functions) {
+
+  uint64_t task_id = next_task_id_++;
+
+  auto functionsFile = config_.userPath_ + "/" + std::to_string(task_id) + ".sh";
+  int handle = open(functionsFile.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0770);
+  if (handle == -1) {
+    throw std::runtime_error("Unable to create functions file: " + functionsFile + 
+        " : " + strerror(errno));
+  }
+  write(handle, functions.c_str(), functions.length());
+  close(handle);
+
+  std::pair<uint64_t, std::list<ns_Schedule::Step*>> results;
+  results.first = task_id;
+  results.second = CreateStepsFromJson(rootJSON, task_id, functionsFile);
+  return results;
+}
+
+void ns_Schedule::TasksManager::DeleteTask(ns_Schedule::Step* rootStep) {
+  if (!rootStep->depend_from_.empty()) {
+    throw std::runtime_error("Trying to delete a non-root task: name=" +
+        rootStep->name_ + ", uuid=" + std::to_string(rootStep->uuid_));
+  }
+  std::unordered_set<ns_Schedule::Step*> stepCleared;
+  std::stack<ns_Schedule::Step*> stepToClear;
+  stepToClear.push(rootStep);
+  while (!stepToClear.empty()) {
+    ns_Schedule::Step* step = stepToClear.top();
+    stepToClear.pop();
+    if (!stepCleared.insert(step).second) {
+      continue;
+    }
+    for(ns_Schedule::Step* childStep : step->dependencies_) {
+      stepToClear.push(childStep);
+    }
+    delete step;
+  }
+}
+
+std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
+    rapidjson::Value const& root, uint64_t task_id, std::string const& functionsPath) {
   std::list<ns_Schedule::Step*> parent_stack;
   std::list<ns_Schedule::Step*> current_stack;
   std::list<ns_Schedule::Step*> root_steps;
@@ -18,7 +63,6 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ReadJsonConfig(const ra
     return {};
   }
 
-  uint64_t task_id = next_task_id_++;
   uint64_t step_id = 0;
 
   const rapidjson::Value& flow = root["flow"];
@@ -52,7 +96,8 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ReadJsonConfig(const ra
         step->task_id_ = task_id;
         step->step_id_ = step_id;
         step->rank_id_ = j;
-        step->run_path_ = run_path_ + "/" + std::to_string(step->task_id_);
+        step->run_path_ = config_.runPath_ + "/" + std::to_string(step->task_id_);
+        step->functions_path_ = functionsPath;
         step->stdout_ = step->run_path_ + "/.output/stdout." + 
             std::to_string(step->step_id_) + "-" + 
             std::to_string(step->rank_id_) + "-" + 
@@ -75,7 +120,8 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ReadJsonConfig(const ra
     } else {
       step->task_id_ = task_id;
       step->step_id_ = step_id;
-      step->run_path_ = run_path_ + "/" + std::to_string(step->task_id_);
+      step->run_path_ = config_.runPath_ + "/" + std::to_string(step->task_id_);
+      step->functions_path_ = functionsPath;
       step->stdout_ = step->run_path_ + "/.output/stdout." + 
           std::to_string(step->step_id_) + "-0-" +
           std::to_string(step->attempt_id_) + ".txt";
@@ -108,27 +154,6 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ReadJsonConfig(const ra
   }
 
   return root_steps;
-}
-
-void ns_Schedule::TasksManager::DeleteTask(ns_Schedule::Step* rootStep) {
-  if (!rootStep->depend_from_.empty()) {
-    throw std::runtime_error("Trying to delete a non-root task: name=" +
-        rootStep->name_ + ", uuid=" + std::to_string(rootStep->uuid_));
-  }
-  std::unordered_set<ns_Schedule::Step*> stepCleared;
-  std::stack<ns_Schedule::Step*> stepToClear;
-  stepToClear.push(rootStep);
-  while (!stepToClear.empty()) {
-    ns_Schedule::Step* step = stepToClear.top();
-    stepToClear.pop();
-    if (!stepCleared.insert(step).second) {
-      continue;
-    }
-    for(ns_Schedule::Step* childStep : step->dependencies_) {
-      stepToClear.push(childStep);
-    }
-    delete step;
-  }
 }
 
 std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateRetrySteps(
