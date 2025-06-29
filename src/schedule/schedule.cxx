@@ -6,7 +6,6 @@
 #include <unordered_set>
 #include <algorithm>
 #include <fcntl.h>
-#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <rapidjson/filereadstream.h>
@@ -196,13 +195,16 @@ pid_t ns_Schedule::Schedule::Execute(ns_Schedule::Step* step) {
     std::cerr << strerror(errno) << std::endl;
     exit(-1);
   }
+
   close(errhandler);
   close(outhandler);
-  step->pid_ = pid;
+  step->MarkRunning(pid);
   return pid;
 }
 
 void ns_Schedule::Schedule::ScheduleLoop() {
+  std::runtime_error fatal_error("");
+  std::list<ns_Schedule::Step*> step_delayed_delete;
   std::vector<pid_t> pids;
   std::vector<bool> cpusFree(maxCPU_, true);
   uint64_t nbCPUsFree = maxCPU_;
@@ -215,7 +217,6 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     for(ns_Schedule::Step* step : toRun) {
       step->cpus_ = AssignCPU(cpusFree, step->nb_cpu_);
       nbCPUsFree -= step->nb_cpu_;
-      step->MarkRunning();
       Execute(step);
     }
 
@@ -233,6 +234,21 @@ void ns_Schedule::Schedule::ScheduleLoop() {
             " (" + std::strerror(errno) + ")"
         );
       } else if (childPID == 0) {
+        lockThread_.lock();
+        try {
+          ProcessDelayedCleanup(toRun, step_delayed_delete);
+        } catch (std::runtime_error& e) {
+          fatal_error = e;
+          goto ns_Schedule__Schedule__ScheduleLoop_fatal;
+        }
+        lockThread_.unlock();
+
+        for (ns_Schedule::Step* step : toRun) {
+          if (step->IsRunning() && step->IsTimedOut()) {
+            step->KillAndMarkTimedout();
+          }
+        }
+
         sleep(1);
       } else {
         kill(-childPID, SIGKILL);
@@ -242,11 +258,10 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     ns_Schedule::Step* stepDone = nullptr;
     for(ns_Schedule::Step* step : toRun) {
-      if (step->pid_ != childPID) {
+      if (step->PID() != childPID) {
         continue;
       }
-      step->exit_code_ = WEXITSTATUS(status);
-      step->MarkDone();
+      step->MarkDone(WEXITSTATUS(status));
       ReleaseCPU(nbCPUsFree, cpusFree, step->cpus_);
       stepDone = step;
       break;
@@ -254,29 +269,52 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     lockThread_.lock();
     if (stepDone != nullptr) {
-      toRun.remove(stepDone);
-      try {
-        ManageEndOfStep(stepDone);
-      } catch(std::runtime_error& e) {
-        threadRunning_ = false;
-        lockThread_.unlock();
-        printf("Exception S\n");
-        throw e;
+      if (stepDone->monitor_count_ > 0) {
+        step_delayed_delete.push_back(stepDone);
+      } else {
+        try {
+          ManageEndOfStep(toRun, stepDone);
+        } catch(std::runtime_error& e) {
+          fatal_error = e;
+          goto ns_Schedule__Schedule__ScheduleLoop_fatal;
+        }
       }
     }
   }
+
   for (ns_Schedule::Step* step: steps_) {
     if (step->IsRunning()) {
-      kill(-step->pid_, SIGKILL);
-      waitpid(step->pid_, nullptr, 0);
+      step->Kill();
     }
   }
   threadRunning_ = false;
   printf("Done S\n");
   lockThread_.unlock();
+  return;
+
+ns_Schedule__Schedule__ScheduleLoop_fatal:
+  threadRunning_ = false;
+  printf("Exception S\n");
+  lockThread_.unlock();
+  throw fatal_error;
 }
 
-void ns_Schedule::Schedule::ManageEndOfStep(ns_Schedule::Step* step) {
+inline void ns_Schedule::Schedule::ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, 
+    std::list<ns_Schedule::Step*>& delayedSteps) {
+  for (auto it = delayedSteps.begin(); it != delayedSteps.end(); ) {
+    ns_Schedule::Step* step = *it;
+    if (step->monitor_count_ == 0) {
+      ManageEndOfStep(steps, step);
+      it = delayedSteps.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void ns_Schedule::Schedule::ManageEndOfStep(
+    std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step) {
+  steps.remove(step);
   auto itStep = std::find(steps_.begin(), steps_.end(), step);
   if (itStep != steps_.end()) {
     for (auto rit = step->dependencies_.rbegin(); rit != step->dependencies_.rend(); ++rit) {
