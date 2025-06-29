@@ -12,10 +12,11 @@ GetLibs(Poco STATIC ${POCO_PATH} "PocoNetSSL;PocoCrypto;PocoNet;PocoUtil;PocoFou
 CreateExternalLib(Poco "${Pocolibs}" DEPLOYTARGET setupDLL)
 target_link_libraries(Poco INTERFACE ssl crypto)
 
-add_executable(srv src/srv.cxx src/schedule/schedule.cxx src/schedule/step.cxx src/schedule/tasksmanager.cxx)
+add_executable(srv 
+    src/main.cxx src/server/server.cxx src/server/parts_handler.cxx 
+    src/server/request_handler.cxx src/schedule/schedule.cxx 
+    src/schedule/step.cxx src/schedule/tasksmanager.cxx 
+    src/api/schedule_api.cxx
+)
 target_link_libraries(srv PRIVATE Poco)
 target_include_directories(srv PRIVATE ${RAPIDJSON_PATH})
-
-add_executable(srv_sec src/srv_sec.cxx src/schedule/schedule.cxx src/schedule/step.cxx src/schedule/tasksmanager.cxx)
-target_link_libraries(srv_sec PRIVATE Poco)
-target_include_directories(srv_sec PRIVATE ${RAPIDJSON_PATH})

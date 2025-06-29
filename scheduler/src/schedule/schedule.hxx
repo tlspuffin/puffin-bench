@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.hxx"
 #include "step.hxx"
 #include "tasksmanager.hxx"
 #include <vector>
@@ -13,9 +14,9 @@ namespace ns_Schedule {
 
 class Schedule {
 public:
-  Schedule(std::string const& script_path, std::string const& run_path, uint64_t maxCPU);
+  Schedule(ns_Schedule::Config const& config);
   ~Schedule();
-  bool AddJob(std::string tasksList, std::vector<std::string> files);
+  uint64_t AddJob(std::string tasksList, std::vector<std::string> files);
 
 private:
   void ScheduleLoop();
