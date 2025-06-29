@@ -100,6 +100,7 @@ inline void Step::MarkRunning(pid_t pid) {
 }
 
 inline void Step::MarkDone(uint8_t exit_code) {
+  if (state_ != 1) return;
   state_ = 2;
   pid_ = 0;
   time_points_[1] = std::chrono::steady_clock::now();
