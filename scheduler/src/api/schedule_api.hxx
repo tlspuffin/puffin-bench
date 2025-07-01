@@ -10,6 +10,9 @@ public:
 
   uint64_t AddTask(std::vector<uint8_t> const& flow, 
       std::vector<uint8_t> const & functions);
+  bool CancelTask(uint64_t task_id);
+  void GetRunningTaskSummary();
+  void GetTaskInfos(uint64_t task_id);
 
 private:
   ns_Schedule::Config const& config_;

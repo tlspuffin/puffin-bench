@@ -1,4 +1,5 @@
 #include "schedule.hxx"
+#include "executor/local.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <sstream>
@@ -11,14 +12,21 @@
 #include <rapidjson/filereadstream.h>
 #include <rapidjson/error/en.h>
 
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/filewritestream.h>
+
 #undef RAPIDJSON_ASSERT
 #define RAPIDJSON_ASSERT(x) { throw std::runtime_error(x); }
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
-    : tasksManager_(config), script_path_(config.scriptPath_), 
-      run_path_(config.runPath_), maxCPU_(config.maxCPU_), 
-      threadRunning_(false)
+    : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
+      threadRunning_(false), defaultExecutor_("local")
 {
+  ns_Executor::Executor* executor = ns_Executor::Executor::Build(
+      ns_Executor::Executor::Type::LOCAL, "local", config.executors_);
+  executors_.insert(std::make_pair<>(executor->Name(), executor));
 }
 
 ns_Schedule::Schedule::~Schedule() {
@@ -39,6 +47,10 @@ ns_Schedule::Schedule::~Schedule() {
     }
   }
 
+  for(auto& executor : executors_) {
+    delete executor.second;
+  }
+
   lockThread_.unlock();
 }
 
@@ -56,7 +68,8 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   }
 
   std::pair<uint64_t, std::list<ns_Schedule::Step*>> tasks = 
-      tasksManager_.CreateTask(stepsJSON, functions);
+      tasksManager_.CreateTask(stepsJSON, functions, 
+      defaultExecutor_, executors_);
   uint64_t tasks_id = tasks.first;
   std::list<ns_Schedule::Step*>& steps = tasks.second;
 
@@ -81,201 +94,67 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   return tasks_id;
 }
 
-std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTaskToRun(uint64_t nbCPUsFree, std::list<ns_Schedule::Step*>& tasks) {
+std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
   std::list<ns_Schedule::Step*> result;
 
-  for(ns_Schedule::Step* step : tasks) {
-    uint64_t nbCPUsRequired = step->nb_cpu_;
-    if ((!step->IsReady()) || (nbCPUsRequired > nbCPUsFree)) {
-      continue;
-    }
-    nbCPUsFree -= nbCPUsRequired;
-    result.push_back(step);
+  for(auto const& executor : executors_) {
+    std::list<ns_Schedule::Step*> elements = executor.second->FindRunnableSteps(steps_);
+    result.insert(result.end(), elements.begin(), elements.end());
   }
 
   return result;
-}
-
-inline std::vector<uint64_t> AssignCPU(std::vector<bool>& cpusFree, uint64_t nbCPU) {
-  std::vector<uint64_t> result;
-  for (size_t i=0; i<cpusFree.size(); ++i) {
-    if (cpusFree[i]) {
-      cpusFree[i] = false;
-      result.push_back(i);
-      if (--nbCPU == 0) {
-        break;
-      };
-    }
-  }
-  return result;
-}
-
-inline void ReleaseCPU(uint64_t& nbCPUsFree, std::vector<bool>& cpusFree, std::vector<uint64_t>& cpus) {
-  for(uint64_t index: cpus) {
-    cpusFree[index] = true;
-  }
-  nbCPUsFree += cpus.size();
-}
-
-inline bool RedirectOutput(int outhandler, int errhandler) {
-  return ((close(1) == 0) && (dup(outhandler) == 1) && (close(outhandler) == 0) &&
-      (close(2) == 0) && (dup(errhandler) == 2) && (close(errhandler) == 0));
-}
-
-pid_t ns_Schedule::Schedule::Execute(ns_Schedule::Step* step) {
-  if (step->IsFirstStepOfTask()) {
-    if (mkdir(step->run_path_.c_str(), 0777) != 0) {
-      throw std::runtime_error(
-          std::string("mkdir ") + step->run_path_ + std::string(" failed: errno=") +
-          std::to_string(errno) +
-          " (" + std::strerror(errno) + ")"
-      );
-    }
-    if (mkdir(std::string(step->run_path_ + "/.output").c_str(), 0777) != 0) {
-      throw std::runtime_error(
-          std::string("mkdir ") + step->run_path_ + std::string("/.output failed: errno=") +
-          std::to_string(errno) +
-          " (" + std::strerror(errno) + ")"
-      );
-    }
-  }
-  int outhandler = open(step->stdout_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 00660);
-  if (outhandler == -1) {
-    throw std::runtime_error(
-        std::string("open stdout failed for: ") + step->stdout_ + std::string(" : errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
-    );
-  }
-  int errhandler = open(step->stderr_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 00660);
-  if (errhandler == -1) {
-    throw std::runtime_error(
-        std::string("open stderr failed: errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
-    );
-  }
-
-  pid_t pid = fork();
-  if (pid == 0) {
-    pid_t spid = setsid();
-    if (spid == -1) {
-      exit(-1);
-    }
-    if (chdir(step->run_path_.c_str()) != 0) {
-      std::cerr << "chdir failed" << std::endl;
-      exit(-1);
-    }
-
-    std::vector<char*> arg_strings;
-    arg_strings.push_back(strdup("task"));
-    arg_strings.push_back(strdup(step->functions_path_.c_str()));
-    arg_strings.push_back(strdup(std::string(run_path_ + "/" + std::to_string(step->task_id_) +
-        "/.taskenv").c_str()));
-    arg_strings.push_back(strdup(std::to_string(spid).c_str()));
-    arg_strings.push_back(strdup(std::to_string(step->rank_id_).c_str()));
-    arg_strings.push_back(strdup(step->function_.c_str()));
-    std::istringstream iss(step->args_);
-    std::string token;
-    while (iss >> token) {
-      arg_strings.push_back(strdup(token.c_str()));
-    }
-    arg_strings.push_back(nullptr);
-    std::string script = script_path_ + "/executor.sh";
-
-    if (!RedirectOutput(outhandler, errhandler)) {
-      std::cerr << "RedirectOutput failed" << std::endl;
-      exit(-1);
-    }
-
-    int retval = execv(script.c_str(), arg_strings.data());
-
-    std::cerr << "Unable to excecute " << script << " : " 
-        << strerror(errno) << std::endl;
-    exit(-1);
-  }
-
-  close(errhandler);
-  close(outhandler);
-  step->MarkRunning(pid);
-  return pid;
 }
 
 void ns_Schedule::Schedule::ScheduleLoop() {
   std::runtime_error fatal_error("");
+  std::list<ns_Schedule::Step*> running;
   std::list<ns_Schedule::Step*> step_delayed_delete;
-  std::vector<pid_t> pids;
-  std::vector<bool> cpusFree(maxCPU_, true);
-  uint64_t nbCPUsFree = maxCPU_;
+
   lockThread_.lock();
   while((!steps_.empty()) && (threadRunning_)) {
-    std::list<ns_Schedule::Step*> toRun = SearchTaskToRun(nbCPUsFree, steps_);
+    std::list<ns_Schedule::Step*> toRun = SearchTasksToRun();
     lockThread_.unlock();
 
-    
     for(ns_Schedule::Step* step : toRun) {
-      step->cpus_ = AssignCPU(cpusFree, step->nb_cpu_);
-      nbCPUsFree -= step->nb_cpu_;
-      Execute(step);
+      step->Execute();
     }
+    running.insert(running.end(), toRun.begin(), toRun.end());
 
-    pid_t childPID = -1;
-    int status = 0;
-    while(threadRunning_) {
-      childPID = waitpid(-1, &status, WNOHANG);
-      if (childPID == -1) {
-        if (errno == EINTR) {
-          continue;
-        }
-        throw std::runtime_error(
-            std::string("waitpid failed in ScheduleLoop: errno=") +
-            std::to_string(errno) +
-            " (" + std::strerror(errno) + ")"
-        );
-      } else if (childPID == 0) {
-        lockThread_.lock();
-        try {
-          ProcessDelayedCleanup(toRun, step_delayed_delete);
-        } catch (std::runtime_error& e) {
-          fatal_error = e;
-          goto ns_Schedule__Schedule__ScheduleLoop_fatal;
-        }
-        lockThread_.unlock();
+    ExportRunningSteps(config_.exportPath_ / "status.json", running);
 
-        for (ns_Schedule::Step* step : toRun) {
-          if (step->IsRunning() && step->IsTimedOut()) {
-            std::cout << "Tasks " << step->task_id_ << " step " << 
-                step->step_id_ << "-" << step->rank_id_ << "-" << step->attempt_id_ <<  
-                " timeouted" << std::endl;
-            step->KillAndMarkTimedout();
-          }
-        }
-
-        sleep(1);
-      } else {
-        kill(-childPID, SIGKILL);
-        break;
+    std::list<ns_Schedule::Step*> stepsDone;
+    while(threadRunning_ && (stepsDone.size() == 0)) {
+      std::this_thread::sleep_for (std::chrono::seconds(1));
+      for(auto& executor : executors_) {
+        stepsDone = executor.second->CheckFinishedSteps(running);
       }
-    }
 
-    ns_Schedule::Step* stepDone = nullptr;
-    for(ns_Schedule::Step* step : toRun) {
-      if (step->PID() != childPID) {
-        continue;
+      lockThread_.lock();
+      try {
+        ProcessDelayedCleanup(running, step_delayed_delete);
+      } catch (std::runtime_error& e) {
+        fatal_error = e;
+        goto ns_Schedule__Schedule__ScheduleLoop_fatal;
       }
-      step->MarkDone(WEXITSTATUS(status));
-      ReleaseCPU(nbCPUsFree, cpusFree, step->cpus_);
-      stepDone = step;
-      break;
+      lockThread_.unlock();
+
+      for (ns_Schedule::Step* step : running) {
+        if (step->IsRunning() && step->IsTimedOut()) {
+          std::cout << "Tasks " << step->task_id_ << " step " << 
+              step->step_id_ << "-" << step->rank_id_ << "-" << step->attempt_id_ <<  
+              " timeouted" << std::endl;
+          step->KillAndMarkTimedout();
+        }
+      }
     }
 
     lockThread_.lock();
-    if (stepDone != nullptr) {
-      if (stepDone->monitor_count_ > 0) {
-        step_delayed_delete.push_back(stepDone);
+    for(ns_Schedule::Step* step : stepsDone) {
+      if (step->monitor_count_ > 0) {
+        step_delayed_delete.push_back(step);
       } else {
         try {
-          ManageEndOfStep(toRun, stepDone);
+          ManageEndOfStep(running, step);
         } catch(std::runtime_error& e) {
           fatal_error = e;
           goto ns_Schedule__Schedule__ScheduleLoop_fatal;
@@ -286,17 +165,15 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
   for (ns_Schedule::Step* step: steps_) {
     if (step->IsRunning()) {
-      step->Kill();
+      step->Shutdown();
     }
   }
   threadRunning_ = false;
-  printf("Done S\n");
   lockThread_.unlock();
   return;
 
 ns_Schedule__Schedule__ScheduleLoop_fatal:
   threadRunning_ = false;
-  printf("Exception S\n");
   lockThread_.unlock();
   throw fatal_error;
 }
@@ -338,12 +215,35 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     }
     if (allStepDone) {
       // todo signal end of the flow
-      std::string clean_cmd = "rm -rf " + step->run_path_ + " " + step->functions_path_;
-      if (system(clean_cmd.c_str()) != 0 ) {
-        throw std::runtime_error("Unable to clean folder: " +
-            step->run_path_ + ", after strep name=" + step->name_);
-      }
+      step->FinalClean();
       std::cout << "Tasks " << step->task_id_ << " done" << std::endl;
     }
   }
+}
+
+void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename, 
+    std::list<ns_Schedule::Step*> const& steps) const {
+  rapidjson::Document doc;
+  doc.SetObject();
+  rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
+
+  rapidjson::Value arr(rapidjson::kArrayType);
+  for (Step const* step : steps) {
+    rapidjson::Value val;
+    step->ToJSON(val, alloc);
+    arr.PushBack(val, alloc);
+  }
+  doc.AddMember("running_steps", arr, alloc);
+
+  FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
+  if (!fp) {
+    throw std::system_error(errno, std::generic_category(), "Impossible d'ouvrir " + filename);
+  }
+  char buffer[65536];
+  rapidjson::FileWriteStream os(fp, buffer, sizeof(buffer));
+  rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
+  doc.Accept(writer);
+  std::fclose(fp);
+
+  std::filesystem::rename((filename + "tmp"), filename);
 }
