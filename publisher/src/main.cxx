@@ -2,11 +2,13 @@
 #include "api/schedule_api.hxx"
 
 #include "config.hxx"
+#include "schedule/executor/config.hxx"
 
 #define SEC_PATH "../security"
 #define USR_PATH "../users_data"
 #define SCRIPT_PATH "../scripts"
 #define RUN_PATH "../runs"
+#define EXPORT_PATH "../users_data"
 
 int main(int argc, char *argv[]) {
   Config config;
@@ -17,10 +19,13 @@ int main(int argc, char *argv[]) {
   config.server_.userPath_ = realpath(USR_PATH, nullptr);
   config.server_.port_ = config.server_.secure_ ? 8443 : 8080;
 
-  config.schedule_.maxCPU_ = 4;
-  config.schedule_.userPath_ = realpath(USR_PATH, nullptr);  
-  config.schedule_.scriptPath_ = realpath(SCRIPT_PATH, nullptr);
-  config.schedule_.runPath_ = realpath(RUN_PATH, nullptr);
+  ns_Executor::LocalConfig* localConfig = new struct ns_Executor::LocalConfig();
+  localConfig->maxCPU_ = 4;
+  localConfig->scriptPath_ = realpath(SCRIPT_PATH, nullptr);
+  localConfig->runPath_ = realpath(RUN_PATH, nullptr);
+  config.schedule_.executors_.insert(std::make_pair<>("local", localConfig));
+  config.schedule_.userPath_ = realpath(USR_PATH, nullptr);
+  config.schedule_.exportPath_ = realpath(EXPORT_PATH, nullptr);
 
   ns_API::ScheduleAPI scheduleAPI(config.schedule_);
 

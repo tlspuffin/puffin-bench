@@ -11,3 +11,13 @@ uint64_t ns_API::ScheduleAPI::AddTask(std::vector<uint8_t> const& flow,
   return schedule_.AddTask((char const*)flow.data(), 
       (char const*)functions.data(), files);
 }
+
+bool ns_API::ScheduleAPI::CancelTask(uint64_t task_id) {
+  return false;
+}
+
+void ns_API::ScheduleAPI::GetRunningTaskSummary() {
+}
+
+void ns_API::ScheduleAPI::GetTaskInfos(uint64_t task_id) {
+}
