@@ -58,7 +58,7 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
 
     bool result = apis_->cacheAPI_.Put(srcPath, id, force, computeMD5);
 
-    out << R"({"success": )"<< (result ? "true" : "false") << R"(, error: false"})";
+    out << R"({"success": )"<< (result ? "true" : "false") << R"(, "error": ""})";
   } catch (const std::exception& e) {
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
@@ -82,9 +82,9 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
     }
 
     std::filesystem::path path;
-    bool result = apis_->cacheAPI_.Get(id, path);
+    std::string state = apis_->cacheAPI_.Get(id, path);
 
-    out << R"({"success": )"<< (result ? "true" : "false") << R"(, error: false", path: ")" + path.string() + R"( })";
+    out << R"({"success": true, "error": "", "state": ")" + state + R"(", "path": ")" + path.string() + R"(" })";
   } catch (const std::exception& e) {
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }

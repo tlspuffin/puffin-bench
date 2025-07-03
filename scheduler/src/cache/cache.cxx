@@ -1,22 +1,28 @@
 #include "cache.hxx"
 #include <iostream>
 #include <fstream>
+#include <list>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/error/en.h>
 
 ns_Cache::Cache::Cache(ns_Cache::Config const& config) 
-    : config_(config)
+    : config_(config), threadRunning_(false)
 {
   LoadData();
+  SaveData();
+  threadRunning_ = true;
   thread_ = std::thread(&ns_Cache::Cache::CacheLoop, this);
 }
 
 ns_Cache::Cache::~Cache() {
-  if (thread_.joinable()) {
+  {
+    std::lock_guard<std::mutex> lock(cacheThreadLock_);
     threadRunning_ = false;
-    cacheThreadCV_.notify_one();
+  }
+  cacheThreadCV_.notify_one();
+  if (thread_.joinable()) {
     thread_.join();
   }
 }
@@ -38,9 +44,10 @@ bool ns_Cache::Cache::Put(std::filesystem::path const& path,
   fileToStore.id_ = id;
   fileToStore.srcPath_ = path;
   fileToStore.md5_ = computeMD5;
-  cacheThreadLock_.lock();
-  dataToAdd_.push(fileToStore);
-  cacheThreadLock_.unlock();
+  {
+    std::lock_guard<std::mutex> lock(cacheThreadLock_);
+    dataToAdd_.push_back(fileToStore);
+  }
   cacheThreadCV_.notify_one();
   return true;
 }
@@ -48,54 +55,62 @@ bool ns_Cache::Cache::Put(std::filesystem::path const& path,
 enum ns_Cache::Cache::GetStatus ns_Cache::Cache::Get(
     std::string const& id, std::filesystem::path& path) {
   enum ns_Cache::Cache::GetStatus status = ns_Cache::Cache::GetStatus::NO;
-  dataLock_.lock();
+  std::shared_lock lock(dataLock_);
   auto const& data = data_.find(id);
   if (data != data_.end()) {
-    if (data->second.full_) {
+    if (data->second.full_.load()) {
       path = data->second.path_;
-      status = ns_Cache::Cache::GetStatus::OK;
+      return ns_Cache::Cache::GetStatus::OK;
     } else {
-      status = ns_Cache::Cache::GetStatus::PARTIAL;
+      return ns_Cache::Cache::GetStatus::PARTIAL;
     }
   }
-  dataLock_.unlock();
-  return status;
+  return ns_Cache::Cache::GetStatus::NO;
 }
 
 void ns_Cache::Cache::CacheLoop() {
-  threadRunning_ = true;
-  std::queue<struct FileToStore> dataToCopy;
+  std::vector<struct FileToStore> dataToAdd;
   std::unique_lock lock(cacheThreadLock_);
   while(threadRunning_) {
     cacheThreadCV_.wait(lock);
-    dataLock_.lock();
-    while(dataToAdd_.size() > 0) {
-      struct FileToStore fileToStore = dataToAdd_.front();
-      dataToAdd_.pop();
-      struct FileInformations fileInformations;
-      fileInformations.path_ = config_.storagePath_ / fileToStore.id_;
-      fileInformations.md5_ = 0;
-      fileInformations.full_ = false;
-      data_.insert(std::make_pair<>(fileToStore.id_, fileInformations));
-      dataToCopy.push(fileToStore);
+    if (dataToAdd_.empty()) {
+      continue;
     }
-    dataLock_.unlock();
+    dataToAdd.swap(dataToAdd_);
+    lock.unlock();
+
+    {
+      std::lock_guard lock(dataLock_);
+      for(auto const& it : dataToAdd) {
+        struct FileInformations fileInformations;
+        fileInformations.path_ = config_.storagePath_ / it.id_;
+        fileInformations.md5_ = "";
+        fileInformations.full_ = false;
+        data_.emplace(it.id_, fileInformations);
+      }
+    }
     SaveData();
-    while(dataToCopy.size() > 0) {
-      struct FileToStore fileToStore = dataToCopy.front();
-      dataToCopy.pop();
+
+    for(auto const& it : dataToAdd) {
       try {
-        std::filesystem::copy_file(
-            fileToStore.srcPath_, config_.storagePath_ / fileToStore.id_, 
+        std::filesystem::copy_file(it.srcPath_, config_.storagePath_ / it.id_, 
             std::filesystem::copy_options::overwrite_existing);
-        auto const& data = data_.find(fileToStore.id_);            
-        data->second.full_ = true;
+        data_.at(it.id_).full_.store(true);
+        SaveCopyLog(it.id_, config_.storagePath_ / it.id_, "");
       } catch (const std::filesystem::filesystem_error& e) {
-        data_.erase(fileToStore.id_);
+        {
+          std::lock_guard lock(dataLock_);
+          data_.erase(it.id_);
+        }
         std::cerr << "Error while copying: " << e.what() << std::endl;
       }
-      SaveData();
     }
+
+    SaveData();
+    DeleteCopyLog();
+    dataToAdd.clear();
+
+    lock.lock();
   }
   lock.unlock();
   threadRunning_ = false;
@@ -110,8 +125,8 @@ void ns_Cache::Cache::SaveData() {
   for (const auto& [id, info] : data_) {
     rapidjson::Value fileObj(rapidjson::kObjectType);
     fileObj.AddMember("path", rapidjson::Value(info.path_.c_str(), allocator), allocator);
-    fileObj.AddMember("md5", rapidjson::Value(info.md5_), allocator);
-    fileObj.AddMember("full", rapidjson::Value(info.full_), allocator);
+    fileObj.AddMember("md5", rapidjson::Value(info.md5_.c_str(), allocator), allocator);
+    fileObj.AddMember("full", rapidjson::Value(info.full_.load()), allocator);
 
     doc.AddMember(rapidjson::Value(id.c_str(), allocator), fileObj, allocator);
   }
@@ -124,26 +139,43 @@ void ns_Cache::Cache::SaveData() {
       return;
   }
 
-  std::ofstream ofs(config_.mappingFile_);
+  std::string tmpFile = config_.mappingFile_.string() + ".tmp";
+  std::ofstream ofs(tmpFile, std::ios::trunc);
   if (!ofs.is_open()) {
-      std::cerr << "Error: unable to open writable file " << config_.mappingFile_ << std::endl;
+      std::cerr << "Error: unable to open writable file " << tmpFile << std::endl;
       return;
   }
   ofs << buffer.GetString();
   if (!ofs) {
-      std::cerr << "Error: write error in " << config_.mappingFile_ << std::endl;
-      std::filesystem::remove(config_.mappingFile_);
+      std::cerr << "Error: write error in " << tmpFile << std::endl;
+      std::filesystem::remove(tmpFile);
+      ofs.close();
+      return;
   }
+  ofs.close();
+
+  std::filesystem::rename(tmpFile, config_.mappingFile_);
+}
+
+void ns_Cache::Cache::SaveCopyLog(std::string const& id, std::string const& path, std::string const& md5) {
+  std::string copyLogFile = config_.mappingFile_.string() + ".copy";
+  std::ofstream ofs(copyLogFile, std::ios::app);
+  if (!ofs.is_open()) {
+      std::cerr << "Error: unable to open writable file " << copyLogFile << std::endl;
+      return;
+  }
+  ofs << id << '\n' << path << '\n' << md5 << '\n';
   ofs.close();
 }
 
+inline void ns_Cache::Cache::DeleteCopyLog() {
+  std::filesystem::remove(config_.mappingFile_.string() + ".copy");
+}
 
 void ns_Cache::Cache::LoadData() {
   data_.clear();
   std::ifstream ifs(config_.mappingFile_);
   if (!ifs.is_open()) {
-    /*throw std::runtime_error("Error: Unable to open cache info file " + 
-        config_.mappingFile_.string());*/
     std::cerr << "Error: Unable to open cache info file " << 
         config_.mappingFile_.string() << ". Cache is empty." << std::endl;
     return;
@@ -166,6 +198,20 @@ void ns_Cache::Cache::LoadData() {
         config_.mappingFile_.string());
   }
 
+  std::unordered_map<std::string, struct FileInformations> copiedFile;
+  ifs.open(config_.mappingFile_.string() + ".copy");
+  if (ifs.is_open()) {
+    FileInformations fileInformations;
+    std::string id, path, md5;
+    while (std::getline(ifs, id) && std::getline(ifs, path) &&
+        std::getline(ifs, md5)) {
+      fileInformations.path_ = path;
+      fileInformations.md5_ = md5;
+      fileInformations.full_.store(true);
+      copiedFile.emplace(id, fileInformations);
+    }
+  }
+
   for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
     std::string id = it->name.GetString();
     rapidjson::Value const& fileObj = it->value;
@@ -174,17 +220,21 @@ void ns_Cache::Cache::LoadData() {
       throw std::runtime_error("Error: Object '" + id + "' is corrupted.");
     }
     if (!fileObj.HasMember("path") || !fileObj["path"].IsString() ||
-        !fileObj.HasMember("md5")  || !fileObj["md5"].IsUint64()  ||
+        !fileObj.HasMember("md5")  || !fileObj["md5"].IsString()  ||
         !fileObj.HasMember("full") || !fileObj["full"].IsBool()) {
       throw std::runtime_error("Error: Object '" + id + "' have missing informations");
     }
 
     FileInformations info;
     info.path_ = fileObj["path"].GetString();
-    info.md5_  = fileObj["md5"].GetUint64();
-    info.full_ = fileObj["full"].GetBool();
-    if (info.full_) {
+    info.md5_  = fileObj["md5"].GetString();
+    info.full_.store(fileObj["full"].GetBool());
+    std::error_code ec;
+    bool exist = std::filesystem::exists(info.path_, ec);
+    if (exist && info.full_) {
       data_[id] = info;
+    } else if (exist && copiedFile.find(id) != copiedFile.end()) {
+      data_[id] = copiedFile[id];
     } else {
       std::filesystem::remove(info.path_);
     }
