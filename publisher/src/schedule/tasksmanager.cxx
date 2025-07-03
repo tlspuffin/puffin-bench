@@ -151,14 +151,14 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ConfigureStep(ns_Schedu
   step->rank_id_ = rank_id;
   step->run_root_path_ = std::to_string(step->task_id_);
 
-  std::string run_path = std::to_string(step->step_id_) + "-" + 
+  std::string step_name = std::to_string(step->step_id_) + "-" + 
       std::to_string(step->rank_id_) + "-" + 
       std::to_string(step->attempt_id_);
-  step->run_path_ = step->run_root_path_ / run_path;
+  step->run_path_ = step->run_root_path_ / step_name;
 
   step->functions_path_ = functionsPath;
-  step->stdout_ = step->run_root_path_ / (".output/stdout." + run_path + ".txt");
-  step->stderr_ = step->run_root_path_ / (".output/stderr." + run_path + ".txt");
+  step->stdout_ = step->run_root_path_ / (".output/stdout." + step_name + ".txt");
+  step->stderr_ = step->run_root_path_ / (".output/stderr." + step_name + ".txt");
   step->depend_from_ = parent_stack;
   return CreateRetrySteps(step);
 }

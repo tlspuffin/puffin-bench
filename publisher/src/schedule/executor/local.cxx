@@ -4,9 +4,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <fstream>
 #include <sstream>
-#include <iostream>
 #include <filesystem>
+#include <iostream>
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config)
     : Executor(name), config_(config), nbCPUsFree_(config_.maxCPU_), 
@@ -115,6 +116,12 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 
     std::cerr << "Unable to excecute " << script << " : " 
         << strerror(errno) << std::endl;
+
+    std::string step_name = "fe-" + std::to_string(step.step_id_) + "-" + 
+        std::to_string(step.rank_id_) + "-" + std::to_string(step.attempt_id_);
+    std::ofstream fatalErrorProf(step.run_root_path_ / step_name);
+    sync();
+
     exit(-1);
   }
 
@@ -144,7 +151,15 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       if (step->PID() == childPID) {
         --nbChild_;
         kill(-childPID, SIGKILL);
-        step->MarkDone(WEXITSTATUS(status));
+
+        std::string step_name = "fe-" + std::to_string(step->step_id_) + "-" + 
+            std::to_string(step->rank_id_) + "-" + std::to_string(step->attempt_id_);
+        std::error_code ec;
+        if (std::filesystem::exists(step->run_root_path_ / step_name, ec)) {
+          step->MarkDone(ns_Schedule::Step::exitCode_StepLaunchError_);
+        } else {
+          step->MarkDone(WEXITSTATUS(status));
+        }
         ReleaseCPU(step->cpus_);
         result.push_back(step);
         break;
