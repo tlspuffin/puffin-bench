@@ -2,7 +2,21 @@
   "flow" : [
     { 
       "task": "Init",
-      "args": "4"
+      "args": "3f648f016c84884d6470fc906735bb8c5da7891b 4"
+    },
+    {
+      "task": "Build",
+      "run": [
+        {
+          "args": "'SDOS2' 'wolfssl540,asan,wolfssl-disable-postauth,fix-CVE-2022-39173' '--put-use-clear'"
+        },
+        {
+          "args": "'SDOS1' 'openssl111j'"
+        },
+        {
+          "args": "'HEAP' 'wolfssl540,asan,fix-CVE-2022-39173' '--put-use-clear'"
+        }
+      ]
     },
     {
       "task": "Experiment",

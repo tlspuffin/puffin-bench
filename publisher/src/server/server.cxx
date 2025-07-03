@@ -5,8 +5,8 @@
 #include <Poco/Net/SecureServerSocket.h>
 
 ns_Server::MyServerApp::MyServerApp(ns_Server::Config const& config, 
-    ns_API::ScheduleAPI& scheduleAPI) 
-    : config_(config), scheduleAPI_(scheduleAPI)
+    struct ns_API::APIS& apis) 
+    : config_(config), apis_(apis)
 {
 }
 
@@ -22,7 +22,7 @@ int ns_Server::MyServerApp::main(const std::vector<std::string>& args) {
     serverSocket = new Poco::Net::SecureServerSocket(config_.port_, 64, context);
   }
 
-  Poco::Net::HTTPServer server(new RequestHandlerFactory(config_, scheduleAPI_), 
+  Poco::Net::HTTPServer server(new RequestHandlerFactory(config_, apis_), 
       *serverSocket, new Poco::Net::HTTPServerParams);
 
   server.start();

@@ -45,23 +45,11 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   step.stdout_ = config_.runPath_ / step.stdout_;
   step.stderr_ = config_.runPath_ / step.stderr_;
 
-  std::error_code ec;
   if (step.IsFirstStepOfTask()) {
-    if (!std::filesystem::create_directories(step.run_root_path_, ec)) {
-      throw std::runtime_error(
-          std::string("create dir ") + step.run_root_path_.string() + std::string(" failed: errno=") +
-          std::to_string(ec.value()) +
-          " (" + ec.message() + ")"
-      );
-    }
-    if (!std::filesystem::create_directories(step.run_root_path_ / ".output", ec)) {
-      throw std::runtime_error(
-          std::string("create dir ") + step.run_root_path_.string() + std::string("/.output failed: errno=") +
-          std::to_string(ec.value()) +
-          " (" + ec.message() + ")"
-      );
-    }
+    CreateRunFolders(step.run_root_path_);
   }
+
+  std::error_code ec;
   if (!std::filesystem::create_directories(step.run_path_, ec)) {
     throw std::runtime_error(
         std::string("create dir ") + step.run_path_.string() + std::string("/.output failed: errno=") +
@@ -104,6 +92,8 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     arg_strings.push_back(strdup(step.functions_path_.c_str()));
     arg_strings.push_back(strdup(std::filesystem::path(step.run_root_path_ /
         ".taskenv").c_str()));
+    arg_strings.push_back(strdup(std::filesystem::path(step.run_root_path_ /
+        "output").c_str()));
     arg_strings.push_back(strdup(std::to_string(spid).c_str()));
     arg_strings.push_back(strdup(std::to_string(step.rank_id_).c_str()));
     arg_strings.push_back(strdup(step.function_.c_str()));
@@ -209,4 +199,28 @@ inline void ns_Executor::Local::ReleaseCPU(std::vector<uint64_t>& cpus) {
     cpusFree_[index] = true;
   }
   nbCPUsFree_ += cpus.size();
+}
+
+void ns_Executor::Local::CreateRunFolders(std::filesystem::path const& path) {
+  std::error_code ec;
+  if (!std::filesystem::create_directories(path, ec)) {
+    throw std::runtime_error(
+        "create dir " + path.string() + std::string(" failed: errno=") +
+        std::to_string(ec.value()) + " (" + ec.message() + ")"
+    );
+  }
+  if (!std::filesystem::create_directories(path / ".output", ec)) {
+    throw std::runtime_error(
+        "create dir " + (path / ".output").string() +
+        " failed: errno=" + std::to_string(ec.value()) +
+        " (" + ec.message() + ")"
+    );
+  }
+  if (!std::filesystem::create_directories(path / "output", ec)) {
+    throw std::runtime_error(
+        "create dir " + (path / "output").string() +
+        " failed: errno=" + std::to_string(ec.value()) +
+        " (" + ec.message() + ")"
+    );
+  }
 }

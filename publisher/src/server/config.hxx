@@ -10,7 +10,6 @@ struct Config {
   std::string key_;
   std::string cert_;
   std::string CA_;
-  std::string userPath_;
 };
 
 };
