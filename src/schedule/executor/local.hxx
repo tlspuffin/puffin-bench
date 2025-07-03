@@ -25,6 +25,7 @@ private:
 
   std::vector<uint64_t> AssignCPU(uint64_t nbCPU);
   void ReleaseCPU(std::vector<uint64_t>& cpus);
+  void CreateRunFolders(std::filesystem::path const& path);
 };
 
 inline Local::~Local() {}

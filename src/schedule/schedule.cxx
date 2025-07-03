@@ -168,6 +168,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       step->Shutdown();
     }
   }
+  ExportRunningSteps(config_.exportPath_ / "status.json", running);
   threadRunning_ = false;
   lockThread_.unlock();
   return;

@@ -1,21 +1,21 @@
 #pragma once
 
 #include "config.hxx"
-#include "../api/schedule_api.hxx"
+#include "../api/api.hxx"
 #include <Poco/Util/ServerApplication.h>
 
 namespace ns_Server {
 
 class MyServerApp : public Poco::Util::ServerApplication {
 public:
-  MyServerApp(ns_Server::Config const& config, ns_API::ScheduleAPI& scheduleAPI);
+  MyServerApp(ns_Server::Config const& config, struct ns_API::APIS& apis);
 
   protected:
   int main(const std::vector<std::string>& args);
 
 private:
   ns_Server::Config const& config_;
-  ns_API::ScheduleAPI& scheduleAPI_;
+  struct ns_API::APIS& apis_;
 };
 
 };
