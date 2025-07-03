@@ -24,34 +24,45 @@ if [ ! -r "$1" ]; then
   echo "Unable to read $1"
   exit 1
 fi
-if [ ! -r "$2" ]; then
-  #echo "Unable to read env $2"
+SRCFILE=$1
+shift
+
+if [ ! -r "$1" ]; then
+  #echo "Unable to read env $1"
   #exit 1
-  touch $2
+  touch $1
 fi
-if [ -z "$3" ]; then
+ENVFILE=$1
+shift
+
+if [ ! -w "$1" ]; then
+  echo "Output directory is not writable: $1"
+  exit 1
+fi
+OUTPATH=$1
+shift
+
+if [ -z "$1" ]; then
   echo "Missing sid"
   exit 1
 fi
-if [ -z "$4" ]; then
+sid=$1
+shift
+
+if [ -z "$1" ]; then
   echo "Missing rank id"
   exit 1
 fi
-if [ -z "$5" ]; then
+rankid=$1
+shift
+
+if [ -z "$1" ]; then
   echo "Missing function name"
   exit 1
 fi
-
-SRCFILE=$1
-shift
-ENVFILE=$1
-shift
-sid=$1
-shift
-rankid=$1
-shift
 COMMAND=$1
 shift
+
 source ${SRCFILE}
 
 if ! declare -F "${COMMAND}" > /dev/null; then
