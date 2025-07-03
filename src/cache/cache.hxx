@@ -1,9 +1,10 @@
 #pragma once
 #include "config.hxx"
 #include <thread>
-#include <mutex>
+#include <atomic>
+#include <shared_mutex>
 #include <unordered_map>
-#include <queue>
+#include <vector>
 #include <condition_variable>
 
 namespace ns_Cache {
@@ -24,8 +25,22 @@ public:
 private:
   struct FileInformations {
     std::filesystem::path path_;
-    uint64_t md5_;
-    bool full_;
+    std::string md5_;
+    std::atomic<bool> full_;
+
+    FileInformations() : full_(false) {}
+
+    FileInformations(const FileInformations& other)
+        : path_(other.path_), md5_(other.md5_), full_(other.full_.load()) {}
+
+    FileInformations& operator=(const FileInformations& other) {
+        if (this != &other) {
+            path_ = other.path_;
+            md5_ = other.md5_;
+            full_.store(other.full_.load());
+        }
+        return *this;
+    }
   };
   struct FileToStore {
     std::string id_;
@@ -35,14 +50,16 @@ private:
   ns_Cache::Config const& config_;
   bool threadRunning_;
   std::thread thread_;
-  std::mutex dataLock_;
+  std::shared_mutex dataLock_;
   std::unordered_map<std::string, struct FileInformations> data_;
   std::mutex cacheThreadLock_;
   std::condition_variable cacheThreadCV_;
-  std::queue<struct FileToStore> dataToAdd_;
+  std::vector<struct FileToStore> dataToAdd_;
 
   void CacheLoop();
   void SaveData();
+  void SaveCopyLog(std::string const& id, std::string const& path, std::string const& md5);
+  void DeleteCopyLog();
   void LoadData();
 };
 

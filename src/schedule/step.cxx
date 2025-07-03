@@ -2,6 +2,7 @@
 
 uint16_t const ns_Schedule::Step::exitCode_NotSet_ = 0x0100;
 uint16_t const ns_Schedule::Step::exitCode_Timedout_ = 0x0200;
+uint16_t const ns_Schedule::Step::exitCode_StepLaunchError_ = 0x0400;
 std::atomic<uint64_t> ns_Schedule::Step::next_uuid_ = 0;
 
 static uint64_t parseTimeout(const std::string& str) {

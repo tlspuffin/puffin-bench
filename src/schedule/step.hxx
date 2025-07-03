@@ -16,6 +16,7 @@ class Step {
 public:
   static uint16_t const exitCode_NotSet_;
   static uint16_t const exitCode_Timedout_;
+  static uint16_t const exitCode_StepLaunchError_;
 
   Step(std::string const& name);
   void CopyParameters(Step const& step);
