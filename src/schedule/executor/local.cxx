@@ -9,6 +9,11 @@
 #include <filesystem>
 #include <iostream>
 
+void ns_Executor::LocalData::ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const {
+  out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
+}
+
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config)
     : Executor(name), config_(config), nbCPUsFree_(config_.maxCPU_), 
       cpusFree_(config_.maxCPU_, true), nbChild_(0)
@@ -38,6 +43,9 @@ inline bool RedirectOutput(int outhandler, int errhandler){
 }
 
 void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
+  LocalData* localData = new LocalData();
+  step.executor_data_ = localData;
+
   step.cpus_ = AssignCPU(step.nb_cpu_);
   nbCPUsFree_ -= step.nb_cpu_;
 
@@ -133,55 +141,57 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         std::to_string(step.step_id_) + " : " + std::strerror(errno));
   }
 
-  step.MarkRunning(pid);
+  localData->pid_ = pid;
+  step.MarkRunning();
   ++nbChild_;
 }
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     std::list<ns_Schedule::Step*>& runningSteps) {
   std::list<ns_Schedule::Step*> result;
-  if (nbChild_ == 0) {
-    return result;
-  }
-  pid_t childPID = -1;
-  int status = 0;
-  for (childPID = waitpid(-1, &status, WNOHANG); (childPID > 0); 
-      childPID = waitpid(-1, &status, WNOHANG)) {
-    for(ns_Schedule::Step* step : runningSteps) {
-      if (step->PID() == childPID) {
-        --nbChild_;
-        kill(-childPID, SIGKILL);
+  for(ns_Schedule::Step* step : runningSteps) {
+    if (step->executor_ != this) {
+      continue;
+    }
+    LocalData* localData = dynamic_cast<LocalData*>(step->executor_data_);
+    if (localData == nullptr) {
+      throw std::runtime_error("ExecutorData are not of type LocalData");
+    }
+    int status = 0;
+    pid_t childPID = waitpid(localData->pid_, &status, WNOHANG);
+    if ((childPID == -1) && (errno != EINTR)) {
+      throw std::runtime_error(
+          std::string("waitpid failed in CheckFinishedSteps: errno=") +
+          std::to_string(errno) +
+          " (" + std::strerror(errno) + ")");
+    } else if (childPID == localData->pid_) {
+      --nbChild_;
+      kill(-childPID, SIGKILL);
 
-        std::string step_name = "fe-" + std::to_string(step->step_id_) + "-" + 
-            std::to_string(step->rank_id_) + "-" + std::to_string(step->attempt_id_);
-        std::error_code ec;
-        if (std::filesystem::exists(step->run_root_path_ / step_name, ec)) {
-          step->MarkDone(ns_Schedule::Step::exitCode_StepLaunchError_);
-        } else {
-          step->MarkDone(WEXITSTATUS(status));
-        }
-        ReleaseCPU(step->cpus_);
-        result.push_back(step);
-        break;
+      std::string step_name = "fe-" + std::to_string(step->step_id_) + "-" + 
+          std::to_string(step->rank_id_) + "-" + std::to_string(step->attempt_id_);
+      std::error_code ec;
+      if (std::filesystem::exists(step->run_root_path_ / step_name, ec)) {
+        step->MarkDone(ns_Schedule::Step::exitCode_StepLaunchError_);
+      } else {
+        step->MarkDone(WEXITSTATUS(status));
       }
-    }
-    if (nbChild_ == 0) {
-      break;
+      ReleaseCPU(step->cpus_);
+      result.push_back(step);
     }
   }
-  if ((childPID == -1) && (errno != EINTR)) {
-    throw std::runtime_error(
-        std::string("waitpid failed in CheckFinishedSteps: errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")");
-  }
+
   return result;
 }
 
 void ns_Executor::Local::Shutdown(ns_Schedule::Step& step, bool wait) {
-  kill(-step.PID(), SIGKILL);
+  LocalData* localData = dynamic_cast<LocalData*>(step.executor_data_);
+  if (localData == nullptr) {
+    throw std::runtime_error("ExecutorData are not of type LocalData");
+  }
+  kill(-localData->pid_, SIGKILL);
   if (wait) {
-    waitpid(-step.PID(), nullptr, 0);
+    waitpid(-localData->pid_, nullptr, 0);
   }
 }
 

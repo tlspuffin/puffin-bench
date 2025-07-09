@@ -27,6 +27,7 @@ private:
   void ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, std::list<ns_Schedule::Step*>& delayedSteps);
   void ManageEndOfStep(std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step);
   void ExportRunningSteps(std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
+  static void AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step);
 
   ns_Schedule::Config const& config_;
   std::filesystem::path exportPath_;
