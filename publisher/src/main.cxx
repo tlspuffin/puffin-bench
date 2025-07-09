@@ -15,9 +15,9 @@
 int main(int argc, char *argv[]) {
   Config config;
   config.server_.secure_ = false;
-  config.server_.key_ = std::filesystem::canonical(std::filesystem::path(SEC_PATH) / "site.key").string();
-  config.server_.cert_ = std::filesystem::canonical(std::filesystem::path(SEC_PATH) / "site.pem").string();
-  config.server_.CA_ = std::filesystem::canonical(std::filesystem::path(SEC_PATH) / "CA.pem").string();
+  config.server_.key_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "site.key").string();
+  config.server_.cert_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "site.pem").string();
+  config.server_.CA_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "CA.pem").string();
   config.server_.port_ = config.server_.secure_ ? 8443 : 8080;
 
   ns_Executor::LocalConfig* localConfig = new struct ns_Executor::LocalConfig();
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
   config.schedule_.exportPath_ = std::filesystem::canonical(std::filesystem::path(EXPORT_PATH)).string();
 
   config.cache_.storagePath_ = std::filesystem::canonical(std::filesystem::path(USR_PATH)).string();
-  config.cache_.mappingFile_ = std::filesystem::canonical(std::filesystem::path(USR_PATH) / "cache.json").string();
+  config.cache_.mappingFile_ = std::filesystem::weakly_canonical(std::filesystem::path(USR_PATH) / "cache.json").string();
 
   struct ns_API::APIS apis(config.schedule_, config.cache_);
 

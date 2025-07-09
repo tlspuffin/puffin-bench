@@ -2,7 +2,7 @@
   "flow" : [
     { 
       "task": "Init",
-      "args": "3f648f016c84884d6470fc906735bb8c5da7891b 4"
+      "args": "4 3f648f016c84884d6470fc906735bb8c5da7891b"
     },
     {
       "task": "Build",
@@ -24,20 +24,20 @@
         {
           "args": "'SDOS2' 'wolfssl540,asan,wolfssl-disable-postauth,fix-CVE-2022-39173' '--put-use-clear'",
           "nbcpu": 4,
-          "maxtime": "60m",
-          "retry": 3
+          "maxtime": "10m",
+          "retry": 10
         },
         {
           "args": "'SDOS1' 'openssl111j'",
           "nbcpu": 4,
-          "maxtime": "60m",
-          "retry": 3
+          "maxtime": "10m",
+          "retry": 10
         },
         {
           "args": "'HEAP' 'wolfssl540,asan,fix-CVE-2022-39173' '--put-use-clear'",
           "nbcpu": 4,
-          "maxtime": "60m",
-          "retry": 3
+          "maxtime": "10m",
+          "retry": 10
         }
       ]
     },
