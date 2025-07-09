@@ -10,7 +10,9 @@
 ns_Cache::Cache::Cache(ns_Cache::Config const& config) 
     : config_(config), threadRunning_(false)
 {
-  LoadData();
+  if (!LoadData()) {
+    SaveData();
+  }
   threadRunning_ = true;
   thread_ = std::thread(&ns_Cache::Cache::CacheLoop, this);
 }
@@ -172,13 +174,13 @@ inline void ns_Cache::Cache::DeleteCopyLog() {
   std::filesystem::remove(config_.mappingFile_.string() + ".copy");
 }
 
-void ns_Cache::Cache::LoadData() {
+bool ns_Cache::Cache::LoadData() {
   data_.clear();
   std::ifstream ifs(config_.mappingFile_);
   if (!ifs.is_open()) {
     std::cerr << "Warning: Unable to open cache info file " << 
         config_.mappingFile_.string() << ". Cache is empty." << std::endl;
-    return;
+    return true;
   }
 
   std::stringstream buffer;
@@ -212,6 +214,7 @@ void ns_Cache::Cache::LoadData() {
     }
   }
 
+  bool noCleaning = true;
   for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
     std::string id = it->name.GetString();
     rapidjson::Value const& fileObj = it->value;
@@ -236,7 +239,10 @@ void ns_Cache::Cache::LoadData() {
     } else if (exist && copiedFile.find(id) != copiedFile.end()) {
       data_[id] = copiedFile[id];
     } else {
+      noCleaning = false;
       std::filesystem::remove(info.path_);
     }
   }
+
+  return noCleaning;
 }

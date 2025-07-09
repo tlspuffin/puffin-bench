@@ -48,11 +48,13 @@ public:
   uint64_t step_id_;
   uint64_t rank_id_;
   uint64_t attempt_id_;
+  uint64_t run_id_;
   std::string executor_name_;
   ns_Executor::Executor* executor_;
   ns_Executor::ExecutorData* executor_data_;
   std::filesystem::path run_root_path_;
   std::filesystem::path run_path_;
+  std::filesystem::path files_path_;
   std::filesystem::path functions_path_;
   std::string function_;
   std::string args_;
@@ -97,7 +99,7 @@ inline bool Step::IsRunning() const {
 }
 
 inline bool Step::IsDone() const {
-  return state_ == State::Done;
+  return state_ >= State::Done;
 }
 
 inline bool Step::IsTimedOut() const {

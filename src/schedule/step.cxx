@@ -9,6 +9,8 @@ static uint64_t parseTimeout(const std::string& str) {
     if (str.empty()) return 0;
     char unit = str.back();
     int value = std::stoi(str.substr(0, str.size() - 1));
+    if (unit == 'd') return value * 60 * 60 * 24;
+    if (unit == 'h') return value * 60 * 60;
     if (unit == 'm') return value * 60;
     if (unit == 's') return value;
     return value;
@@ -16,9 +18,9 @@ static uint64_t parseTimeout(const std::string& str) {
 
 ns_Schedule::Step::Step(std::string const& name) 
     : name_(name), uuid_(++next_uuid_), task_id_(0), step_id_(0), 
-      rank_id_(0), attempt_id_(0), executor_name_("default"), 
+      rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
       executor_(nullptr), executor_data_(nullptr), run_root_path_(), 
-      run_path_(), functions_path_(), function_(name), args_(), 
+      run_path_(), files_path_(), functions_path_(), function_(name), args_(), 
       nb_cpu_(1), nb_retry_(0), timeout_(0), next_(this), previous_(this), 
       dependencies_(), depend_from_(), state_(State::Pending), cpus_(), 
       stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0)
@@ -35,6 +37,9 @@ void ns_Schedule::Step::CopyParameters(Step const& step) {
   task_id_ = step.task_id_;
   executor_ = step.executor_;
   run_root_path_ = step.run_root_path_;
+  files_path_ = step.files_path_;
+  functions_path_ = step.functions_path_;
+  function_ = step.function_;
   depend_from_ = step.depend_from_;
 
   args_ = step.args_;
@@ -65,9 +70,11 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("step_id", step_id_, alloc);
   out.AddMember("rank_id", rank_id_, alloc);
   out.AddMember("attempt_id", attempt_id_, alloc);
+  out.AddMember("run_id", run_id_, alloc);
   out.AddMember("executor_name", rapidjson::Value(executor_name_.c_str(), alloc), alloc);
   out.AddMember("run_root_path", rapidjson::Value(run_root_path_.string().c_str(), alloc), alloc);
   out.AddMember("run_path", rapidjson::Value(run_path_.string().c_str(), alloc), alloc);
+  out.AddMember("files_path", rapidjson::Value(files_path_.string().c_str(), alloc), alloc);
   out.AddMember("functions_path", rapidjson::Value(functions_path_.string().c_str(), alloc), alloc);
   out.AddMember("function", rapidjson::Value(function_.c_str(), alloc), alloc);
   out.AddMember("args", rapidjson::Value(args_.c_str(), alloc), alloc);

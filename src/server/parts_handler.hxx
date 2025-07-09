@@ -15,10 +15,10 @@ public:
   };
 
   void handlePart(const Poco::Net::MessageHeader& header, std::istream& stream);
-  std::unordered_map<std::string, struct PartData> const& GetParts() const;
+  std::unordered_multimap<std::string, struct PartData> const& GetParts() const;
 
 private:
-  std::unordered_map<std::string, PartData> parts_;
+  std::unordered_multimap<std::string, PartData> parts_;
 };
 
 };
