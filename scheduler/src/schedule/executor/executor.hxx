@@ -4,12 +4,22 @@
 #include <string>
 #include <list>
 #include <unordered_map>
+#include <rapidjson/document.h>
 
 namespace ns_Schedule {
   class Step;
 }
 
 namespace ns_Executor {
+
+class ExecutorData {
+public:
+  virtual ~ExecutorData();
+  virtual void ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const = 0;
+};
+
+inline ExecutorData::~ExecutorData() {}
 
 class Executor {
 public:
