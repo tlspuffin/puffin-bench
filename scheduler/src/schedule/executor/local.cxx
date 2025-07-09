@@ -103,9 +103,12 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         ".taskenv").c_str()));
     arg_strings.push_back(strdup(std::filesystem::path(step.run_root_path_ /
         "output").c_str()));
+    arg_strings.push_back(strdup(step.files_path_.c_str()));
+    arg_strings.push_back(strdup(std::to_string(step.next_ == &step).c_str()));
     arg_strings.push_back(strdup(std::to_string(spid).c_str()));
-    arg_strings.push_back(strdup(std::to_string(step.rank_id_).c_str()));
+    arg_strings.push_back(strdup(std::to_string(step.run_id_).c_str()));
     arg_strings.push_back(strdup(step.function_.c_str()));
+    arg_strings.push_back(strdup("---"));
     std::istringstream iss(step.args_);
     std::string token;
     while (iss >> token) {
@@ -119,7 +122,6 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       exit(-1);
     }
 
-    std::cerr << "Doing execve" << std::endl;
     int retval = execv(script.c_str(), arg_strings.data());
 
     std::cerr << "Unable to excecute " << script << " : " 
@@ -150,7 +152,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     std::list<ns_Schedule::Step*>& runningSteps) {
   std::list<ns_Schedule::Step*> result;
   for(ns_Schedule::Step* step : runningSteps) {
-    if (step->executor_ != this) {
+    if ((step->IsDone()) || (step->executor_ != this)) {
       continue;
     }
     LocalData* localData = dynamic_cast<LocalData*>(step->executor_data_);

@@ -1,5 +1,13 @@
 #!/bin/bash
 
+QUIET=0
+while [[ "$1" == -* ]]; do
+  case "$1" in
+    -q) QUIET=1; shift ;;
+    *) break ;;
+  esac
+done
+
 CACHE_ID="$1"
 TIMEOUT="${2:-0}"
 SERVER_URL="http://localhost:8080/cache_get"
@@ -9,7 +17,9 @@ if [ -z "$CACHE_ID" ]; then
   exit 1
 fi
 
-echo "Waiting file '$CACHE_ID' to be ready in cache..."
+[[ "$QUIET" -eq 0 ]] && echo "Waiting file '$CACHE_ID' to be ready in cache..."
+
+START_TIME=$(date +%s)
 
 while true; do
   RESPONSE=$(curl -s -X POST "$SERVER_URL" -F "id=$CACHE_ID")
@@ -19,18 +29,18 @@ while true; do
   STATE=$(echo "$RESPONSE" | jq -r '.state')
   PATH_VAL=$(echo "$RESPONSE" | jq -r '.path // empty')
 
-  echo "Got: success=$SUCCESS, state=$STATE, error='$ERROR', path=$PATH_VAL"
+  [[ "$QUIET" -eq 0 ]] && echo "Got: success=$SUCCESS, state=$STATE, error='$ERROR', path=$PATH_VAL"
 
   if [[ "$STATE" == "Ok" ]]; then
-    echo "File ready: $PATH_VAL"
+    [[ "$QUIET" -eq 0 ]] && echo "File ready: $PATH_VAL" || echo ${PATH_VAL}
     break
   elif [[ "$STATE" == "Locked" ]]; then
-    echo "File locked, new try in $DELAY s..."
+    [[ "$QUIET" -eq 0 ]] && echo "File locked, new try in $DELAY s..."
   elif [[ "$STATE" == "Not Available" ]]; then
-    echo "File unavailable (Not Available). Aborting."
+    [[ "$QUIET" -eq 0 ]] && echo "File unavailable (Not Available). Aborting."
     exit 2
   else
-    echo "Unknown state or invalid response. Raw response: $RESPONSE"
+    [[ "$QUIET" -eq 0 ]] && echo "Unknown state or invalid response. Raw response: $RESPONSE"
     exit 3
   fi
 
@@ -38,7 +48,7 @@ while true; do
     NOW=$(date +%s)
     ELAPSED=$((NOW - START_TIME))
     if [[ "$ELAPSED" -ge "$TIMEOUT" ]]; then
-      echo "Timeout reached after $ELAPSED seconds. Aborting."
+      [[ "$QUIET" -eq 0 ]] && echo "Timeout reached after $ELAPSED seconds. Aborting."
       exit 4
     fi
   fi

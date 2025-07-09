@@ -1,6 +1,6 @@
 #include "parts_handler.hxx"
 
-std::unordered_map<std::string, struct ns_Server::PartsHandler::PartData> const& ns_Server::PartsHandler::GetParts() const {
+std::unordered_multimap<std::string, struct ns_Server::PartsHandler::PartData> const& ns_Server::PartsHandler::GetParts() const {
   return parts_;
 }
 

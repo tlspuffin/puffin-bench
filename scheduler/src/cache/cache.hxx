@@ -60,7 +60,7 @@ private:
   void SaveData() const;
   void SaveCopyLog(std::string const& id, std::string const& path, std::string const& md5) const;
   void DeleteCopyLog();
-  void LoadData();
+  bool LoadData();
 };
 
 };

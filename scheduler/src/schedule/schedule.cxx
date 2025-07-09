@@ -55,7 +55,8 @@ ns_Schedule::Schedule::~Schedule() {
 }
 
 uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList, 
-    std::string const& functions, std::vector<std::string> files) {
+    std::string const& functions, 
+    std::unordered_map<std::string, std::vector<uint8_t>>& files) {
   rapidjson::Document stepsJSON;
   stepsJSON.Parse(tasksList.c_str());
 
@@ -68,7 +69,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   }
 
   std::pair<uint64_t, std::list<ns_Schedule::Step*>> tasks = 
-      tasksManager_.CreateTask(stepsJSON, functions, 
+      tasksManager_.CreateTask(stepsJSON, functions, files, 
       defaultExecutor_, executors_);
   uint64_t tasks_id = tasks.first;
   std::list<ns_Schedule::Step*>& steps = tasks.second;
@@ -146,6 +147,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
               step->step_id_ << "-" << step->rank_id_ << "-" << step->attempt_id_ <<  
               " timeouted" << std::endl;
           step->KillAndMarkTimedout();
+          stepsDone.push_back(step);
         }
       }
     }
