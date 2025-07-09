@@ -2,6 +2,7 @@
 #include "executor/local.hxx"
 #include <stdlib.h>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <stack>
 #include <unordered_set>
@@ -11,7 +12,6 @@
 #include <sys/types.h>
 #include <rapidjson/filereadstream.h>
 #include <rapidjson/error/en.h>
-
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
@@ -33,11 +33,11 @@ ns_Schedule::Schedule::~Schedule() {
   lockThread_.lock();
   if (threadRunning_) {
     threadRunning_ = false;
-    if (thread_.joinable()) {
-      lockThread_.unlock();
-      thread_.join();
-      lockThread_.lock();
-    }
+  }
+  if (thread_.joinable()) {
+    lockThread_.unlock();
+    thread_.join();
+    lockThread_.lock();
   }
   for(ns_Schedule::Step* rootStep : tasks_) {
     try {
@@ -106,6 +106,7 @@ std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
 }
 
 void ns_Schedule::Schedule::ScheduleLoop() {
+  std::ofstream stepsDoneFile(config_.exportPath_ / "steps_done.json", std::ios::app);
   std::runtime_error fatal_error("");
   std::list<ns_Schedule::Step*> running;
   std::list<ns_Schedule::Step*> step_delayed_delete;
@@ -126,7 +127,8 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     while(threadRunning_ && (stepsDone.size() == 0)) {
       std::this_thread::sleep_for (std::chrono::seconds(1));
       for(auto& executor : executors_) {
-        stepsDone = executor.second->CheckFinishedSteps(running);
+        std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(running);
+        stepsDone.insert(stepsDone.end(), executorStepsDone.begin(), executorStepsDone.end());
       }
 
       lockThread_.lock();
@@ -155,6 +157,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       } else {
         try {
           ManageEndOfStep(running, step);
+          AppendStepToFinishLog(stepsDoneFile, *step);
         } catch(std::runtime_error& e) {
           fatal_error = e;
           goto ns_Schedule__Schedule__ScheduleLoop_fatal;
@@ -247,4 +250,17 @@ void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename,
   std::fclose(fp);
 
   std::filesystem::rename((filename + "tmp"), filename);
+}
+
+void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  step.ToJSON(doc, doc.GetAllocator());
+  doc.Accept(writer);
+
+  log << buffer.GetString() << std::endl;
+  log.flush();
 }

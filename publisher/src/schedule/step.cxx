@@ -17,13 +17,18 @@ static uint64_t parseTimeout(const std::string& str) {
 ns_Schedule::Step::Step(std::string const& name) 
     : name_(name), uuid_(++next_uuid_), task_id_(0), step_id_(0), 
       rank_id_(0), attempt_id_(0), executor_name_("default"), 
-      executor_(nullptr), run_root_path_(), run_path_(), 
-      functions_path_(), function_(name), args_(), nb_cpu_(1), 
-      nb_retry_(0), timeout_(0), next_(this), previous_(this), 
-      dependencies_(), depend_from_(), state_(State::Pending), pid_(0), 
-      cpus_(), stdout_(), stderr_(), exit_code_(exitCode_NotSet_), 
-      monitor_count_(0)
+      executor_(nullptr), executor_data_(nullptr), run_root_path_(), 
+      run_path_(), functions_path_(), function_(name), args_(), 
+      nb_cpu_(1), nb_retry_(0), timeout_(0), next_(this), previous_(this), 
+      dependencies_(), depend_from_(), state_(State::Pending), cpus_(), 
+      stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0)
 {
+}
+
+ns_Schedule::Step::~Step() {
+  if (executor_data_ != nullptr) {
+    delete executor_data_;
+  }
 }
 
 void ns_Schedule::Step::CopyParameters(Step const& step) {
@@ -87,7 +92,7 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     case State::Shutdown: stateStr = "Shutdown"; break;
   }
   out.AddMember("state", rapidjson::Value(stateStr, alloc), alloc);
-  out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
+  executor_data_->ToJSON(out, alloc);
   rapidjson::Value timepoints(rapidjson::kArrayType);
   timepoints.PushBack(ToMillis(time_points_[0]), alloc);
   timepoints.PushBack(ToMillis(time_points_[1]), alloc);

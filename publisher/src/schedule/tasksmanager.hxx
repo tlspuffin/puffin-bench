@@ -2,7 +2,8 @@
 
 #include "config.hxx"
 #include "step.hxx"
-#include <atomic>
+#include <mutex>
+#include <rapidjson/document.h>
 
 namespace ns_Schedule {
 
@@ -16,9 +17,13 @@ public:
       std::unordered_map<std::string, ns_Executor::Executor*>& executors);
   void DeleteTask(ns_Schedule::Step* rootStep);
 
+  void SaveStatus() const;
+  void ReadSavedStatus();
+
 private:
   ns_Schedule::Config const& config_;
-  std::atomic<uint64_t> next_task_id_;
+  std::mutex lock_;
+  uint64_t next_task_id_;
 
   std::list<ns_Schedule::Step*> CreateStepsFromJson(
       rapidjson::Value const& root, uint64_t task_id, 

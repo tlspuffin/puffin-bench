@@ -11,7 +11,6 @@ ns_Cache::Cache::Cache(ns_Cache::Config const& config)
     : config_(config), threadRunning_(false)
 {
   LoadData();
-  SaveData();
   threadRunning_ = true;
   thread_ = std::thread(&ns_Cache::Cache::CacheLoop, this);
 }
@@ -80,7 +79,7 @@ void ns_Cache::Cache::CacheLoop() {
     lock.unlock();
 
     {
-      std::lock_guard lock(dataLock_);
+      std::lock_guard<std::shared_mutex> lock(dataLock_);
       for(auto const& it : dataToAdd) {
         struct FileInformations fileInformations;
         fileInformations.path_ = config_.storagePath_ / it.id_;
@@ -99,7 +98,7 @@ void ns_Cache::Cache::CacheLoop() {
         SaveCopyLog(it.id_, config_.storagePath_ / it.id_, "");
       } catch (const std::filesystem::filesystem_error& e) {
         {
-          std::lock_guard lock(dataLock_);
+          std::lock_guard<std::shared_mutex> lock(dataLock_);
           data_.erase(it.id_);
         }
         std::cerr << "Error while copying: " << e.what() << std::endl;
@@ -117,7 +116,7 @@ void ns_Cache::Cache::CacheLoop() {
 }
 
 
-void ns_Cache::Cache::SaveData() {
+void ns_Cache::Cache::SaveData() const {
   rapidjson::Document doc;
   doc.SetObject();
   rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
@@ -157,7 +156,8 @@ void ns_Cache::Cache::SaveData() {
   std::filesystem::rename(tmpFile, config_.mappingFile_);
 }
 
-void ns_Cache::Cache::SaveCopyLog(std::string const& id, std::string const& path, std::string const& md5) {
+void ns_Cache::Cache::SaveCopyLog(std::string const& id, std::string const& path, 
+    std::string const& md5) const {
   std::string copyLogFile = config_.mappingFile_.string() + ".copy";
   std::ofstream ofs(copyLogFile, std::ios::app);
   if (!ofs.is_open()) {
@@ -176,7 +176,7 @@ void ns_Cache::Cache::LoadData() {
   data_.clear();
   std::ifstream ifs(config_.mappingFile_);
   if (!ifs.is_open()) {
-    std::cerr << "Error: Unable to open cache info file " << 
+    std::cerr << "Warning: Unable to open cache info file " << 
         config_.mappingFile_.string() << ". Cache is empty." << std::endl;
     return;
   }

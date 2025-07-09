@@ -38,7 +38,7 @@ while true; do
     NOW=$(date +%s)
     ELAPSED=$((NOW - START_TIME))
     if [[ "$ELAPSED" -ge "$TIMEOUT" ]]; then
-      echo "⏱️ Timeout reached after $ELAPSED seconds. Aborting."
+      echo "Timeout reached after $ELAPSED seconds. Aborting."
       exit 4
     fi
   fi

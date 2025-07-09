@@ -29,5 +29,6 @@ int ns_Server::MyServerApp::main(const std::vector<std::string>& args) {
   std::cout << "Server started on port " << config_.port_ << "..." << std::endl;
   waitForTerminationRequest();
   server.stop();
+  delete serverSocket;
   return 0;
 }

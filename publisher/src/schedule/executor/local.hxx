@@ -6,6 +6,14 @@
 
 namespace ns_Executor {
 
+class LocalData : public ExecutorData {
+public:
+  void ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const;
+
+  pid_t pid_;
+};
+
 class Local : public Executor {
 public:
   Local(std::string const& name, ns_Executor::LocalConfig const& config);

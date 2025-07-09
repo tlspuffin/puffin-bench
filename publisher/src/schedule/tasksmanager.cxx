@@ -2,10 +2,17 @@
 #include <unordered_set>
 #include <stack>
 #include <fstream>
+#include <iostream>
+#include <rapidjson/document.h>
+#include <rapidjson/error/error.h>
+#include <rapidjson/error/en.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/filewritestream.h>
 
 ns_Schedule::TasksManager::TasksManager(ns_Schedule::Config const& config)
     : config_(config), next_task_id_(0)
 {
+  ReadSavedStatus();
 }
 
 std::pair<uint64_t, std::list<ns_Schedule::Step*>> ns_Schedule::TasksManager::CreateTask(
@@ -13,7 +20,12 @@ std::pair<uint64_t, std::list<ns_Schedule::Step*>> ns_Schedule::TasksManager::Cr
       std::string const& defaultExecutor, 
       std::unordered_map<std::string, ns_Executor::Executor*>& executors) {
 
-  uint64_t task_id = ++next_task_id_;
+  uint64_t task_id = 0;
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    task_id = ++next_task_id_;
+    SaveStatus();
+  }
 
   std::filesystem::path functionsFile = config_.userPath_ / (std::to_string(task_id) + ".sh");
   std::ofstream ofs(functionsFile, std::ios::trunc | std::ios::binary);
@@ -52,6 +64,53 @@ void ns_Schedule::TasksManager::DeleteTask(ns_Schedule::Step* rootStep) {
   }
 }
 
+void ns_Schedule::TasksManager::SaveStatus() const {
+  rapidjson::Document doc;
+  doc.SetObject();
+  rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
+  doc.AddMember("next_task_id", next_task_id_, alloc);
+
+  std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
+  FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
+  if (!fp) {
+    throw std::system_error(errno, std::generic_category(), "Impossible d'ouvrir " + filename);
+  }
+  char buffer[65536];
+  rapidjson::FileWriteStream os(fp, buffer, sizeof(buffer));
+  rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
+  doc.Accept(writer);
+  std::fclose(fp);
+
+  std::filesystem::rename((filename + "tmp"), filename);
+}
+
+void ns_Schedule::TasksManager::ReadSavedStatus() {
+  std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
+  std::ifstream statusFile(filename);
+  if (!statusFile.is_open()) {
+    std::cerr << "Warning: Unable to open tasksmanager status file " << 
+        filename << ". Tasksmanager start stateless." << std::endl;
+    return;
+  }
+  std::stringstream buffer;
+  buffer << statusFile.rdbuf();
+  rapidjson::Document doc;
+  doc.Parse(buffer.str().c_str());
+  if (doc.HasParseError()) {
+    throw std::runtime_error(std::string("Error while parsing JSON file '") +
+        (config_.exportPath_ / "status.json").string() + "' : " +
+        rapidjson::GetParseError_En(doc.GetParseError()) +
+        " (offset: " + std::to_string(doc.GetErrorOffset()) + ")");
+  }
+  if (!doc.HasMember("next_task_id")) {
+    return;
+  }
+  if (!doc["next_task_id"].IsUint64()) {
+    throw std::runtime_error("Invalid 'next_task_id' in JSON");
+  }
+  next_task_id_ = doc["next_task_id"].GetUint64();
+}
+
 std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
     rapidjson::Value const& root, uint64_t task_id, std::string const& functionsPath, 
     std::string const& defaultExecutor, 
@@ -63,7 +122,6 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
 
   if (!root.HasMember("flow") || !root["flow"].IsArray()) {
     throw std::runtime_error("Invalid or missing 'flow' in JSON");
-    return {};
   }
 
   uint64_t step_id = 0;
