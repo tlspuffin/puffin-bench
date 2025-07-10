@@ -14,7 +14,7 @@
 
 int main(int argc, char *argv[]) {
   Config config;
-  config.server_.secure_ = false;
+  /*config.server_.secure_ = false;
   config.server_.key_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "site.key").string();
   config.server_.cert_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "site.pem").string();
   config.server_.CA_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "CA.pem").string();
@@ -29,14 +29,16 @@ int main(int argc, char *argv[]) {
   config.schedule_.exportPath_ = std::filesystem::canonical(std::filesystem::path(EXPORT_PATH)).string();
 
   config.cache_.storagePath_ = std::filesystem::canonical(std::filesystem::path(USR_PATH)).string();
-  config.cache_.mappingFile_ = std::filesystem::weakly_canonical(std::filesystem::path(USR_PATH) / "cache.json").string();
+  config.cache_.mappingFile_ = std::filesystem::weakly_canonical(std::filesystem::path(USR_PATH) / "cache.json").string();*/
+
+  config.Load("config.json");
+  config.Save("config.json");
 
   struct ns_API::APIS apis(config.schedule_, config.cache_);
 
   ns_Server::MyServerApp app(config.server_, apis);
   try {
     int rc = app.run(argc, argv);
-    delete localConfig;
     return rc;
   } catch(std::runtime_error const& e) {
     std::cerr << e.what() << std::endl;
