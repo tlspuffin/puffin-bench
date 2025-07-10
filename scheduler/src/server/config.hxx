@@ -1,6 +1,7 @@
 #pragma once
-#include <string>
 #include <cstdint>
+#include <string>
+#include <rapidjson/document.h>
 
 namespace ns_Server {
 
@@ -10,6 +11,10 @@ struct Config {
   std::string key_;
   std::string cert_;
   std::string CA_;
+  Config();
+  void Load(std::string const& name, rapidjson::Value& doc);
+  void Save(std::string const& name, rapidjson::Value& doc, 
+      rapidjson::MemoryPoolAllocator<>& alloc) const;
 };
 
 };

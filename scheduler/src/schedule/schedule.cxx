@@ -24,9 +24,10 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config)
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), defaultExecutor_("local")
 {
-  ns_Executor::Executor* executor = ns_Executor::Executor::Build(
-      ns_Executor::Executor::Type::LOCAL, "local", config.executors_);
-  executors_.insert(std::make_pair<>(executor->Name(), executor));
+  for (auto const& executorConfig : config.executors_) {
+    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second);
+    executors_.insert(std::make_pair<>(executor->Name(), executor));
+  }
 }
 
 ns_Schedule::Schedule::~Schedule() {
