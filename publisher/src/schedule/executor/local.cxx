@@ -18,6 +18,14 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     : Executor(name), config_(config), nbCPUsFree_(config_.maxCPU_), 
       cpusFree_(config_.maxCPU_, true), nbChild_(0)
 {
+  if (nbCPUsFree_ == 0) {
+    cpusFree_ = config_.cpus_;
+    for(size_t i=0; i<cpusFree_.size(); ++i) {
+      if (cpusFree_[i]) {
+        ++nbCPUsFree_;
+      }
+    }
+  }
 }
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(

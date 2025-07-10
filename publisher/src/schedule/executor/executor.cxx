@@ -3,23 +3,16 @@
 
 #include <stdexcept>
 
-ns_Executor::Executor* ns_Executor::Executor::Build(enum Type type, 
-    std::string const& name, 
-    std::unordered_map<std::string, ns_Executor::Config*> configs) {
-  auto const& config = configs.find(name);
-  switch(type) {
-    case Type::LOCAL: {
-        if (config == configs.end()) {
+ns_Executor::Executor* ns_Executor::Executor::Build(ns_Executor::Config* config) {
+  switch(config->type_) {
+    case Config::Type::Local: {
+        LocalConfig* cConfig = 
+            dynamic_cast<ns_Executor::LocalConfig*>(config);
+        if (cConfig == nullptr) {
           throw std::runtime_error("Local Executor '" + 
-              name + "' requires a configuration");
+              cConfig->name_ + "' got an inccorect configuration");
         }
-        LocalConfig* iConfig = 
-            dynamic_cast<ns_Executor::LocalConfig*>(config->second);
-        if (iConfig == nullptr) {
-          throw std::runtime_error("Local Executor '" + 
-              name + "' got an inccorect configuration");
-        }
-        return new Local(name, *iConfig);
+        return new Local(cConfig->name_, *cConfig);
       }
     default:
       throw std::runtime_error("Unknown executor type");

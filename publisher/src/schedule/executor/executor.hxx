@@ -23,11 +23,7 @@ inline ExecutorData::~ExecutorData() {}
 
 class Executor {
 public:
-  enum class Type {
-    LOCAL,
-  };
-  static Executor* Build(enum Type type, std::string const& name, 
-      std::unordered_map<std::string, ns_Executor::Config*> configs);
+  static Executor* Build(ns_Executor::Config* config);
   virtual ~Executor();
 
   std::string Name() const;
