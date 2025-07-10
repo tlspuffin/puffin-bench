@@ -203,6 +203,7 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step, bool wait) {
   if (wait) {
     waitpid(-localData->pid_, nullptr, 0);
   }
+  ReleaseCPU(step.cpus_);
 }
 
 void ns_Executor::Local::FinalClean(ns_Schedule::Step& step) {
