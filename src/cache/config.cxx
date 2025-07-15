@@ -4,7 +4,7 @@
 static ns_Cache::Config defaultConfig;
 
 ns_Cache::Config::Config()
-    : storagePath_("users_data"), mappingFile_("cache.json")
+    : storagePath_("cache"), mappingFile_("cache.json")
 {}
 
 void ns_Cache::Config::Load(std::string const& name, rapidjson::Value& doc) {
@@ -27,6 +27,10 @@ void ns_Cache::Config::Save(std::string const& name, rapidjson::Value& doc,
   node.AddMember("storagePath",
       rapidjson::Value(storagePath_.c_str(), alloc), alloc);
   node.AddMember("mappingFile",
-      rapidjson::Value(mappingFile_.c_str(), alloc), alloc);
+      rapidjson::Value(mappingFile_.filename().c_str(), alloc), alloc);
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
+}
+
+void ns_Cache::Config::Validate() const {
+  auto discard = std::filesystem::canonical(storagePath_);
 }

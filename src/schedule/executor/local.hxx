@@ -12,6 +12,7 @@ public:
     rapidjson::Document::AllocatorType& alloc) const;
 
   pid_t pid_;
+  std::filesystem::path run_root_path_;
 };
 
 class Local : public Executor {
@@ -23,7 +24,7 @@ public:
   void Execute(ns_Schedule::Step& step);
   std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps);
   void Shutdown(ns_Schedule::Step& step, bool wait =false);
-  void FinalClean(ns_Schedule::Step& step);
+  void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task& task);
 
 private:
   ns_Executor::LocalConfig const& config_;
@@ -34,6 +35,7 @@ private:
   std::vector<uint64_t> AssignCPU(uint64_t nbCPU);
   void ReleaseCPU(std::vector<uint64_t>& cpus);
   void CreateRunFolders(std::filesystem::path const& path);
+  static bool PinCoreToProcess(std::vector<uint64_t> const& cores_);
 };
 
 inline Local::~Local() {}

@@ -1,5 +1,6 @@
 #include "request_handler.hxx"
 #include "parts_handler.hxx"
+#include <fstream>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Net/HTTPServerRequest.h>
@@ -12,6 +13,8 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
     Poco::Net::HTTPServerResponse& response) {
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
 
   PartsHandler partsHandler;
   Poco::Net::HTMLForm form(request, request.stream(), partsHandler);
@@ -36,12 +39,34 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       files.emplace(partData.filename, std::move(partData.content));
     }
 
-
     uint64_t taskID = apis_->scheduleAPI_.AddTask(flow->second.content, 
         functions->second.content, files);
 
     out << R"({"success": true, "task_id": ")" << taskID << R"("})";
   } catch (const std::exception& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+}
+
+void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream& out = response.send();
+  try {
+    std::ifstream ifs(apis_->scheduleAPI_.ExportPath() / "status.json");
+    if (!ifs.is_open()) {
+      throw std::runtime_error("Server can't read schedule status");
+    }
+    std::stringstream buffer;
+    buffer << ifs.rdbuf();
+    out << R"({"success": true, "data": )" << buffer.str() << "}";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
 }
@@ -50,6 +75,8 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
     Poco::Net::HTTPServerResponse& response) {
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
 
   PartsHandler partsHandler;
   Poco::Net::HTMLForm form(request, request.stream(), partsHandler);
@@ -70,6 +97,7 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
 
     out << R"({"success": )"<< (result ? "true" : "false") << R"(, "error": ""})";
   } catch (const std::exception& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
 }
@@ -78,6 +106,8 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
     Poco::Net::HTTPServerResponse& response) {
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
 
   PartsHandler partsHandler;
   Poco::Net::HTMLForm form(request, request.stream(), partsHandler);
@@ -96,6 +126,7 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
 
     out << R"({"success": true, "error": "", "state": ")" + state + R"(", "path": ")" + path.string() + R"(" })";
   } catch (const std::exception& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
 }

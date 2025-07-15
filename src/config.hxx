@@ -9,4 +9,5 @@ typedef struct Config {
   ns_Cache::Config cache_;
   bool Load(std::string const& filepath);
   void Save(std::string const& filepath) const;
+  void Validate() const;
 } Config;

@@ -28,8 +28,10 @@ SRCFILE=$1
 shift
 
 if [ ! -r "$1" ]; then
-  #echo "Unable to read env $1"
-  #exit 1
+  if [ -z "$1" ]; then
+    echo "Required env file is missing"
+    exit 1
+  fi
   touch $1
 fi
 ENVFILE=$1
@@ -40,6 +42,13 @@ if [ ! -w "$1" ]; then
   exit 1
 fi
 OUTPATH=$1
+shift
+
+if [ ! -r "$1" ]; then
+  echo "Tools directory is not readable: $1"
+  exit 1
+fi
+TOOLSPATH=$1
 shift
 
 if [ ! -r "$1" ]; then
@@ -61,7 +70,7 @@ if [ -z "$1" ]; then
   echo "Missing sid"
   exit 1
 fi
-sid=$1
+SID=$1
 shift
 
 if [ -z "$1" ]; then
@@ -69,6 +78,14 @@ if [ -z "$1" ]; then
   exit 1
 fi
 RUN_ID=$1
+shift
+
+if [ -z "$1" ]; then
+  echo "Missing cores list"
+  exit 1
+fi
+CORES=$1
+NBCORES=$(IFS=, read -ra cpus <<<"$CORES"; echo "${#cpus[@]}")
 shift
 
 if [ -z "$1" ]; then

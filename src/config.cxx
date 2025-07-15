@@ -11,13 +11,16 @@
 #include <rapidjson/error/en.h>
 
 bool Config::Load(std::string const& filepath) {
+  bool sucess = true;
   rapidjson::Document doc;
   std::ifstream ifs(filepath);
   if (!ifs) {
+    sucess = false;
     std::cerr << "Can't open: " << filepath << "\n";
   } else {
     rapidjson::IStreamWrapper isw(ifs);
     if (doc.ParseStream(isw).HasParseError()) {
+      sucess = false;
       std::cerr << "Erreur JSON (offset "
           << doc.GetErrorOffset() << "): "
           << rapidjson::GetParseError_En(doc.GetParseError()) << "\n";
@@ -25,13 +28,14 @@ bool Config::Load(std::string const& filepath) {
     }
   }
   if (!doc.IsObject()) {
+    sucess = false;
     std::cerr << "Bad JSON document " << filepath << "\n";
     doc.SetObject();
   }
   server_.Load("server", doc);
   schedule_.Load("schedule", doc);
-  cache_.Load("cache", doc); 
-  return true;
+  cache_.Load("cache", doc);
+  return sucess;
 }
 
 void Config::Save(std::string const& filepath) const {
@@ -50,4 +54,10 @@ void Config::Save(std::string const& filepath) const {
   rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(osw);
   writer.SetIndent(' ', 2);
   doc.Accept(writer);
+}
+
+void Config::Validate() const {
+  server_.Validate();
+  schedule_.Validate();
+  cache_.Validate();
 }

@@ -19,6 +19,9 @@ struct Config {
   static Config* BuildConfig(rapidjson::Value const& node);
   void Save(std::string const& name, rapidjson::Value& node, 
       rapidjson::MemoryPoolAllocator<>& alloc) const;
+  virtual void Validate() const = 0;
+
+protected:
   virtual void DoLoad(rapidjson::Value const& node) = 0;
   virtual void DoSave(rapidjson::Value& node, 
       rapidjson::MemoryPoolAllocator<>& alloc) const = 0;
@@ -29,6 +32,8 @@ struct LocalConfig : public Config {
   std::vector<bool> cpus_;
   std::filesystem::path scriptPath_;
   std::filesystem::path runPath_;
+  void Validate() const;
+
   LocalConfig(std::string const& name);
   void DoLoad(rapidjson::Value const& node);
   void DoSave(rapidjson::Value& node, 
