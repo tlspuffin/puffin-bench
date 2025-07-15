@@ -35,3 +35,11 @@ void ns_Server::Config::Save(std::string const& name, rapidjson::Value& doc,
   node.AddMember("port", port_, alloc);
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
+
+void ns_Server::Config::Validate() const {
+  if(secure_) {
+    auto discard = std::filesystem::canonical(key_);
+    discard = std::filesystem::canonical(cert_);
+    discard = std::filesystem::canonical(CA_);
+  }
+}

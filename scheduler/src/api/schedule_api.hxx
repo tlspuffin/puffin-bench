@@ -14,10 +14,15 @@ public:
   bool CancelTask(uint64_t task_id);
   void GetRunningTaskSummary();
   void GetTaskInfos(uint64_t task_id);
+  std::filesystem::path ExportPath();
 
 private:
   ns_Schedule::Config const& config_;
   ns_Schedule::Schedule schedule_;
 };
+
+inline std::filesystem::path ScheduleAPI::ExportPath() {
+  return config_.exportPath_;
+}
 
 };

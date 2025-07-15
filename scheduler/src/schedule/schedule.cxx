@@ -1,4 +1,5 @@
 #include "schedule.hxx"
+#include "task.hxx"
 #include "executor/local.hxx"
 #include <stdlib.h>
 #include <iostream>
@@ -28,6 +29,10 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config)
     ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
+
+  std::list<ns_Schedule::Step*> running;
+  std::list<ns_Schedule::Step*> step_delayed_delete;
+  ExportRunningSteps(config_.exportPath_ / "status.json", running);
 }
 
 ns_Schedule::Schedule::~Schedule() {
@@ -40,12 +45,10 @@ ns_Schedule::Schedule::~Schedule() {
     thread_.join();
     lockThread_.lock();
   }
-  for(ns_Schedule::Step* rootStep : tasks_) {
-    try {
-      tasksManager_.DeleteTask(rootStep);
-    } catch(std::exception const& e) {
-      std::cerr << "DeleteTask exception: " << e.what() << std::endl;
-    }
+  try {
+    tasksManager_.DeleteTasks();
+  } catch(std::exception const& e) {
+    std::cerr << "DeleteTasks exception: " << e.what() << std::endl;
   }
 
   for(auto& executor : executors_) {
@@ -69,16 +72,24 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
     );
   }
 
-  std::pair<uint64_t, std::list<ns_Schedule::Step*>> tasks = 
+  ns_Schedule::Task* task = 
       tasksManager_.CreateTask(stepsJSON, functions, files, 
       defaultExecutor_, executors_);
-  uint64_t tasks_id = tasks.first;
-  std::list<ns_Schedule::Step*>& steps = tasks.second;
+
+  std::string taskFilePath = (config_.userPath_ / std::to_string(task->id_) / 
+      std::string(std::to_string(task->id_) + ".json")).string();
+  std::ofstream taskFile(taskFilePath, std::ios::trunc);
+  if (!taskFile.is_open()) {
+    throw std::runtime_error(
+      "Unable to open file '" + taskFilePath + 
+      "': " + std::strerror(errno));
+  }
+  taskFile << tasksList;
+  taskFile.close();
 
   lockThread_.lock();
 
-  for(ns_Schedule::Step* step : steps) {
-    tasks_.push_back(step);
+  for(ns_Schedule::Step* step : task->root_steps_) {
     steps_.push_back(step);
   }
   
@@ -93,7 +104,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   }
   lockThread_.unlock();
 
-  return tasks_id;
+  return task->id_;
 }
 
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
@@ -113,6 +124,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
   std::list<ns_Schedule::Step*> running;
   std::list<ns_Schedule::Step*> step_delayed_delete;
 
+  bool updateStatus = false;
   lockThread_.lock();
   while((!steps_.empty()) && (threadRunning_)) {
     std::list<ns_Schedule::Step*> toRun = SearchTasksToRun();
@@ -120,52 +132,52 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     for(ns_Schedule::Step* step : toRun) {
       step->Execute();
+      std::cerr << "Execute step: " << step->ID() << std::endl;
     }
     running.insert(running.end(), toRun.begin(), toRun.end());
 
-    ExportRunningSteps(config_.exportPath_ / "status.json", running);
+    if ((toRun.size() > 0) || updateStatus) {
+      ExportRunningSteps(config_.exportPath_ / "status.json", running);
+      updateStatus = false;
+    }
 
     std::list<ns_Schedule::Step*> stepsDone;
-    while(threadRunning_ && (stepsDone.size() == 0)) {
+    //while(threadRunning_ && (stepsDone.size() == 0)) {
       std::this_thread::sleep_for (std::chrono::seconds(1));
       for(auto& executor : executors_) {
         std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(running);
         stepsDone.insert(stepsDone.end(), executorStepsDone.begin(), executorStepsDone.end());
+        for(ns_Schedule::Step* step : executorStepsDone) {
+          std::cerr << "Done step: " << step->ID() << std::endl;
+        }
       }
-
-      lockThread_.lock();
-      try {
-        ProcessDelayedCleanup(running, step_delayed_delete);
-      } catch (std::runtime_error& e) {
-        fatal_error = e;
-        goto ns_Schedule__Schedule__ScheduleLoop_fatal;
-      }
-      lockThread_.unlock();
 
       for (ns_Schedule::Step* step : running) {
         if (step->IsRunning() && step->IsTimedOut()) {
-          std::cout << "Tasks " << step->task_id_ << " step " << 
-              step->step_id_ << "-" << step->rank_id_ << "-" << step->attempt_id_ <<  
-              " timeouted" << std::endl;
+          std::cout << "Step " << step->ID() << " timeouted" << std::endl;
           step->KillAndMarkTimedout();
           stepsDone.push_back(step);
         }
       }
-    }
+    //}
 
     lockThread_.lock();
-    for(ns_Schedule::Step* step : stepsDone) {
-      if (step->monitor_count_ > 0) {
-        step_delayed_delete.push_back(step);
-      } else {
-        try {
+    try {
+      ProcessDelayedCleanup(running, step_delayed_delete);
+
+      for(ns_Schedule::Step* step : stepsDone) {
+        if (step->monitor_count_ > 0) {
+          step_delayed_delete.push_back(step);
+        } else {
           ManageEndOfStep(running, step);
           AppendStepToFinishLog(stepsDoneFile, *step);
-        } catch(std::runtime_error& e) {
-          fatal_error = e;
-          goto ns_Schedule__Schedule__ScheduleLoop_fatal;
+          updateStatus = true;
+          std::cerr << "Remove step: " << step->ID() << std::endl;
         }
       }
+    } catch (std::runtime_error& e) {
+      fatal_error = e;
+      goto ns_Schedule__Schedule__ScheduleLoop_fatal;
     }
   }
 
@@ -212,19 +224,14 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     }
   } else {
     throw std::runtime_error("Trying to delete a non-root task: name=" +
-        step->name_ + ", uuid=" + std::to_string(step->uuid_));
+        step->name_ + ", id=" + step->ID());
   }
   steps_.remove(step);
-  if (step->dependencies_.empty()) {
-    bool allStepDone = true;
-    for(ns_Schedule::Step* itStep = step->next_; itStep != step; itStep = itStep->next_) {
-      allStepDone &= itStep->IsDone();
-    }
-    if (allStepDone) {
-      // todo signal end of the flow
-      step->FinalClean();
-      std::cout << "Tasks " << step->task_id_ << " done" << std::endl;
-    }
+  if (step->TaskDone()) {
+    // todo signal end of the flow
+    step->FinalClean(config_.exportPath_);
+    tasksManager_.TaskEnded(step->task_);
+    std::cout << "Tasks " << step->TaskID() << " done" << std::endl;
   }
 }
 

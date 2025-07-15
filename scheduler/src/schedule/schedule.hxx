@@ -37,7 +37,6 @@ private:
   std::mutex lockThread_;
   std::thread thread_;
   bool threadRunning_;
-  std::list<ns_Schedule::Step*> tasks_;
   std::list<ns_Schedule::Step*> steps_;
   std::string defaultExecutor_;
   std::unordered_map<std::string, ns_Executor::Executor*> executors_;

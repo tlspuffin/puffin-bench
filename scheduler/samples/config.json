@@ -1,0 +1,28 @@
+{
+  "server": {
+    "secure": false,
+    "key": "../security/site.key",
+    "cert": "../security/site.pem",
+    "CA": "../security/CA.pem",
+    "port": 8080
+  },
+  "schedule": {
+    "executors": {
+      "local": {
+        "name": "local",
+        "type": 1,
+        "core": [
+          0
+        ],
+        "scriptPath": "../scripts",
+        "runPath": "../runs"
+      }
+    },
+    "userPath": "../users_data",
+    "exportPath": "../exports/schedule"
+  },
+  "cache": {
+    "storagePath": "../cache",
+    "mappingFile": "cache.json"
+  }
+}

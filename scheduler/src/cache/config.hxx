@@ -12,6 +12,7 @@ struct Config {
   void Load(std::string const& name, rapidjson::Value& doc);
   void Save(std::string const& name, rapidjson::Value& doc, 
       rapidjson::MemoryPoolAllocator<>& alloc) const;
+  void Validate() const;
 };
 
 };

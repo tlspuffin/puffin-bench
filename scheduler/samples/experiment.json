@@ -1,11 +1,11 @@
 {
   "flow" : [
     { 
-      "task": "Init",
-      "args": "4 3f648f016c84884d6470fc906735bb8c5da7891b"
+      "step": "Init",
+      "args": "3f648f016c84884d6470fc906735bb8c5da7891b"
     },
     {
-      "task": "Build",
+      "step": "Build",
       "run": [
         {
           "args": "'SDOS2' 'wolfssl540,asan,wolfssl-disable-postauth,fix-CVE-2022-39173' '--put-use-clear'"
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "task": "Experiment",
+      "step": "Experiment",
       "run": [
         {
           "args": "'SDOS2' 'wolfssl540,asan,wolfssl-disable-postauth,fix-CVE-2022-39173' '--put-use-clear'",
@@ -42,7 +42,7 @@
       ]
     },
     {
-      "task": "ManageResults"
+      "step": "ManageResults"
     }
   ]
 }
