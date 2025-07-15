@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.hxx"
+#include "../task.hxx"
 #include <string>
 #include <list>
 #include <unordered_map>
@@ -32,7 +33,7 @@ public:
   virtual void Execute(ns_Schedule::Step& step) = 0;
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
   virtual void Shutdown(ns_Schedule::Step& step, bool wait =false) = 0;
-  virtual void FinalClean(ns_Schedule::Step& step) = 0;
+  virtual void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task& task) = 0;
 
 protected:
   Executor(std::string const& name);

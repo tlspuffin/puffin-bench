@@ -34,6 +34,7 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
 }
 
 REQUESTHANDLER(TaskNew);
+REQUESTHANDLER(TasksRunning);
 REQUESTHANDLER(CachePut);
 REQUESTHANDLER(CacheGet);
 

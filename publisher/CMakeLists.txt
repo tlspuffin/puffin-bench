@@ -11,6 +11,11 @@ GetLibs(Poco STATIC ${POCO_PATH} "PocoNetSSL;PocoCrypto;PocoNet;PocoUtil;PocoFou
 CreateExternalLib(Poco "${Pocolibs}" DEPLOYTARGET setupDLL)
 target_link_libraries(Poco INTERFACE ssl crypto)
 
+EmbedTextFile("scripts/executor.sh" 
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded//executor_sh.h" Executor_Script)
+EmbedTextFile("scripts/get_file.sh" 
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded/get_file_sh.h" GetFile_Script)
+
 set(SRV_SRC 
   src/main.cxx src/config.cxx 
   src/server/config.cxx src/server/server.cxx src/server/parts_handler.cxx src/server/request_handler.cxx 

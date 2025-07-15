@@ -1,7 +1,12 @@
 #include "config.hxx"
 #include "../../utils/rapidjson.hxx"
 
+#include "embeded/executor_sh.h"
+#include "embeded/get_file_sh.h"
+
 #include <iostream>
+#include <fstream>
+#include <tuple>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -47,16 +52,38 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
     scriptPath_("scripts"), runPath_("runs")
 {}
 
+void ns_Executor::LocalConfig::Validate() const {
+  auto discard = std::filesystem::canonical(scriptPath_);
+  discard = std::filesystem::canonical(runPath_);
+  for(auto const& [ file, data, size ] : { 
+      std::tuple{ "executor.sh", Executor_Script_data, Executor_Script_size }, 
+      std::tuple{ "get_file.sh", GetFile_Script_data, GetFile_Script_size }
+    }) {
+    std::filesystem::path filePath = 
+        std::filesystem::weakly_canonical(scriptPath_ / file);
+    if (!std::filesystem::exists(filePath)) {
+      std::cerr << "Creating missing required file " << filePath << std::endl;
+      std::ofstream ofs(filePath, std::ios::binary);
+      ofs.write(data, size);
+      ofs.close();
+      std::filesystem::permissions(filePath,
+        std::filesystem::perms::owner_all |
+        std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
+        std::filesystem::perm_options::replace);
+    }
+  }
+}
+
 void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
   maxCPU_ = 0;
   cpus_.clear();
-  if (node.HasMember("cpus") && node["cpus"].IsArray()) {
-    const rapidjson::Value& arr = node["cpus"];
+  if (node.HasMember("core") && node["core"].IsArray()) {
+    const rapidjson::Value& arr = node["core"];
     uint64_t maxIndex = 0;
     std::vector<uint64_t> indexes;
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
       if (!arr[i].IsUint64()) {
-        throw std::runtime_error("Config of Local executor require uint64 for cpus list");
+        throw std::runtime_error("Config of Local executor require uint64 in core list");
       }
       uint64_t cpu = arr[i].GetUint64();
       indexes.push_back(cpu);
@@ -64,7 +91,7 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
         maxIndex = cpu;
       }
     }
-    cpus_.assign(maxIndex, false);
+    cpus_.assign(maxIndex+1, false);
     for (auto const& index : indexes) {
       cpus_[index] = true;
     }
@@ -74,10 +101,10 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
   } else {
     cpus_.assign(1, true);
   }
-  scriptPath_ = std::filesystem::canonical(
+  scriptPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(node, "scriptPath", defaultLocalConfig.scriptPath_))
       .string();
-  runPath_ = std::filesystem::canonical(
+  runPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(node, "runPath", defaultLocalConfig.runPath_))
       .string();
 }
@@ -93,7 +120,7 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
         cpuArray.PushBack(static_cast<uint64_t>(i), alloc);
       }
     }
-    node.AddMember("CPU", cpuArray, alloc);
+    node.AddMember("core", cpuArray, alloc);
   }
   node.AddMember("scriptPath", 
       rapidjson::Value(scriptPath_.c_str(), alloc), alloc);

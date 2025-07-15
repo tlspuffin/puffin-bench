@@ -30,6 +30,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   RequestHandler* requestHandler = nullptr;
   if (request.getURI() == "/task_new") {
     requestHandler = new RequestHandlerTaskNew;
+  } else if (request.getURI() == "/tasks_running") {
+    requestHandler = new RequestHandlerTasksRunning;
   } else if (request.getURI() == "/cache_put") {
     requestHandler = new RequestHandlerCachePut;
   } else if (request.getURI() == "/cache_get") {
