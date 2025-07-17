@@ -24,7 +24,7 @@ public:
 
   void CopyParameters(Step const& step);
 
-  void ReadFromJSON(rapidjson::Value const& entry);
+  void ReadFromTaskJSON(rapidjson::Value const& entry);
 
   uint64_t TaskID() const;
   std::filesystem::path const& RunRootPath() const;
@@ -64,14 +64,13 @@ public:
   std::filesystem::path run_path_;
   std::string function_;
   std::string args_;
-  uint32_t nb_cpu_;
+  uint32_t nb_cores_;
   uint32_t nb_retry_;
   uint64_t timeout_;
   Step* next_;
   Step* previous_;
   std::list<Step*> dependencies_;
   std::list<Step*> depend_from_;
-  std::vector<uint64_t> cpus_;
   std::filesystem::path stdout_;
   std::filesystem::path stderr_;
   uint16_t exit_code_;
@@ -167,7 +166,7 @@ inline void Step::Shutdown() {
 
 inline void Step::FinalClean(std::filesystem::path const& savePath) {
   if (state_ >= State::Running) {
-    executor_->FinalClean(savePath, *task_);
+    task_->FinalClean(savePath);
   }
 }
 

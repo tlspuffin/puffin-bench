@@ -67,12 +67,12 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
 }
 
 void ns_Schedule::TasksManager::DeleteTask(ns_Schedule::Task* task) {
+  DeleteTaskInternal(task);
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.remove(task);
     SaveStatus();
   }
-  DeleteTaskInternal(task);
 }
 
 void ns_Schedule::TasksManager::DeleteTasks() {
@@ -90,17 +90,16 @@ void ns_Schedule::TasksManager::DeleteTasks() {
     } catch(...) {
       std::cerr << "DeleteTask exception on id: " << task->id_ << std::endl;
     }
-    delete task;
   }
 }
 
 void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
+  DeleteTaskInternal(task);
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.remove(task);
     SaveStatus();
   }
-  DeleteTaskInternal(task);
 }
 
 void ns_Schedule::TasksManager::SaveStatus() const {
@@ -177,6 +176,7 @@ void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {
       delete step;
     }
   }
+  delete task;
 }
 
 std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
@@ -208,7 +208,7 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
     current_stack.clear();
 
     ns_Schedule::Step* step = new ns_Schedule::Step(task, step_name);
-    step->ReadFromJSON(stepJSON);
+    step->ReadFromTaskJSON(stepJSON);
 
     if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
       const rapidjson::Value& run_array = stepJSON["run"];
@@ -223,7 +223,7 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
           step = step->next_;
           step->CopyParameters(*(step->previous_));
         }
-        step->ReadFromJSON(run);
+        step->ReadFromTaskJSON(run);
         std::list<ns_Schedule::Step*> attempts = ConfigureStep(
             step, step_id, j, run_id, parent_stack, 
             defaultExecutor, executors);

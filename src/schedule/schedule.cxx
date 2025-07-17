@@ -169,10 +169,10 @@ void ns_Schedule::Schedule::ScheduleLoop() {
         if (step->monitor_count_ > 0) {
           step_delayed_delete.push_back(step);
         } else {
-          ManageEndOfStep(running, step);
-          AppendStepToFinishLog(stepsDoneFile, *step);
-          updateStatus = true;
           std::cerr << "Remove step: " << step->ID() << std::endl;
+          AppendStepToFinishLog(stepsDoneFile, *step);
+          ManageEndOfStep(running, step);
+          updateStatus = true;
         }
       }
     } catch (std::runtime_error& e) {
@@ -229,9 +229,10 @@ void ns_Schedule::Schedule::ManageEndOfStep(
   steps_.remove(step);
   if (step->TaskDone()) {
     // todo signal end of the flow
+    uint64_t task_id = step->TaskID();
     step->FinalClean(config_.exportPath_);
     tasksManager_.TaskEnded(step->task_);
-    std::cout << "Tasks " << step->TaskID() << " done" << std::endl;
+    std::cout << "Tasks " << task_id << " done" << std::endl;
   }
 }
 

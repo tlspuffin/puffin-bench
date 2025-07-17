@@ -12,19 +12,28 @@
 
 void ns_Executor::LocalData::ToJSON(rapidjson::Value& out, 
     rapidjson::Document::AllocatorType& alloc) const {
+  rapidjson::Value cores(rapidjson::kArrayType);
+  for (auto core : cores_) {
+    cores.PushBack(core, alloc);
+  }
+  out.AddMember("cores", cores, alloc);
   out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
+}
+
+void ns_Executor::LocalTaskData::ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const {
   out.AddMember("run_root_path", rapidjson::Value(run_root_path_.c_str(), alloc), alloc);
 }
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config)
-    : Executor(name), config_(config), nbCPUsFree_(config_.maxCPU_), 
-      cpusFree_(config_.cpus_), nbChild_(0)
+    : Executor(name), config_(config), coresMonitor_(15), nbCoresFree_(config_.nbCores_), 
+      coresFree_(config_.cores_), nbChild_(0)
 {
-  if (nbCPUsFree_ == 0) {
-    cpusFree_ = config_.cpus_;
-    for(size_t i=0; i<cpusFree_.size(); ++i) {
-      if (cpusFree_[i]) {
-        ++nbCPUsFree_;
+  if (nbCoresFree_ == 0) {
+    coresFree_ = config_.cores_;
+    for(size_t i=0; i<coresFree_.size(); ++i) {
+      if (coresFree_[i]) {
+        ++nbCoresFree_;
       }
     }
   }
@@ -32,15 +41,15 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
     std::list<ns_Schedule::Step*> const& tasks) const {
-  uint64_t nbCPUsFree = nbCPUsFree_;
+  uint64_t nbCoresFree = nbCoresFree_;
   std::list<ns_Schedule::Step*> result;
 
   for(ns_Schedule::Step* step : tasks) {
-    uint64_t nbCPUsRequired = step->nb_cpu_;
-    if (!step->IsReady() || nbCPUsRequired > nbCPUsFree) {
+    uint64_t nbCoresRequired = step->nb_cores_;
+    if (!step->IsReady() || nbCoresRequired > nbCoresFree) {
       continue;
     }
-    nbCPUsFree -= nbCPUsRequired;
+    nbCoresFree -= nbCoresRequired;
     result.push_back(step);
   }
 
@@ -56,16 +65,28 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   LocalData* localData = new LocalData();
   step.executor_data_ = localData;
 
-  step.cpus_ = AssignCPU(step.nb_cpu_);
-  nbCPUsFree_ -= step.nb_cpu_;
+  LocalTaskData* localTaskData = nullptr;
+  auto executorIT = step.task_->executors_.find(this);
+  if (executorIT != step.task_->executors_.end()) {
+    localTaskData = dynamic_cast<ns_Executor::LocalTaskData*>(executorIT->second);
+    if (localData == nullptr) {
+      throw std::runtime_error("ExecutorTaskData are not of type LocalTaskData");
+    }
+  } else {
+    localTaskData = new LocalTaskData();
+    step.task_->executors_.insert(std::make_pair<>(this, localTaskData));
+  }
 
-  localData->run_root_path_ = config_.runPath_ / step.RunRootPath();
+  localData->cores_ = AssignCores(step.nb_cores_);
+  nbCoresFree_ -= step.nb_cores_;
+
+  localTaskData->run_root_path_ = config_.runPath_ / step.RunRootPath();
   step.run_path_ = config_.runPath_ / step.run_path_;
   step.stdout_ = config_.runPath_ / step.stdout_;
   step.stderr_ = config_.runPath_ / step.stderr_;
 
   if (step.IsFirstStepOfTask()) {
-    CreateRunFolders(localData->run_root_path_);
+    CreateRunFolders(localTaskData->run_root_path_);
   }
 
   std::error_code ec;
@@ -101,7 +122,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       std::cerr << "setsid failed" << std::endl;
       exit(-1);
     }
-    if (!PinCoreToProcess(step.cpus_)) {
+    if (!PinCoresToProcess(localData->cores_)) {
       std::cerr << "set core affinity failed" << std::endl;
       exit(-1);
     }
@@ -113,9 +134,9 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     std::vector<char*> arg_strings;
     arg_strings.push_back(strdup("task"));
     arg_strings.push_back(strdup(step.FunctionsPath().c_str()));
-    arg_strings.push_back(strdup(std::filesystem::path(localData->run_root_path_ /
+    arg_strings.push_back(strdup(std::filesystem::path(localTaskData->run_root_path_ /
         ".taskenv").c_str()));
-    arg_strings.push_back(strdup(std::filesystem::path(localData->run_root_path_ /
+    arg_strings.push_back(strdup(std::filesystem::path(localTaskData->run_root_path_ /
         "output").c_str()));
     arg_strings.push_back(strdup(config_.scriptPath_.c_str()));
     arg_strings.push_back(strdup(step.FilesPath().c_str()));
@@ -123,7 +144,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     arg_strings.push_back(strdup(std::to_string(spid).c_str()));
     arg_strings.push_back(strdup(std::to_string(step.run_id_).c_str()));
     std::string cores;
-    for(uint64_t core: step.cpus_) {
+    for(uint64_t core: localData->cores_) {
       cores += std::to_string(core) + ',';
     }
     cores.pop_back();
@@ -150,7 +171,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 
     std::string step_name = "fe-" + std::to_string(step.step_id_) + "-" + 
         std::to_string(step.rank_id_) + "-" + std::to_string(step.attempt_id_);
-    std::ofstream fatalErrorProf(localData->run_root_path_ / step_name);
+    std::ofstream fatalErrorProf(localTaskData->run_root_path_ / step_name);
     sync();
 
     exit(-1);
@@ -180,6 +201,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     if (localData == nullptr) {
       throw std::runtime_error("ExecutorData are not of type LocalData");
     }
+    LocalTaskData* localTaskData = GetExecutorTaskData<LocalTaskData>(step->task_);
     int status = 0;
     pid_t childPID = waitpid(localData->pid_, &status, WNOHANG);
     if ((childPID == -1) && (errno != EINTR)) {
@@ -194,12 +216,12 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       std::string step_fatal_error = "fe-" + std::to_string(step->step_id_) + "-" + 
           std::to_string(step->rank_id_) + "-" + std::to_string(step->attempt_id_);
       std::error_code ec;
-      if (std::filesystem::exists(localData->run_root_path_ / step_fatal_error, ec)) {
+      if (std::filesystem::exists(localTaskData->run_root_path_ / step_fatal_error, ec)) {
         step->MarkDone(ns_Schedule::Step::exitCode_StepLaunchError_);
       } else {
         step->MarkDone(WEXITSTATUS(status));
       }
-      ReleaseCPU(step->cpus_);
+      ReleaseCores(localData->cores_);
       result.push_back(step);
     }
   }
@@ -216,51 +238,59 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step, bool wait) {
   if (wait) {
     waitpid(-localData->pid_, nullptr, 0);
   }
-  ReleaseCPU(step.cpus_);
+  ReleaseCores(localData->cores_);
 }
 
 void ns_Executor::Local::FinalClean(std::filesystem::path const& savePath, 
-    ns_Schedule::Task& task) {
-  /*try {
-    std::filesystem::path finalSavePath = savePath / std::to_string(step.TaskID());
+    ns_Schedule::Task* task) {
+  LocalTaskData* localTaskData = GetExecutorTaskData<LocalTaskData>(task);
+  try {
+    std::filesystem::path finalSavePath = savePath / std::to_string(task->id_);
     if (!std::filesystem::create_directory(finalSavePath)) {
       throw std::runtime_error("Save directory (" + finalSavePath.string() + ") already exist");
     }
-    std::filesystem::rename(step.run_path_ / "output", finalSavePath / "output");
-    std::filesystem::rename(step.run_path_ / ".output", finalSavePath / "logs");
+    std::filesystem::rename(localTaskData->run_root_path_ / "output", finalSavePath / "output");
+    std::filesystem::rename(localTaskData->run_root_path_ / ".output", finalSavePath / "logs");
   } catch(std::runtime_error const& e) {
     std::cerr << "Error while moving resultats from running to save storage\n" <<
-        "All keep in " << step.run_path_ << "\n\t" << e.what();
+        "All keep in " << localTaskData->run_root_path_ << "\n\t" << e.what();
     return;
   }
-  for(std::filesystem::path const& path: { step.functions_path_, step.run_root_path_ }) {
+  for(std::filesystem::path const& path: { localTaskData->run_root_path_ }) {
   std::error_code ec;
     if (std::filesystem::remove_all(path, ec) == -1) {
       std::cerr << "Error while removing " << path << "\n" << 
           "\t" << ec.value() << ": " << ec.message() << std::endl;
     }
-  }*/
+  }
 }
 
-inline std::vector<uint64_t> ns_Executor::Local::AssignCPU(uint64_t nbCPU) {
+inline std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
   std::vector<uint64_t> result;
-  for (size_t i=0; i<cpusFree_.size(); ++i) {
-    if (cpusFree_[i]) {
-      cpusFree_[i] = false;
-      result.push_back(i);
-      if (--nbCPU == 0) {
-        break;
-      };
+  if (config_.nbCores_ == 0) {
+    for (size_t i=0; i<coresFree_.size(); ++i) {
+      if (coresFree_[i]) {
+        coresFree_[i] = false;
+        result.push_back(i);
+        if (--nbCores == 0) {
+          break;
+        };
+      }
+    }
+  } else {
+    result = coresMonitor_.SelectMostIdleCores(nbCores, &coresFree_);
+    for (size_t i=0; i<result.size(); ++i) {
+      coresFree_[result[i]] = false;
     }
   }
   return result;
 }
 
-inline void ns_Executor::Local::ReleaseCPU(std::vector<uint64_t>& cpus) {
-  for(uint64_t index: cpus) {
-    cpusFree_[index] = true;
+inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
+  for(uint64_t core: cores) {
+    coresFree_[core] = true;
   }
-  nbCPUsFree_ += cpus.size();
+  nbCoresFree_ += cores.size();
 }
 
 void ns_Executor::Local::CreateRunFolders(std::filesystem::path const& path) {
@@ -287,7 +317,7 @@ void ns_Executor::Local::CreateRunFolders(std::filesystem::path const& path) {
   }
 }
 
-bool ns_Executor::Local::PinCoreToProcess(std::vector<uint64_t> const& cores_) {
+bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) {
   std::set<uint64_t> coresSet;
   cpu_set_t mask;
   CPU_ZERO(&mask);

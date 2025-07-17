@@ -20,9 +20,9 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name)
     : task_(task), name_(name), uuid_(++next_uuid_), step_id_(0), 
       rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
       executor_(nullptr), executor_data_(nullptr), run_path_(), 
-      function_(name), args_(), nb_cpu_(1), nb_retry_(0), timeout_(0), 
+      function_(name), args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
       next_(this), previous_(this), dependencies_(), depend_from_(), 
-      state_(State::Pending), cpus_(), stdout_(), stderr_(), 
+      state_(State::Pending), stdout_(), stderr_(), 
       exit_code_(exitCode_NotSet_), monitor_count_(0)
 {
 }
@@ -39,18 +39,18 @@ void ns_Schedule::Step::CopyParameters(Step const& step) {
   depend_from_ = step.depend_from_;
 
   args_ = step.args_;
-  nb_cpu_ = step.nb_cpu_;
+  nb_cores_ = step.nb_cores_;
   nb_retry_ = step.nb_retry_;
   timeout_ = step.timeout_;
 }
 
-void ns_Schedule::Step::ReadFromJSON(rapidjson::Value const& entry) {
+void ns_Schedule::Step::ReadFromTaskJSON(rapidjson::Value const& entry) {
   if (entry.HasMember("executor") && entry["executor"].IsString())
     executor_name_ = entry["executor"].GetString();
   if (entry.HasMember("args") && entry["args"].IsString())
     args_ = entry["args"].GetString();
-  if (entry.HasMember("nbcpu") && entry["nbcpu"].IsInt())
-    nb_cpu_ = static_cast<uint32_t>(entry["nbcpu"].GetInt());
+  if (entry.HasMember("nbCores") && entry["nbCores"].IsInt())
+    nb_cores_ = static_cast<uint32_t>(entry["nbCores"].GetInt());
   if (entry.HasMember("retry") && entry["retry"].IsInt())
     nb_retry_ = static_cast<uint32_t>(entry["retry"].GetInt());
   if (entry.HasMember("maxtime") && entry["maxtime"].IsString())
@@ -71,6 +71,13 @@ bool ns_Schedule::Step::TaskDone() {
 void ns_Schedule::Step::ToJSON(rapidjson::Value& out, 
     rapidjson::Document::AllocatorType& alloc) const {
   out.SetObject();
+
+  auto executorTaskData = task_->executors_.find(executor_);
+  if (executorTaskData != task_->executors_.end()) {
+    rapidjson::Value executorTaskDataJSON(rapidjson::kObjectType);
+    executorTaskData->second->ToJSON(executorTaskDataJSON, alloc);
+    out.AddMember("task_executor_data", executorTaskDataJSON, alloc);
+  }
   out.AddMember("name", rapidjson::Value(name_.c_str(), alloc), alloc);
   out.AddMember("uuid", uuid_, alloc);
   out.AddMember("task_id", TaskID(), alloc);
@@ -85,14 +92,9 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("functions_path", rapidjson::Value(FunctionsPath().c_str(), alloc), alloc);
   out.AddMember("function", rapidjson::Value(function_.c_str(), alloc), alloc);
   out.AddMember("args", rapidjson::Value(args_.c_str(), alloc), alloc);
-  out.AddMember("nb_cpu", nb_cpu_, alloc);
+  out.AddMember("nb_cores", nb_cores_, alloc);
   out.AddMember("nb_retry", nb_retry_, alloc);
   out.AddMember("timeout", timeout_, alloc);
-  rapidjson::Value cpus(rapidjson::kArrayType);
-  for (auto c : cpus_) {
-    cpus.PushBack(c, alloc);
-  }
-  out.AddMember("cpus", cpus, alloc);
   out.AddMember("stdout", rapidjson::Value(stdout_.c_str(), alloc), alloc);
   out.AddMember("stderr", rapidjson::Value(stderr_.c_str(), alloc), alloc);
   out.AddMember("exit_code", exit_code_, alloc);
@@ -106,8 +108,13 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     case State::Shutdown: stateStr = "Shutdown"; break;
   }
   out.AddMember("state", rapidjson::Value(stateStr, alloc), alloc);
+  if (executor_ != nullptr) {
+    out.AddMember("executor", rapidjson::Value(executor_->Name().c_str(), alloc), alloc);  
+  }
   if (executor_data_ != nullptr) {
-    executor_data_->ToJSON(out, alloc);
+    rapidjson::Value executorDataJSON(rapidjson::kObjectType);
+    executor_data_->ToJSON(executorDataJSON, alloc);
+    out.AddMember("executor_data", executorDataJSON, alloc);
   }
   rapidjson::Value timepoints(rapidjson::kArrayType);
   timepoints.PushBack(ToMillis(time_points_[0]), alloc);
