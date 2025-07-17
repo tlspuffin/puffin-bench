@@ -87,6 +87,14 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 
   if (step.IsFirstStepOfTask()) {
     CreateRunFolders(localTaskData->run_root_path_);
+
+    std::filesystem::path taskenvPath = std::filesystem::path(
+        localTaskData->run_root_path_ / ".taskenv");
+    std::ofstream taskenv = std::ofstream(taskenvPath, std::ios::trunc);
+    for(auto const& arg: step.task_->args_) {
+      taskenv << arg.first << "= \"" << arg.second << "\" ";
+    }
+    taskenv.close();
   }
 
   std::error_code ec;
