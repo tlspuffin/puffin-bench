@@ -1,0 +1,36 @@
+project:
+  type: website
+  output-dir: "output"
+  render:
+    - index.qmd
+    - commits.qmd
+    - commit/*.qmd
+
+author: The Puffin Development Team
+date: now
+date-format: "dddd MMM D, YYYY - HH:mm"
+
+jupyter: puffin-bench
+
+website:
+  title: "puffin-bench"
+  navbar:
+    left:
+      - href: commits.qmd
+        text: Commits
+  search: false
+
+
+format:
+  html:
+    theme: cosmo
+    page-layout: full
+    embed-resources: true
+    echo: false
+    code-fold: true
+    code-summary: "show code"
+    code-tools:
+      source: true
+      toggle: false
+      caption: "source"
+    toc: true
