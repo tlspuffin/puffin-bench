@@ -1,4 +1,5 @@
 #include "config.hxx"
+#include "linux_cores.hxx"
 #include "../../utils/rapidjson.hxx"
 
 #include "embeded/executor_sh.h"
@@ -48,11 +49,24 @@ void ns_Executor::Config::Save(std::string const& name, rapidjson::Value& doc,
 static ns_Executor::LocalConfig defaultLocalConfig("local");
 
 ns_Executor::LocalConfig::LocalConfig(std::string const& name) 
-    : Config(Config::Type::Local, name), maxCPU_(0), cpus_(1, true), 
+    : Config(Config::Type::Local, name), nbCores_(1), cores_(), 
     scriptPath_("scripts"), runPath_("runs")
-{}
+{
+  CoresStats coresStats;
+  uint64_t maxNbCores = coresStats.NbCores();
+  cores_.assign(maxNbCores, true);
+  if (maxNbCores > 1) {
+    cores_[0] = false;
+  }
+}
 
 void ns_Executor::LocalConfig::Validate() const {
+  CoresStats coresStats;
+  uint64_t maxNbCores = coresStats.NbCores();
+  if ((cores_.size() > maxNbCores) || ((nbCores_ > maxNbCores))) {
+    throw std::runtime_error("Config of Local executor requires more cores than system have (" + 
+        std::to_string(maxNbCores) + ")");
+  }
   auto discard = std::filesystem::canonical(scriptPath_);
   discard = std::filesystem::canonical(runPath_);
   for(auto const& [ file, data, size ] : { 
@@ -75,31 +89,52 @@ void ns_Executor::LocalConfig::Validate() const {
 }
 
 void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
-  maxCPU_ = 0;
-  cpus_.clear();
-  if (node.HasMember("core") && node["core"].IsArray()) {
-    const rapidjson::Value& arr = node["core"];
-    uint64_t maxIndex = 0;
+  nbCores_ = 0;
+  cores_.clear();
+  CoresStats coresStats;
+  if (node.HasMember("cores") && node["cores"].IsArray()) {
+    const rapidjson::Value& arr = node["cores"];
     std::vector<uint64_t> indexes;
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
       if (!arr[i].IsUint64()) {
-        throw std::runtime_error("Config of Local executor require uint64 in core list");
+        throw std::runtime_error("Config of Local executor require uint64 in cores list");
       }
-      uint64_t cpu = arr[i].GetUint64();
-      indexes.push_back(cpu);
-      if (cpu > maxIndex) {
-        maxIndex = cpu;
-      }
+      uint64_t coreIndex = arr[i].GetUint64();
+      indexes.push_back(coreIndex);
     }
-    cpus_.assign(maxIndex+1, false);
+    cores_.assign(coresStats.NbCores(), false);
     for (auto const& index : indexes) {
-      cpus_[index] = true;
+      cores_[index] = true;
     }
-  } else if (node.HasMember("maxCPU") && node["maxCPU"].IsUint64()){
-    maxCPU_ = GetOrDefault<uint64_t>(node, "maxCPU", defaultLocalConfig.maxCPU_);
-    cpus_.assign(maxCPU_, true);
+  } else if (node.HasMember("excludeCores") && node["excludeCores"].IsArray()) {
+    uint64_t maxNbCores = coresStats.NbCores();
+    cores_.assign(maxNbCores, true);
+
+    if (node.HasMember("nbCores") && node["nbCores"].IsUint64()) {
+      nbCores_ = GetOrDefault<uint64_t>(node, "nbCores", defaultLocalConfig.nbCores_);
+    } else {
+      nbCores_ = maxNbCores;
+    }
+
+    const rapidjson::Value& arr = node["excludeCores"];
+    for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
+      if (!arr[i].IsUint64()) {
+        throw std::runtime_error("Config of Local executor require uint64 in cores list");
+      }
+      uint64_t coreIndex = arr[i].GetUint64();
+      if (coreIndex >= maxNbCores) {
+        throw std::runtime_error("Config of Local executor requires more cores than system have (" + 
+            std::to_string(maxNbCores) + ")");
+      }
+      cores_[coreIndex] = false;
+    }
   } else {
-    cpus_.assign(1, true);
+    uint64_t maxNbCores = coresStats.NbCores();
+    nbCores_ = 1;
+    cores_.assign(maxNbCores, true);
+    if (maxNbCores > 1) {
+      cores_[0] = false;
+    }
   }
   scriptPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(node, "scriptPath", defaultLocalConfig.scriptPath_))
@@ -111,16 +146,23 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
     rapidjson::MemoryPoolAllocator<>& alloc) const {
-  if (maxCPU_ > 0) {
-    node.AddMember("maxCPU", maxCPU_, alloc);
-  } else {
-    rapidjson::Value cpuArray(rapidjson::kArrayType);
-    for (size_t i = 0; i < cpus_.size(); ++i) {
-      if (cpus_[i]) {
-        cpuArray.PushBack(static_cast<uint64_t>(i), alloc);
+  if (nbCores_ > 0) {
+    node.AddMember("nbCores", nbCores_, alloc);
+    rapidjson::Value coresArray(rapidjson::kArrayType);
+    for (size_t i = 0; i < cores_.size(); ++i) {
+      if (!cores_[i]) {
+        coresArray.PushBack(static_cast<uint64_t>(i), alloc);
       }
     }
-    node.AddMember("core", cpuArray, alloc);
+    node.AddMember("excludeCores", coresArray, alloc);
+  } else {
+    rapidjson::Value coresArray(rapidjson::kArrayType);
+    for (size_t i = 0; i < cores_.size(); ++i) {
+      if (cores_[i]) {
+        coresArray.PushBack(static_cast<uint64_t>(i), alloc);
+      }
+    }
+    node.AddMember("cores", coresArray, alloc);
   }
   node.AddMember("scriptPath", 
       rapidjson::Value(scriptPath_.c_str(), alloc), alloc);

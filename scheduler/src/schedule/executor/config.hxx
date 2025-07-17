@@ -28,8 +28,8 @@ protected:
 };
 
 struct LocalConfig : public Config {
-  uint64_t maxCPU_;
-  std::vector<bool> cpus_;
+  uint64_t nbCores_;
+  std::vector<bool> cores_;
   std::filesystem::path scriptPath_;
   std::filesystem::path runPath_;
   void Validate() const;

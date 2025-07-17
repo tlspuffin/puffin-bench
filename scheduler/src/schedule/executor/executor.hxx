@@ -22,6 +22,15 @@ public:
 
 inline ExecutorData::~ExecutorData() {}
 
+class ExecutorTaskData {
+public:
+  virtual ~ExecutorTaskData();
+  virtual void ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const = 0;
+};
+
+inline ExecutorTaskData::~ExecutorTaskData() {}
+
 class Executor {
 public:
   static Executor* Build(ns_Executor::Config* config);
@@ -33,10 +42,12 @@ public:
   virtual void Execute(ns_Schedule::Step& step) = 0;
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
   virtual void Shutdown(ns_Schedule::Step& step, bool wait =false) = 0;
-  virtual void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task& task) = 0;
+  virtual void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task* task) = 0;
 
 protected:
   Executor(std::string const& name);
+
+  template<typename T> T* GetExecutorTaskData(ns_Schedule::Task* task);
 
 private:
   std::string name_;
@@ -50,6 +61,18 @@ inline Executor::~Executor() {}
 
 inline std::string Executor::Name() const {
   return name_;
+}
+
+template<typename T> inline T* Executor::GetExecutorTaskData(ns_Schedule::Task* task) {
+  auto executorTaskDataIT = task->executors_.find(this);
+  if (executorTaskDataIT == nullptr) {
+    throw std::runtime_error("ExecutorTaskData not found in task");
+  }
+  T* executorTaskData = dynamic_cast<T*>(executorTaskDataIT->second);
+  if (executorTaskData == nullptr) {
+    throw std::runtime_error("ExecutorTaskData are not of type LocalTaskData");
+  }
+  return executorTaskData;
 }
 
 };
