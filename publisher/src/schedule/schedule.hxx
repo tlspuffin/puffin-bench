@@ -19,7 +19,8 @@ public:
   Schedule(ns_Schedule::Config const& config);
   ~Schedule();
   uint64_t AddTask(std::string const& tasksList, std::string const& functions, 
-      std::unordered_map<std::string, std::vector<uint8_t>>& files);
+      std::unordered_map<std::string, std::vector<uint8_t>>& files,
+      std::unordered_map<std::string, std::string>& args);
 
 private:
   void ScheduleLoop();

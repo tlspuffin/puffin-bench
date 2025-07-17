@@ -60,7 +60,8 @@ ns_Schedule::Schedule::~Schedule() {
 
 uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList, 
     std::string const& functions, 
-    std::unordered_map<std::string, std::vector<uint8_t>>& files) {
+    std::unordered_map<std::string, std::vector<uint8_t>>& files,
+    std::unordered_map<std::string, std::string>& args) {
   rapidjson::Document stepsJSON;
   stepsJSON.Parse(tasksList.c_str());
 
@@ -75,6 +76,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   ns_Schedule::Task* task = 
       tasksManager_.CreateTask(stepsJSON, functions, files, 
       defaultExecutor_, executors_);
+  task->args_ = args;
 
   std::string taskFilePath = (config_.userPath_ / std::to_string(task->id_) / 
       std::string(std::to_string(task->id_) + ".json")).string();

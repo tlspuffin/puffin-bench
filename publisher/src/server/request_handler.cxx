@@ -39,8 +39,23 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       files.emplace(partData.filename, std::move(partData.content));
     }
 
+    std::unordered_map<std::string, std::string> args;
+    for (auto key : form) {
+      if (key.first.compare("args[]") == 0) {
+        std::string const& variable = key.second;
+        size_t pos = variable.find('=');
+        if (pos == std::string::npos) {
+          throw std::runtime_error("args[] value required a =");
+        }
+        auto success = args.emplace(variable.substr(0, pos), variable.substr(pos+1));
+        if (!success.second) {
+          throw std::runtime_error("args[] value duplicate key found");
+        }
+      }
+    }
+
     uint64_t taskID = apis_->scheduleAPI_.AddTask(flow->second.content, 
-        functions->second.content, files);
+        functions->second.content, files, args);
 
     out << R"({"success": true, "task_id": ")" << taskID << R"("})";
   } catch (const std::exception& e) {

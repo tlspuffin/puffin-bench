@@ -49,8 +49,8 @@ void ns_Schedule::Step::ReadFromTaskJSON(rapidjson::Value const& entry) {
     executor_name_ = entry["executor"].GetString();
   if (entry.HasMember("args") && entry["args"].IsString())
     args_ = entry["args"].GetString();
-  if (entry.HasMember("nbCores") && entry["nbCores"].IsInt())
-    nb_cores_ = static_cast<uint32_t>(entry["nbCores"].GetInt());
+  if (entry.HasMember("nbcores") && entry["nbcores"].IsInt())
+    nb_cores_ = static_cast<uint32_t>(entry["nbcores"].GetInt());
   if (entry.HasMember("retry") && entry["retry"].IsInt())
     nb_retry_ = static_cast<uint32_t>(entry["retry"].GetInt());
   if (entry.HasMember("maxtime") && entry["maxtime"].IsString())
@@ -72,24 +72,17 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     rapidjson::Document::AllocatorType& alloc) const {
   out.SetObject();
 
-  auto executorTaskData = task_->executors_.find(executor_);
-  if (executorTaskData != task_->executors_.end()) {
-    rapidjson::Value executorTaskDataJSON(rapidjson::kObjectType);
-    executorTaskData->second->ToJSON(executorTaskDataJSON, alloc);
-    out.AddMember("task_executor_data", executorTaskDataJSON, alloc);
-  }
+  rapidjson::Value taskJSON(rapidjson::kObjectType);
+  task_->ToJSON(taskJSON, alloc, this);
+  out.AddMember("task", taskJSON, alloc);
   out.AddMember("name", rapidjson::Value(name_.c_str(), alloc), alloc);
   out.AddMember("uuid", uuid_, alloc);
-  out.AddMember("task_id", TaskID(), alloc);
   out.AddMember("step_id", step_id_, alloc);
   out.AddMember("rank_id", rank_id_, alloc);
   out.AddMember("attempt_id", attempt_id_, alloc);
   out.AddMember("run_id", run_id_, alloc);
   out.AddMember("executor_name", rapidjson::Value(executor_name_.c_str(), alloc), alloc);
-  out.AddMember("run_root_path", rapidjson::Value(RunRootPath().c_str(), alloc), alloc);
   out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
-  out.AddMember("files_path", rapidjson::Value(FilesPath().c_str(), alloc), alloc);
-  out.AddMember("functions_path", rapidjson::Value(FunctionsPath().c_str(), alloc), alloc);
   out.AddMember("function", rapidjson::Value(function_.c_str(), alloc), alloc);
   out.AddMember("args", rapidjson::Value(args_.c_str(), alloc), alloc);
   out.AddMember("nb_cores", nb_cores_, alloc);
