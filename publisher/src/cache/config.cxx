@@ -13,7 +13,7 @@ void ns_Cache::Config::Load(std::string const& name, rapidjson::Value& doc) {
   if (doc.HasMember(name.c_str()) && (doc[name.c_str()].IsObject())) {
     cacheConfig = &doc[name.c_str()];
   }
-  storagePath_ = std::filesystem::weakly_canonical(
+  storagePath_ = std::filesystem::path(
       GetOrDefault<std::string>(*cacheConfig, "storagePath", defaultConfig.storagePath_))
       .string();
   std::string mapFile = GetOrDefault<std::string>(*cacheConfig, "mappingFile", 
@@ -31,6 +31,6 @@ void ns_Cache::Config::Save(std::string const& name, rapidjson::Value& doc,
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
-void ns_Cache::Config::Validate() const {
-  auto discard = std::filesystem::canonical(storagePath_);
+void ns_Cache::Config::Validate() {
+  storagePath_ = std::filesystem::canonical(storagePath_);
 }

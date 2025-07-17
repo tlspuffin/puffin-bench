@@ -11,7 +11,8 @@
       "local": {
         "name": "local",
         "type": 1,
-        "core": [
+        "nbCores": 4,
+        "excludeCores": [
           0
         ],
         "scriptPath": "../scripts",

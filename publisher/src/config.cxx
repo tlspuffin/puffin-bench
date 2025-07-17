@@ -28,8 +28,10 @@ bool Config::Load(std::string const& filepath) {
     }
   }
   if (!doc.IsObject()) {
-    sucess = false;
-    std::cerr << "Bad JSON document " << filepath << "\n";
+    if (sucess) {
+      sucess = false;
+      std::cerr << "Bad JSON document " << filepath << "\n";
+    }
     doc.SetObject();
   }
   server_.Load("server", doc);
@@ -56,7 +58,7 @@ void Config::Save(std::string const& filepath) const {
   doc.Accept(writer);
 }
 
-void Config::Validate() const {
+void Config::Validate() {
   server_.Validate();
   schedule_.Validate();
   cache_.Validate();

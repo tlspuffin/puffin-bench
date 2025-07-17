@@ -1,6 +1,7 @@
 #pragma once
 
 #include "executor.hxx"
+#include "linux_cores.hxx"
 #include <cstdint>
 #include <vector>
 
@@ -11,7 +12,15 @@ public:
   void ToJSON(rapidjson::Value& out, 
     rapidjson::Document::AllocatorType& alloc) const;
 
+  std::vector<uint64_t> cores_;
   pid_t pid_;
+};
+
+class LocalTaskData : public ExecutorTaskData {
+public:
+  void ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const;
+
   std::filesystem::path run_root_path_;
 };
 
@@ -24,18 +33,19 @@ public:
   void Execute(ns_Schedule::Step& step);
   std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps);
   void Shutdown(ns_Schedule::Step& step, bool wait =false);
-  void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task& task);
+  void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task* task);
 
 private:
   ns_Executor::LocalConfig const& config_;
-  uint64_t nbCPUsFree_;
-  std::vector<bool> cpusFree_;
+  ns_Executor::CoresMonitor coresMonitor_;
+  uint64_t nbCoresFree_;
+  std::vector<bool> coresFree_;
   uint64_t nbChild_;
 
-  std::vector<uint64_t> AssignCPU(uint64_t nbCPU);
-  void ReleaseCPU(std::vector<uint64_t>& cpus);
+  std::vector<uint64_t> AssignCores(uint64_t nbCores);
+  void ReleaseCores(std::vector<uint64_t>& cores);
   void CreateRunFolders(std::filesystem::path const& path);
-  static bool PinCoreToProcess(std::vector<uint64_t> const& cores_);
+  static bool PinCoresToProcess(std::vector<uint64_t> const& cores_);
 };
 
 inline Local::~Local() {}
