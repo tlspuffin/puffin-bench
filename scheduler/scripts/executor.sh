@@ -16,9 +16,42 @@ AddGlobalParam() {
   AddParam GLBPARMS "$1" "$2"
 }
 
+CreateArtefact() {
+  local path=$( realpath "$1" )
+  local name="$2"
+  shift 2
+
+  local artefact_file="${ROOT_PATH}/.artefacts"
+
+  local jq_expr='{"path": $path, "name": $name}'
+  local jq_args=(--arg path "$path" --arg name "$name")
+
+  if [ "$#" -gt 0 ]; then
+    jq_expr+=' | .metadata = {}'
+    for pair in "$@"; do
+      key="${pair%%:*}"
+      value="${pair#*:}"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        jq_expr+=" | .metadata[\"$key\"] = \$meta_${key}"
+        jq_args+=(--argjson "meta_${key}" "$value")
+      elif [[ "$value" =~ ^(true|false|null)$ ]]; then
+        jq_expr+=" | .metadata[\"$key\"] = \$meta_${key}"
+        jq_args+=(--argjson "meta_${key}" "$value")
+      else
+        jq_expr+=" | .metadata[\"$key\"] = \$meta_${key}"
+        jq_args+=(--arg "meta_${key}" "$value")
+      fi
+    done
+  fi
+
+  jq -c -n "${jq_args[@]}" "$jq_expr" >> "${artefact_file}"
+}
+
 AbortFail() {
   "$@" || ( echo "Fail: $*"; false )
 }
+
+ROOT_PATH=$( pwd )
 
 if [ ! -r "$1" ]; then
   echo "Unable to read $1"
@@ -35,6 +68,13 @@ if [ ! -r "$1" ]; then
   touch $1
 fi
 ENVFILE=$1
+shift
+
+if [ ! -w "$1" ]; then
+  echo "Output directory is not writable: $1"
+  exit 1
+fi
+COMMONPATH=$1
 shift
 
 if [ ! -w "$1" ]; then
@@ -71,6 +111,23 @@ if [ -z "$1" ]; then
   exit 1
 fi
 SID=$1
+shift
+
+if [ -z "$1" ]; then
+  echo "Missing id"
+  exit 1
+fi
+STEP_ID=$1
+if [ "${STEP_ID}" = "." ]; then
+  STEP_ID=
+fi
+shift
+
+if [ -z "$1" ]; then
+  echo "Missing attempt id"
+  exit 1
+fi
+ATTEMPT_ID=$1
 shift
 
 if [ -z "$1" ]; then
@@ -113,12 +170,15 @@ echo "task env: $( cat ${ENVFILE})"
 eval ${GLBPARMS}
 echo "In: ${GLBPARMS}"
 
+pushd . >/dev/null
 ${COMMAND} "$@"
 RETVAL=$?
+popd >/dev/null
 
 if [[ "${UPDATE_ENV}" == "1" ]]; then
   echo "Out: ${GLBPARMS}"
   echo "${GLBPARMS}" > ${ENVFILE}
 fi
 
+echo ${RETVAL} > .done
 exit ${RETVAL}

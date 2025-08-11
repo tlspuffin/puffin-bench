@@ -74,9 +74,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   }
 
   ns_Schedule::Task* task = 
-      tasksManager_.CreateTask(stepsJSON, functions, files, 
-      defaultExecutor_, executors_);
-  task->args_ = args;
+      tasksManager_.CreateTask(stepsJSON, functions, files, args, *this);
 
   std::string taskFilePath = (config_.userPath_ / std::to_string(task->id_) / 
       std::string(std::to_string(task->id_) + ".json")).string();
@@ -108,6 +106,66 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
 
   return task->id_;
 }
+
+ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
+  auto const& executorIT = executors_.find(name);
+  if (executorIT == executors_.end()) {
+    auto const& executorIT = executors_.find(defaultExecutor_);
+    if (executorIT != executors_.end()) {
+      return executorIT->second;
+    }
+    std::cerr << "Unable to retrieve default executor " << defaultExecutor_ << std::endl;
+    return nullptr;
+  }
+  return executorIT->second;
+}
+
+std::string ns_Schedule::Schedule::GetOutput(std::string const& executorName, 
+    std::string const& type, std::string const& taskID, 
+    std::string const& stepID, std::string const& rankID, 
+    std::string const& attemptID, size_t readSize, 
+    ssize_t readOffset, int& state) const {
+  state = 0;
+  ns_Executor::Executor const* executor = GetExecutor(executorName);
+  if (executor == nullptr) {
+    return "";
+  }
+  std::filesystem::path runPath = config_.runPath_;
+  runPath = runPath / taskID;
+  std::string output = executor->GetRunningOutput(runPath, type, taskID, 
+      stepID, rankID, attemptID, readSize, readOffset, state);
+  if (state > 0) {
+    return output;
+  }
+
+  std::filesystem::path outputPath = config_.exportPath_;
+  outputPath = outputPath / taskID / "logs";
+  std::string prefix = "stdout";
+  if (type.compare("error") == 0) {
+    prefix = "stderr";
+  }
+  std::stringstream oss;
+  oss << prefix << '.' << stepID << '-' << rankID << '-' << attemptID << ".txt";
+  outputPath = outputPath / oss.str();
+  if (!std::filesystem::exists(outputPath)) {
+    return "";
+  }
+  std::ifstream ifs(outputPath);
+  if (!ifs) {
+    return "";
+  }
+  ifs.seekg(readOffset, readOffset >= 0 ? std::ios::beg : std::ios::end);
+  if (!ifs) {
+    return "";
+  }
+  std::string buffer;
+  buffer.resize(readSize);
+  ifs.read(&buffer[0], readSize);
+  buffer.resize(ifs.gcount());
+  state = buffer.size() == readSize ? 1 : 2; 
+  return buffer;
+}
+
 
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
   std::list<ns_Schedule::Step*> result;
@@ -144,24 +202,21 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     }
 
     std::list<ns_Schedule::Step*> stepsDone;
-    //while(threadRunning_ && (stepsDone.size() == 0)) {
-      std::this_thread::sleep_for (std::chrono::seconds(1));
-      for(auto& executor : executors_) {
-        std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(running);
-        stepsDone.insert(stepsDone.end(), executorStepsDone.begin(), executorStepsDone.end());
-        for(ns_Schedule::Step* step : executorStepsDone) {
-          std::cerr << "Done step: " << step->ID() << std::endl;
-        }
+    for(auto& executor : executors_) {
+      std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(running);
+      stepsDone.insert(stepsDone.end(), executorStepsDone.begin(), executorStepsDone.end());
+      for(ns_Schedule::Step* step : executorStepsDone) {
+        std::cerr << "Done step: " << step->ID() << std::endl;
       }
+    }
 
-      for (ns_Schedule::Step* step : running) {
-        if (step->IsRunning() && step->IsTimedOut()) {
-          std::cout << "Step " << step->ID() << " timeouted" << std::endl;
-          step->KillAndMarkTimedout();
-          stepsDone.push_back(step);
-        }
+    for (ns_Schedule::Step* step : running) {
+      if (step->IsRunning() && step->IsTimedOut()) {
+        std::cout << "Step " << step->ID() << " timeouted" << std::endl;
+        step->KillAndMarkTimedout();
+        stepsDone.push_back(step);
       }
-    //}
+    }
 
     lockThread_.lock();
     try {
@@ -229,10 +284,11 @@ void ns_Schedule::Schedule::ManageEndOfStep(
         step->name_ + ", id=" + step->ID());
   }
   steps_.remove(step);
+  step->GatherFilesToLocal();
   if (step->TaskDone()) {
     // todo signal end of the flow
     uint64_t task_id = step->TaskID();
-    step->FinalClean(config_.exportPath_);
+    step->FinalizeAndArchive(config_.exportPath_);
     tasksManager_.TaskEnded(step->task_);
     std::cout << "Tasks " << task_id << " done" << std::endl;
   }

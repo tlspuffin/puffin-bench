@@ -42,7 +42,13 @@ public:
   virtual void Execute(ns_Schedule::Step& step) = 0;
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
   virtual void Shutdown(ns_Schedule::Step& step, bool wait =false) = 0;
-  virtual void FinalClean(std::filesystem::path const& savePath, ns_Schedule::Task* task) = 0;
+  virtual void GatherFilesToLocal(ns_Schedule::Step& step) = 0;
+
+  virtual std::string GetRunningOutput(std::filesystem::path const& runPath, 
+      std::string const& type, std::string const& taskID, 
+      std::string const& stepID, std::string const& rankID, 
+      std::string const& attemptID, size_t readSize, ssize_t readOffset, 
+      int& state) const = 0;
 
 protected:
   Executor(std::string const& name);

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Tâches en cours - Scheduler</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background-color: #f9f9f9; }
+    .step {
+      border: 1px solid #ccc;
+      background: #fff;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.1);
+    }
+    .step h2 { margin-top: 0; }
+    pre {
+      background: #f0f0f0;
+      padding: 10px;
+      overflow-x: auto;
+      max-height: 300px;
+      white-space: pre-wrap;
+    }
+    details summary {
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>🟢 Tâches en cours</h1>
+  <div id="steps-container">Chargement...</div>
+
+  <script>
+    const API_BASE = 'http://localhost:8080/api';
+    const OUTPUT_CHUNK_SIZE = 1024;
+    const POLLING_INTERVAL = 5000; // ms
+
+    // stocke offset et état de lecture pour chaque sortie (par tâche/type)
+    const stepOutputStates = {}; // { "uuid-stdout": { offset, done }, ... }
+
+    async function fetchOutputChunk(type, step, preEl) {
+      const uuid = step.uuid;
+      const key = `${uuid}-${type}`;
+      let state = stepOutputStates[key] || { offset: 0, done: false };
+      if (state.done) return;
+
+      while (true) {
+        const params = new URLSearchParams({
+            task_id: step.task.id,
+            step_id: step.step_id,
+            rank_id: step.rank_id,
+            attempt_id: step.attempt_id,
+            executor: step.executor,
+            type: type,
+            read_offset: state.offset,
+            read_size: OUTPUT_CHUNK_SIZE
+        });
+
+        try {
+          const response = await fetch(`${API_BASE}/task_outputs`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: params
+          });
+
+          const json = await response.json();
+
+          if (!json.success) {
+            preEl.textContent += `\n❌ Erreur API: ${json.error || "inconnue"}`;
+            state.done = true;
+            break;
+          }
+
+          const chunk = atob(json.data);
+          if (chunk.length > 0) {
+            preEl.textContent += chunk;
+            preEl.scrollTop = preEl.scrollHeight;
+          }
+
+          state.offset += chunk.length;
+
+          if (json.state === 3) {
+            state.done = true;
+            break;
+          }
+
+          if (json.state === 2) {
+            break; // pas terminé, mais à jour
+          }
+
+          // Si state === 1, continue en boucle (il y a potentiellement plus)
+
+        } catch (err) {
+          preEl.textContent += `\n❌ Exception JS: ${err.message}`;
+          state.done = true;
+          break;
+        }
+      }
+      stepOutputStates[key] = state;
+    }
+
+    async function loadRunningSteps() {
+      const container = document.getElementById('steps-container');
+      container.innerHTML = 'Chargement...';
+
+      try {
+        const response = await fetch(`${API_BASE}/tasks_running`, {
+          method: 'POST'
+        });
+
+        const result = await response.json();
+        const steps = result.data?.running_steps || [];
+
+        if (steps.length === 0) {
+          container.innerHTML = "<p>Aucune tâche en cours.</p>";
+          return;
+        }
+
+        container.innerHTML = '';
+
+        for (const step of steps) {
+          const div = document.createElement('div');
+          div.className = 'step';
+          const uuid = step.uuid;
+
+          const stdoutId = `stdout-${uuid}`;
+          const stderrId = `stderr-${uuid}`;
+
+          // init offset tracking
+          stepOutputStates[`${uuid}-stdout`] = { offset: 0, done: false };
+          stepOutputStates[`${uuid}-error`] = { offset: 0, done: false };
+
+          div.innerHTML = `
+            <h2>${step.name} (UUID: ${step.uuid})</h2>
+            <p><strong>État :</strong> ${step.state}</p>
+            <p><strong>PID :</strong> ${step.executor_data?.pid ?? 'n/a'}</p>
+            <p><strong>CPU :</strong> ${step.executor_data?.cores?.join(', ') ?? 'n/a'}</p>
+            <p><strong>Commande :</strong> ${step.function} ${step.args}</p>
+
+            <details open>
+              <summary>🟢 stdout</summary>
+              <pre id="${stdoutId}">(chargement...)</pre>
+            </details>
+            <details open>
+              <summary>🔴 stderr</summary>
+              <pre id="${stderrId}">(chargement...)</pre>
+            </details>
+          `;
+
+          container.appendChild(div);
+        }
+
+        // première lecture immédiate
+        for (const step of steps) {
+          const uuid = step.uuid;
+          fetchOutputChunk('stdout', step, document.getElementById(`stdout-${uuid}`));
+          fetchOutputChunk('error', step, document.getElementById(`stderr-${uuid}`));
+        }
+
+        // démarrer polling
+        setInterval(() => {
+          for (const step of steps) {
+            const uuid = step.uuid;
+            fetchOutputChunk('stdout', step, document.getElementById(`stdout-${uuid}`));
+            fetchOutputChunk('error', step, document.getElementById(`stderr-${uuid}`));
+          }
+        }, POLLING_INTERVAL);
+
+      } catch (err) {
+        container.innerHTML = `<p class="error">❌ Erreur lors du chargement : ${err.message}</p>`;
+      }
+    }
+
+    loadRunningSteps();
+  </script>
+</body>
+</html>

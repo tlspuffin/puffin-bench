@@ -27,9 +27,6 @@ public:
   void ReadFromTaskJSON(rapidjson::Value const& entry);
 
   uint64_t TaskID() const;
-  std::filesystem::path const& RunRootPath() const;
-  std::filesystem::path const& FilesPath() const;
-  std::filesystem::path const& FunctionsPath() const;
 
   bool IsFirstStepOfTask() const;
   bool IsReady() const;
@@ -44,7 +41,8 @@ public:
   bool TaskDone();
   void Execute();
   void Shutdown();
-  void FinalClean(std::filesystem::path const& savePath);
+  void GatherFilesToLocal();
+  void FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
       rapidjson::Document::AllocatorType& alloc) const;
@@ -53,6 +51,7 @@ public:
 
   ns_Schedule::Task* task_;
   std::string name_;
+  std::string id_;
   uint64_t uuid_;
   uint64_t step_id_;
   uint64_t rank_id_;
@@ -61,7 +60,6 @@ public:
   std::string executor_name_;
   ns_Executor::Executor* executor_;
   ns_Executor::ExecutorData* executor_data_;
-  std::filesystem::path run_path_;
   std::string function_;
   std::string args_;
   uint32_t nb_cores_;
@@ -93,18 +91,6 @@ private:
 
 inline uint64_t Step::TaskID() const {
   return task_->id_;
-}
-
-inline std::filesystem::path const& Step::RunRootPath() const {
-  return task_->run_root_path_;
-}
-
-inline std::filesystem::path const& Step::FilesPath() const {
-  return task_->files_path_;
-}
-
-inline std::filesystem::path const& Step::FunctionsPath() const {
-  return task_->functions_path_;
 }
 
 inline bool Step::IsFirstStepOfTask() const{
@@ -164,15 +150,20 @@ inline void Step::Shutdown() {
   }
 }
 
-inline void Step::FinalClean(std::filesystem::path const& savePath) {
+inline void Step::GatherFilesToLocal() {
   if (state_ >= State::Running) {
-    task_->FinalClean(savePath);
+    executor_->GatherFilesToLocal(*this);
+  }
+}
+
+inline void Step::FinalizeAndArchive(std::filesystem::path const& savePath) {
+  if (state_ >= State::Running) {
+    task_->FinalizeAndArchive(savePath);
   }
 }
 
 inline std::string Step::ID() {
-  return std::to_string(task_->id_) + '-' +
-    std::to_string(step_id_) + '-' +
+  return std::to_string(step_id_) + '-' +
     std::to_string(rank_id_) + '-' +
     std::to_string(attempt_id_);
 }

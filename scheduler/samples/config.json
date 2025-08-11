@@ -16,9 +16,9 @@
           0
         ],
         "scriptPath": "../scripts",
-        "runPath": "../runs"
       }
     },
+    "runPath": "../runs",
     "userPath": "../users_data",
     "exportPath": "../exports/schedule"
   },

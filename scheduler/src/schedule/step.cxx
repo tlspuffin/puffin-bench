@@ -19,8 +19,8 @@ static uint64_t parseTimeout(const std::string& str) {
 ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name) 
     : task_(task), name_(name), uuid_(++next_uuid_), step_id_(0), 
       rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
-      executor_(nullptr), executor_data_(nullptr), run_path_(), 
-      function_(name), args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
+      executor_(nullptr), executor_data_(nullptr), function_(name), 
+      args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
       next_(this), previous_(this), dependencies_(), depend_from_(), 
       state_(State::Pending), stdout_(), stderr_(), 
       exit_code_(exitCode_NotSet_), monitor_count_(0)
@@ -82,7 +82,6 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("attempt_id", attempt_id_, alloc);
   out.AddMember("run_id", run_id_, alloc);
   out.AddMember("executor_name", rapidjson::Value(executor_name_.c_str(), alloc), alloc);
-  out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
   out.AddMember("function", rapidjson::Value(function_.c_str(), alloc), alloc);
   out.AddMember("args", rapidjson::Value(args_.c_str(), alloc), alloc);
   out.AddMember("nb_cores", nb_cores_, alloc);

@@ -23,3 +23,11 @@ void ns_API::ScheduleAPI::GetRunningTaskSummary() {
 
 void ns_API::ScheduleAPI::GetTaskInfos(uint64_t task_id) {
 }
+
+std::string ns_API::ScheduleAPI::GetOutput(std::string const& executorName, 
+    std::string const& type, std::string const& taskID, std::string const& stepID,
+    std::string const& rankID, std::string const& attemptID, size_t readSize, 
+    ssize_t readOffset, int& state) {
+  return schedule_.GetOutput(executorName, type, taskID, stepID, rankID, attemptID, 
+      readSize, readOffset, state);
+}
