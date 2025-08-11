@@ -370,7 +370,7 @@ function(CreateExternalLib libname libs)
           IMPORTED_IMPLIB_DEBUG "${MYLIBSEARCH_${libname}_${filename}_DEBUG}")
       else()
         set_target_properties(${libname}::${filename} PROPERTIES
-          IMPORTED_LOCATION_DEBUG "${MYLIBSEARCH_${libname}_${filename}_DEBUG}")
+          IMPORTED_LOCATION_DEBUG "${MYLIBSEARCH_${libname}_${filename}}")
       endif()
     endif()
     if (MYLIBSEARCH_${libname}_${filename}_DLL)

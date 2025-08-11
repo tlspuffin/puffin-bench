@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <set>
 #include <iostream>
+#include <rapidjson/istreamwrapper.h>
 
 void ns_Executor::LocalData::ToJSON(rapidjson::Value& out, 
     rapidjson::Document::AllocatorType& alloc) const {
@@ -17,12 +18,17 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
     cores.PushBack(core, alloc);
   }
   out.AddMember("cores", cores, alloc);
+  out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
   out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
+  out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
 }
 
 void ns_Executor::LocalTaskData::ToJSON(rapidjson::Value& out, 
     rapidjson::Document::AllocatorType& alloc) const {
-  out.AddMember("run_root_path", rapidjson::Value(run_root_path_.c_str(), alloc), alloc);
+  out.AddMember("log_path", rapidjson::Value(log_path_.c_str(), alloc), alloc);
+  out.AddMember("env_path", rapidjson::Value(env_path_.c_str(), alloc), alloc);
+  out.AddMember("common_path", rapidjson::Value(common_path_.c_str(), alloc), alloc);
+  out.AddMember("output_path", rapidjson::Value(output_path_.c_str(), alloc), alloc);
 }
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config)
@@ -40,11 +46,11 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
 }
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
-    std::list<ns_Schedule::Step*> const& tasks) const {
+    std::list<ns_Schedule::Step*> const& steps) const {
   uint64_t nbCoresFree = nbCoresFree_;
   std::list<ns_Schedule::Step*> result;
 
-  for(ns_Schedule::Step* step : tasks) {
+  for(auto step : steps) {
     uint64_t nbCoresRequired = step->nb_cores_;
     if (!step->IsReady() || nbCoresRequired > nbCoresFree) {
       continue;
@@ -80,28 +86,31 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   localData->cores_ = AssignCores(step.nb_cores_);
   nbCoresFree_ -= step.nb_cores_;
 
-  localTaskData->run_root_path_ = config_.runPath_ / step.RunRootPath();
-  step.run_path_ = config_.runPath_ / step.run_path_;
-  step.stdout_ = config_.runPath_ / step.stdout_;
-  step.stderr_ = config_.runPath_ / step.stderr_;
+  localTaskData->log_path_ = step.task_->run_root_path_ / ".output";
+  localTaskData->env_path_ = step.task_->run_root_path_ / ".taskenv";
+  localTaskData->output_path_ = step.task_->run_root_path_ / "output";
+  localTaskData->common_path_ = step.task_->run_root_path_ / "common";
+  localData->run_path_ = step.task_->run_root_path_ / step.ID();
+  step.stdout_ = localTaskData->log_path_ / step.stdout_;
+  step.stderr_ = localTaskData->log_path_ / step.stderr_;
+  localData->artefacts_path_ = localData->run_path_ / ".artefacts";
 
   if (step.IsFirstStepOfTask()) {
-    CreateRunFolders(localTaskData->run_root_path_);
+    CreateRunFolders(step.task_, localTaskData);
 
-    std::filesystem::path taskenvPath = std::filesystem::path(
-        localTaskData->run_root_path_ / ".taskenv");
-    std::ofstream taskenv = std::ofstream(taskenvPath, std::ios::trunc);
+    std::ofstream taskenv = std::ofstream(localTaskData->env_path_
+        , std::ios::trunc);
     for(auto const& arg: step.task_->args_) {
-      taskenv << arg.first << "= \"" << arg.second << "\" ";
+      taskenv << arg.first << "=\"" << arg.second << "\" ";
     }
     taskenv.close();
   }
 
   std::error_code ec;
-  if (!std::filesystem::create_directories(step.run_path_, ec)) {
+  if (!std::filesystem::create_directories(localData->run_path_, ec)) {
     throw std::runtime_error(
-        std::string("create dir ") + step.run_path_.string() + std::string("/.output failed: errno=") +
-        std::to_string(ec.value()) +
+        std::string("create dir ") + localData->run_path_.string() + 
+        std::string("/.output failed: errno=") + std::to_string(ec.value()) +
         " (" + ec.message() + ")"
     );
   }
@@ -134,22 +143,23 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       std::cerr << "set core affinity failed" << std::endl;
       exit(-1);
     }
-    if (chdir(step.run_path_.c_str()) != 0) {
+    if (chdir(localData->run_path_.c_str()) != 0) {
       std::cerr << "chdir failed" << std::endl;
       exit(-1);
     }
 
     std::vector<char*> arg_strings;
     arg_strings.push_back(strdup("task"));
-    arg_strings.push_back(strdup(step.FunctionsPath().c_str()));
-    arg_strings.push_back(strdup(std::filesystem::path(localTaskData->run_root_path_ /
-        ".taskenv").c_str()));
-    arg_strings.push_back(strdup(std::filesystem::path(localTaskData->run_root_path_ /
-        "output").c_str()));
+    arg_strings.push_back(strdup(step.task_->functions_path_.c_str()));
+    arg_strings.push_back(strdup(localTaskData->env_path_.c_str()));
+    arg_strings.push_back(strdup(localTaskData->common_path_.c_str()));
+    arg_strings.push_back(strdup(localTaskData->output_path_.c_str()));
     arg_strings.push_back(strdup(config_.scriptPath_.c_str()));
-    arg_strings.push_back(strdup(step.FilesPath().c_str()));
+    arg_strings.push_back(strdup(step.task_->files_path_.c_str()));
     arg_strings.push_back(strdup(std::to_string(step.next_ == &step).c_str()));
     arg_strings.push_back(strdup(std::to_string(spid).c_str()));
+    arg_strings.push_back(strdup(step.id_.c_str()));
+    arg_strings.push_back(strdup(std::to_string(step.attempt_id_).c_str()));
     arg_strings.push_back(strdup(std::to_string(step.run_id_).c_str()));
     std::string cores;
     for(uint64_t core: localData->cores_) {
@@ -179,7 +189,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 
     std::string step_name = "fe-" + std::to_string(step.step_id_) + "-" + 
         std::to_string(step.rank_id_) + "-" + std::to_string(step.attempt_id_);
-    std::ofstream fatalErrorProf(localTaskData->run_root_path_ / step_name);
+    std::ofstream fatalErrorProf(step.task_->run_root_path_ / step_name);
     sync();
 
     exit(-1);
@@ -224,12 +234,13 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       std::string step_fatal_error = "fe-" + std::to_string(step->step_id_) + "-" + 
           std::to_string(step->rank_id_) + "-" + std::to_string(step->attempt_id_);
       std::error_code ec;
-      if (std::filesystem::exists(localTaskData->run_root_path_ / step_fatal_error, ec)) {
+      if (std::filesystem::exists(step->task_->run_root_path_ / step_fatal_error, ec)) {
         step->MarkDone(ns_Schedule::Step::exitCode_StepLaunchError_);
       } else {
         step->MarkDone(WEXITSTATUS(status));
       }
       ReleaseCores(localData->cores_);
+      SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step->ID());
       result.push_back(step);
     }
   }
@@ -247,33 +258,50 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step, bool wait) {
     waitpid(-localData->pid_, nullptr, 0);
   }
   ReleaseCores(localData->cores_);
+
+  LocalTaskData* localTaskData = GetExecutorTaskData<LocalTaskData>(step.task_);
+  SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step.ID());
 }
 
-void ns_Executor::Local::FinalClean(std::filesystem::path const& savePath, 
-    ns_Schedule::Task* task) {
-  LocalTaskData* localTaskData = GetExecutorTaskData<LocalTaskData>(task);
-  try {
-    std::filesystem::path finalSavePath = savePath / std::to_string(task->id_);
-    if (!std::filesystem::create_directory(finalSavePath)) {
-      throw std::runtime_error("Save directory (" + finalSavePath.string() + ") already exist");
-    }
-    std::filesystem::rename(localTaskData->run_root_path_ / "output", finalSavePath / "output");
-    std::filesystem::rename(localTaskData->run_root_path_ / ".output", finalSavePath / "logs");
-  } catch(std::runtime_error const& e) {
-    std::cerr << "Error while moving resultats from running to save storage\n" <<
-        "All keep in " << localTaskData->run_root_path_ << "\n\t" << e.what();
-    return;
-  }
-  for(std::filesystem::path const& path: { localTaskData->run_root_path_ }) {
-  std::error_code ec;
-    if (std::filesystem::remove_all(path, ec) == -1) {
-      std::cerr << "Error while removing " << path << "\n" << 
-          "\t" << ec.value() << ": " << ec.message() << std::endl;
-    }
-  }
+void ns_Executor::Local::GatherFilesToLocal(ns_Schedule::Step& step) {
 }
 
-inline std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
+std::string ns_Executor::Local::GetRunningOutput(std::filesystem::path const& runPath, 
+    std::string const& type, std::string const& taskID, 
+    std::string const& stepID, std::string const& rankID, 
+    std::string const& attemptID, size_t readSize, 
+    ssize_t readOffset, int& state) const {
+  state = 0;
+  std::filesystem::path outputPath = runPath;
+  outputPath = outputPath / ".output";
+  std::string prefix = "stdout";
+  if (type.compare("error") == 0) {
+    prefix = "stderr";
+  }
+  std::stringstream oss;
+  oss << prefix << '.' << stepID << '-' << rankID << '-' << attemptID << ".txt";
+  outputPath = outputPath / oss.str();
+  if (!std::filesystem::exists(outputPath)) {
+    return "";
+  }
+  std::ifstream ifs(outputPath);
+  if (!ifs) {
+    return "";
+  }
+  ifs.seekg(readOffset, readOffset >= 0 ? std::ios::beg : std::ios::end);
+  if (!ifs) {
+    return "";
+  }
+  std::string buffer;
+  buffer.resize(readSize);
+  ifs.read(&buffer[0], readSize);
+  buffer.resize(ifs.gcount());
+  state = buffer.size() == readSize ? 1 : 3; 
+  return buffer;
+}
+
+
+std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
   std::vector<uint64_t> result;
   if (config_.nbCores_ == 0) {
     for (size_t i=0; i<coresFree_.size(); ++i) {
@@ -301,27 +329,29 @@ inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
   nbCoresFree_ += cores.size();
 }
 
-void ns_Executor::Local::CreateRunFolders(std::filesystem::path const& path) {
+void ns_Executor::Local::CreateRunFolders(ns_Schedule::Task const* task, 
+    LocalTaskData const* localTaskData) {
   std::error_code ec;
-  if (!std::filesystem::create_directories(path, ec)) {
-    throw std::runtime_error(
-        "create dir " + path.string() + std::string(" failed: errno=") +
-        std::to_string(ec.value()) + " (" + ec.message() + ")"
-    );
+
+  std::filesystem::path outputPathArtefacts = localTaskData->output_path_ / "artefacts";
+  for(std::filesystem::path path : { 
+      task->run_root_path_, localTaskData->log_path_, 
+      localTaskData->common_path_, localTaskData->output_path_,
+      outputPathArtefacts
+  }) {
+    if (!std::filesystem::create_directories(path, ec)) {
+      throw std::runtime_error(
+          "create dir " + path.string() + std::string(" failed: errno=") + 
+          std::to_string(ec.value()) + " (" + ec.message() + ")"
+      );
+    }
   }
-  if (!std::filesystem::create_directories(path / ".output", ec)) {
+  std::filesystem::create_symlink(outputPathArtefacts, localTaskData->common_path_ / "artefacts", ec);
+  if (ec) {
     throw std::runtime_error(
-        "create dir " + (path / ".output").string() +
-        " failed: errno=" + std::to_string(ec.value()) +
-        " (" + ec.message() + ")"
-    );
-  }
-  if (!std::filesystem::create_directories(path / "output", ec)) {
-    throw std::runtime_error(
-        "create dir " + (path / "output").string() +
-        " failed: errno=" + std::to_string(ec.value()) +
-        " (" + ec.message() + ")"
-    );
+          "create symlink to " + (localTaskData->common_path_ / "artefacts").string() + 
+          std::string(" failed: errno=") + std::to_string(ec.value()) + " (" + ec.message() + ")"
+      );
   }
 }
 
@@ -349,4 +379,62 @@ bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) 
   }
 
   return coresSet.empty();
+}
+
+void ns_Executor::Local::SaveArtefacts(std::filesystem::path const& artefactsJSON, 
+    std::filesystem::path const& outputPath, std::string const& id) {
+    if (!std::filesystem::exists(artefactsJSON)) {
+      return;
+    }
+
+    std::ifstream ifs(artefactsJSON);
+    if (!ifs.is_open()) {
+      throw std::runtime_error("Cannot open artefacts file: " + artefactsJSON.string());
+    }
+
+    std::filesystem::path finalDir = outputPath / "artefacts";
+    //std::filesystem::create_directories(finalDir);
+
+    std::string line;
+    int lineNumber = 0;
+
+    while (std::getline(ifs, line)) {
+      ++lineNumber;
+      if (line.empty()) continue;
+
+      rapidjson::Document doc;
+      doc.Parse(line.c_str());
+
+      if (doc.HasParseError() || !doc.IsObject()) {
+        std::cerr << "Invalid JSON on line " << lineNumber << ": " << line << std::endl;
+        continue;
+      }
+
+      if (!doc.HasMember("path") || !doc["path"].IsString()) {
+        std::cerr << "Missing or invalid 'path' on line " << lineNumber << std::endl;
+        continue;
+      }
+
+      std::string srcPath = doc["path"].GetString();
+      std::string destName;
+
+      if (doc.HasMember("name") && doc["name"].IsString()) {
+        destName = doc["name"].GetString();
+      } else {
+        destName = std::filesystem::path(srcPath).filename().string();
+      }
+
+      std::filesystem::path destPath = finalDir / destName;
+
+      std::filesystem::path destDir = destPath.parent_path();
+      std::filesystem::create_directories(destDir);
+
+      try {
+          std::filesystem::copy(srcPath, destPath);
+          std::cout << "Saved artefact to: " << destPath << std::endl;
+      } catch (const std::exception& ex) {
+        std::cerr << "Failed to move artefact: " << srcPath << " -> " << destPath
+            << " (" << ex.what() << ")" << std::endl;
+      }
+    }
 }

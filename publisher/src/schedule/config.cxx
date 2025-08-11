@@ -4,7 +4,7 @@
 static ns_Schedule::Config defaultConfig;
 
 ns_Schedule::Config::Config() 
-    : exportPath_(std::filesystem::path("exports") / "schedule"), 
+    : runPath_("runs"), exportPath_(std::filesystem::path("exports") / "schedule"), 
     userPath_("users_data"), executors_()
 {}
 
@@ -48,6 +48,8 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
     executorConfig->Save(name, executorsConfig, alloc);
   }
   node.AddMember("executors", executorsConfig, alloc);
+  node.AddMember("runPath",
+    rapidjson::Value(runPath_.c_str(), alloc), alloc);
   node.AddMember("userPath",
       rapidjson::Value(userPath_.c_str(), alloc), alloc);
   node.AddMember("exportPath",

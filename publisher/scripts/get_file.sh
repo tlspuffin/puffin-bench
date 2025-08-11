@@ -10,7 +10,7 @@ done
 
 CACHE_ID="$1"
 TIMEOUT="${2:-0}"
-SERVER_URL="http://localhost:8080/cache_get"
+SERVER_URL="http://localhost:8080/api/cache_get"
 DELAY=1
 if [ -z "$CACHE_ID" ]; then
   echo "Usage: $0 <cache_id> [timeout_seconds]"

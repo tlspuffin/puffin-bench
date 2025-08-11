@@ -1,8 +1,8 @@
 {
+  "final_storage_path": "/home/olivier/Desktop/Archives/${COMMIT_ID}/${task_id}/",
   "flow" : [
     { 
-      "step": "Init",
-      "args": "3f648f016c84884d6470fc906735bb8c5da7891b"
+      "step": "Init"
     },
     {
       "step": "Build",
@@ -25,24 +25,28 @@
           "args": "'SDOS2' 'wolfssl540,asan,wolfssl-disable-postauth,fix-CVE-2022-39173' '--put-use-clear'",
           "nbcpu": 4,
           "maxtime": "10m",
-          "retry": 10
+          "retry": 1,
+          "id": "SDO2"
         },
         {
           "args": "'SDOS1' 'openssl111j'",
           "nbcpu": 4,
           "maxtime": "10m",
-          "retry": 10
+          "retry": 1,
+          "id": "SDO1"
         },
         {
           "args": "'HEAP' 'wolfssl540,asan,fix-CVE-2022-39173' '--put-use-clear'",
           "nbcpu": 4,
           "maxtime": "10m",
-          "retry": 10
+          "retry": 1,
+          "id": "HEAP"
         }
       ]
     },
     {
-      "step": "ManageResults"
+      "step": "ManageResults",
+      "args": "'SDOS2' 'SDOS1' 'HEAP'"
     }
   ]
 }

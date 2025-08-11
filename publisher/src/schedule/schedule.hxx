@@ -22,6 +22,13 @@ public:
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args);
 
+  ns_Executor::Executor* GetExecutor(std::string const& name) const;
+  std::string GetOutput(std::string const& executorName, 
+      std::string const& type, std::string const& taskID, 
+      std::string const& stepID, std::string const& rankID, 
+      std::string const& attemptID, size_t readSize, 
+      ssize_t readOffset, int& state) const;
+
 private:
   void ScheduleLoop();
   std::list<ns_Schedule::Step*> SearchTasksToRun();

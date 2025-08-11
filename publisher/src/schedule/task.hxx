@@ -24,16 +24,24 @@ public:
   std::filesystem::path run_root_path_;
   std::list<ns_Schedule::Step*> root_steps_;
   std::unordered_map<std::string, std::string> args_;
+  std::string symbolic_final_storage_path_;
 
   std::unordered_map<ns_Executor::Executor*, ns_Executor::ExecutorTaskData*> 
       executors_;
 
   ~Task();
-  void FinalClean(std::filesystem::path const& savePath);
+  void FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
     rapidjson::Document::AllocatorType& alloc, 
     ns_Schedule::Step const* step) const;
+
+private:
+  std::unordered_map<std::string, std::string> 
+      ReadGlobalParameters(std::filesystem::path const& envFile);
+  std::string ResolveVariables(std::string const& pattern, 
+    std::unordered_map<std::string, std::string> const& taskVariables);
+  void FinalStoring(std::filesystem::path const& savePath);
 };
 
 };

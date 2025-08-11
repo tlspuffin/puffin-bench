@@ -1,8 +1,11 @@
 #include "tasksmanager.hxx"
+#include "schedule.hxx"
 #include <unordered_set>
 #include <stack>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <thread>
 #include <rapidjson/document.h>
 #include <rapidjson/error/error.h>
 #include <rapidjson/error/en.h>
@@ -18,13 +21,16 @@ ns_Schedule::TasksManager::TasksManager(ns_Schedule::Config const& config)
 ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
       rapidjson::Value const& rootJSON, std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files, 
-      std::string const& defaultExecutor, 
-      std::unordered_map<std::string, ns_Executor::Executor*>& executors) {
+      std::unordered_map<std::string, std::string>& args, 
+      ns_Schedule::Schedule const& schedule) {
 
   uint64_t task_id = 0;
   {
     std::lock_guard<std::mutex> lock(lock_);
-    task_id = ++next_task_id_;
+    //task_id = ++next_task_id_;
+    task_id = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
   std::filesystem::path inDataPath = config_.userPath_ / (std::to_string(task_id));
@@ -49,13 +55,22 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
     ofs.close();
   }
 
+  std::string symbolicFinalStoragePath;
+  if (rootJSON.HasMember("final_storage_path")) {
+    if (!rootJSON["final_storage_path"].IsString()) {
+      throw std::runtime_error("Invalid 'final_storage_path' in JSON");
+    }
+    symbolicFinalStoragePath = rootJSON["final_storage_path"].GetString();
+  }
+
   ns_Schedule::Task* task = new ns_Schedule::Task();
   task->id_ = task_id;
-  task->run_root_path_ = std::to_string(task->id_);
+  task->args_ = args;
+  task->symbolic_final_storage_path_ = symbolicFinalStoragePath;
+  task->run_root_path_ = config_.runPath_ / std::to_string(task->id_);
   task->files_path_ = inDataPath;
   task->functions_path_ = functionsFile;
-  task->root_steps_ = CreateStepsFromJson(rootJSON, task, 
-      defaultExecutor, executors);
+  task->root_steps_ = CreateStepsFromJson(rootJSON, task, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);
@@ -181,8 +196,7 @@ void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {
 
 std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
     rapidjson::Value const& root, ns_Schedule::Task* task, 
-    std::string const& defaultExecutor, 
-    std::unordered_map<std::string, ns_Executor::Executor*>& executors) {
+    ns_Schedule::Schedule const& schedule) {
   std::list<ns_Schedule::Step*> parent_stack;
   std::list<ns_Schedule::Step*> current_stack;
   std::list<ns_Schedule::Step*> root_steps;
@@ -225,8 +239,7 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
         }
         step->ReadFromTaskJSON(run);
         std::list<ns_Schedule::Step*> attempts = ConfigureStep(
-            step, step_id, j, run_id, parent_stack, 
-            defaultExecutor, executors);
+            step, step_id, j, run_id, parent_stack, schedule);
         current_stack.insert(current_stack.end(), attempts.begin(), attempts.end());
 
         last_step = attempts.back();
@@ -235,8 +248,7 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
       first_step->previous_ = last_step;
     } else {
       std::list<ns_Schedule::Step*> attempts = ConfigureStep(
-          step, step_id, 0, run_id, parent_stack, 
-          defaultExecutor, executors);
+          step, step_id, 0, run_id, parent_stack, schedule);
       current_stack.insert(current_stack.end(), attempts.begin(), attempts.end());
 
       attempts.front()->previous_ = attempts.back();
@@ -263,15 +275,14 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
   return root_steps;
 }
 
-std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ConfigureStep(ns_Schedule::Step* step, 
+std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ConfigureStep(
+    ns_Schedule::Step* step, 
     uint64_t step_id, uint64_t rank_id, uint64_t& run_id, 
-    std::list<ns_Schedule::Step*>& parent_stack, std::string const& defaultExecutor, 
-    std::unordered_map<std::string, ns_Executor::Executor*>& executors) {
-  auto executor = executors.find(step->executor_name_);
-  if (executor == executors.end()) {
-    executor = executors.find(defaultExecutor);
-  }
-  step->executor_ = executor->second;
+    std::list<ns_Schedule::Step*>& parent_stack, 
+    ns_Schedule::Schedule const& schedule) {
+  ns_Executor::Executor* executor = schedule.GetExecutor(step->executor_name_);
+  step->executor_name_ = executor->Name();
+  step->executor_ = executor;
 
   step->step_id_ = step_id;
   step->rank_id_ = rank_id;
@@ -280,10 +291,9 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::ConfigureStep(ns_Schedu
   std::string step_name = std::to_string(step->step_id_) + "-" + 
       std::to_string(step->rank_id_) + "-" + 
       std::to_string(step->attempt_id_);
-  step->run_path_ = step->RunRootPath() / step_name;
 
-  step->stdout_ = step->RunRootPath() / (".output/stdout." + step_name + ".txt");
-  step->stderr_ = step->RunRootPath() / (".output/stderr." + step_name + ".txt");
+  step->stdout_ = "stdout." + step_name + ".txt";
+  step->stderr_ = "stderr." + step_name + ".txt";
   step->depend_from_ = parent_stack;
   return CreateRetrySteps(step, run_id);
 }
@@ -303,13 +313,12 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateRetrySteps(
     step->attempt_id_ = attempt;
     step->run_id_ = run_id++;
 
-    std::string run_path = std::to_string(step->step_id_) + "-" + 
+    std::string step_name = std::to_string(step->step_id_) + "-" + 
       std::to_string(step->rank_id_) + "-" + 
       std::to_string(step->attempt_id_);
-    step->run_path_ = step->RunRootPath() / run_path;
 
-    step->stdout_ = step->RunRootPath() / (".output/stdout." + run_path + ".txt");
-    step->stderr_ = step->RunRootPath() / (".output/stderr." + run_path + ".txt");
+    step->stdout_ = "stdout." + step_name + ".txt";
+    step->stderr_ = "stderr." + step_name + ".txt";
 
     if (prev_attempt) {
       prev_attempt->next_ = step;

@@ -94,9 +94,13 @@ void ns_Cache::Cache::CacheLoop() {
 
     for(auto const& it : dataToAdd) {
       try {
+        std::cerr << "[cache] copying " << it.srcPath_ << " to " << config_.storagePath_ / it.id_ << std::endl;
         std::filesystem::copy_file(it.srcPath_, config_.storagePath_ / it.id_, 
             std::filesystem::copy_options::overwrite_existing);
-        data_.at(it.id_).full_.store(true);
+        {
+          std::lock_guard<std::shared_mutex> lock(dataLock_);
+          data_.at(it.id_).full_.store(true);
+        }
         SaveCopyLog(it.id_, config_.storagePath_ / it.id_, "");
       } catch (const std::filesystem::filesystem_error& e) {
         {
@@ -155,6 +159,7 @@ void ns_Cache::Cache::SaveData() const {
   }
   ofs.close();
 
+  std::cerr << "[cache] rename " << tmpFile << " in " << config_.mappingFile_ << std::endl;
   std::filesystem::rename(tmpFile, config_.mappingFile_);
 }
 
@@ -171,6 +176,7 @@ void ns_Cache::Cache::SaveCopyLog(std::string const& id, std::string const& path
 }
 
 inline void ns_Cache::Cache::DeleteCopyLog() {
+  std::cerr << "[cache] delete copy log " << config_.mappingFile_.string() + ".copy" << std::endl;
   std::filesystem::remove(config_.mappingFile_.string() + ".copy");
 }
 
@@ -235,11 +241,14 @@ bool ns_Cache::Cache::LoadData() {
     std::error_code ec;
     bool exist = std::filesystem::exists(info.path_, ec);
     if (exist && info.full_) {
+      std::cerr << "[cache] add " << id << " as " << info.path_ << std::endl;
       data_[id] = info;
     } else if (exist && copiedFile.find(id) != copiedFile.end()) {
+      std::cerr << "[cache] add " << id << " as " << copiedFile[id].path_ << std::endl;
       data_[id] = copiedFile[id];
     } else {
       noCleaning = false;
+      std::cerr << "[cache] delete unclean file " << info.path_ << std::endl;
       std::filesystem::remove(info.path_);
     }
   }
