@@ -7,9 +7,19 @@ include(CMakeUtils.cmake)
 
 include(CMakeLists.conf)
 
+if(DEFINED OPENSSL_PATH)
+  GetLibs(openssl STATIC ${OPENSSL_PATH}  "ssl;crypto" openssllibs VERBOSE)
+  CreateExternalLib(openssl "${openssllibs}" DEPLOYTARGET setupDLL)
+endif()
+
 GetLibs(Poco STATIC ${POCO_PATH} "PocoNetSSL;PocoCrypto;PocoNet;PocoUtil;PocoFoundation;PocoJSON" Pocolibs VERBOSE)
 CreateExternalLib(Poco "${Pocolibs}" DEPLOYTARGET setupDLL)
-target_link_libraries(Poco INTERFACE ssl crypto)
+if(DEFINED OPENSSL_PATH)
+  target_link_libraries(Poco INTERFACE openssl)
+else()
+  target_link_libraries(Poco INTERFACE ssl crypto)
+endif()
+
 
 EmbedTextFile("scripts/executor.sh" 
   "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded//executor_sh.h" Executor_Script)

@@ -50,7 +50,7 @@ static ns_Executor::LocalConfig defaultLocalConfig("local");
 
 ns_Executor::LocalConfig::LocalConfig(std::string const& name) 
     : Config(Config::Type::Local, name), nbCores_(1), cores_(), 
-    scriptPath_("scripts"), runPath_("runs")
+    scriptPath_("scripts")
 {
   CoresStats coresStats;
   uint64_t maxNbCores = coresStats.NbCores();
@@ -68,7 +68,6 @@ void ns_Executor::LocalConfig::Validate() const {
         std::to_string(maxNbCores) + ")");
   }
   auto discard = std::filesystem::canonical(scriptPath_);
-  discard = std::filesystem::canonical(runPath_);
   for(auto const& [ file, data, size ] : { 
       std::tuple{ "executor.sh", Executor_Script_data, Executor_Script_size }, 
       std::tuple{ "get_file.sh", GetFile_Script_data, GetFile_Script_size }
@@ -139,9 +138,6 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
   scriptPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(node, "scriptPath", defaultLocalConfig.scriptPath_))
       .string();
-  runPath_ = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(node, "runPath", defaultLocalConfig.runPath_))
-      .string();
 }
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
@@ -166,6 +162,4 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
   }
   node.AddMember("scriptPath", 
       rapidjson::Value(scriptPath_.c_str(), alloc), alloc);
-  node.AddMember("runPath", 
-      rapidjson::Value(runPath_.c_str(), alloc), alloc);
 }

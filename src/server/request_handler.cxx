@@ -4,10 +4,25 @@
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Net/HTTPServerRequest.h>
+#include <Poco/Base64Encoder.h>
 
 inline static bool ToBool(std::string const& v) {
   return v == "1" || v == "true" || v == "on" || v == "yes";
 };
+
+static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  response.set("Access-Control-Allow-Origin", "*");
+  response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  response.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_OPTIONS) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send();
+    return true;
+  }
+  return false;
+}
 
 void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
@@ -29,6 +44,7 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
 
     if ((flow == parts.end()) || (functions == parts.end())) {
       out << R"({"success": false, "error": "Missing config or script file."})";
+      out.flush();
       return;
     }
 
@@ -40,17 +56,17 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
     }
 
     std::unordered_map<std::string, std::string> args;
-    for (auto key : form) {
-      if (key.first.compare("args[]") == 0) {
-        std::string const& variable = key.second;
-        size_t pos = variable.find('=');
-        if (pos == std::string::npos) {
-          throw std::runtime_error("args[] value required a =");
-        }
-        auto success = args.emplace(variable.substr(0, pos), variable.substr(pos+1));
-        if (!success.second) {
-          throw std::runtime_error("args[] value duplicate key found");
-        }
+    for (auto& [name, value] : form) {
+      if ((name.find("args[") != 0) || (name.rfind("]") != (name.size()-1))) {
+        continue;
+      }
+      std::string key = name.substr(5, name.size() - 6);
+      if (key.empty()) {
+        throw std::runtime_error("Empty key in args[]");
+      }
+      auto success = args.emplace(key, value);
+      if (!success.second) {
+        throw std::runtime_error("args[] value duplicate key found");
       }
     }
 
@@ -62,10 +78,15 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
+  out.flush();
 }
 
 void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -84,6 +105,62 @@ void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerR
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
+  out.flush();
+}
+
+void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream& out = response.send();
+
+  Poco::Net::HTMLForm form(request, request.stream());
+  std::string type = form.get("type", "");
+  std::string taskid = form.get("task_id", "");
+  std::string stepid = form.get("step_id", "");
+  std::string rankid = form.get("rank_id", "");
+  std::string attemptid = form.get("attempt_id", "");
+  std::string readoffsetStr = form.get("read_offset", "");
+  std::string readsizeStr = form.get("read_size", "");
+  std::string executor = form.get("executor", "");
+
+  if ((type.empty()) || (taskid.empty()) || (stepid.empty()) || 
+      (rankid.empty()) || (attemptid.empty()) || (readoffsetStr.empty()) ||
+      (readsizeStr.empty()) || (executor.empty())) {
+    out << R"({"success": false, "error": "Missing required parameter(s)."})";
+    out.flush();
+    return;
+  }
+
+  try {
+    ssize_t readoffset = std::stoll(readoffsetStr);
+    size_t readsize = std::stoull(readsizeStr);
+    int state = 0;
+    std::string output = apis_->scheduleAPI_.GetOutput(
+        executor, type, taskid, stepid, rankid, attemptid, readsize, readoffset, state);
+    if (state == 0) {
+      throw std::runtime_error("Server can't read requested output");
+    }
+
+    std::ostringstream oss;
+    Poco::Base64Encoder encoder(oss);
+    encoder.rdbuf()->setLineLength(0);
+    encoder << output;
+    encoder.close();
+
+    out << R"({"success": true, "data": ")" << oss.str() << R"(", "state": )" << state << "}";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+  out.flush();
 }
 
 void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -115,6 +192,7 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
+  out.flush();
 }
 
 void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -133,6 +211,7 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
   try {
     if (id.empty()) {
       out << R"({"success": false, "error": "Missing required parameters id."})";
+      out.flush();
       return;
     }
 
@@ -144,4 +223,5 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
+  out.flush();
 }

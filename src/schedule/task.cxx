@@ -2,6 +2,8 @@
 #include "step.hxx"
 #include "executor/executor.hxx"
 #include <unordered_set>
+#include <fstream>
+#include <regex>
 
 ns_Schedule::Task::~Task() {
   for(auto& it : executors_) {
@@ -9,11 +11,49 @@ ns_Schedule::Task::~Task() {
   }
 }
 
-void ns_Schedule::Task::FinalClean(std::filesystem::path const& savePath) {
-  for(auto executorIT : executors_) {
-    executorIT.first->FinalClean(savePath, this);
+void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath) {
+  std::filesystem::path finalSavePath = savePath / std::to_string(id_);
+  try {
+    if (!std::filesystem::create_directory(finalSavePath)) {
+      throw std::runtime_error("Unable to create save directory (" + finalSavePath.string() + ")");
+    }
+    std::filesystem::rename(run_root_path_ / "output", finalSavePath / "output");
+    std::filesystem::rename(run_root_path_ / ".output", finalSavePath / "logs");
+  } catch(std::runtime_error const& e) {
+    std::cerr << "Error while moving resultats from running to save storage\n" <<
+        "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;
+    return;
+  } catch(...) {
+    std::cerr << "Unknown Error while moving resultats from running to save storage\n" <<
+        "All keep in " << run_root_path_ << std::endl;
+    return;
   }
-  for(std::filesystem::path const& path: { functions_path_, files_path_ }) {
+
+  try {
+    if (!symbolic_final_storage_path_.empty()) {
+      std::unordered_map<std::string, std::string>  variables = 
+          ReadGlobalParameters(run_root_path_ / "global_params.txt");
+
+      std::filesystem::path finalStoragePath = ResolveVariables(symbolic_final_storage_path_, variables);
+      if (!finalStoragePath.empty()) {
+        if (!std::filesystem::create_directories(finalStoragePath)) {
+          throw std::runtime_error(
+              "Unable to create user save directory (" + finalStoragePath.string() + ")");
+        }
+        std::filesystem::copy(finalSavePath / "logs", finalStoragePath / "process_logs");
+        std::filesystem::copy(finalSavePath / "output", finalStoragePath);
+      }
+    }
+  } catch(std::runtime_error const& e) {
+    std::cerr << "Error while moving resultats from save to user save storage\n" <<
+        "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;
+  } catch(...) {
+    std::cerr << "Unknown Error while moving resultats from save to user save storage\n" <<
+        "All keep in " << run_root_path_ << std::endl;
+  }
+
+  for(std::filesystem::path const& path: 
+      { run_root_path_, functions_path_, files_path_ }) {
   std::error_code ec;
     if (std::filesystem::remove_all(path, ec) == -1) {
       std::cerr << "Error while removing " << path << "\n" << 

@@ -10,6 +10,7 @@
 namespace ns_Schedule {
 
 struct Config {
+  std::filesystem::path runPath_;
   std::filesystem::path exportPath_;
   std::filesystem::path userPath_;
   std::unordered_map<std::string, ns_Executor::Config*> executors_;

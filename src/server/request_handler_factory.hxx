@@ -28,14 +28,16 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest& request) {
 
   RequestHandler* requestHandler = nullptr;
-  if (request.getURI() == "/task_new") {
+  if (request.getURI() == "/api/task_new") {
     requestHandler = new RequestHandlerTaskNew;
-  } else if (request.getURI() == "/tasks_running") {
+  } else if (request.getURI() == "/api/tasks_running") {
     requestHandler = new RequestHandlerTasksRunning;
-  } else if (request.getURI() == "/cache_put") {
+  } else if (request.getURI() == "/api/cache_put") {
     requestHandler = new RequestHandlerCachePut;
-  } else if (request.getURI() == "/cache_get") {
+  } else if (request.getURI() == "/api/cache_get") {
     requestHandler = new RequestHandlerCacheGet;
+  } else if (request.getURI() == "/api/task_outputs") {
+    requestHandler = new RequestHandlerTaskOutputs;
   }
   if (requestHandler != nullptr) {
     requestHandler->Configure(config_, apis_);
