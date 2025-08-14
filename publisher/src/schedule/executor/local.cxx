@@ -96,14 +96,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   localData->artefacts_path_ = localData->run_path_ / ".artefacts";
 
   if (step.IsFirstStepOfTask()) {
-    CreateRunFolders(step.task_, localTaskData);
-
-    std::ofstream taskenv = std::ofstream(localTaskData->env_path_
-        , std::ios::trunc);
-    for(auto const& arg: step.task_->args_) {
-      taskenv << arg.first << "=\"" << arg.second << "\" ";
-    }
-    taskenv.close();
+    CreateRunFolders(localTaskData);
   }
 
   std::error_code ec;
@@ -329,16 +322,10 @@ inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
   nbCoresFree_ += cores.size();
 }
 
-void ns_Executor::Local::CreateRunFolders(ns_Schedule::Task const* task, 
-    LocalTaskData const* localTaskData) {
+void ns_Executor::Local::CreateRunFolders(LocalTaskData const* localTaskData) {
   std::error_code ec;
 
-  std::filesystem::path outputPathArtefacts = localTaskData->output_path_ / "artefacts";
-  for(std::filesystem::path path : { 
-      task->run_root_path_, localTaskData->log_path_, 
-      localTaskData->common_path_, localTaskData->output_path_,
-      outputPathArtefacts
-  }) {
+  for(std::filesystem::path path : { localTaskData->common_path_ }) {
     if (!std::filesystem::create_directories(path, ec)) {
       throw std::runtime_error(
           "create dir " + path.string() + std::string(" failed: errno=") + 
@@ -346,7 +333,7 @@ void ns_Executor::Local::CreateRunFolders(ns_Schedule::Task const* task,
       );
     }
   }
-  std::filesystem::create_symlink(outputPathArtefacts, localTaskData->common_path_ / "artefacts", ec);
+  std::filesystem::create_symlink(localTaskData->output_path_ / "artefacts", localTaskData->common_path_ / "artefacts", ec);
   if (ec) {
     throw std::runtime_error(
           "create symlink to " + (localTaskData->common_path_ / "artefacts").string() + 
@@ -430,7 +417,10 @@ void ns_Executor::Local::SaveArtefacts(std::filesystem::path const& artefactsJSO
       std::filesystem::create_directories(destDir);
 
       try {
-          std::filesystem::copy(srcPath, destPath);
+          std::filesystem::copy_options copyOptions = 
+              std::filesystem::copy_options::update_existing |
+              std::filesystem::copy_options::recursive;
+          std::filesystem::copy(srcPath, destPath, copyOptions);
           std::cout << "Saved artefact to: " << destPath << std::endl;
       } catch (const std::exception& ex) {
         std::cerr << "Failed to move artefact: " << srcPath << " -> " << destPath

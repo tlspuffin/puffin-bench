@@ -38,6 +38,7 @@ public:
   void MarkDone(uint8_t exit_code);
   void KillAndMarkTimedout();
 
+  bool PrepareToRun();
   bool TaskDone();
   void Execute();
   void Shutdown();
@@ -137,6 +138,13 @@ inline void Step::KillAndMarkTimedout() {
   state_ = State::TimedOut;
   time_points_[1] = std::chrono::steady_clock::now();
   exit_code_ = exitCode_Timedout_;
+}
+
+inline bool Step::PrepareToRun() {
+  if (IsFirstStepOfTask()) {
+    return task_->PrepareToRun();
+  }
+  return true;
 }
 
 inline void Step::Execute() {

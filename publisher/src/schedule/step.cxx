@@ -45,6 +45,10 @@ void ns_Schedule::Step::CopyParameters(Step const& step) {
 }
 
 void ns_Schedule::Step::ReadFromTaskJSON(rapidjson::Value const& entry) {
+  if (entry.HasMember("id") && entry["id"].IsString())
+    id_ = entry["id"].GetString();
+  else
+    id_ = ".";
   if (entry.HasMember("executor") && entry["executor"].IsString())
     executor_name_ = entry["executor"].GetString();
   if (entry.HasMember("args") && entry["args"].IsString())
