@@ -10,12 +10,12 @@ ns_Schedule::Task::Task(uint64_t id,
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& runRootPath, 
     std::unordered_map<std::string, std::string>& args, 
-    rapidjson::Value const* publisherConfiguration, 
+    rapidjson::Value const* publishConfiguration, 
     rapidjson::Value const* configurations)
     : id_(id), files_path_(inDataPath), 
     functions_path_(functionsFile),
     run_root_path_(runRootPath), args_(args), 
-    publisher_(*publisherConfiguration), 
+    publish_(*publishConfiguration), 
     logs_path_(run_root_path_ / ".output"), 
     env_path_(run_root_path_ / ".taskenv"), 
     outputs_path_(run_root_path_ / "output")
@@ -83,7 +83,7 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
       variables.emplace(key, value);
     }
     variables.emplace("task_id", std::to_string(id_));
-    publisher_.Publish(finalSavePath / "logs", finalSavePath / "output" / "artefacts", variables);
+    publish_.PublishResults(finalSavePath / "logs", finalSavePath / "output" / "artefacts", variables);
   } catch(std::runtime_error const& e) {
     std::cerr << "Error while moving resultats from save to user save storage\n" <<
         "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;

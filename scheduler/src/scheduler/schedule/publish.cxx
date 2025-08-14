@@ -1,4 +1,4 @@
-#include "publisher.hxx"
+#include "publish.hxx"
 #include "../utils/rapidjson.hxx"
 #include <memory>
 #include <iostream>
@@ -8,16 +8,16 @@
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Net/HTTPResponse.h>
 
-ns_Schedule::Publisher::Publisher() 
+ns_Schedule::Publish::Publish() 
     : server_(), storage_(), checkServerCertificat_(false) {
 }
 
-ns_Schedule::Publisher::Publisher(rapidjson::Value const& config) 
-    : Publisher() {
+ns_Schedule::Publish::Publish(rapidjson::Value const& config) 
+    : Publish() {
   ReadJSON(config);
 }
 
-void ns_Schedule::Publisher::ReadJSON(rapidjson::Value const& config) {
+void ns_Schedule::Publish::ReadJSON(rapidjson::Value const& config) {
   server_ = GetOrDefault<std::string>(config, "server", "");
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
@@ -25,7 +25,7 @@ void ns_Schedule::Publisher::ReadJSON(rapidjson::Value const& config) {
       GetOrDefault<std::string>(config, "storage_path", ""));
 }
 
-void ns_Schedule::Publisher::Publish(std::filesystem::path const& inLogs, 
+void ns_Schedule::Publish::PublishResults(std::filesystem::path const& inLogs, 
     std::filesystem::path const& inArtefacts, 
     std::unordered_map<std::string, std::string> const& taskVariables) {
   if (storage_.empty()) {
@@ -52,7 +52,7 @@ void ns_Schedule::Publisher::Publish(std::filesystem::path const& inLogs,
   PublishToServer(finalStoragePath);
 }
 
-std::string ns_Schedule::Publisher::ResolveVariables(
+std::string ns_Schedule::Publish::ResolveVariables(
     std::string const& pattern, 
     std::unordered_map<std::string, std::string> const& taskVariables) {
   std::unordered_map<std::string, std::string> variables = taskVariables;
@@ -77,7 +77,7 @@ std::string ns_Schedule::Publisher::ResolveVariables(
   return result;
 }
 
-void ns_Schedule::Publisher::PublishToServer(std::filesystem::path const& archivePath) {
+void ns_Schedule::Publish::PublishToServer(std::filesystem::path const& archivePath) {
   try {
     Poco::URI uri(server_);
     std::unique_ptr<Poco::Net::HTTPClientSession> session;

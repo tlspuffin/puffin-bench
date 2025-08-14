@@ -1,7 +1,7 @@
 #pragma once
 
 #include "step_configurations.hxx"
-#include "publisher.hxx"
+#include "publish.hxx"
 #include <cstdint>
 #include <iostream>
 #include <list>
@@ -26,7 +26,7 @@ public:
   std::filesystem::path functions_path_;
   std::filesystem::path run_root_path_;
   std::unordered_map<std::string, std::string> args_;
-  Publisher publisher_;
+  Publish publish_;
 
   std::filesystem::path logs_path_;
   std::filesystem::path env_path_;
@@ -46,7 +46,7 @@ public:
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& runRootPath, 
     std::unordered_map<std::string, std::string>& args, 
-    rapidjson::Value const* publisherConfiguration, 
+    rapidjson::Value const* publishConfiguration, 
     rapidjson::Value const* configurations);
   ~Task();
 
