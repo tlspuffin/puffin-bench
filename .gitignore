@@ -13,6 +13,7 @@ wheels/
 
 /.quarto/
 
+CMakeLists.conf
 .vscode/
 build/
 src/schedule/executor/embeded/

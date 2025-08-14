@@ -70,6 +70,11 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   task->run_root_path_ = config_.runPath_ / std::to_string(task->id_);
   task->files_path_ = inDataPath;
   task->functions_path_ = functionsFile;
+
+  task->logs_path_ = task->run_root_path_ / ".output";
+  task->env_path_ = task->run_root_path_ / ".taskenv";
+  task->outputs_path_ = task->run_root_path_ / "output";
+
   task->root_steps_ = CreateStepsFromJson(rootJSON, task, schedule);
 
   {

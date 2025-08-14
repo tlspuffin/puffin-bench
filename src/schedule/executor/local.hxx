@@ -55,7 +55,7 @@ private:
 
   std::vector<uint64_t> AssignCores(uint64_t nbCores);
   void ReleaseCores(std::vector<uint64_t>& cores);
-  void CreateRunFolders(ns_Schedule::Task const* task, LocalTaskData const* localTaskData);
+  void CreateRunFolders(LocalTaskData const* localTaskData);
   static bool PinCoresToProcess(std::vector<uint64_t> const& cores_);
   static void SaveArtefacts(std::filesystem::path const& artefactsJSON, 
       std::filesystem::path const& outputPath, std::string const& id);

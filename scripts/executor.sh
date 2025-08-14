@@ -114,12 +114,12 @@ SID=$1
 shift
 
 if [ -z "$1" ]; then
-  echo "Missing id"
+  echo "Missing step name"
   exit 1
 fi
-STEP_ID=$1
-if [ "${STEP_ID}" = "." ]; then
-  STEP_ID=
+STEP_NAME=$1
+if [ "${STEP_NAME}" = "." ]; then
+  STEP_NAME=
 fi
 shift
 

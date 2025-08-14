@@ -191,6 +191,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     lockThread_.unlock();
 
     for(ns_Schedule::Step* step : toRun) {
+      step->PrepareToRun();
       step->Execute();
       std::cerr << "Execute step: " << step->ID() << std::endl;
     }
@@ -227,6 +228,9 @@ void ns_Schedule::Schedule::ScheduleLoop() {
           step_delayed_delete.push_back(step);
         } else {
           std::cerr << "Remove step: " << step->ID() << std::endl;
+
+          AppendStepToFinishLog(step->task_->steps_file_, *step);
+
           AppendStepToFinishLog(stepsDoneFile, *step);
           ManageEndOfStep(running, step);
           updateStatus = true;

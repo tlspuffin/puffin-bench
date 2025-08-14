@@ -35,6 +35,9 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
   userPath_  = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(*scheduleConfig, "userPath", defaultConfig.userPath_))
       .string();
+  runPath_  = std::filesystem::weakly_canonical(
+      GetOrDefault<std::string>(*scheduleConfig, "runPath", defaultConfig.runPath_))
+      .string();
   exportPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(*scheduleConfig, "exportPath", defaultConfig.exportPath_))
       .string();
@@ -58,7 +61,8 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
 }
 
 void ns_Schedule::Config::Validate() const {
-  auto discard = std::filesystem::canonical(userPath_);
+  auto discard = std::filesystem::canonical(runPath_);
+  discard = std::filesystem::canonical(userPath_);
   discard = std::filesystem::canonical(exportPath_);
   for (auto const& [name, executorConfig] : executors_) {
     executorConfig->Validate();
