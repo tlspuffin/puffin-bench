@@ -1,3 +1,4 @@
+from __future__ import annotations
 import subprocess
 from dataset_cache import DatasetCache
 from pathlib import Path

@@ -141,6 +141,13 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       exit(-1);
     }
 
+    std::ofstream stepParameters = std::ofstream(
+        "./.parameters", std::ios::trunc);
+    for(auto const& [ key, value ]: step.args_) {
+      stepParameters << key << "=\"" << value << "\" ";
+    }
+    stepParameters.close();
+
     std::vector<char*> arg_strings;
     arg_strings.push_back(strdup("task"));
     arg_strings.push_back(strdup(step.task_->functions_path_.c_str()));
@@ -161,12 +168,9 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     cores.pop_back();
     arg_strings.push_back(strdup(cores.c_str()));
     arg_strings.push_back(strdup(step.function_.c_str()));
+    arg_strings.push_back(strdup("./.parameters"));
     arg_strings.push_back(strdup("---"));
-    std::istringstream iss(step.args_);
-    std::string token;
-    while (iss >> token) {
-      arg_strings.push_back(strdup(token.c_str()));
-    }
+
     arg_strings.push_back(nullptr);
     std::filesystem::path script = config_.scriptPath_ / "executor.sh";
 
@@ -263,8 +267,8 @@ std::string ns_Executor::Local::GetRunningOutput(std::filesystem::path const& ru
     std::string const& type, std::string const& taskID, 
     std::string const& stepID, std::string const& rankID, 
     std::string const& attemptID, size_t readSize, 
-    ssize_t readOffset, int& state) const {
-  state = 0;
+    ssize_t readOffset, enum ns_Schedule::OutputState& state) const {
+  state = ns_Schedule::OutputState::UNKNOWN;
   std::filesystem::path outputPath = runPath;
   outputPath = outputPath / ".output";
   std::string prefix = "stdout";
@@ -289,7 +293,8 @@ std::string ns_Executor::Local::GetRunningOutput(std::filesystem::path const& ru
   buffer.resize(readSize);
   ifs.read(&buffer[0], readSize);
   buffer.resize(ifs.gcount());
-  state = buffer.size() == readSize ? 1 : 3; 
+  state = buffer.size() == readSize ? 
+      ns_Schedule::OutputState::GOT_DATA : ns_Schedule::OutputState::POSSIBLE_MORE_DATA; 
   return buffer;
 }
 

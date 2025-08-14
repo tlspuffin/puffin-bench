@@ -2,6 +2,7 @@
 
 #include "task.hxx"
 #include "executor/executor.hxx"
+#include "step_configurations.hxx"
 #include <cstdint>
 #include <string>
 #include <list>
@@ -24,7 +25,10 @@ public:
 
   void CopyParameters(Step const& step);
 
-  void ReadFromTaskJSON(rapidjson::Value const& entry);
+  void ReadFromTaskJSON(
+      StepConfigurations const& configurations, 
+      std::vector<rapidjson::Value const*> configurationStack, 
+      rapidjson::Value const* configuration);
 
   uint64_t TaskID() const;
 
@@ -62,7 +66,7 @@ public:
   ns_Executor::Executor* executor_;
   ns_Executor::ExecutorData* executor_data_;
   std::string function_;
-  std::string args_;
+  std::unordered_map<std::string, std::string> args_;
   uint32_t nb_cores_;
   uint32_t nb_retry_;
   uint64_t timeout_;

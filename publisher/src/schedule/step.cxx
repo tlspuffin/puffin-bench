@@ -5,17 +5,6 @@ uint16_t const ns_Schedule::Step::exitCode_Timedout_ = 0x0200;
 uint16_t const ns_Schedule::Step::exitCode_StepLaunchError_ = 0x0400;
 std::atomic<uint64_t> ns_Schedule::Step::next_uuid_ = 0;
 
-static uint64_t parseTimeout(const std::string& str) {
-    if (str.empty()) return 0;
-    char unit = str.back();
-    int value = std::stoi(str.substr(0, str.size() - 1));
-    if (unit == 'd') return value * 60 * 60 * 24;
-    if (unit == 'h') return value * 60 * 60;
-    if (unit == 'm') return value * 60;
-    if (unit == 's') return value;
-    return value;
-}
-
 ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name) 
     : task_(task), name_(name), uuid_(++next_uuid_), step_id_(0), 
       rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
@@ -44,21 +33,34 @@ void ns_Schedule::Step::CopyParameters(Step const& step) {
   timeout_ = step.timeout_;
 }
 
-void ns_Schedule::Step::ReadFromTaskJSON(rapidjson::Value const& entry) {
-  if (entry.HasMember("id") && entry["id"].IsString())
-    id_ = entry["id"].GetString();
-  else
-    id_ = ".";
-  if (entry.HasMember("executor") && entry["executor"].IsString())
-    executor_name_ = entry["executor"].GetString();
-  if (entry.HasMember("args") && entry["args"].IsString())
-    args_ = entry["args"].GetString();
-  if (entry.HasMember("nbcores") && entry["nbcores"].IsInt())
-    nb_cores_ = static_cast<uint32_t>(entry["nbcores"].GetInt());
-  if (entry.HasMember("retry") && entry["retry"].IsInt())
-    nb_retry_ = static_cast<uint32_t>(entry["retry"].GetInt());
-  if (entry.HasMember("maxtime") && entry["maxtime"].IsString())
-    timeout_ = parseTimeout(entry["maxtime"].GetString());
+void ns_Schedule::Step::ReadFromTaskJSON(
+    StepConfigurations const& configurations, 
+    std::vector<rapidjson::Value const*> configurationStack, 
+    rapidjson::Value const* configuration) {
+  StepConfigurations::Configuration stepConfiguration;
+  if (configuration->IsString()) {
+    stepConfiguration = configurations.MakeWithOverrides(
+        configuration->GetString(), configurationStack);
+  } else if (configuration->IsObject()) {
+    if ((configuration->HasMember("configuration")) && ((*configuration)["configuration"].IsString()) && 
+        (configuration->HasMember("override")) && ((*configuration)["override"].IsObject())) {
+      configurationStack.push_back(&((*configuration)["override"]));
+      stepConfiguration = configurations.MakeWithOverrides(
+          (*configuration)["configuration"].GetString(), configurationStack);
+    } else {
+      configurationStack.push_back(configuration);
+      stepConfiguration = configurations.MakeWithOverrides("", configurationStack);
+    }
+  } else {
+    throw std::runtime_error("step configuration not have expected format");
+  }
+ 
+  id_ = stepConfiguration.id_;
+  executor_name_ = stepConfiguration.executor_name_;
+  nb_cores_ = stepConfiguration.nb_cores_;
+  nb_retry_ = stepConfiguration.nb_retry_;
+  timeout_ = stepConfiguration.timeout_;
+  args_= stepConfiguration.args_;
 }
 
 bool ns_Schedule::Step::TaskDone() {
@@ -87,7 +89,15 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("run_id", run_id_, alloc);
   out.AddMember("executor_name", rapidjson::Value(executor_name_.c_str(), alloc), alloc);
   out.AddMember("function", rapidjson::Value(function_.c_str(), alloc), alloc);
-  out.AddMember("args", rapidjson::Value(args_.c_str(), alloc), alloc);
+
+  rapidjson::Value argsObj(rapidjson::kObjectType);
+  for (const auto& [ key, value ] : args_) {
+    rapidjson::Value keyJSON(key.c_str(), alloc);
+    rapidjson::Value valJSON(value.c_str(), alloc);
+    argsObj.AddMember(keyJSON, valJSON, alloc);
+  }
+  out.AddMember(rapidjson::StringRef("args"), argsObj, alloc);
+
   out.AddMember("nb_cores", nb_cores_, alloc);
   out.AddMember("nb_retry", nb_retry_, alloc);
   out.AddMember("timeout", timeout_, alloc);

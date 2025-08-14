@@ -22,7 +22,7 @@ endif()
 
 
 EmbedTextFile("scripts/executor.sh" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded//executor_sh.h" Executor_Script)
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded/executor_sh.h" Executor_Script)
 EmbedTextFile("scripts/get_file.sh" 
   "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded/get_file_sh.h" GetFile_Script)
 
@@ -30,7 +30,7 @@ set(SRV_SRC
   src/main.cxx src/config.cxx 
   src/server/config.cxx src/server/server.cxx src/server/parts_handler.cxx src/server/request_handler.cxx 
   src/schedule/config.cxx src/schedule/schedule.cxx src/schedule/task.cxx src/schedule/step.cxx 
-  src/schedule/tasksmanager.cxx 
+  src/schedule/tasksmanager.cxx src/schedule/step_configurations.cxx src/schedule/publisher.cxx
   src/schedule/executor/config.cxx src/schedule/executor/executor.cxx src/schedule/executor/local.cxx 
   src/schedule/executor/linux_cores.cxx
   src/api/schedule_api.cxx

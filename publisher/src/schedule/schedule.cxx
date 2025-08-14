@@ -124,8 +124,8 @@ std::string ns_Schedule::Schedule::GetOutput(std::string const& executorName,
     std::string const& type, std::string const& taskID, 
     std::string const& stepID, std::string const& rankID, 
     std::string const& attemptID, size_t readSize, 
-    ssize_t readOffset, int& state) const {
-  state = 0;
+    ssize_t readOffset, OutputState& state) const {
+  state = OutputState::UNKNOWN;
   ns_Executor::Executor const* executor = GetExecutor(executorName);
   if (executor == nullptr) {
     return "";
@@ -162,7 +162,7 @@ std::string ns_Schedule::Schedule::GetOutput(std::string const& executorName,
   buffer.resize(readSize);
   ifs.read(&buffer[0], readSize);
   buffer.resize(ifs.gcount());
-  state = buffer.size() == readSize ? 1 : 2; 
+  state = buffer.size() == readSize ? OutputState::GOT_DATA : OutputState::END_OF_DATA; 
   return buffer;
 }
 
