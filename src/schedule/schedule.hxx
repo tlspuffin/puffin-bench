@@ -3,6 +3,7 @@
 #include "config.hxx"
 #include "step.hxx"
 #include "tasksmanager.hxx"
+#include "output_state.hxx"
 #include "executor/executor.hxx"
 #include <vector>
 #include <list>
@@ -27,7 +28,7 @@ public:
       std::string const& type, std::string const& taskID, 
       std::string const& stepID, std::string const& rankID, 
       std::string const& attemptID, size_t readSize, 
-      ssize_t readOffset, int& state) const;
+      ssize_t readOffset, OutputState& state) const;
 
 private:
   void ScheduleLoop();

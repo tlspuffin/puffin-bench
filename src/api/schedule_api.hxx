@@ -21,7 +21,7 @@ public:
   std::string GetOutput(std::string const& executorName, 
       std::string const& type, std::string const& taskID, std::string const& stepID,
       std::string const& rankID, std::string const& attemptID, size_t readSize, 
-      ssize_t readOffset, int& state);
+      ssize_t readOffset, ns_Schedule::OutputState& state);
 
 private:
   ns_Schedule::Config const& config_;

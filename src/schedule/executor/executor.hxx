@@ -2,6 +2,7 @@
 
 #include "config.hxx"
 #include "../task.hxx"
+#include "../output_state.hxx"
 #include <string>
 #include <list>
 #include <unordered_map>
@@ -48,7 +49,7 @@ public:
       std::string const& type, std::string const& taskID, 
       std::string const& stepID, std::string const& rankID, 
       std::string const& attemptID, size_t readSize, ssize_t readOffset, 
-      int& state) const = 0;
+      enum ns_Schedule::OutputState& state) const = 0;
 
 protected:
   Executor(std::string const& name);

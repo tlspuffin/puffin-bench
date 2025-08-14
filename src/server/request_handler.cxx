@@ -142,7 +142,7 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
   try {
     ssize_t readoffset = std::stoll(readoffsetStr);
     size_t readsize = std::stoull(readsizeStr);
-    int state = 0;
+    ns_Schedule::OutputState state;
     std::string output = apis_->scheduleAPI_.GetOutput(
         executor, type, taskid, stepid, rankid, attemptid, readsize, readoffset, state);
     if (state == 0) {
