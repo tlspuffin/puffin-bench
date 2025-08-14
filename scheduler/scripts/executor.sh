@@ -152,6 +152,13 @@ fi
 COMMAND=$1
 shift
 
+if [ -z "$1" ]; then
+  echo "Missing parameters data"
+  exit 1
+fi
+PARAMETERSFILE=$1
+shift
+
 if [[ "$1" != "---" ]]; then
   echo "Missing end of executor parameter: $1"
   exit 1
@@ -169,6 +176,11 @@ GLBPARMS=$( cat ${ENVFILE} )
 echo "task env: $( cat ${ENVFILE})"
 eval ${GLBPARMS}
 echo "In: ${GLBPARMS}"
+
+RUNPARMS=$( cat ${PARAMETERSFILE} )
+echo "step run params: $( cat ${PARAMETERSFILE})"
+eval ${RUNPARMS}
+echo "Params: ${RUNPARMS}"
 
 pushd . >/dev/null
 ${COMMAND} "$@"

@@ -44,7 +44,7 @@ public:
       std::string const& type, std::string const& taskID, 
       std::string const& stepID, std::string const& rankID, 
       std::string const& attemptID, size_t readSize, ssize_t readOffset, 
-      int& state) const;
+      enum ns_Schedule::OutputState& state) const;
 
 private:
   ns_Executor::LocalConfig const& config_;

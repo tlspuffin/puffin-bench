@@ -55,26 +55,21 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
     ofs.close();
   }
 
-  std::string symbolicFinalStoragePath;
-  if (rootJSON.HasMember("final_storage_path")) {
-    if (!rootJSON["final_storage_path"].IsString()) {
-      throw std::runtime_error("Invalid 'final_storage_path' in JSON");
+  rapidjson::Value const* publisherConfiguration = nullptr;
+  if (rootJSON.HasMember("publish")) {
+    if (!rootJSON["publish"].IsObject()) {
+      throw std::runtime_error("Invalid 'publish' in JSON");
     }
-    symbolicFinalStoragePath = rootJSON["final_storage_path"].GetString();
+    publisherConfiguration = &rootJSON["publish"];
   }
-
-  ns_Schedule::Task* task = new ns_Schedule::Task();
-  task->id_ = task_id;
-  task->args_ = args;
-  task->symbolic_final_storage_path_ = symbolicFinalStoragePath;
-  task->run_root_path_ = config_.runPath_ / std::to_string(task->id_);
-  task->files_path_ = inDataPath;
-  task->functions_path_ = functionsFile;
-
-  task->logs_path_ = task->run_root_path_ / ".output";
-  task->env_path_ = task->run_root_path_ / ".taskenv";
-  task->outputs_path_ = task->run_root_path_ / "output";
-
+  rapidjson::Value const* configurations = nullptr;
+  if (rootJSON.HasMember("configurations") && 
+      (rootJSON["configurations"].IsObject())) {
+    configurations = &rootJSON["configurations"];
+  }
+  ns_Schedule::Task* task = new ns_Schedule::Task(task_id, inDataPath, 
+      functionsFile, config_.runPath_ / std::to_string(task_id), 
+      args, publisherConfiguration, configurations);
   task->root_steps_ = CreateStepsFromJson(rootJSON, task, schedule);
 
   {
@@ -211,6 +206,8 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
     throw std::runtime_error("Invalid or missing 'flow' in JSON");
   }
 
+  rapidjson::Value runEmptyConfiguration(rapidjson::kObjectType);
+
   uint64_t step_id = 0;
 
   const rapidjson::Value& flow = root["flow"];
@@ -223,11 +220,19 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
       continue;
     }
 
-    const std::string& step_name = stepJSON["step"].GetString();
     current_stack.clear();
 
+    const std::string& step_name = stepJSON["step"].GetString();
+
+    std::vector<rapidjson::Value const*> configurationsStack;
+    if (stepJSON.HasMember("configuration")) {
+      configurationsStack.push_back(&stepJSON["configuration"]);
+    }
+
     ns_Schedule::Step* step = new ns_Schedule::Step(task, step_name);
-    step->ReadFromTaskJSON(stepJSON);
+    rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
+    step->ReadFromTaskJSON(task->configurations_, configurationsStack, runConfiguration);
+    configurationsStack.push_back(runConfiguration);
 
     if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
       const rapidjson::Value& run_array = stepJSON["run"];
@@ -242,7 +247,9 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
           step = step->next_;
           step->CopyParameters(*(step->previous_));
         }
-        step->ReadFromTaskJSON(run);
+
+        step->ReadFromTaskJSON(task->configurations_, configurationsStack, &run);
+
         std::list<ns_Schedule::Step*> attempts = ConfigureStep(
             step, step_id, j, run_id, parent_stack, schedule);
         current_stack.insert(current_stack.end(), attempts.begin(), attempts.end());

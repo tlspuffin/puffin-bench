@@ -1,0 +1,57 @@
+const Config = {
+  API_BASE_URL: 'http://localhost:8080/api',
+  API_ENDPOINTS: {
+    TASK_NEW: '/task_new',
+    TASKS_RUNNING: '/tasks_running',
+    TASK_OUTPUTS: '/task_outputs',
+    CACHE_PUT: '/cache_put',
+    CACHE_GET: '/cache_get'
+  },
+  
+  POLL_INTERVAL_RUNNING: 5000,
+  POLL_INTERVAL_COMPLETED: 30000,
+  
+  MAX_TOAST_DURATION: 5000,
+  MAX_FILE_SIZE: 10 * 1024 * 1024,
+  OUTPUT_CHUNK_SIZE: 1024 * 64,
+  
+  STATUS_LABELS: {
+    'QUEUED': 'En attente',
+    'RUNNING': 'En cours',
+    'COMPLETED': 'Terminé',
+    'SUCCESS': 'Succès',
+    'FAILED': 'Échec',
+    'CANCELLED': 'Annulé',
+    'TIMEOUT': 'Timeout',
+    'Pending': 'En attente',
+    'Running': 'En cours',
+    'Success': 'Succès',
+    'Error': 'Erreur',
+    'Fatal': 'Fatal',
+    'Timeout': 'Timeout'
+  },
+  
+  STATUS_ICONS: {
+    'QUEUED': '⏳',
+    'RUNNING': '▶️',
+    'COMPLETED': '✅',
+    'SUCCESS': '✅',
+    'FAILED': '❌',
+    'CANCELLED': '⚠️',
+    'TIMEOUT': '⏱️',
+    'Pending': '⏳',
+    'Running': '▶️',
+    'Success': '✅',
+    'Error': '❌',
+    'Fatal': '💀',
+    'Timeout': '⏱️'
+  },
+  
+  DATE_FORMAT: {
+    locale: 'fr-FR',
+    options: {
+      dateStyle: 'short',
+      timeStyle: 'medium'
+    }
+  }
+};
