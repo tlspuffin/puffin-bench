@@ -6,13 +6,13 @@
 
 namespace ns_Schedule {
 
-class Publisher {
+class Publish {
 public:
-  Publisher();
-  Publisher(rapidjson::Value const& config);
+  Publish();
+  Publish(rapidjson::Value const& config);
 
   void ReadJSON(rapidjson::Value const& config);
-  void Publish(std::filesystem::path const& inLogs, 
+  void PublishResults(std::filesystem::path const& inLogs, 
       std::filesystem::path const& inArtefacts, 
       std::unordered_map<std::string, std::string> const& taskVariables);
 
