@@ -22,19 +22,19 @@ endif()
 
 
 EmbedTextFile("scripts/executor.sh" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded/executor_sh.h" Executor_Script)
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/scheduler/schedule/executor/embeded/executor_sh.h" Executor_Script)
 EmbedTextFile("scripts/get_file.sh" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/schedule/executor/embeded/get_file_sh.h" GetFile_Script)
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/scheduler/schedule/executor/embeded/get_file_sh.h" GetFile_Script)
 
 set(SRV_SRC 
-  src/main.cxx src/config.cxx 
-  src/server/config.cxx src/server/server.cxx src/server/parts_handler.cxx src/server/request_handler.cxx 
-  src/schedule/config.cxx src/schedule/schedule.cxx src/schedule/task.cxx src/schedule/step.cxx 
-  src/schedule/tasksmanager.cxx src/schedule/step_configurations.cxx src/schedule/publisher.cxx
-  src/schedule/executor/config.cxx src/schedule/executor/executor.cxx src/schedule/executor/local.cxx 
-  src/schedule/executor/linux_cores.cxx
-  src/api/schedule_api.cxx
-  src/cache/config.cxx src/cache/cache.cxx
+  src/scheduler/main.cxx src/scheduler/config.cxx 
+  src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
+  src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
+  src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
+  src/scheduler/schedule/executor/config.cxx src/scheduler/schedule/executor/executor.cxx src/scheduler/schedule/executor/local.cxx 
+  src/scheduler/schedule/executor/linux_cores.cxx
+  src/scheduler/api/schedule_api.cxx
+  src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
 )
 
 add_executable(srv ${SRV_SRC})
