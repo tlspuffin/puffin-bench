@@ -46,4 +46,27 @@ target_link_libraries(srv-static PRIVATE Poco)
 target_include_directories(srv-static PRIVATE ${RAPIDJSON_PATH})
 target_link_options(srv-static PRIVATE -static)
 
-add_executable(testcpu src/cpu.cxx src/schedule/executor/linux_cores.cxx)
+add_executable(testcpu src/cpu.cxx src/scheduler/schedule/executor/linux_cores.cxx)
+
+EmbedTextFile("${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/index.html" 
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/embeded/index_html.h" Publisher_Index)
+EmbedTextFile("${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/index.css" 
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/embeded/index_css.h" Publisher_CSS)
+EmbedTextFile("${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/index.js" 
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/embeded/index_js.h" Publisher_JS)
+
+set(PUBLISHER_SRC
+  src/publisher/main.cxx src/publisher/config.cxx 
+  src/publisher/server/config.cxx src/publisher/server/server.cxx 
+  src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
+  src/publisher/publish/config.cxx src/publisher/publish/publish.cxx
+)
+
+add_executable(publisher ${PUBLISHER_SRC})
+target_link_libraries(publisher PRIVATE Poco)
+target_include_directories(publisher PRIVATE ${RAPIDJSON_PATH})
+
+add_executable(publisher-static ${PUBLISHER_SRC})
+target_link_libraries(publisher-static PRIVATE Poco)
+target_include_directories(publisher-static PRIVATE ${RAPIDJSON_PATH})
+target_link_options(publisher-static PRIVATE -static)

@@ -1,4 +1,5 @@
 CMakeLists.conf
 .vscode/
 build/
-src/schedule/executor/embeded/
+src/scheduler/schedule/executor/embeded/
+src/publisher/publish/embeded/
