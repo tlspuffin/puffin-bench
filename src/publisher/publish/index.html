@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Rapports d'Expérimentation</title>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div class="header">
+    <h1>Rapports d'Expérimentation</h1>
+    <div class="filters">
+      <div class="filter-group">
+        <label>Statut:</label>
+        <select id="status-filter">
+          <option value="">Tous</option>
+          <option value="valid">Succès</option>
+          <option value="error">Erreur</option>
+          <option value="orphan">Orphelin</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Période:</label>
+        <select id="period-filter">
+          <option value="">Toutes</option>
+          <option value="24h">Dernières 24h</option>
+          <option value="7d">7 derniers jours</option>
+          <option value="30d">30 derniers jours</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <input type="text" id="search-filter" placeholder="Rechercher commit...">
+      </div>
+    </div>
+  </div>
+
+  <div class="commits-list">
