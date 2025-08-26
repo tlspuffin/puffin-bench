@@ -1,6 +1,8 @@
 #include "task.hxx"
 #include "step.hxx"
+#include "schedule.hxx"
 #include "executor/executor.hxx"
+#include "../utils/rapidjson.hxx"
 #include <unordered_set>
 #include <fstream>
 #include <regex>
@@ -14,14 +16,138 @@ ns_Schedule::Task::Task(uint64_t id,
     rapidjson::Value const* configurations)
     : id_(id), files_path_(inDataPath), 
     functions_path_(functionsFile),
-    run_root_path_(runRootPath), args_(args), 
-    publish_(*publishConfiguration), 
+    run_root_path_(runRootPath), 
     logs_path_(run_root_path_ / ".output"), 
     env_path_(run_root_path_ / ".taskenv"), 
-    outputs_path_(run_root_path_ / "output")
+    outputs_path_(run_root_path_ / "output"),
+    args_(args), configurations_(), 
+    root_steps_(), executors_(), 
+    steps_file_(), request_cancel_(false), 
+    publish_(*publishConfiguration)
 {
   if (configurations != nullptr) {
     configurations_.ReadFromTaskJSON(*configurations);
+  }
+  PrepareToRun();
+}
+
+ns_Schedule::Task::Task(rapidjson::Value const& config, 
+    ns_Schedule::Schedule const* schedule, 
+    std::list<ns_Schedule::Step*>& stepsPending, 
+    std::list<ns_Schedule::Step*>& stepsRunning, 
+    std::list<ns_Schedule::Step*>& stepsDone) {
+  if (!config.IsObject()) {
+    throw std::runtime_error("Task JSON must be an object");
+  }
+
+  id_ = Get<uint64_t>(config, "id");
+  files_path_ = GetPath(config, "files_path");
+  functions_path_ = GetPath(config, "functions_path");
+  run_root_path_ = GetPath(config, "run_root_path");
+  logs_path_ = GetPath(config, "logs_path");
+  env_path_ = GetPath(config, "env_path");
+  outputs_path_ = GetPath(config, "outputs_path");
+
+  if ((config.HasMember("args")) && (config["args"].IsArray())) {
+    rapidjson::Value const& argsArray = config["args"];
+    for (rapidjson::SizeType i = 0; i < argsArray.Size(); i++) {
+      rapidjson::Value const& argObject = argsArray[i];
+      if (!argObject.IsObject()) {
+        std::cerr << "Warning: Invalid arg object at index " << i << std::endl;
+        continue;
+      }
+      try {
+        std::string key = Get<std::string>(argObject, "key");
+        std::string value = Get<std::string>(argObject, "value");
+        if (!key.empty()) {
+          args_[key] = value;
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "Warning: Failed to parse arg at index " << i 
+            << ": " << e.what() << std::endl;
+      }
+    }
+  }
+
+  if ((config.HasMember("task_executor_data")) && (config["task_executor_data"].IsObject())) {
+    rapidjson::Value const& executorDataJson = config["task_executor_data"];
+    for (auto it = executorDataJson.MemberBegin(); it != executorDataJson.MemberEnd(); ++it) {
+      std::string executorName = it->name.GetString();
+      ns_Executor::Executor* executor = schedule->GetExecutor(executorName);
+      if ((executor == nullptr) || (executorName.compare(executor->Name()) != 0)) {
+        throw std::runtime_error("Unable to find executor: " + executorName);
+      }
+      executors_.emplace(executor, executor->CreateLocalTaskData(it->value));
+    }
+  }
+
+  std::list<ns_Schedule::Step*> loadedSteps;
+  std::unordered_map<uint64_t, ns_Schedule::Step*> loadedStepsIndex;
+  std::unordered_map<uint64_t, ns_Schedule::Step::UUIDDependencies> loadedStepsDeps;
+  if (config.HasMember("steps") && config["steps"].IsObject()) {
+    rapidjson::Value const& stepsObject = config["steps"];
+    for (auto stepIt = stepsObject.MemberBegin(); 
+        stepIt != stepsObject.MemberEnd(); ++stepIt) {
+      uint64_t stepUUID = std::stoull(stepIt->name.GetString());
+      const rapidjson::Value& stepConfig = stepIt->value;
+      ns_Schedule::Step::UUIDDependencies& dependencies = loadedStepsDeps[stepUUID];
+      ns_Schedule::Step* step = new Step(this, stepConfig, schedule, dependencies);
+      loadedSteps.push_back(step);
+      loadedStepsIndex.emplace(stepUUID, step);
+    }
+  }
+  for (ns_Schedule::Step* step: loadedSteps) {
+    uint64_t uuid = step->uuid_;
+    step->next_ = loadedStepsIndex[loadedStepsDeps[uuid].next];
+    step->previous_ = loadedStepsIndex[loadedStepsDeps[uuid].previous];
+    for(auto& stepUUID: loadedStepsDeps[uuid].depend_from) {
+      step->depend_from_.push_back(loadedStepsIndex[stepUUID]);
+    }
+    for(auto& stepUUID: loadedStepsDeps[uuid].dependencies) {
+      step->dependencies_.push_back(loadedStepsIndex[stepUUID]);
+    }
+    if (step->IsRunning()) {
+      step->executor_->CheckReloadRunning(*step);
+      if (step->IsRunning()) {
+        stepsRunning.push_back(step);
+        stepsPending.push_back(step);
+      } else if (step->IsDone()) {
+        stepsDone.push_back(step);
+        stepsPending.push_back(step);
+      }
+    }
+    if (step->IsReady()) {
+      stepsPending.push_back(step);
+    }
+  }
+
+  if (config.HasMember("root_steps") && config["root_steps"].IsArray()) {
+    const rapidjson::Value& rootStepsArray = config["root_steps"];
+    for (rapidjson::SizeType i = 0; i < rootStepsArray.Size(); i++) {
+      if (!rootStepsArray[i].IsUint64()) {
+        std::cerr << "Warning: Invalid root_step UUID at index " << i << std::endl;
+        continue;
+      }
+      uint64_t stepUUID = rootStepsArray[i].GetUint64();
+      root_steps_.push_back(loadedStepsIndex[stepUUID]);
+    }
+  }
+
+  if (root_steps_.empty()) {
+    throw std::runtime_error("Task must have at least one root step");
+  }
+
+  std::filesystem::path stepsFile = logs_path_ / ".steps.json";
+  steps_file_.open(stepsFile);
+  if (!steps_file_.is_open()) {
+    throw std::runtime_error("Unable to create file " + 
+        stepsFile.string());
+  }
+
+  request_cancel_ = Get<bool>(config, "request_cancel");
+
+  if (config.HasMember("publish")) {
+    publish_.ReadJSON(config["publish"]);
   }
 }
 
@@ -35,14 +161,13 @@ ns_Schedule::Task::~Task() {
 }
 
 bool ns_Schedule::Task::PrepareToRun() {
+  if (steps_file_.is_open()) {
+    return true;
+  }
+
   CreateRunFolders();
 
-  std::ofstream taskenv = std::ofstream(env_path_, 
-      std::ios::trunc);
-  for(auto const& arg: args_) {
-    taskenv << arg.first << "=\"" << arg.second << "\" ";
-  }
-  taskenv.close();
+  SaveGlobalParameters(args_, env_path_);
 
   std::filesystem::path stepsFile = logs_path_ / ".steps.json";
   steps_file_.open(stepsFile);
@@ -78,7 +203,7 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
 
   try {
     std::unordered_map<std::string, std::string> variables = 
-        ReadGlobalParameters(run_root_path_ / "global_params.txt");
+        LoadGlobalParameters(env_path_);
     for (const auto& [key, value] : args_) {
       variables.emplace(key, value);
     }
@@ -114,15 +239,35 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("env_path", rapidjson::Value(env_path_.c_str(), alloc), alloc);
   out.AddMember("outputs_path", rapidjson::Value(outputs_path_.c_str(), alloc), alloc);
 
-  std::unordered_set<uint64_t> uniqueStepIds;
-  for (const auto& step : root_steps_) {
-    uniqueStepIds.insert(step->step_id_);
+  out.AddMember("request_cancel", request_cancel_, alloc);
+
+  std::unordered_set<ns_Schedule::Step*> uniqueSteps;
+  for (ns_Schedule::Step* const step : root_steps_) {
+    uniqueSteps.insert(step);
   }
   rapidjson::Value rootStepsArray(rapidjson::kArrayType);
-  for (int id : uniqueStepIds) {
-    rootStepsArray.PushBack(id, alloc);
+  for (ns_Schedule::Step* const step: uniqueSteps) {
+    rootStepsArray.PushBack(step->uuid_, alloc);
   }
   out.AddMember("root_steps", rootStepsArray, alloc);
+
+  if (step == nullptr) {
+    rapidjson::Value stepsObject(rapidjson::kObjectType);
+    while (uniqueSteps.size() > 0) {
+      std::unordered_set<ns_Schedule::Step*> uniqueDependenciesSteps;
+      for (ns_Schedule::Step* const step: uniqueSteps) {
+        for(ns_Schedule::Step* dependency: step->dependencies_) {
+          uniqueDependenciesSteps.insert(dependency);
+        }
+        rapidjson::Value stepObject(rapidjson::kObjectType);
+        step->ToJSON(stepObject, alloc, false);
+        stepsObject.AddMember(
+            rapidjson::Value(std::to_string(step->uuid_).c_str(), alloc), stepObject, alloc);
+      }
+      uniqueSteps.swap(uniqueDependenciesSteps);
+    }
+    out.AddMember("steps", stepsObject, alloc);
+  }
 
   rapidjson::Value argsArray(rapidjson::kArrayType);
   for (const auto& pair : args_) {
@@ -135,13 +280,26 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   }
   out.AddMember("args", argsArray, alloc);
   if (step != nullptr) {
-    auto executorTaskData = executors_.find(step->executor_);
+    auto const& executorTaskData = executors_.find(step->executor_);
     if (executorTaskData != executors_.end()) {
       rapidjson::Value executorTaskDataJSON(rapidjson::kObjectType);
       executorTaskData->second->ToJSON(executorTaskDataJSON, alloc);
       out.AddMember("task_executor_data", executorTaskDataJSON, alloc);
     }
+  } else {
+    rapidjson::Value executorTasksDataJSON(rapidjson::kObjectType);
+    for(auto const& [executor, executorTaskData]: executors_) {
+      rapidjson::Value executorTaskDataJSON(rapidjson::kObjectType);
+      executorTaskData->ToJSON(executorTaskDataJSON, alloc);
+      executorTasksDataJSON.AddMember(
+          rapidjson::Value(executor->Name().c_str(), alloc), executorTaskDataJSON, alloc);
+    }
+    out.AddMember("task_executor_data", executorTasksDataJSON, alloc);
   }
+
+  rapidjson::Value publishObject(rapidjson::kObjectType);
+  publish_.ToJSON(publishObject, alloc);
+  out.AddMember("publish", publishObject, alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {
@@ -158,23 +316,6 @@ bool ns_Schedule::Task::CreateRunFolders() {
     }
   }
   return true;
-}
-
-std::unordered_map<std::string, std::string> 
-ns_Schedule::Task::ReadGlobalParameters(std::filesystem::path const& envFile) {
-  std::regex pairRegex(R"raw((\w+)="([^"]*)")raw");
-  std::sregex_iterator end;
-  std::unordered_map<std::string, std::string> parameters;
-  std::ifstream file(envFile);
-  std::string line;
-  while (std::getline(file, line)) {
-    std::sregex_iterator it(line.begin(), line.end(), pairRegex);
-    while (it != end) {
-        parameters.emplace((*it)[1], (*it)[2]);
-        ++it;
-    }
-  }
-  return parameters;
 }
 
 std::string ns_Schedule::Task::ResolveVariables(std::string const& pattern, 
@@ -205,4 +346,39 @@ std::string ns_Schedule::Task::ResolveVariables(std::string const& pattern,
   }
 
   return result;
+}
+
+std::unordered_map<std::string, std::string> 
+ns_Schedule::Task::LoadGlobalParameters(std::filesystem::path const& file) {
+  std::ifstream ifs(file);
+  if (!ifs.is_open()) {
+    throw std::runtime_error("[Task::LoadGlobalParameters] Unable to open paramerters file: " + 
+        file.string());
+  }
+  std::regex pairRegex(R"raw((\w+)="([^"]*)")raw");
+  std::sregex_iterator end;
+  std::unordered_map<std::string, std::string> parameters;
+  std::string line;
+  while (std::getline(ifs, line)) {
+    std::sregex_iterator it(line.begin(), line.end(), pairRegex);
+    while (it != end) {
+        parameters.emplace((*it)[1], (*it)[2]);
+        ++it;
+    }
+  }
+  return parameters;
+}
+
+void ns_Schedule::Task::SaveGlobalParameters(
+    std::unordered_map<std::string, std::string> const& parameters, 
+    std::filesystem::path const& file) {
+  std::ofstream ofs = std::ofstream(file, std::ios::trunc);
+  if (!ofs.is_open()) {
+    throw std::runtime_error("[Task::SaveGlobalParameters] Unable to open for write paramerters file: " + 
+        file.string());
+  }
+  for(auto const& parameter: parameters) {
+    ofs << parameter.first << "=\"" << parameter.second << "\" ";
+  }
+  ofs.close();
 }

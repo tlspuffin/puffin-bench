@@ -22,19 +22,24 @@ public:
   uint64_t AddTask(std::string const& tasksList, std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args);
+  bool CancelStep(uint64_t taskID, uint64_t stepUUID);
+  bool CancelTask(uint64_t taskID);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
-  std::string GetOutput(std::string const& executorName, 
+  std::string GetOutput(
       std::string const& type, std::string const& taskID, 
       std::string const& stepID, std::string const& rankID, 
       std::string const& attemptID, size_t readSize, 
-      ssize_t readOffset, OutputState& state) const;
+      ssize_t readOffset, OutputState& state);
 
 private:
   void ScheduleLoop();
   std::list<ns_Schedule::Step*> SearchTasksToRun();
-  void ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, std::list<ns_Schedule::Step*>& delayedSteps);
-  void ManageEndOfStep(std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step);
+  bool ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, 
+      std::list<ns_Schedule::Step*>& delayedSteps, 
+      std::ofstream& stepsDoneFile);
+  void ManageEndOfStep(std::list<ns_Schedule::Step*>& steps, 
+      ns_Schedule::Step* step, std::ofstream& stepsDoneFile);
   void ExportRunningSteps(std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
   static void AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step);
 
@@ -47,6 +52,8 @@ private:
   std::thread thread_;
   bool threadRunning_;
   std::list<ns_Schedule::Step*> steps_;
+  std::list<ns_Schedule::Step*> stepsRunning_;
+  std::list<ns_Schedule::Step*> stepsDone_;
   std::string defaultExecutor_;
   std::unordered_map<std::string, ns_Executor::Executor*> executors_;
 };

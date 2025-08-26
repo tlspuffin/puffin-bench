@@ -6,7 +6,7 @@
   "configurations": {
     "SDOS2": {
       "args": {
-        "features": "'wolfssl540,asan,wolfssl-disable-postauth,fix-CVE-2022-39173'",
+        "features": "'wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173'",
         "extra_flags": "'--put-use-clear'"
       }
     },
@@ -15,10 +15,29 @@
         "features": "'openssl111j'"
       }
     },
+    "SIG": {
+      "args": {
+        "features": "'wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173'"
+      }
+    },
     "HEAP": {
       "args": {
-        "features": "'wolfssl540,asan,fix-CVE-2022-39173'",
-        "extra_flags": "'--put-use-clear'"
+        "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
+      }
+    },
+    "CDOS": {
+      "args": {
+        "features": "'wolfssl530,fix-CVE-2022-39173'"
+      }
+    },
+    "SKIP": {
+      "args": {
+        "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"
+      }
+    },
+    "BUF": {
+      "args": {
+        "features": "'wolfssl540,fix-CVE-2022-42905'"
       }
     }
   },
@@ -45,7 +64,7 @@
       "configuration": {
         "nb_cores": 1,
         "timeout": "1m",
-        "nb_retry": 1
+        "nb_retry": 2
       }
     },
     {

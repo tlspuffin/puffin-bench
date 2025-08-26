@@ -4,18 +4,19 @@
     "key": "../security/site.key",
     "cert": "../security/site.pem",
     "CA": "../security/CA.pem",
-    "port": 8080
+    "port": 8080, 
+    "html": "../html"
   },
   "schedule": {
     "executors": {
       "local": {
         "name": "local",
         "type": 1,
-        "nbCores": 4,
+        "nbCores": 1,
         "excludeCores": [
           0
         ],
-        "scriptPath": "../scripts",
+        "scriptPath": "../scripts"
       }
     },
     "runPath": "../runs",

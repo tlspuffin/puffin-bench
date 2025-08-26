@@ -23,8 +23,15 @@ public:
   void DeleteTasks();
   void TaskEnded(ns_Schedule::Task* task);
 
-  void SaveStatus() const;
-  void ReadSavedStatus();
+  std::string GetRunningOutput(std::string const& type, 
+    uint64_t taskID, uint64_t stepID, 
+    uint64_t rankID, uint64_t attemptID, 
+    size_t readSize, ssize_t readOffset, 
+    enum ns_Schedule::OutputState& state);
+
+  void SaveStatus();
+  std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
+  LoadStatus(ns_Schedule::Schedule const* schedule);
 
 private:
   ns_Schedule::Config const& config_;
@@ -42,6 +49,12 @@ private:
       uint64_t step_id, uint64_t rank_id, uint64_t& run_id, 
       std::list<ns_Schedule::Step*>& parent_stack, 
       ns_Schedule::Schedule const& schedule);
+  void SaveStatusInternal() const;
 };
+
+inline void ns_Schedule::TasksManager::SaveStatus() {
+  std::lock_guard<std::mutex> lock(lock_);
+  SaveStatusInternal();
+}
 
 };

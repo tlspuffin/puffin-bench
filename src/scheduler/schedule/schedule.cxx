@@ -23,16 +23,24 @@
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
-      threadRunning_(false), defaultExecutor_("local")
+      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local")
 {
   for (auto const& executorConfig : config.executors_) {
     ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
 
-  std::list<ns_Schedule::Step*> running;
-  std::list<ns_Schedule::Step*> step_delayed_delete;
-  ExportRunningSteps(config_.exportPath_ / "status.json", running);
+  auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
+  steps_.insert(steps_.end(), pendingsSteps.begin(), pendingsSteps.end());
+  stepsRunning_.insert(stepsRunning_.end(), stepsRunning.begin(), stepsRunning.end());
+  stepsDone_.insert(stepsDone_.end(), stepsDone.begin(), stepsDone.end());
+
+  if (steps_.empty()) {
+    ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+  } else {
+    threadRunning_ = true;
+    thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
+  }
 }
 
 ns_Schedule::Schedule::~Schedule() {
@@ -107,6 +115,31 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   return task->id_;
 }
 
+bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  for(ns_Schedule::Step* step : steps_) {
+    if ((step->task_->id_ != taskID) || (step->uuid_ != stepUUID)) {
+      continue;
+    }
+    step->request_cancel_ = true;
+    return true;
+  }
+  return false;
+}
+
+bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  for(ns_Schedule::Step* step : steps_) {
+    if (step->task_->id_ != taskID) {
+      continue;
+    }
+    step->task_->request_cancel_ = true;
+    return true;
+  }
+  return false;
+}
+
+
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
   auto const& executorIT = executors_.find(name);
   if (executorIT == executors_.end()) {
@@ -120,21 +153,17 @@ ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& nam
   return executorIT->second;
 }
 
-std::string ns_Schedule::Schedule::GetOutput(std::string const& executorName, 
+std::string ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     std::string const& stepID, std::string const& rankID, 
     std::string const& attemptID, size_t readSize, 
-    ssize_t readOffset, OutputState& state) const {
+    ssize_t readOffset, OutputState& state) {
   state = OutputState::UNKNOWN;
-  ns_Executor::Executor const* executor = GetExecutor(executorName);
-  if (executor == nullptr) {
-    return "";
-  }
-  std::filesystem::path runPath = config_.runPath_;
-  runPath = runPath / taskID;
-  std::string output = executor->GetRunningOutput(runPath, type, taskID, 
-      stepID, rankID, attemptID, readSize, readOffset, state);
-  if (state > 0) {
+  std::string output = tasksManager_.GetRunningOutput(type, 
+      std::stoull(taskID), std::stoull(stepID), 
+      std::stoull(rankID), std::stoull(attemptID), 
+      readSize, readOffset, state);
+  if (state != OutputState::UNKNOWN) {
     return output;
   }
 
@@ -181,7 +210,6 @@ std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
 void ns_Schedule::Schedule::ScheduleLoop() {
   std::ofstream stepsDoneFile(config_.exportPath_ / "steps_done.json", std::ios::app);
   std::runtime_error fatal_error("");
-  std::list<ns_Schedule::Step*> running;
   std::list<ns_Schedule::Step*> step_delayed_delete;
 
   bool updateStatus = false;
@@ -191,48 +219,56 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     lockThread_.unlock();
 
     for(ns_Schedule::Step* step : toRun) {
-      step->PrepareToRun();
       step->Execute();
       std::cerr << "Execute step: " << step->ID() << std::endl;
     }
-    running.insert(running.end(), toRun.begin(), toRun.end());
+    stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
 
     if ((toRun.size() > 0) || updateStatus) {
-      ExportRunningSteps(config_.exportPath_ / "status.json", running);
+      tasksManager_.SaveStatus();
+      ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
       updateStatus = false;
     }
 
-    std::list<ns_Schedule::Step*> stepsDone;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
     for(auto& executor : executors_) {
-      std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(running);
-      stepsDone.insert(stepsDone.end(), executorStepsDone.begin(), executorStepsDone.end());
+      std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(stepsRunning_);
+      stepsDone_.insert(stepsDone_.end(), executorStepsDone.begin(), executorStepsDone.end());
       for(ns_Schedule::Step* step : executorStepsDone) {
         std::cerr << "Done step: " << step->ID() << std::endl;
       }
     }
 
-    for (ns_Schedule::Step* step : running) {
+    for (ns_Schedule::Step* step : stepsRunning_) {
       if (step->IsRunning() && step->IsTimedOut()) {
         std::cout << "Step " << step->ID() << " timeouted" << std::endl;
         step->KillAndMarkTimedout();
-        stepsDone.push_back(step);
+        stepsDone_.push_back(step);
       }
     }
 
     lockThread_.lock();
     try {
-      ProcessDelayedCleanup(running, step_delayed_delete);
+      for (ns_Schedule::Step* step : steps_) {
+        if (step->task_->request_cancel_ || step->request_cancel_) {
+          std::cout << "Step " << step->ID() << " cancelled" << std::endl;
+          if (!step->IsRunning()) {
+            stepsRunning_.push_back(step);
+          }
+          step->KillAndMarkCancel();
+          stepsDone_.push_back(step);
+        }
+      }
 
-      for(ns_Schedule::Step* step : stepsDone) {
+      updateStatus |= ProcessDelayedCleanup(
+          stepsRunning_, step_delayed_delete, stepsDoneFile);
+
+      for(ns_Schedule::Step* step : stepsDone_) {
         if (step->monitor_count_ > 0) {
           step_delayed_delete.push_back(step);
         } else {
-          std::cerr << "Remove step: " << step->ID() << std::endl;
-
-          AppendStepToFinishLog(step->task_->steps_file_, *step);
-
-          AppendStepToFinishLog(stepsDoneFile, *step);
-          ManageEndOfStep(running, step);
+          ManageEndOfStep(stepsRunning_, step, stepsDoneFile);
           updateStatus = true;
         }
       }
@@ -240,14 +276,17 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       fatal_error = e;
       goto ns_Schedule__Schedule__ScheduleLoop_fatal;
     }
+
+    stepsDone_.clear();
   }
 
-  for (ns_Schedule::Step* step: steps_) {
+  tasksManager_.SaveStatus();
+  ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+  /*for (ns_Schedule::Step* step: steps_) {
     if (step->IsRunning()) {
       step->Shutdown();
     }
-  }
-  ExportRunningSteps(config_.exportPath_ / "status.json", running);
+  }*/
   threadRunning_ = false;
   lockThread_.unlock();
   return;
@@ -258,24 +297,39 @@ ns_Schedule__Schedule__ScheduleLoop_fatal:
   throw fatal_error;
 }
 
-inline void ns_Schedule::Schedule::ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, 
-    std::list<ns_Schedule::Step*>& delayedSteps) {
+inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
+    std::list<ns_Schedule::Step*>& steps, 
+    std::list<ns_Schedule::Step*>& delayedSteps, 
+    std::ofstream& stepsDoneFile) {
+  bool aStepProcessed = false;
   for (auto it = delayedSteps.begin(); it != delayedSteps.end(); ) {
     ns_Schedule::Step* step = *it;
     if (step->monitor_count_ == 0) {
-      ManageEndOfStep(steps, step);
+      ManageEndOfStep(steps, step, stepsDoneFile);
       it = delayedSteps.erase(it);
+      aStepProcessed = true;
     } else {
       ++it;
     }
   }
+  return aStepProcessed;
 }
 
 void ns_Schedule::Schedule::ManageEndOfStep(
-    std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step) {
+    std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step, 
+    std::ofstream& stepsDoneFile) {
+  std::cerr << "Remove step: " << step->ID() << std::endl;
+  AppendStepToFinishLog(step->task_->steps_file_, *step);
+  AppendStepToFinishLog(stepsDoneFile, *step);
+
   steps.remove(step);
   auto itStep = std::find(steps_.begin(), steps_.end(), step);
-  if (itStep != steps_.end()) {
+  if (itStep == steps_.end()) {
+    throw std::runtime_error("Trying to delete an unknown step: name=" +
+        step->name_ + ", id=" + step->ID());
+  }
+  bool taskCancelled = step->TaskCancelled();
+  if (!taskCancelled) {
     for (auto rit = step->dependencies_.rbegin(); rit != step->dependencies_.rend(); ++rit) {
       ns_Schedule::Step* stepChild = *rit;
       stepChild->depend_from_.remove(step);
@@ -283,19 +337,26 @@ void ns_Schedule::Schedule::ManageEndOfStep(
         steps_.insert(itStep, stepChild);
       }
     }
-  } else {
-    throw std::runtime_error("Trying to delete a non-root task: name=" +
-        step->name_ + ", id=" + step->ID());
   }
   steps_.remove(step);
   step->GatherFilesToLocal();
-  if (step->TaskDone()) {
+  if (taskCancelled) {
+    for(auto const& aStep: steps_) {
+      if (aStep->task_ == step->task_) {
+        taskCancelled = false;
+        break;
+      }
+    }
+  }
+  if (step->TaskDone() || taskCancelled) {
     // todo signal end of the flow
     uint64_t task_id = step->TaskID();
     step->FinalizeAndArchive(config_.exportPath_);
     tasksManager_.TaskEnded(step->task_);
     std::cout << "Tasks " << task_id << " done" << std::endl;
   }
+
+  tasksManager_.SaveStatus();
 }
 
 void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename, 
@@ -307,7 +368,7 @@ void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename,
   rapidjson::Value arr(rapidjson::kArrayType);
   for (Step const* step : steps) {
     rapidjson::Value val;
-    step->ToJSON(val, alloc);
+    step->ToJSON(val, alloc, true);
     arr.PushBack(val, alloc);
   }
   doc.AddMember("running_steps", arr, alloc);
@@ -331,7 +392,7 @@ void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedul
 
   rapidjson::Document doc;
   doc.SetObject();
-  step.ToJSON(doc, doc.GetAllocator());
+  step.ToJSON(doc, doc.GetAllocator(), true);
   doc.Accept(writer);
 
   log << buffer.GetString() << std::endl;

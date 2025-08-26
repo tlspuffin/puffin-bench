@@ -10,7 +10,7 @@ done
 
 CACHE_ID="$1"
 TIMEOUT="${2:-0}"
-SERVER_URL="http://localhost:8080/api/cache_get"
+SERVER_URL="http://localhost:8080/api/cache"
 DELAY=1
 if [ -z "$CACHE_ID" ]; then
   echo "Usage: $0 <cache_id> [timeout_seconds]"
@@ -22,7 +22,7 @@ fi
 START_TIME=$(date +%s)
 
 while true; do
-  RESPONSE=$(curl -s -X POST "$SERVER_URL" -F "id=$CACHE_ID")
+  RESPONSE=$(curl -s -X GET "$SERVER_URL/$CACHE_ID")
 
   SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
   ERROR=$(echo "$RESPONSE" | jq -r '.error')

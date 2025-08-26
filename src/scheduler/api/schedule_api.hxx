@@ -14,14 +14,15 @@ public:
       std::vector<uint8_t> const & functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args);
-  bool CancelTask(uint64_t task_id);
   void GetRunningTaskSummary();
   void GetTaskInfos(uint64_t task_id);
   std::filesystem::path ExportPath();
-  std::string GetOutput(std::string const& executorName, 
-      std::string const& type, std::string const& taskID, std::string const& stepID,
-      std::string const& rankID, std::string const& attemptID, size_t readSize, 
-      ssize_t readOffset, ns_Schedule::OutputState& state);
+  std::string GetOutput(std::string const& type, 
+      std::string const& taskID, std::string const& stepID,
+      std::string const& rankID, std::string const& attemptID, 
+      size_t readSize, ssize_t readOffset, ns_Schedule::OutputState& state);
+  bool CancelStep(uint64_t taskID, uint64_t stepID);
+  bool CancelTask(uint64_t taskID);
 
 private:
   ns_Schedule::Config const& config_;
@@ -30,6 +31,14 @@ private:
 
 inline std::filesystem::path ScheduleAPI::ExportPath() {
   return config_.exportPath_;
+}
+
+inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
+  return schedule_.CancelStep(taskID, stepUUID);
+}
+
+inline bool ScheduleAPI::CancelTask(uint64_t taskID) {
+  return schedule_.CancelTask(taskID);
 }
 
 };
