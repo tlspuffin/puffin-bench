@@ -6,11 +6,15 @@
 #include <Poco/Net/HTTPRequestHandler.h>
 #include <Poco/Net/HTTPServerResponse.h>
 
-#define REQUESTHANDLER(name) \
+#define REQUESTHANDLER(name, ...) \
 class RequestHandler ## name : public RequestHandler {\
 public:\
+  template<typename... Args>\
+  RequestHandler ## name(Args... args) : args_(std::make_tuple(args...)) {}\
   void handleRequest(Poco::Net::HTTPServerRequest& request,\
       Poco::Net::HTTPServerResponse& response);\
+private:\
+  std::tuple<__VA_ARGS__> args_;\
 }
 
 
@@ -33,10 +37,17 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
   apis_ = &apis;
 }
 
+REQUESTHANDLER(Error);
 REQUESTHANDLER(TaskNew);
 REQUESTHANDLER(TasksRunning);
-REQUESTHANDLER(TaskOutputs);
-REQUESTHANDLER(CachePut);
-REQUESTHANDLER(CacheGet);
+REQUESTHANDLER(TaskOutputs, std::string const, 
+    std::string const, std::string const,
+    std::string const, std::string const, 
+    size_t, ssize_t);
+REQUESTHANDLER(TaskCancel, uint64_t);
+REQUESTHANDLER(TaskCancelStep, uint64_t, uint64_t);
+REQUESTHANDLER(CachePut, std::string const);
+REQUESTHANDLER(CacheGet, std::string const);
+REQUESTHANDLER(Files, std::string const);
 
 };

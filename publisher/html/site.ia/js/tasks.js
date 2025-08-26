@@ -56,13 +56,13 @@ const Tasks = {
   */
   async loadTasks() {
     try {
-      const tasksData = await API.GetRunningTasks();
-      const tasks = API.ParseTasksData(tasksData);
+      const statusData = await API.GetRunningTasks();
+      const tasks = API.parseStatusData(statusData);
       
       this.currentTasks = tasks;
       
       // Update UI
-      this.DisplayRunningTasks(tasks.running);
+      this.displayRunningTasks(tasks.running);
       this.displayCompletedTasks([...tasks.completed, ...tasks.failed]);
       
       // Update badges
@@ -82,11 +82,11 @@ const Tasks = {
   */
   async LoadRunningTasks() {
     try {
-      const tasksData = await API.GetRunningTasks();
-      const tasks = API.ParseTasksData(tasksData);
+      const statusData = await API.GetRunningTasks();
+      const tasks = API.parseStatusData(statusData);
       
       this.currentTasks.running = tasks.running;
-      this.DisplayRunningTasks(tasks.running);
+      this.displayRunningTasks(tasks.running);
       
       // Update badge
       document.getElementById('running-count').textContent = tasks.running.length;
@@ -101,8 +101,8 @@ const Tasks = {
   */
   async loadCompletedTasks() {
     try {
-      const tasksData = await API.GetRunningTasks();
-      const tasks = API.ParseTasksData(tasksData);
+      const statusData = await API.GetRunningTasks();
+      const tasks = API.parseStatusData(statusData);
       
       this.currentTasks.completed = tasks.completed;
       this.currentTasks.failed = tasks.failed;
@@ -122,7 +122,7 @@ const Tasks = {
   * Display running tasks
   * @param {Array} tasks - Array of running tasks
   */
-  DisplayRunningTasks(tasks) {
+  displayRunningTasks(tasks) {
     const container = document.getElementById('running-tasks');
     const emptyState = document.getElementById('no-running-tasks');
     
@@ -287,9 +287,10 @@ const Tasks = {
         attemptId: '0',
         offset: offset,
         size: Config.OUTPUT_CHUNK_SIZE,
+        executor: 'Local'
       };
       
-      const result = await API.GetStepOutput(params);
+      const result = await API.getTaskOutput(params);
       
       return {
         content: result.decodedData || '',
@@ -311,7 +312,7 @@ const Tasks = {
   * @param {string} stdoutElementId - ID of stdout pre element
   * @param {string} stderrElementId - ID of stderr pre element
   */
-  async StreamStepLogs(step, stdoutElementId, stderrElementId) {
+  async streamStepLogs(step, stdoutElementId, stderrElementId) {
     const outputStates = {
       stdout: { offset: 0, done: false },
       stderr: { offset: 0, done: false }
@@ -319,7 +320,7 @@ const Tasks = {
     
     // Function to fetch a chunk of output
     const fetchChunk = async (type, elementId) => {
-      const state = outputStates[type];
+      const state = outputStates[type === 'error' ? 'stderr' : type];
       if (state.done) return;
       
       const preEl = document.getElementById(elementId);
@@ -331,8 +332,7 @@ const Tasks = {
       }
       
       try {
-        do {
-        //while (true) {
+        while (true) {
           const params = {
             taskId: step.task.id,
             stepId: step.step_id,
@@ -341,9 +341,10 @@ const Tasks = {
             attemptId: step.attempt_id || '0',
             offset: state.offset,
             size: Config.OUTPUT_CHUNK_SIZE,
+            executor: step.executor || 'Local'
           };
           
-          const result = await API.GetStepOutput(params);
+          const result = await API.getTaskOutput(params);
           
           if (!result.success) {
             preEl.textContent += `\n❌ Error: ${result.error || 'unknown'}`;
@@ -370,8 +371,7 @@ const Tasks = {
           if (result.state !== 1) {
             break;
           }
-        //}
-        } while(false);
+        }
       } catch (error) {
         preEl.textContent += `\n❌ Error: ${error.message}`;
         state.done = true;
@@ -380,7 +380,7 @@ const Tasks = {
     
     // Initial fetch
     await fetchChunk('stdout', stdoutElementId);
-    await fetchChunk('stderr', stderrElementId);
+    await fetchChunk('error', stderrElementId);
     
     // Set up polling for updates
     const pollInterval = setInterval(async () => {
@@ -392,7 +392,7 @@ const Tasks = {
       }
       
       await fetchChunk('stdout', stdoutElementId);
-      await fetchChunk('stderr', stderrElementId);
+      await fetchChunk('error', stderrElementId);
       
       // Stop polling if both are done
       if (outputStates.stdout.done && outputStates.stderr.done) {
@@ -441,8 +441,8 @@ const Tasks = {
   async exportTaskResults(taskId) {
     try {
       // Get task details
-      const tasksData = await API.GetRunningTasks();
-      const tasks = API.ParseTasksData(tasksData);
+      const statusData = await API.GetRunningTasks();
+      const tasks = API.parseStatusData(statusData);
       const task = tasks.all.find(t => t.id === taskId);
       
       if (!task) {
@@ -483,8 +483,8 @@ const Tasks = {
   */
   async compareTasks(taskIds) {
     try {
-      const tasksData = await API.GetRunningTasks();
-      const tasks = API.parseStatParseTasksDatausData(tasksData);
+      const statusData = await API.GetRunningTasks();
+      const tasks = API.parseStatusData(statusData);
       
       const tasksToCompare = tasks.all.filter(t => taskIds.includes(t.id));
       

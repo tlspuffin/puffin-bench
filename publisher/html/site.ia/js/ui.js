@@ -144,9 +144,6 @@ const UI = {
             <div class="task-card-header">
                 <span class="task-id">${task.id}</span>
                 <span class="task-status ${statusClass}">${statusIcon} ${statusLabel}</span>
-                <button class="btn-expand" onclick="UI.ToggleTaskSteps('${task.id}')">
-                  <span class="expand-icon">▼</span>
-                </button>
             </div>
             <div class="task-name">${task.name}</div>
             <div class="task-meta">
@@ -157,7 +154,7 @@ const UI = {
                 ` : ''}
                 ${task.currentStep ? `
                     <div class="task-meta-item">
-                        📍 Étape: ${Array.from(task.steps).map(step => step.name).join(', ')}
+                        📍 Étape: ${task.currentStep}
                     </div>
                 ` : ''}
             </div>
@@ -172,27 +169,6 @@ const UI = {
                     </div>
                 </div>
             ` : ''}
-
-            <div class="task-steps" id="steps-${task.id}" style="display: none;">
-              ${Array.from(task.steps).map(step => `
-                <div class="step-item ${step.status}">
-                  <div class="step-header">
-                    <span class="step-name">${step.name}</span>
-                    <span class="step-status">${step.status}</span>
-                  </div>
-                  <div class="step-meta">
-                    ${step.duration ? `⏱️ ${step.duration}` : ''}
-                    ${step.status === 'Running' ? `🔄 En cours...` : ''}
-                  </div>
-                  ${step.status !== 'Running' ? `
-                  <button class="btn btn-tiny" onclick="UI.ShowStepLogs('${task.id}', '${step.uuid}')">
-                    📄 Logs
-                  </button>
-                  ` : ''}
-                </div>
-              `).join('')}
-            </div>
-
             <div class="task-actions">
                 <button class="btn btn-small" onclick="UI.ShowTaskDetails('${task.id}')">
                     👁️ Détails
@@ -258,8 +234,8 @@ const UI = {
     
     try {
       // Get task details from current status
-      const tasksData = await API.GetRunningTasks();
-      const tasks = API.ParseTasksData(tasksData);
+      const statusData = await API.GetRunningTasks();
+      const tasks = API.parseStatusData(statusData);
       const task = tasks.all.find(t => t.id === taskId);
       
       if (!task) {
@@ -331,10 +307,11 @@ const UI = {
     
     try {
       // Get running steps for this task
-      const runningSteps = await API.GetRunningTasks();
+      const statusData = await API.GetRunningTasks();
+      const runningSteps = statusData.running_steps || [];
       
       // Filter steps for this task
-      const taskSteps = runningSteps.filter(step => step.task && step.task.id == taskId);
+      const taskSteps = runningSteps.filter(step => step.task && step.task.id === taskId);
       
       if (taskSteps.length === 0) {
         modalBody.innerHTML = `
@@ -374,7 +351,7 @@ const UI = {
         modalBody.appendChild(stepContainer);
         
         // Start streaming logs for this step
-        Tasks.StreamStepLogs(step, `stdout-${step.uuid}`, `stderr-${step.uuid}`);
+        Tasks.streamStepLogs(step, `stdout-${step.uuid}`, `stderr-${step.uuid}`);
       }
       
     } catch (error) {
@@ -404,25 +381,5 @@ const UI = {
   UpdateBadges(counts) {
     document.getElementById('running-count').textContent = counts.running || 0;
     document.getElementById('completed-count').textContent = counts.completed || 0;
-  },
-
-
-
-  ToggleTaskSteps(taskId) {
-    const stepsDiv = document.getElementById(`steps-${taskId}`);
-    const expandIcon = document.querySelector(`[onclick="UI.ToggleTaskSteps('${taskId}')"] .expand-icon`);
-    
-    if (stepsDiv.style.display === 'none') {
-      stepsDiv.style.display = 'block';
-      expandIcon.textContent = '▲';
-    } else {
-      stepsDiv.style.display = 'none';
-      expandIcon.textContent = '▼';
-    }
-  },
-
-  ShowStepLogs(taskId, stepId) {
-    // Afficher logs spécifiques à un step
-    console.log(`Showing logs for task ${taskId}, step ${stepId}`);
   }
 };
