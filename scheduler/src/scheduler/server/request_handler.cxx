@@ -1,10 +1,14 @@
 #include "request_handler.hxx"
 #include "parts_handler.hxx"
+#include "../utils/rapidjson.hxx"
 #include <fstream>
+#include <unordered_map>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Net/HTTPServerRequest.h>
 #include <Poco/Base64Encoder.h>
+#include <Poco/StreamCopier.h>
+#include <Poco/URI.h>
 
 inline static bool ToBool(std::string const& v) {
   return v == "1" || v == "true" || v == "on" || v == "yes";
@@ -22,6 +26,13 @@ static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
     return true;
   }
   return false;
+}
+
+void ns_Server::RequestHandlerError::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+  response.setContentType("text/plain");
+  response.send() << "404 - Path not found: " << request.getURI();
 }
 
 void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -116,37 +127,30 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
 
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json");
-  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
-  response.set("Pragma", "no-cache");
 
-  std::ostream& out = response.send();
-
-  Poco::Net::HTMLForm form(request, request.stream());
-  std::string type = form.get("type", "");
-  std::string taskid = form.get("task_id", "");
-  std::string stepid = form.get("step_id", "");
-  std::string rankid = form.get("rank_id", "");
-  std::string attemptid = form.get("attempt_id", "");
-  std::string readoffsetStr = form.get("read_offset", "");
-  std::string readsizeStr = form.get("read_size", "");
-  std::string executor = form.get("executor", "");
-
-  if ((type.empty()) || (taskid.empty()) || (stepid.empty()) || 
-      (rankid.empty()) || (attemptid.empty()) || (readoffsetStr.empty()) ||
-      (readsizeStr.empty()) || (executor.empty())) {
-    out << R"({"success": false, "error": "Missing required parameter(s)."})";
-    out.flush();
-    return;
-  }
-
+  std::ostream* out = nullptr;
   try {
-    ssize_t readoffset = std::stoll(readoffsetStr);
-    size_t readsize = std::stoull(readsizeStr);
+    std::string const& taskid = std::get<0>(args_);
+    std::string const& type = std::get<1>(args_);
+    std::string const& stepid = std::get<2>(args_);
+    std::string const& rankid = std::get<3>(args_);
+    std::string const& attemptid = std::get<4>(args_);
+    size_t readsize = std::get<5>(args_);
+    ssize_t readoffset = std::get<6>(args_);
+
+    if ((type.empty()) || (taskid.empty()) || (stepid.empty()) || 
+        (rankid.empty()) || (attemptid.empty())) {
+      throw std::runtime_error("Missing required parameter(s)");
+    }
+
     ns_Schedule::OutputState state;
     std::string output = apis_->scheduleAPI_.GetOutput(
-        executor, type, taskid, stepid, rankid, attemptid, readsize, readoffset, state);
-    if (state == 0) {
+        type, taskid, stepid, rankid, attemptid, readsize, readoffset, state);
+    if (state == ns_Schedule::OutputState::UNKNOWN) {
       throw std::runtime_error("Server can't read requested output");
+    } else if (state != ns_Schedule::OutputState::POSSIBLE_MORE_DATA) {
+      response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+      response.set("Pragma", "no-cache");
     }
 
     std::ostringstream oss;
@@ -155,7 +159,65 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
     encoder << output;
     encoder.close();
 
-    out << R"({"success": true, "data": ")" << oss.str() << R"(", "state": )" << state << "}";
+    out = &(response.send());
+
+    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "state": )" << state << "}";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    if (out == nullptr) {
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+  out->flush();
+}
+
+void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  uint64_t taskID = std::get<0>(args_);
+
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream& out = response.send();
+  try {
+    if (!apis_->scheduleAPI_.CancelTask(taskID)) {
+      throw std::runtime_error("task cancel failed");
+    }
+    out << R"({"success": true})";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+  out.flush();
+}
+
+void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  uint64_t taskID = std::get<0>(args_);
+  uint64_t stepUUID = std::get<1>(args_);
+
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream& out = response.send();
+  try {
+    if (!apis_->scheduleAPI_.CancelStep(taskID, stepUUID)) {
+      throw std::runtime_error("step cancel failed");
+    }
+    out << R"({"success": true})";
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
@@ -170,24 +232,29 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
-  PartsHandler partsHandler;
-  Poco::Net::HTMLForm form(request, request.stream(), partsHandler);
-
-  std::string id = form.get("id", "");
-  std::string srcPath = form.get("path", "");
-  bool computeMD5 = ToBool(form.get("computeMD5", "false"));
-  bool force = ToBool(form.get("force", "false"));
-
   std::ostream& out = response.send();
   try {
+    std::istream& stream = request.stream();
+    std::string jsonBody;
+    std::getline(stream, jsonBody, '\0');
+
+    rapidjson::Document doc;
+    doc.Parse(jsonBody.c_str());
+    if (doc.HasParseError()) {
+      throw std::runtime_error("Invalid JSON format");
+    }
+
+    std::string const& id = std::get<0>(args_);
+    std::string srcPath = GetOrDefault<std::string>(doc, "path", "");
+    bool computeMD5 = GetOrDefault<bool>(doc, "computeMD5", false);
+    bool force = GetOrDefault<bool>(doc, "force", false);
+
     if (id.empty() || srcPath.empty()) {
-      out << R"({"success": false, "error": "Missing required parameters id and/or path."})";
-      return;
+      throw std::runtime_error("Missing required parameters id and/or path");
     }
 
     bool result = apis_->cacheAPI_.Put(srcPath, id, force, computeMD5);
-
-    out << R"({"success": )"<< (result ? "true" : "false") << R"(, "error": ""})";
+    out << R"({"success": )"<< (result ? "true" : "false") << R"(})";
   } catch (const std::exception& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
@@ -202,10 +269,7 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
-  PartsHandler partsHandler;
-  Poco::Net::HTMLForm form(request, request.stream(), partsHandler);
-
-  std::string id = form.get("id", "");
+  std::string const& id = std::get<0>(args_);
 
   std::ostream& out = response.send();
   try {
@@ -218,10 +282,95 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
     std::filesystem::path path;
     std::string state = apis_->cacheAPI_.Get(id, path);
 
-    out << R"({"success": true, "error": "", "state": ")" + state + R"(", "path": ")" + path.string() + R"(" })";
+    out << R"({"success": true, "state": ")" + state + R"(", "path": ")" + path.string() + R"(" })";
   } catch (const std::exception& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
   out.flush();
+}
+
+void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  response.setChunkedTransferEncoding(true);
+
+  std::string const& prefix = std::get<0>(args_);
+
+  std::ostream* out = nullptr;
+  try {
+    Poco::URI uri(request.getURI());
+    std::string path = uri.getPath();
+    path = path.substr(prefix.size());
+
+    if (path.compare("/") == 0) {
+      path = "index.html";
+    } else if (path[0] == '/') {
+      path = path.substr(1);
+    }
+
+    std::filesystem::path filename = config_->html_ / path;
+    try {
+      filename = std::filesystem::canonical(filename);
+    } catch(...) {
+      //detectHostileIP_.SetHostileIP(srcIP);
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send();
+      return;
+    }
+
+    std::filesystem::path rootPath = config_->html_;
+    std::error_code ec;
+    std::string relativePath = std::filesystem::relative(filename, rootPath, ec).string();
+    if (ec || (relativePath.find("..") == 0)) {
+      //detectHostileIP_.SetHostileIP(srcIP);
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+      response.send();
+      return;
+    }
+
+    static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
+        mimeType {
+            {".html", {"text/html", std::ios_base::in}}, 
+            {".css", {"text/css", std::ios_base::in}},
+            {".json", {"application/json", std::ios_base::in}},
+            {".js", {"text/javascript", std::ios_base::in}}, 
+            {".jpg", {"image/jpeg", std::ios_base::binary}}, 
+            {".jpeg", {"image/jpeg", std::ios_base::binary}}, 
+            {".png", {"image/png", std::ios_base::binary}}, 
+            {".svg", {"image/svg+xml", std::ios_base::in}}, 
+    };
+    std::string extension = filename.extension().string();
+
+    std::string contentType = "application/octet-stream";
+    std::ios_base::openmode openmode = std::ios_base::in;
+    auto const& mimeTypeIT = mimeType.find(extension);
+    if (mimeTypeIT != mimeType.end()) {
+      contentType = mimeTypeIT->second.first;
+      openmode = mimeTypeIT->second.second;
+    }
+
+    std::ifstream file(filename, openmode);
+    if (!file.is_open()) {
+      //detectHostileIP_.RecordFailedRequest(srcIP);
+      //char cwd[4096] = {};
+      //getcwd(cwd, 4096);
+      ///LOGWARNING("[%s][%s] unable to access %s cwd: %s", GenerateHumanTS().c_str(), srcIP.c_str(), filename.c_str(), cwd);
+      throw std::runtime_error("file open failed");
+    }
+
+    response.setContentType(contentType);
+    response.setChunkedTransferEncoding(true);
+    out = &response.send();
+    Poco::StreamCopier::copyStream(file, *out);
+    out->flush();
+  } catch (const std::exception& e) {
+    std::cerr << "File server error: " << e.what() << std::endl;
+    if (out != nullptr) {
+      out->flush();
+    } else if (!response.sent()) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      response.send();
+    }
+  }
 }

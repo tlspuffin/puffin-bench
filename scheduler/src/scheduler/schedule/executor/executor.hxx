@@ -44,12 +44,15 @@ public:
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
   virtual void Shutdown(ns_Schedule::Step& step, bool wait =false) = 0;
   virtual void GatherFilesToLocal(ns_Schedule::Step& step) = 0;
+  virtual void CheckReloadRunning(ns_Schedule::Step& step) = 0;
 
-  virtual std::string GetRunningOutput(std::filesystem::path const& runPath, 
-      std::string const& type, std::string const& taskID, 
-      std::string const& stepID, std::string const& rankID, 
-      std::string const& attemptID, size_t readSize, ssize_t readOffset, 
+  virtual std::string GetRunningOutput(ns_Schedule::Step const& step, 
+      std::string const& type, 
+      size_t readSize, ssize_t readOffset, 
       enum ns_Schedule::OutputState& state) const = 0;
+
+  virtual ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const = 0;
+  virtual ExecutorData* CreateLocalData(rapidjson::Value const& config) const = 0;
 
 protected:
   Executor(std::string const& name);
@@ -72,7 +75,7 @@ inline std::string Executor::Name() const {
 
 template<typename T> inline T* Executor::GetExecutorTaskData(ns_Schedule::Task* task) {
   auto executorTaskDataIT = task->executors_.find(this);
-  if (executorTaskDataIT == nullptr) {
+  if (executorTaskDataIT == task->executors_.end()) {
     throw std::runtime_error("ExecutorTaskData not found in task");
   }
   T* executorTaskData = dynamic_cast<T*>(executorTaskDataIT->second);

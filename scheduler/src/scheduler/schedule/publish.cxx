@@ -18,11 +18,21 @@ ns_Schedule::Publish::Publish(rapidjson::Value const& config)
 }
 
 void ns_Schedule::Publish::ReadJSON(rapidjson::Value const& config) {
+  if (!config.IsObject()) {
+    throw std::runtime_error("publish config should be an object");
+  }
   server_ = GetOrDefault<std::string>(config, "server", "");
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
   storage_  = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(config, "storage_path", ""));
+}
+
+void ns_Schedule::Publish::ToJSON(rapidjson::Value& node, 
+    rapidjson::Document::AllocatorType& alloc) const {
+  node.AddMember("server", rapidjson::Value(server_.c_str(), alloc), alloc);
+  node.AddMember("check_server_certificat", checkServerCertificat_, alloc);
+  node.AddMember("storage_path", rapidjson::Value(storage_.c_str(), alloc), alloc);
 }
 
 void ns_Schedule::Publish::PublishResults(std::filesystem::path const& inLogs, 

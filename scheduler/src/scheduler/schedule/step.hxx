@@ -14,13 +14,30 @@
 
 namespace ns_Schedule {
 
+class Schedule;
+
 class Step {
 public:
-  static uint16_t const exitCode_NotSet_;
-  static uint16_t const exitCode_Timedout_;
-  static uint16_t const exitCode_StepLaunchError_;
+  static uint16_t constexpr exitCode_NotSet_ = 0x0100;
+  static uint16_t constexpr exitCode_Timedout_ = 0x0200;
+  static uint16_t constexpr exitCode_Cancelled_ = 0x0400;
+  static uint16_t constexpr exitCode_LaunchError_ = 0x0800;
+
+  struct UUIDDependencies {
+    uint64_t next;
+    uint64_t previous;
+    std::vector<uint64_t> dependencies;
+    std::vector<uint64_t> depend_from;
+
+    void Reset() {
+      next = 0; previous = 0; depend_from.clear(); dependencies.clear();
+    }
+  };
 
   Step(ns_Schedule::Task* task, std::string const& name);
+  Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
+      ns_Schedule::Schedule const* schedule, 
+      struct UUIDDependencies& dependencies);
   ~Step();
 
   void CopyParameters(Step const& step);
@@ -32,27 +49,30 @@ public:
 
   uint64_t TaskID() const;
 
-  bool IsFirstStepOfTask() const;
   bool IsReady() const;
   bool IsRunning() const;
   bool IsDone() const;
   bool IsTimedOut() const;
 
+  void MarkPending();
   void MarkRunning();
-  void MarkDone(uint8_t exit_code);
+  void MarkDone(uint16_t exit_code);
+  void MarkLaunchError();
   void KillAndMarkTimedout();
+  void KillAndMarkCancel();
 
-  bool PrepareToRun();
   bool TaskDone();
+  bool TaskCancelled();
   void Execute();
   void Shutdown();
   void GatherFilesToLocal();
   void FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
-      rapidjson::Document::AllocatorType& alloc) const;
+      rapidjson::Document::AllocatorType& alloc, 
+      bool exportTask) const;
 
-  std::string ID();
+  std::string ID() const;
 
   ns_Schedule::Task* task_;
   std::string name_;
@@ -79,27 +99,30 @@ public:
   uint16_t exit_code_;
   int32_t monitor_count_;
 
+  bool request_cancel_;
+
 private:
   enum class State { 
     Pending, 
     Running, 
     Done, 
     TimedOut, 
-    Shutdown
+    Cancelled, 
+    Shutdown, 
+    LaunchError, 
   };
   State state_;
-  std::chrono::time_point<std::chrono::steady_clock> time_points_[2];
+  std::chrono::time_point<std::chrono::system_clock> time_points_[2];
 
   static std::atomic<uint64_t> next_uuid_;
-  static uint64_t ToMillis(std::chrono::time_point<std::chrono::steady_clock> const& tp);
+  static uint64_t ToMillis(std::chrono::time_point<std::chrono::system_clock> const& tp);
+  static std::chrono::system_clock::time_point FromMillis(uint64_t millis);
+  static std::string StateEnumToString(State state);
+  static State StateStringToEnum(std::string const& state);
 };
 
 inline uint64_t Step::TaskID() const {
   return task_->id_;
-}
-
-inline bool Step::IsFirstStepOfTask() const{
-  return ((step_id_ == 0) && (rank_id_ == 0) && (attempt_id_ == 0));
 }
 
 inline bool Step::IsReady() const { 
@@ -118,37 +141,60 @@ inline bool Step::IsTimedOut() const {
   if (state_ > State::Running) {
     return (exit_code_ & 0x0200) == 0x0200;
   }
-  auto now = std::chrono::steady_clock::now();
+  auto now = std::chrono::system_clock::now();
   auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - time_points_[0]);
   return (timeout_ > 0) && (elapsed.count() >= timeout_);
 }
 
-inline void Step::MarkRunning() {
-  state_ = State::Running;
-  time_points_[0] = std::chrono::steady_clock::now();
+inline void Step::MarkPending() {
+  state_ = State::Pending;
+  if (executor_data_ != nullptr) {
+    delete executor_data_;
+    executor_data_ = nullptr;
+  }
 }
 
-inline void Step::MarkDone(uint8_t exit_code) {
+inline void Step::MarkRunning() {
+  if (state_ != State::Pending) {
+    throw std::runtime_error("Can not mark running a not pending task");
+  }
+  state_ = State::Running;
+  time_points_[0] = std::chrono::system_clock::now();
+}
+
+inline void Step::MarkDone(uint16_t exit_code) {
   if (state_ != State::Running) {
     throw std::runtime_error("Can not mark done a not running task");
   }
   state_ = State::Done;
-  time_points_[1] = std::chrono::steady_clock::now();
+  time_points_[1] = std::chrono::system_clock::now();
   exit_code_ = exit_code;
+}
+
+inline void Step::MarkLaunchError() {
+  state_ = State::LaunchError;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_LaunchError_;
 }
 
 inline void Step::KillAndMarkTimedout() {
   executor_->Shutdown(*this);
   state_ = State::TimedOut;
-  time_points_[1] = std::chrono::steady_clock::now();
+  time_points_[1] = std::chrono::system_clock::now();
   exit_code_ = exitCode_Timedout_;
 }
 
-inline bool Step::PrepareToRun() {
-  if (IsFirstStepOfTask()) {
-    return task_->PrepareToRun();
+inline void Step::KillAndMarkCancel() {
+  if (state_ == State::Running) {
+    executor_->Shutdown(*this);
   }
-  return true;
+  state_ = State::Cancelled;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_Cancelled_;
+}
+
+inline bool Step::TaskCancelled() {
+  return task_->request_cancel_;
 }
 
 inline void Step::Execute() {
@@ -174,7 +220,7 @@ inline void Step::FinalizeAndArchive(std::filesystem::path const& savePath) {
   }
 }
 
-inline std::string Step::ID() {
+inline std::string Step::ID() const {
   return std::to_string(step_id_) + '-' +
     std::to_string(rank_id_) + '-' +
     std::to_string(attempt_id_);

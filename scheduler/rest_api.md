@@ -1,1 +1,1 @@
-curl -X POST http://localhost:8080/api/task_new -F "name=myrun" -F "config=@./samples/experiment.json" -F "script=@./samples/campaign.conf" -F "files[]=@./samples/shell.nix" -F "args[COMMIT_ID]=3f648f016c84884d6470fc906735bb8c5da7891b"
+curl -X POST http://localhost:8080/api/task/new -F "name=myrun" -F "config=@./samples/experiment.json" -F "script=@./samples/campaign.conf" -F "files[]=@./samples/shell.nix" -F "args[COMMIT_ID]=3f648f016c84884d6470fc906735bb8c5da7891b"
