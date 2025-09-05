@@ -3,25 +3,26 @@ import pandas as pd
 from fuzzer_run import FuzzerRun
 from dataset_cache import DatasetCache
 
-def generate(root_path: Path, cache: DatasetCache):
+def generate(root_path: Path, cache: DatasetCache, commit: str = None):
   results = []
-  commits = []
-  vulnerabilities = []
   generated_data = pd.DataFrame()
-  for commit_dir in root_path.iterdir():
+  if commit:
+    commit_dirs = [root_path / commit]
+  else:
+    commit_dirs = root_path.iterdir()
+  for commit_dir in commit_dirs:
     if not commit_dir.is_dir():
       continue
-    commit = commit_dir.name
+    commit_name = commit_dir.name
     for vuln_dir in commit_dir.iterdir():
       if not vuln_dir.is_dir():
         continue
       vulnerability = vuln_dir.name
-      vulnerabilities.append(vulnerability)
-      results.append(generate_one(commit, vulnerability, vuln_dir))
+      results.append(generate_one(commit_name, vulnerability, vuln_dir))
   if results:
     generated_data = pd.concat(results, ignore_index=True)
     cache.store(generated_data)
-  return cache.lookup(commit=commits, vulnerability=vulnerabilities)
+  return generated_data
 
 def generate_one(commit: str, vulnerability: str, directory: Path) -> pd.DataFrame:
     runs_data = []

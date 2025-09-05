@@ -10,7 +10,8 @@ class ScheduleAPI {
 public:
   ScheduleAPI(ns_Schedule::Config const& config);
 
-  uint64_t AddTask(std::vector<uint8_t> const& flow, 
+  uint64_t AddTask(std::string const& name, 
+      std::vector<uint8_t> const& flow, 
       std::vector<uint8_t> const & functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args);

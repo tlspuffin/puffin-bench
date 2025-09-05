@@ -23,6 +23,7 @@ class Step;
 class Task {
 public:
   uint64_t id_;
+  std::string name_;
   std::filesystem::path files_path_;
   std::filesystem::path functions_path_;
   std::filesystem::path run_root_path_;
@@ -45,7 +46,7 @@ public:
 
   Publish publish_;
 
-  Task(uint64_t id, 
+  Task(uint64_t id, std::string const& name, 
       std::filesystem::path const& inDataPath, 
       std::filesystem::path const& functionsFile, 
       std::filesystem::path const& runRootPath, 
@@ -69,8 +70,6 @@ public:
 
 private:
   bool CreateRunFolders();
-  std::string ResolveVariables(std::string const& pattern, 
-      std::unordered_map<std::string, std::string> const& taskVariables);
 
   static std::unordered_map<std::string, std::string> 
   LoadGlobalParameters(std::filesystem::path const& file);

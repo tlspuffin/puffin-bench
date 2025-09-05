@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -71,6 +72,12 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     : Executor(name), config_(config), coresMonitor_(15), nbCoresFree_(config_.nbCores_), 
       coresFree_(config_.cores_), nbChild_(0)
 {
+  static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
+  if (setProcessReaper < 0) {
+    throw std::runtime_error(std::string("Failed to enable subreaper mode: ") + 
+        std::strerror(errno));
+  }
+
   if (nbCoresFree_ == 0) {
     coresFree_ = config_.cores_;
     for(size_t i=0; i<coresFree_.size(); ++i) {
@@ -190,9 +197,12 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       exit(-1);
     }
 
-    std::stringstream oss;
-    oss << "Running step: " << step.ID() << " with pid: " << spid << std::endl;
-    std::cerr << oss.str();
+    {
+      std::stringstream oss;
+      oss << "Step running: " << step.task_->id_ << " / " << step.ID()  << \
+          " uuid: " << step.uuid_ << " with pid: " << spid << std::endl;
+      std::cerr << oss.str();
+    }
 
     if (!RedirectOutput(outhandler, errhandler)) {
       std::cerr << "RedirectOutput failed" << std::endl;
@@ -250,14 +260,9 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
           std::to_string(errno) +
           " (" + std::strerror(errno) + ")");
     } else if (childPID == localData->pid_) {
-
-      std::stringstream oss;
-      oss << "End of step: " << step->ID() << " with pid: " << localData->pid_ << std::endl;
-      std::cerr << oss.str();
-
-
       --nbChild_;
       kill(-childPID, SIGKILL);
+      while(waitpid(-localData->pid_, nullptr, 0) > 0);
 
       std::filesystem::path step_fatal_error = 
           step->task_->run_root_path_ / ("fe-" + step->ID());
@@ -269,6 +274,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       }
       ReleaseCores(localData->cores_);
       SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step->ID());
+      std::filesystem::remove_all(localData->run_path_, ec);
       result.push_back(step);
     }
   }
@@ -276,19 +282,21 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
   return result;
 }
 
-void ns_Executor::Local::Shutdown(ns_Schedule::Step& step, bool wait) {
+void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
   LocalData* localData = dynamic_cast<LocalData*>(step.executor_data_);
   if (localData == nullptr) {
     throw std::runtime_error("ExecutorData are not of type LocalData");
   }
+
   kill(-localData->pid_, SIGKILL);
-  if (wait) {
-    waitpid(-localData->pid_, nullptr, 0);
-  }
+  while(waitpid(-localData->pid_, nullptr, 0) > 0);
+
   ReleaseCores(localData->cores_);
 
   LocalTaskData* localTaskData = GetExecutorTaskData<LocalTaskData>(step.task_);
   SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step.ID());
+  std::error_code ec;
+  std::filesystem::remove_all(localData->run_path_, ec);
 }
 
 void ns_Executor::Local::GatherFilesToLocal(ns_Schedule::Step& step) {
@@ -315,25 +323,31 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
   localTaskData = GetExecutorTaskData<LocalTaskData>(step.task_);
 
   if (kill(localData->pid_, 0) != 0) {
-
+    std::cerr << "\t\tNot running" << std::endl;
     stepFatalError = step.task_->run_root_path_ / ("fe-" + step.ID());
     doneFile = localData->run_path_ / ".done";
     if (std::filesystem::exists(stepFatalError, ec)) {
+      std::cerr << "\t\tFound fatal error file "<< stepFatalError << std::endl;
       step.MarkLaunchError();
       return;
     } else if (std::filesystem::exists(localData->run_path_ / ".done", ec)) {
+      std::cerr << "\t\tFound done file in "<< localData->run_path_ << std::endl;
       uint8_t status = 0;
       std::ifstream ifs(doneFile);
       if (ifs >> status) {
+        std::cerr << "\t\tDone file have status: " << status << std::endl;
         step.MarkDone(status);
         SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step.ID());
+        std::filesystem::remove_all(localData->run_path_, ec);
         return;
       } else {
+        std::cerr << "\t\tDone file corrupted" << std::endl;
         errorSS << "Step " << step.ID() << " .done file corrupted, marking Pending" << std::endl;
         goto Local__CheckReloadRunning__Error;
       }
     }
 
+    std::cerr << "\t\tShould have been kill, need restart" << std::endl;
     errorSS << "Step " << step.ID() << " process " << localData->pid_ 
         << " died, marking Pending" << std::endl;
     goto Local__CheckReloadRunning__Error;
@@ -342,11 +356,13 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
   expectedArgs = BuildExecutorArgs(step, localTaskData, config_, localData->pid_);
 
   if (expectedArgs.empty()) {
+    std::cerr << "\t\tFailed to build run args, need restart" << std::endl;
     errorSS << "Step " << step.ID() << " failed to build expected args, marking Pending" << std::endl;
     goto Local__CheckReloadRunning__Error;
   }
 
   if (!VerifyProcessArgs(localData->pid_, expectedArgs)) {
+    std::cerr << "\t\tFound a pid but with diffents run args, need restart" << std::endl;
     errorSS << "Step " << step.uuid_ << " (" << localData->pid_ << 
         ") no more running, marking Pending" << std::endl;
     goto Local__CheckReloadRunning__Error;
@@ -677,5 +693,6 @@ bool ns_Executor::Local::VerifyProcessArgs(pid_t pid,
       return false;
     }
   }
+
   return true;
 }

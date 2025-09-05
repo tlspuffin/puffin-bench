@@ -41,6 +41,7 @@
       }
     }
   },
+  "name" : "Vulnerabilities search - ${COMMIT_ID}",
   "flow" : [
     { 
       "step": "Init"

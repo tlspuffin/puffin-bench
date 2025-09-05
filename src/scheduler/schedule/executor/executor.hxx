@@ -42,7 +42,7 @@ public:
   virtual std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& tasks) const = 0;
   virtual void Execute(ns_Schedule::Step& step) = 0;
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
-  virtual void Shutdown(ns_Schedule::Step& step, bool wait =false) = 0;
+  virtual void Shutdown(ns_Schedule::Step& step) = 0;
   virtual void GatherFilesToLocal(ns_Schedule::Step& step) = 0;
   virtual void CheckReloadRunning(ns_Schedule::Step& step) = 0;
 

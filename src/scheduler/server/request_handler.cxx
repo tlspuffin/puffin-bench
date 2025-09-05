@@ -44,12 +44,12 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
 
   PartsHandler partsHandler;
   Poco::Net::HTMLForm form(request, request.stream(), partsHandler);
-  //std::string name = form.get("name", "UnnamedTask");
   std::unordered_multimap<std::string, ns_Server::PartsHandler::PartData> const& parts = 
       partsHandler.GetParts();
 
   std::ostream& out = response.send();
   try {
+    std::string name = form.get("name", "");
     auto flow = parts.find("config");
     auto functions = parts.find("script");
 
@@ -81,7 +81,7 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       }
     }
 
-    uint64_t taskID = apis_->scheduleAPI_.AddTask(flow->second.content, 
+    uint64_t taskID = apis_->scheduleAPI_.AddTask(name, flow->second.content, 
         functions->second.content, files, args);
 
     out << R"({"success": true, "task_id": ")" << taskID << R"("})";
