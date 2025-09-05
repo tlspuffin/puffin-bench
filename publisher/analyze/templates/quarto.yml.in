@@ -10,7 +10,7 @@ author: The Puffin Development Team
 date: now
 date-format: "dddd MMM D, YYYY - HH:mm"
 
-jupyter: puffin-bench
+#jupyter: puffin-bench
 
 website:
   title: "puffin-bench"

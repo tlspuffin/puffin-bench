@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <signal.h>
 #include <rapidjson/filereadstream.h>
 #include <rapidjson/error/en.h>
 #include <rapidjson/document.h>
@@ -20,11 +21,21 @@
 
 #undef RAPIDJSON_ASSERT
 #define RAPIDJSON_ASSERT(x) { throw std::runtime_error(x); }
+#define DEBUG_STEP_MSG(label, step) {\
+  std::stringstream oss;\
+  oss << label << ": " << step->task_->id_ << " / " << step->ID()  << \
+      " uuid: " << step->uuid_ << std::endl;\
+  std::cerr << oss.str();\
+}
+
+bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local")
 {
+  static int installHandler = InstallSigUSRHandler();
+
   for (auto const& executorConfig : config.executors_) {
     ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
@@ -66,7 +77,8 @@ ns_Schedule::Schedule::~Schedule() {
   lockThread_.unlock();
 }
 
-uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList, 
+uint64_t ns_Schedule::Schedule::AddTask(std::string const& name, 
+    std::string const& tasksList, 
     std::string const& functions, 
     std::unordered_map<std::string, std::vector<uint8_t>>& files,
     std::unordered_map<std::string, std::string>& args) {
@@ -82,7 +94,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& tasksList,
   }
 
   ns_Schedule::Task* task = 
-      tasksManager_.CreateTask(stepsJSON, functions, files, args, *this);
+      tasksManager_.CreateTask(name, stepsJSON, functions, files, args, *this);
 
   std::string taskFilePath = (config_.userPath_ / std::to_string(task->id_) / 
       std::string(std::to_string(task->id_) + ".json")).string();
@@ -220,7 +232,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     for(ns_Schedule::Step* step : toRun) {
       step->Execute();
-      std::cerr << "Execute step: " << step->ID() << std::endl;
+      DEBUG_STEP_MSG("Step execute", step);
     }
     stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
 
@@ -236,13 +248,13 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(stepsRunning_);
       stepsDone_.insert(stepsDone_.end(), executorStepsDone.begin(), executorStepsDone.end());
       for(ns_Schedule::Step* step : executorStepsDone) {
-        std::cerr << "Done step: " << step->ID() << std::endl;
+        DEBUG_STEP_MSG("Step done", step);
       }
     }
 
     for (ns_Schedule::Step* step : stepsRunning_) {
       if (step->IsRunning() && step->IsTimedOut()) {
-        std::cout << "Step " << step->ID() << " timeouted" << std::endl;
+        DEBUG_STEP_MSG("Step timeouted", step);
         step->KillAndMarkTimedout();
         stepsDone_.push_back(step);
       }
@@ -252,7 +264,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     try {
       for (ns_Schedule::Step* step : steps_) {
         if (step->task_->request_cancel_ || step->request_cancel_) {
-          std::cout << "Step " << step->ID() << " cancelled" << std::endl;
+          DEBUG_STEP_MSG("Step cancelled", step);
           if (!step->IsRunning()) {
             stepsRunning_.push_back(step);
           }
@@ -282,11 +294,13 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
   tasksManager_.SaveStatus();
   ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
-  /*for (ns_Schedule::Step* step: steps_) {
-    if (step->IsRunning()) {
-      step->Shutdown();
+  if (shutdownTasksAtExit__) {
+    for (ns_Schedule::Step* step: steps_) {
+      if (step->IsRunning()) {
+        step->Shutdown();
+      }
     }
-  }*/
+  }
   threadRunning_ = false;
   lockThread_.unlock();
   return;
@@ -318,7 +332,7 @@ inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
 void ns_Schedule::Schedule::ManageEndOfStep(
     std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step, 
     std::ofstream& stepsDoneFile) {
-  std::cerr << "Remove step: " << step->ID() << std::endl;
+  DEBUG_STEP_MSG("Step removed", step);
   AppendStepToFinishLog(step->task_->steps_file_, *step);
   AppendStepToFinishLog(stepsDoneFile, *step);
 
@@ -398,3 +412,19 @@ void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedul
   log << buffer.GetString() << std::endl;
   log.flush();
 }
+
+void ns_Schedule::Schedule::HandlerUSR1(int sig) {
+  shutdownTasksAtExit__ = !shutdownTasksAtExit__;
+  std::stringstream oss;
+  oss << "ctl + c will shutdown tasks at exit: " << 
+      (shutdownTasksAtExit__ ? "true" : "false") <<
+      std::endl;
+  std::cerr << oss.str();
+}
+
+int ns_Schedule::Schedule::InstallSigUSRHandler() {
+    struct sigaction sa = {0};
+    sa.sa_handler = HandlerUSR1;
+    return sigaction(SIGUSR1, &sa, NULL);
+}
+

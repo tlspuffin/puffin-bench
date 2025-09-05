@@ -1,5 +1,6 @@
 #include "publish.hxx"
 #include "../utils/rapidjson.hxx"
+#include "../utils/variables.hxx"
 #include <memory>
 #include <iostream>
 #include <Poco/URI.h>
@@ -60,31 +61,6 @@ void ns_Schedule::Publish::PublishResults(std::filesystem::path const& inLogs,
     return;
   }
   PublishToServer(finalStoragePath);
-}
-
-std::string ns_Schedule::Publish::ResolveVariables(
-    std::string const& pattern, 
-    std::unordered_map<std::string, std::string> const& taskVariables) {
-  std::unordered_map<std::string, std::string> variables = taskVariables;
-  std::string result = pattern;
-
-  size_t pos = 0;
-  while ((pos = result.find("${", pos)) != std::string::npos) {
-    size_t end = result.find('}', pos);
-    if (end == std::string::npos) {
-      break;
-    }
-    std::string variableName = result.substr(pos + 2, end - pos - 2);
-    auto const& it = variables.find(variableName);
-    if (it != variables.end()) {
-      result.replace(pos, end - pos + 1, it->second);
-      pos += it->second.length();
-    } else {
-      pos = end + 1;
-    }
-  }
-
-  return result;
 }
 
 void ns_Schedule::Publish::PublishToServer(std::filesystem::path const& archivePath) {

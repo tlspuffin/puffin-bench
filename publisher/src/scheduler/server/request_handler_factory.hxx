@@ -44,9 +44,6 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       } else if (uri == "/api/tasks/running") {
         requestHandler = new RequestHandlerTasksRunning;
       } else if (std::regex_match(uri, matches, std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))"))) {
-        std::stringstream oss;
-        oss << "Got a cache request GET for " << matches[1].str() << std::endl;
-        std::cerr << oss.str();
         requestHandler = new RequestHandlerCacheGet(matches[1].str());
       } else if (uri.find("/files/") == 0) {
         requestHandler = new RequestHandlerFiles("/files");
@@ -58,9 +55,6 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     } else if (method == "PUT") {
       std::smatch matches;
       if (std::regex_match(uri, matches, std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))"))) {
-        std::stringstream oss;
-        oss << "Got a cache request PUT for " << matches[1].str() << std::endl;
-        std::cerr << oss.str();
         requestHandler = new RequestHandlerCachePut(matches[1].str());
       }
     } else if (method == "DELETE") {

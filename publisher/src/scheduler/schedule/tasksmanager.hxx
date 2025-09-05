@@ -14,7 +14,7 @@ class TasksManager {
 public:
   TasksManager(ns_Schedule::Config const& config);
 
-  ns_Schedule::Task* CreateTask(
+  ns_Schedule::Task* CreateTask(std::string const& name, 
       rapidjson::Value const& rootJSON, std::string const& functionsPath, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files, 
       std::unordered_map<std::string, std::string>& args, 

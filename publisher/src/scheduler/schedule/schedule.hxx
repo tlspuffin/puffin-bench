@@ -19,7 +19,8 @@ class Schedule {
 public:
   Schedule(ns_Schedule::Config const& config);
   ~Schedule();
-  uint64_t AddTask(std::string const& tasksList, std::string const& functions, 
+  uint64_t AddTask(std::string const& name, std::string const& tasksList, 
+      std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args);
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
@@ -56,6 +57,10 @@ private:
   std::list<ns_Schedule::Step*> stepsDone_;
   std::string defaultExecutor_;
   std::unordered_map<std::string, ns_Executor::Executor*> executors_;
+
+  static bool shutdownTasksAtExit__;
+  static void HandlerUSR1(int sig);
+  static int InstallSigUSRHandler();
 };
 
 };

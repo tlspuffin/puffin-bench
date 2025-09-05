@@ -41,7 +41,7 @@ public:
   std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps) const;
   void Execute(ns_Schedule::Step& step);
   std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps);
-  void Shutdown(ns_Schedule::Step& step, bool wait =false);
+  void Shutdown(ns_Schedule::Step& step);
   void GatherFilesToLocal(ns_Schedule::Step& step);
   void CheckReloadRunning(ns_Schedule::Step& step);
 
