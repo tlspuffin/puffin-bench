@@ -11,6 +11,7 @@ def main():
   generate_parser = subparsers.add_parser("generate", help="Generate dataset CSV from run directories")
   generate_parser.add_argument("root_dir", type=Path, help="Root directory containing commit/vuln/<i> structure")
   generate_parser.add_argument("output_csv", type=Path, help="Output CSV file path")
+  generate_parser.add_argument("--commit", dest="commit_id", type=str, help="Commit ID to process (process all commits if omitted)")
 
   report_parser = subparsers.add_parser("report", help="Generate Quarto HTML reports from CSV")
   report_parser.add_argument("output_csv", type=Path, help="CSV previously generated")
@@ -21,8 +22,8 @@ def main():
   if args.command == "generate":
     print(f"Génération du dataset depuis {args.root_dir}...")
     cache = DatasetCache(args.output_csv)
-    df = generate(args.root_dir, cache)
-    print(f"CSV généré : {args.output_csv} ({len(df)} lignes)")
+    generate(args.root_dir, cache, commit=args.commit_id)
+    print(f"CSV généré : {args.output_csv}")
 
   elif args.command == "report":
     print(f"Génération des rapports HTML à partir de {args.output_csv}...")

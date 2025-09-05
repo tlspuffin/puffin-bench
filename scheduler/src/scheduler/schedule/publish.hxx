@@ -22,9 +22,6 @@ public:
   bool checkServerCertificat_;
 
 private:
-  std::string ResolveVariables(std::string const& pattern, 
-      std::unordered_map<std::string, std::string> const& taskVariables);
-
   void PublishToServer(std::filesystem::path const& archivePath);
 };
 

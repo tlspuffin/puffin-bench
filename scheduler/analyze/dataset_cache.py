@@ -25,23 +25,6 @@ class DatasetCache:
 
     return pd.read_csv(self.cache_file())
 
-  def lookup(self, **kwargs) -> pd.DataFrame:
-    def lookup_operator(p):
-      if isinstance(p, list):
-        return "in"
-      else:
-        return "=="
-
-    return self.fetch_all().query(
-      " & ".join(
-        [
-          f"(`run.params.{p}` {lookup_operator(p)} {kwargs[p]!r})"
-          for p in self._params
-          if p in kwargs
-        ]
-      )
-    )
-
   def store(self, data: pd.DataFrame) -> None:
     cached = self.fetch_all()
     cached = pd.concat([data, cached], ignore_index=True)

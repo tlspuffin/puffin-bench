@@ -3,18 +3,19 @@
 #include "schedule.hxx"
 #include "executor/executor.hxx"
 #include "../utils/rapidjson.hxx"
+#include "../utils/variables.hxx"
 #include <unordered_set>
 #include <fstream>
 #include <regex>
 
-ns_Schedule::Task::Task(uint64_t id, 
+ns_Schedule::Task::Task(uint64_t id, std::string const& name, 
     std::filesystem::path const& inDataPath, 
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& runRootPath, 
     std::unordered_map<std::string, std::string>& args, 
     rapidjson::Value const* publishConfiguration, 
     rapidjson::Value const* configurations)
-    : id_(id), files_path_(inDataPath), 
+    : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
     run_root_path_(runRootPath), 
     logs_path_(run_root_path_ / ".output"), 
@@ -41,6 +42,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   }
 
   id_ = Get<uint64_t>(config, "id");
+  name_ = Get<std::string>(config, "name");
   files_path_ = GetPath(config, "files_path");
   functions_path_ = GetPath(config, "functions_path");
   run_root_path_ = GetPath(config, "run_root_path");
@@ -161,9 +163,12 @@ ns_Schedule::Task::~Task() {
 }
 
 bool ns_Schedule::Task::PrepareToRun() {
-  if (steps_file_.is_open()) {
-    return true;
+  std::unordered_map<std::string, std::string> variables;
+  for (const auto& [key, value] : args_) {
+    variables.emplace(key, value);
   }
+  variables.emplace("task_id", std::to_string(id_));
+  name_ = ResolveVariables(name_, variables);
 
   CreateRunFolders();
 
@@ -231,6 +236,7 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
     rapidjson::Document::AllocatorType& alloc, 
     ns_Schedule::Step const* step) const {
   out.AddMember("id", id_, alloc);
+  out.AddMember("name", rapidjson::Value(name_.c_str(), alloc), alloc);
   out.AddMember("files_path", rapidjson::Value(files_path_.c_str(), alloc), alloc);
   out.AddMember("functions_path", rapidjson::Value(functions_path_.c_str(), alloc), alloc);
   out.AddMember("run_root_path", rapidjson::Value(run_root_path_.c_str(), alloc), alloc);
@@ -316,36 +322,6 @@ bool ns_Schedule::Task::CreateRunFolders() {
     }
   }
   return true;
-}
-
-std::string ns_Schedule::Task::ResolveVariables(std::string const& pattern, 
-    std::unordered_map<std::string, std::string> const& taskVariables) {
-  std::unordered_map<std::string, std::string> variables = taskVariables;
-
-  for (const auto& [key, value] : args_) {
-    variables.emplace(key, value);
-  }
-
-  variables.emplace("task_id", std::to_string(id_));
-  std::string result = pattern;
-
-  size_t pos = 0;
-  while ((pos = result.find("${", pos)) != std::string::npos) {
-    size_t end = result.find('}', pos);
-    if (end == std::string::npos) {
-      break;
-    }
-    std::string variableName = result.substr(pos + 2, end - pos - 2);
-    auto const& it = variables.find(variableName);
-    if (it != variables.end()) {
-      result.replace(pos, end - pos + 1, it->second);
-      pos += it->second.length();
-    } else {
-      pos = end + 1;
-    }
-  }
-
-  return result;
 }
 
 std::unordered_map<std::string, std::string> 

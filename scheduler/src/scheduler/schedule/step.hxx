@@ -203,7 +203,7 @@ inline void Step::Execute() {
 
 inline void Step::Shutdown() {
   if (state_ == State::Running) {
-    executor_->Shutdown(*this, true);
+    executor_->Shutdown(*this);
     state_ = State::Shutdown;
   }
 }

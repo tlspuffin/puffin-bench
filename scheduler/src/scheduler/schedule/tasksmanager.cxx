@@ -1,5 +1,6 @@
 #include "tasksmanager.hxx"
 #include "schedule.hxx"
+#include "../utils/rapidjson.hxx"
 #include <unordered_set>
 #include <stack>
 #include <fstream>
@@ -18,10 +19,11 @@ ns_Schedule::TasksManager::TasksManager(
 }
 
 ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
-      rapidjson::Value const& rootJSON, std::string const& functions, 
-      std::unordered_map<std::string, std::vector<uint8_t>>& files, 
-      std::unordered_map<std::string, std::string>& args, 
-      ns_Schedule::Schedule const& schedule) {
+    std::string const& name, 
+    rapidjson::Value const& rootJSON, std::string const& functions, 
+    std::unordered_map<std::string, std::vector<uint8_t>>& files, 
+    std::unordered_map<std::string, std::string>& args, 
+    ns_Schedule::Schedule const& schedule) {
 
   uint64_t task_id = 0;
   {
@@ -54,6 +56,11 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
     ofs.close();
   }
 
+  std::string taskName = name;
+  if (taskName.empty()) {
+    taskName = GetOrDefault<std::string>(rootJSON, "name", "Unamed Task");
+  }
+
   rapidjson::Value const* publisherConfiguration = nullptr;
   if (rootJSON.HasMember("publish")) {
     if (!rootJSON["publish"].IsObject()) {
@@ -66,9 +73,10 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
       (rootJSON["configurations"].IsObject())) {
     configurations = &rootJSON["configurations"];
   }
-  ns_Schedule::Task* task = new ns_Schedule::Task(task_id, inDataPath, 
-      functionsFile, config_.runPath_ / std::to_string(task_id), 
-      args, publisherConfiguration, configurations);
+  ns_Schedule::Task* task = new ns_Schedule::Task(task_id, taskName, 
+      inDataPath, functionsFile, 
+      config_.runPath_ / std::to_string(task_id), args, 
+      publisherConfiguration, configurations);
   task->root_steps_ = CreateStepsFromJson(rootJSON, task, schedule);
 
   {
@@ -128,6 +136,8 @@ std::string ns_Schedule::TasksManager::GetRunningOutput(
       continue;
     }
 
+    std::cerr << "Got task: " << task->id_ << " : " << taskID << std::endl;
+
     ns_Schedule::Step const* firstStep = task->root_steps_.front();
     ns_Schedule::Step const* step = nullptr;
     do {
@@ -136,10 +146,11 @@ std::string ns_Schedule::TasksManager::GetRunningOutput(
       }
       step = firstStep;
       do {
-        std::cerr << "Check step: " << step->ID() << ":" << step->step_id_ << std::endl;
+        std::cerr << "Check step: " << step->ID()  <<
+            " uuid: " << step->uuid_ << std::endl;
 
         if ((step->step_id_ == stepID) && (step->rank_id_ == rankID) && (step->attempt_id_ == attemptID)) {
-          std::cerr << "Found step: " << step->ID() << std::endl;
+          std::cerr << "\tFound " << std::endl;
           return step->executor_->GetRunningOutput(
               *step, type, readSize, readOffset, state);
         }
