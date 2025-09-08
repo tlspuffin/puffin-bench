@@ -33,6 +33,7 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
   apis_ = &apis;
 }
 
+REQUESTHANDLER(Error);
 REQUESTHANDLER(Notify);
 REQUESTHANDLER(Files);
 

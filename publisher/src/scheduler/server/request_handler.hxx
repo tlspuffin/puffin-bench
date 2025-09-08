@@ -40,10 +40,8 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
 REQUESTHANDLER(Error);
 REQUESTHANDLER(TaskNew);
 REQUESTHANDLER(TasksRunning);
-REQUESTHANDLER(TaskOutputs, std::string const, 
-    std::string const, std::string const,
-    std::string const, std::string const, 
-    size_t, ssize_t);
+REQUESTHANDLER(TaskOutputs, std::string const, uint64_t, 
+    std::string const, std::string const, size_t , ssize_t);
 REQUESTHANDLER(TaskCancel, uint64_t);
 REQUESTHANDLER(TaskCancelStep, uint64_t, uint64_t);
 REQUESTHANDLER(CachePut, std::string const);
