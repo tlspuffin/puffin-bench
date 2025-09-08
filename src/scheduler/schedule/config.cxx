@@ -1,10 +1,19 @@
 #include "config.hxx"
+#include "embeded/get_file_sh.h"
+#ifdef STATIC
+#include "reserve_port-static.h"
+#else
+#include "reserve_port.h"
+#endif
 #include "../utils/rapidjson.hxx"
+#include <iostream>
+#include <fstream>
 
 static ns_Schedule::Config defaultConfig;
 
 ns_Schedule::Config::Config() 
-    : runPath_("runs"), exportPath_(std::filesystem::path("exports") / "schedule"), 
+    : toolsPath_("tools"), runPath_("runs"), 
+    exportPath_(std::filesystem::path("exports") / "schedule"), 
     userPath_("users_data"), executors_()
 {}
 
@@ -21,6 +30,19 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
     scheduleConfig = &doc[name.c_str()];
   }
 
+  toolsPath_  = std::filesystem::weakly_canonical(
+      GetOrDefault<std::string>(*scheduleConfig, "toolsPath", defaultConfig.toolsPath_))
+      .string();
+  userPath_  = std::filesystem::weakly_canonical(
+      GetOrDefault<std::string>(*scheduleConfig, "userPath", defaultConfig.toolsPath_))
+      .string();
+  runPath_  = std::filesystem::weakly_canonical(
+      GetOrDefault<std::string>(*scheduleConfig, "runPath", defaultConfig.runPath_))
+      .string();
+  exportPath_ = std::filesystem::weakly_canonical(
+      GetOrDefault<std::string>(*scheduleConfig, "exportPath", defaultConfig.exportPath_))
+      .string();
+
   if (scheduleConfig->HasMember("executors") && 
       (*scheduleConfig)["executors"].IsObject()) {
     for (auto const& [ found, jsonConfig ] : (*scheduleConfig)["executors"].GetObject()) {
@@ -32,36 +54,52 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
     ns_Executor::LocalConfig* localConfig = new ns_Executor::LocalConfig("local");
     executors_.emplace(localConfig->name_, localConfig);
   }
-  userPath_  = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(*scheduleConfig, "userPath", defaultConfig.userPath_))
-      .string();
-  runPath_  = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(*scheduleConfig, "runPath", defaultConfig.runPath_))
-      .string();
-  exportPath_ = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(*scheduleConfig, "exportPath", defaultConfig.exportPath_))
-      .string();
 }
 
 void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc, 
       rapidjson::MemoryPoolAllocator<>& alloc) const {
   rapidjson::Value node(rapidjson::kObjectType);
-  rapidjson::Value executorsConfig(rapidjson::kObjectType);
-  for (auto const& [name, executorConfig] : executors_) {
-    executorConfig->Save(name, executorsConfig, alloc);
-  }
-  node.AddMember("executors", executorsConfig, alloc);
+
+  node.AddMember("toolsPath",
+    rapidjson::Value(toolsPath_.c_str(), alloc), alloc);
   node.AddMember("runPath",
     rapidjson::Value(runPath_.c_str(), alloc), alloc);
   node.AddMember("userPath",
       rapidjson::Value(userPath_.c_str(), alloc), alloc);
   node.AddMember("exportPath",
       rapidjson::Value(exportPath_.c_str(), alloc), alloc);
+
+  rapidjson::Value executorsConfig(rapidjson::kObjectType);
+  for (auto const& [name, executorConfig] : executors_) {
+    executorConfig->Save(name, executorsConfig, alloc);
+  }
+  node.AddMember("executors", executorsConfig, alloc);
+
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
 void ns_Schedule::Config::Validate() const {
-  auto discard = std::filesystem::canonical(runPath_);
+  auto discard = std::filesystem::canonical(toolsPath_);
+
+  for(auto const& [ file, data, size ] : { 
+      std::tuple{ "reserve_port", (char const*)ReservePort_Binary, (size_t)ReservePort_Binary_len }, 
+      std::tuple{ "get_file.sh", GetFile_Script_data, GetFile_Script_size }
+  }) {
+    std::filesystem::path filePath = 
+        std::filesystem::weakly_canonical(toolsPath_ / file);
+    if (!std::filesystem::exists(filePath)) {
+      std::cerr << "Creating missing required file " << filePath << std::endl;
+      std::ofstream ofs(filePath, std::ios::binary);
+      ofs.write(data, size);
+      ofs.close();
+      std::filesystem::permissions(filePath,
+        std::filesystem::perms::owner_all |
+        std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
+        std::filesystem::perm_options::replace);
+    }
+  }
+
+  discard = std::filesystem::canonical(runPath_);
   discard = std::filesystem::canonical(userPath_);
   discard = std::filesystem::canonical(exportPath_);
   for (auto const& [name, executorConfig] : executors_) {

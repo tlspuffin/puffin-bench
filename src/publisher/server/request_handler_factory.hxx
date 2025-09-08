@@ -30,11 +30,13 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   RequestHandler* requestHandler = nullptr;
   if (request.getURI() == "/api/notify") {
     requestHandler = new RequestHandlerNotify;
-  } else if (request.getURI() == "/files") {
+  } else if (request.getURI().find("/files/") == 0) {
     requestHandler = new RequestHandlerFiles;
   }
   if (requestHandler != nullptr) {
     requestHandler->Configure(config_, apis_);
+  } else {
+    requestHandler = new RequestHandlerError;
   }
   return requestHandler;
 }

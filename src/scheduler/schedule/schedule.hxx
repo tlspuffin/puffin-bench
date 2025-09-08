@@ -28,10 +28,9 @@ public:
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
   std::string GetOutput(
-      std::string const& type, std::string const& taskID, 
-      std::string const& stepID, std::string const& rankID, 
-      std::string const& attemptID, size_t readSize, 
-      ssize_t readOffset, OutputState& state);
+      std::string const& type, std::string const& taskID,
+      uint64_t stepUUID, std::string const& stepID, 
+      size_t readSize, ssize_t readOffset, OutputState& state);
 
 private:
   void ScheduleLoop();

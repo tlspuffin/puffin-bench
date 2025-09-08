@@ -185,6 +185,8 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     rapidjson::Value taskJSON(rapidjson::kObjectType);
     task_->ToJSON(taskJSON, alloc, this);
     out.AddMember("task", taskJSON, alloc);
+  } else {
+    out.AddMember("task_id", task_->id_, alloc);
   }
 
   out.AddMember("name", rapidjson::Value(name_.c_str(), alloc), alloc);

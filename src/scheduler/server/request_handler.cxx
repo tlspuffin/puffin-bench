@@ -105,7 +105,7 @@ void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerR
 
   std::ostream& out = response.send();
   try {
-    std::ifstream ifs(apis_->scheduleAPI_.ExportPath() / "status.json");
+    std::ifstream ifs(apis_->scheduleAPI_.ExportPath() / "tasksmanager.json");
     if (!ifs.is_open()) {
       throw std::runtime_error("Server can't read schedule status");
     }
@@ -131,21 +131,19 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
   std::ostream* out = nullptr;
   try {
     std::string const& taskid = std::get<0>(args_);
-    std::string const& type = std::get<1>(args_);
+    uint64_t stepuuid = std::get<1>(args_);
     std::string const& stepid = std::get<2>(args_);
-    std::string const& rankid = std::get<3>(args_);
-    std::string const& attemptid = std::get<4>(args_);
-    size_t readsize = std::get<5>(args_);
-    ssize_t readoffset = std::get<6>(args_);
+    std::string const& type = std::get<3>(args_);
+    size_t readsize = std::get<4>(args_);
+    ssize_t readoffset = std::get<5>(args_);
 
-    if ((type.empty()) || (taskid.empty()) || (stepid.empty()) || 
-        (rankid.empty()) || (attemptid.empty())) {
+    if ((type.empty()) || (taskid.empty()) || (stepid.empty())) {
       throw std::runtime_error("Missing required parameter(s)");
     }
 
     ns_Schedule::OutputState state;
     std::string output = apis_->scheduleAPI_.GetOutput(
-        type, taskid, stepid, rankid, attemptid, readsize, readoffset, state);
+        type, taskid, stepuuid, stepid, readsize, readoffset, state);
     if (state == ns_Schedule::OutputState::UNKNOWN) {
       throw std::runtime_error("Server can't read requested output");
     } else if (state != ns_Schedule::OutputState::POSSIBLE_MORE_DATA) {
@@ -161,7 +159,9 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
 
     out = &(response.send());
 
-    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "state": )" << state << "}";
+    //*out << R"({"success": true, "data": ")" << oss.str() << R"(", "state": )" << state << "}";
+    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "size": )" << 
+        output.size() << R"(, "state": )" << state << "}";
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {

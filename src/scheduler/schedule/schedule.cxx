@@ -167,14 +167,11 @@ ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& nam
 
 std::string ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
-    std::string const& stepID, std::string const& rankID, 
-    std::string const& attemptID, size_t readSize, 
-    ssize_t readOffset, OutputState& state) {
+    uint64_t stepUUID, std::string const& stepID,
+    size_t readSize, ssize_t readOffset, OutputState& state) {
   state = OutputState::UNKNOWN;
   std::string output = tasksManager_.GetRunningOutput(type, 
-      std::stoull(taskID), std::stoull(stepID), 
-      std::stoull(rankID), std::stoull(attemptID), 
-      readSize, readOffset, state);
+      std::stoull(taskID), stepUUID, readSize, readOffset, state);
   if (state != OutputState::UNKNOWN) {
     return output;
   }
@@ -186,7 +183,7 @@ std::string ns_Schedule::Schedule::GetOutput(
     prefix = "stderr";
   }
   std::stringstream oss;
-  oss << prefix << '.' << stepID << '-' << rankID << '-' << attemptID << ".txt";
+  oss << prefix << '.' << stepID << ".txt";
   outputPath = outputPath / oss.str();
   if (!std::filesystem::exists(outputPath)) {
     return "";

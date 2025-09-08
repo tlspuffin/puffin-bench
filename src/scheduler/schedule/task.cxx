@@ -11,12 +11,14 @@
 ns_Schedule::Task::Task(uint64_t id, std::string const& name, 
     std::filesystem::path const& inDataPath, 
     std::filesystem::path const& functionsFile, 
+    std::filesystem::path const& toolsFolders, 
     std::filesystem::path const& runRootPath, 
     std::unordered_map<std::string, std::string>& args, 
     rapidjson::Value const* publishConfiguration, 
     rapidjson::Value const* configurations)
     : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
+    tools_path_(toolsFolders), 
     run_root_path_(runRootPath), 
     logs_path_(run_root_path_ / ".output"), 
     env_path_(run_root_path_ / ".taskenv"), 
@@ -45,6 +47,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   name_ = Get<std::string>(config, "name");
   files_path_ = GetPath(config, "files_path");
   functions_path_ = GetPath(config, "functions_path");
+  tools_path_ = GetPath(config, "tools_path");
   run_root_path_ = GetPath(config, "run_root_path");
   logs_path_ = GetPath(config, "logs_path");
   env_path_ = GetPath(config, "env_path");
@@ -213,6 +216,7 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
       variables.emplace(key, value);
     }
     variables.emplace("task_id", std::to_string(id_));
+
     publish_.PublishResults(finalSavePath / "logs", finalSavePath / "output" / "artefacts", variables);
   } catch(std::runtime_error const& e) {
     std::cerr << "Error while moving resultats from save to user save storage\n" <<
@@ -239,6 +243,7 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("name", rapidjson::Value(name_.c_str(), alloc), alloc);
   out.AddMember("files_path", rapidjson::Value(files_path_.c_str(), alloc), alloc);
   out.AddMember("functions_path", rapidjson::Value(functions_path_.c_str(), alloc), alloc);
+  out.AddMember("tools_path", rapidjson::Value(tools_path_.c_str(), alloc), alloc);
   out.AddMember("run_root_path", rapidjson::Value(run_root_path_.c_str(), alloc), alloc);
 
   out.AddMember("logs_path", rapidjson::Value(logs_path_.c_str(), alloc), alloc);

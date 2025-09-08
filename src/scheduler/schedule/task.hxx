@@ -26,6 +26,7 @@ public:
   std::string name_;
   std::filesystem::path files_path_;
   std::filesystem::path functions_path_;
+  std::filesystem::path tools_path_;
   std::filesystem::path run_root_path_;
   std::filesystem::path logs_path_;
   std::filesystem::path env_path_;
@@ -49,6 +50,7 @@ public:
   Task(uint64_t id, std::string const& name, 
       std::filesystem::path const& inDataPath, 
       std::filesystem::path const& functionsFile, 
+      std::filesystem::path const& toolsFolders, 
       std::filesystem::path const& runRootPath, 
       std::unordered_map<std::string, std::string>& args, 
       rapidjson::Value const* publishConfiguration, 
