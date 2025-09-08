@@ -22,6 +22,7 @@ public:
   static uint16_t constexpr exitCode_Timedout_ = 0x0200;
   static uint16_t constexpr exitCode_Cancelled_ = 0x0400;
   static uint16_t constexpr exitCode_LaunchError_ = 0x0800;
+  static uint16_t constexpr exitCode_Lost_ = 0x1000;
 
   struct UUIDDependencies {
     uint64_t next;

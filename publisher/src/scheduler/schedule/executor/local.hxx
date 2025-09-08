@@ -9,6 +9,12 @@ namespace ns_Executor {
 
 class LocalData : public ExecutorData {
 public:
+  enum EProcessStatus {
+    Internal,
+    External,
+    External_Running
+  };
+
   LocalData();
   LocalData(rapidjson::Value const& config);
   void ToJSON(rapidjson::Value& out, 
@@ -18,6 +24,11 @@ public:
   std::filesystem::path run_path_;
   pid_t pid_;
   std::filesystem::path artefacts_path_;
+
+  EProcessStatus process_status_;
+  std::filesystem::path fatalerror_path_;
+  std::filesystem::path done_path_;
+  std::vector<std::string> arguments_;
 };
 
 class LocalTaskData : public ExecutorTaskData {
@@ -64,16 +75,20 @@ private:
   void ReAssignCores(std::vector<uint64_t>& cores);
   void ReleaseCores(std::vector<uint64_t>& cores);
   void CreateRunFolders(LocalTaskData const* localTaskData);
+
+  std::vector<std::string> BuildExecutorArgs(
+      ns_Schedule::Step const& step,
+      ns_Executor::LocalTaskData* localTaskData);
+  int16_t CheckExternalProcessIsRunning(pid_t pid, 
+      std::vector<std::string> const& arguments, 
+      std::string const& fatalFile, std::string const& doneFile, 
+      std::stringstream& log);
+  bool VerifyProcessArgs(pid_t pid, 
+      std::vector<std::string> const& expectedArgs);
+
   static bool PinCoresToProcess(std::vector<uint64_t> const& cores_);
   static void SaveArtefacts(std::filesystem::path const& artefactsJSON, 
       std::filesystem::path const& outputPath, std::string const& id);
-  static std::vector<char*> BuildExecutorArgs(
-      ns_Schedule::Step const& step,
-      ns_Executor::LocalTaskData* localTaskData,
-      ns_Executor::LocalConfig const& config,
-      pid_t sessionPid);
-  bool VerifyProcessArgs(pid_t pid, 
-      std::vector<char*> const& expectedArgs);
 };
 
 inline Local::~Local() {}

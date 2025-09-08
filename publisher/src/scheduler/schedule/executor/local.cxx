@@ -15,9 +15,13 @@
 
 #define FREE_ARG_STRINGS(args) for(char* string: args) free(string)
 
-ns_Executor::LocalData::LocalData() {}
+ns_Executor::LocalData::LocalData() : process_status_(Internal)
+{
+}
 
-ns_Executor::LocalData::LocalData(rapidjson::Value const& config) {
+ns_Executor::LocalData::LocalData(rapidjson::Value const& config) 
+    : process_status_(External)
+{
   if (!config.IsObject()) {
     throw std::runtime_error("LocalData JSON must be an object");
   }
@@ -34,6 +38,9 @@ ns_Executor::LocalData::LocalData(rapidjson::Value const& config) {
   run_path_ = Get<std::string>(config, "run_path");
   pid_ = Get<uint64_t>(config, "pid");
   artefacts_path_ = Get<std::string>(config, "artefacts_path");
+
+  fatalerror_path_ = Get<std::string>(config, "fatalerror_path");
+  done_path_ = Get<std::string>(config, "done_path");
 }
 
 void ns_Executor::LocalData::ToJSON(rapidjson::Value& out, 
@@ -46,6 +53,9 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
   out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
   out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
   out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
+
+  out.AddMember("fatalerror_path", rapidjson::Value(fatalerror_path_.c_str(), alloc), alloc);
+  out.AddMember("done_path", rapidjson::Value(done_path_.c_str(), alloc), alloc);
 }
 
 ns_Executor::LocalTaskData::LocalTaskData() {}
@@ -121,7 +131,6 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   LocalData* localData = new LocalData();
   step.executor_data_ = localData;
 
-  bool localTaskDataCreated = false;
   LocalTaskData* localTaskData = nullptr;
   auto executorIT = step.task_->executors_.find(this);
   if (executorIT != step.task_->executors_.end()) {
@@ -131,22 +140,23 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     }
   } else {
     localTaskData = new LocalTaskData();
+  
+    localTaskData->log_path_ = step.task_->run_root_path_ / ".output";
+    localTaskData->env_path_ = step.task_->run_root_path_ / ".taskenv";
+    localTaskData->output_path_ = step.task_->run_root_path_ / "output";
+    localTaskData->common_path_ = step.task_->run_root_path_ / "common";
+
     step.task_->executors_.insert(std::make_pair<>(this, localTaskData));
-    localTaskDataCreated = true;
+    CreateRunFolders(localTaskData);
   }
 
   localData->cores_ = AssignCores(step.nb_cores_);
 
-  localTaskData->log_path_ = step.task_->run_root_path_ / ".output";
-  localTaskData->env_path_ = step.task_->run_root_path_ / ".taskenv";
-  localTaskData->output_path_ = step.task_->run_root_path_ / "output";
-  localTaskData->common_path_ = step.task_->run_root_path_ / "common";
   localData->run_path_ = step.task_->run_root_path_ / step.ID();
   localData->artefacts_path_ = localData->run_path_ / ".artefacts";
 
-  if (localTaskDataCreated) {
-    CreateRunFolders(localTaskData);
-  }
+  localData->fatalerror_path_ = step.task_->run_root_path_ / ("fe-" + step.ID());
+  localData->done_path_ = localData->run_path_ / ".done";
 
   std::error_code ec;
   if (!std::filesystem::create_directories(localData->run_path_, ec)) {
@@ -175,6 +185,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   }
 
   pid_t pid = fork();
+
   if (pid == 0) {
     pid_t spid = setsid();
     if (spid == -1) {
@@ -197,12 +208,18 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     }
     stepParameters.close();
 
-    std::vector<char*> arg_strings = 
-        BuildExecutorArgs(step, localTaskData, config_, spid);
-    if (arg_strings.empty()) {
+    localData->pid_ = getpid();
+    std::vector<std::string> args_strings = 
+        BuildExecutorArgs(step, localTaskData);
+    if (args_strings.empty()) {
       std::cerr << "Can not build args for process" << std::endl;
       exit(-1);
     }
+    std::vector<char*> args_chars;
+    for(std::string const& arg: args_strings) {
+      args_chars.push_back(strdup(arg.c_str()));
+    }
+    args_chars.push_back(nullptr);
 
     {
       std::stringstream oss;
@@ -219,20 +236,20 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     close_range(3, ~0U, 0);
 
     std::filesystem::path script = config_.scriptPath_ / "executor.sh";
-    int retval = execv(script.c_str(), arg_strings.data());
+    int retval = execv(script.c_str(), args_chars.data());
 
     std::cerr << "Unable to excecute " << script << " : " 
         << strerror(errno) << std::endl;
 
-    std::filesystem::path step_fatal_error = 
-        step.task_->run_root_path_ / ("fe-" + step.ID());
-    std::ofstream fatalErrorProf(step_fatal_error);
+    std::ofstream fatalErrorProf(localData->fatalerror_path_, std::ios::trunc);
     fatalErrorProf << "0";
     fatalErrorProf.close();
     sync();
 
     exit(-1);
   }
+
+  localData->pid_ = pid;
 
   close(errhandler);
   close(outhandler);
@@ -242,7 +259,6 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         std::to_string(step.step_id_) + " : " + std::strerror(errno));
   }
 
-  localData->pid_ = pid;
   step.MarkRunning();
   ++nbChild_;
 }
@@ -260,7 +276,18 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     }
     LocalTaskData* localTaskData = GetExecutorTaskData<LocalTaskData>(step->task_);
     int status = 0;
-    pid_t childPID = waitpid(localData->pid_, &status, WNOHANG);
+    pid_t childPID = 0;
+    if (localData->process_status_ == ns_Executor::LocalData::Internal) {
+      childPID = waitpid(localData->pid_, &status, WNOHANG);
+    } else {
+      std::stringstream log;
+      status = CheckExternalProcessIsRunning(localData->pid_, localData->arguments_, 
+          localData->fatalerror_path_, localData->done_path_, log);
+      if (status != ns_Schedule::Step::exitCode_NotSet_) {
+        childPID = localData->pid_;
+      }
+      errno = EINTR;
+    }
     if ((childPID == -1) && (errno != EINTR)) {
       throw std::runtime_error(
           std::string("waitpid failed in CheckFinishedSteps: errno=") +
@@ -268,15 +295,23 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
           " (" + std::strerror(errno) + ")");
     } else if (childPID == localData->pid_) {
       --nbChild_;
-      kill(-childPID, SIGKILL);
-      while(waitpid(-localData->pid_, nullptr, 0) > 0);
 
-      std::filesystem::path step_fatal_error = 
-          step->task_->run_root_path_ / ("fe-" + step->ID());
       std::error_code ec;
-      if (std::filesystem::exists(step_fatal_error, ec)) {
+      if (std::filesystem::exists(localData->fatalerror_path_, ec)) {
         step->MarkLaunchError();
       } else {
+        if (localData->process_status_ != ns_Executor::LocalData::External) {
+          kill(-childPID, SIGHUP);
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+          for(int sig: std::vector<int>{SIGTERM, SIGKILL}) {
+            if (kill(-childPID, 0) != 0) {
+              break;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(4));
+            kill(-childPID, sig);
+          }
+        }
+        while(waitpid(-childPID, nullptr, 0) > 0);
         step->MarkDone(WEXITSTATUS(status));
       }
       ReleaseCores(localData->cores_);
@@ -315,80 +350,49 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
   }
 
   std::error_code ec;
-  std::stringstream errorSS;
+  std::stringstream logSS;
   LocalData* localData = nullptr;
   LocalTaskData* localTaskData = nullptr;
-  std::vector<char*> expectedArgs;
-  std::filesystem::path doneFile;
-  std::filesystem::path stepFatalError;
+  int16_t status = ns_Schedule::Step::exitCode_Lost_;
 
   localData = dynamic_cast<LocalData*>(step.executor_data_);
   if (localData == nullptr) {
-    errorSS << "Step " << step.ID() << " marked Running but no LocalData, marking Pending" << std::endl;
+    logSS << "Step " << step.ID() << " marked Running but no LocalData, marking Pending" << std::endl;
     goto Local__CheckReloadRunning__Error;
   }
   localTaskData = GetExecutorTaskData<LocalTaskData>(step.task_);
 
-  if (kill(localData->pid_, 0) != 0) {
-    std::cerr << "\t\tNot running" << std::endl;
-    stepFatalError = step.task_->run_root_path_ / ("fe-" + step.ID());
-    doneFile = localData->run_path_ / ".done";
-    if (std::filesystem::exists(stepFatalError, ec)) {
-      std::cerr << "\t\tFound fatal error file "<< stepFatalError << std::endl;
-      step.MarkLaunchError();
+  localData->arguments_ = BuildExecutorArgs(step, localTaskData);
+  if (localData->arguments_.empty()) {
+    logSS << "Step " << step.ID() << " failed to build expected args, marking Pending" << std::endl;
+    goto Local__CheckReloadRunning__Error;
+  }
+
+  status = CheckExternalProcessIsRunning(localData->pid_, localData->arguments_, 
+      localData->fatalerror_path_, localData->done_path_, logSS);
+  if (status == ns_Schedule::Step::exitCode_NotSet_) {
+    if (VerifyProcessArgs(localData->pid_, localData->arguments_)) {
+      std::cerr << "Step " << step.ID() << " process still running, re-reserving " 
+          << localData->cores_.size() << " cores" << std::endl;
+      ReAssignCores(localData->cores_);
+      ++nbChild_;
       return;
-    } else if (std::filesystem::exists(localData->run_path_ / ".done", ec)) {
-      std::cerr << "\t\tFound done file in "<< localData->run_path_ << std::endl;
-      uint8_t status = 0;
-      std::ifstream ifs(doneFile);
-      if (ifs >> status) {
-        std::cerr << "\t\tDone file have status: " << status << std::endl;
-        step.MarkDone(status);
-        SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step.ID());
-        std::filesystem::remove_all(localData->run_path_, ec);
-        return;
-      } else {
-        std::cerr << "\t\tDone file corrupted" << std::endl;
-        errorSS << "Step " << step.ID() << " .done file corrupted, marking Pending" << std::endl;
-        goto Local__CheckReloadRunning__Error;
-      }
     }
-
-    std::cerr << "\t\tShould have been kill, need restart" << std::endl;
-    errorSS << "Step " << step.ID() << " process " << localData->pid_ 
-        << " died, marking Pending" << std::endl;
-    goto Local__CheckReloadRunning__Error;
-  }
-
-  expectedArgs = BuildExecutorArgs(step, localTaskData, config_, localData->pid_);
-
-  if (expectedArgs.empty()) {
-    std::cerr << "\t\tFailed to build run args, need restart" << std::endl;
-    errorSS << "Step " << step.ID() << " failed to build expected args, marking Pending" << std::endl;
-    goto Local__CheckReloadRunning__Error;
-  }
-
-  if (!VerifyProcessArgs(localData->pid_, expectedArgs)) {
-    std::cerr << "\t\tFound a pid but with diffents run args, need restart" << std::endl;
-    errorSS << "Step " << step.uuid_ << " (" << localData->pid_ << 
+    logSS << "Step " << step.uuid_ << " (" << localData->pid_ << 
         ") no more running, marking Pending" << std::endl;
-    goto Local__CheckReloadRunning__Error;
+  } else if (status == ns_Schedule::Step::exitCode_LaunchError_) {
+    step.MarkLaunchError();
+    return;
+  } else if (status == ns_Schedule::Step::exitCode_Lost_) {
+  } else {
+    step.MarkDone(status);
+    SaveArtefacts(localData->artefacts_path_, localTaskData->output_path_, step.ID());
+    std::filesystem::remove_all(localData->run_path_, ec);
+    return;
   }
-
-  std::cerr << "Step " << step.ID() << " process still running, re-reserving " 
-      << localData->cores_.size() << " cores" << std::endl;
-
-  ReAssignCores(localData->cores_);
-  ++nbChild_;
-
-  FREE_ARG_STRINGS(expectedArgs);
-  return;
 
 Local__CheckReloadRunning__Error:
-  std::cerr << errorSS.str();
-  if (!expectedArgs.empty()) {
-    FREE_ARG_STRINGS(expectedArgs);
-  }
+  std::cerr << step.task_->id_ << " step " << step.ID() << "\n" << logSS.str();
 
   bool deleteRunPath = localData != nullptr;
   bool deleteOutFile = true;
@@ -507,7 +511,6 @@ inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
 
 void ns_Executor::Local::CreateRunFolders(LocalTaskData const* localTaskData) {
   std::error_code ec;
-
   for(std::filesystem::path path : { localTaskData->common_path_ }) {
     if (!std::filesystem::create_directories(path, ec)) {
       throw std::runtime_error(
@@ -523,6 +526,126 @@ void ns_Executor::Local::CreateRunFolders(LocalTaskData const* localTaskData) {
           std::string(" failed: errno=") + std::to_string(ec.value()) + " (" + ec.message() + ")"
       );
   }
+}
+
+std::vector<std::string> ns_Executor::Local::BuildExecutorArgs(
+    ns_Schedule::Step const& step, 
+    ns_Executor::LocalTaskData* localTaskData) {
+
+  LocalData* localData = dynamic_cast<LocalData*>(step.executor_data_);
+  std::string cores;
+  for(uint64_t core: localData->cores_) {
+    cores += std::to_string(core) + ',';
+  }
+  if (cores.empty()) {
+    return std::vector<std::string>();
+  }
+  cores.pop_back();
+
+  std::vector<std::string> arg_strings;
+  arg_strings.push_back("task");
+  arg_strings.push_back(step.task_->functions_path_.c_str());
+  arg_strings.push_back(localTaskData->env_path_.c_str());
+  arg_strings.push_back(localTaskData->common_path_.c_str());
+  arg_strings.push_back(localTaskData->output_path_.c_str());
+  arg_strings.push_back(config_.scriptPath_.c_str());
+  arg_strings.push_back(step.task_->files_path_.c_str());
+  arg_strings.push_back(std::to_string(step.next_ == &step).c_str());
+  arg_strings.push_back(std::to_string(localData->pid_).c_str());
+  arg_strings.push_back(step.id_.c_str());
+  arg_strings.push_back(std::to_string(step.attempt_id_).c_str());
+  arg_strings.push_back(std::to_string(step.run_id_).c_str());
+  arg_strings.push_back(cores.c_str());
+  arg_strings.push_back(step.function_.c_str());
+  arg_strings.push_back("./.parameters");
+  arg_strings.push_back("---");
+
+  return arg_strings;
+}
+
+int16_t ns_Executor::Local::CheckExternalProcessIsRunning(pid_t pid, std::vector<std::string> const& arguments, 
+    std::string const& fatalFile, std::string const& doneFile, std::stringstream& log) {
+
+  if (kill(pid, 0) != 0) {
+    std::error_code ec;
+    log << "\tNot running" << std::endl;
+    if (std::filesystem::exists(fatalFile, ec)) {
+      log << "\tFound fatal error file "<< fatalFile << std::endl;
+      return ns_Schedule::Step::exitCode_LaunchError_;
+    } else if (std::filesystem::exists(doneFile, ec)) {
+      log << "\tFound done file in "<< doneFile << std::endl;
+      uint8_t status = 0;
+      std::ifstream ifs(doneFile);
+      if (ifs >> status) {
+        log << "\tDone file have status: " << status << std::endl;
+        return status;
+      } else {
+        log << "\tDdone file corrupted: " << doneFile << std::endl;
+        return ns_Schedule::Step::exitCode_Lost_;
+      }
+    }
+    log << "\tprocess " << pid << " not running" << std::endl;
+    return ns_Schedule::Step::exitCode_Lost_;
+  }
+
+  if (!VerifyProcessArgs(pid, arguments)) {
+    log << "\tFound a pid but with diffents run args, need restart" << std::endl;
+    return ns_Schedule::Step::exitCode_Lost_;
+  }
+
+  return ns_Schedule::Step::exitCode_NotSet_;
+}
+
+bool ns_Executor::Local::VerifyProcessArgs(pid_t pid, 
+    std::vector<std::string> const& expectedArgs) {
+  if (expectedArgs.size() < 3) {
+    return false;
+  }
+  std::ifstream cmdline("/proc/" + std::to_string(pid) + "/cmdline");
+  if (!cmdline.is_open()) {
+    return false;
+  }
+
+  size_t expectedArgsSize = expectedArgs.size();
+
+  std::vector<std::string> actualArgs;
+  std::string arg;
+  char c;
+  while (cmdline.get(c)) {
+    if (c == '\0') {
+      actualArgs.push_back(arg);
+      arg.clear();
+    } else {
+      arg += c;
+    }
+  }
+  if (!arg.empty()) {
+    actualArgs.push_back(arg);
+  }
+
+  if (actualArgs.size() < expectedArgsSize) {
+    return false;
+  }
+
+  size_t startIndex = 1;
+  for(; startIndex<actualArgs.size(); ++startIndex) {
+    if (actualArgs[startIndex].compare(expectedArgs[1]) == 0) {
+      startIndex;
+      break;
+    }
+  }
+
+  if ((startIndex >= actualArgs.size()) || 
+      ((expectedArgsSize - 1) > (actualArgs.size() - startIndex))) {
+    return false;
+  }
+  for(size_t i=2; i<expectedArgsSize; ++i) {
+    if (actualArgs[startIndex+i-1].compare(expectedArgs[i]) != 0) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) {
@@ -610,96 +733,4 @@ void ns_Executor::Local::SaveArtefacts(std::filesystem::path const& artefactsJSO
           << " (" << ex.what() << ")" << std::endl;
     }
   }
-}
-
-std::vector<char*> ns_Executor::Local::BuildExecutorArgs(
-    ns_Schedule::Step const& step, 
-    ns_Executor::LocalTaskData* localTaskData,
-    ns_Executor::LocalConfig const& config, 
-    pid_t sessionPid) {
-
-  LocalData* localData = dynamic_cast<LocalData*>(step.executor_data_);
-
-  std::vector<char*> arg_strings;
-  arg_strings.push_back(strdup("task"));
-  arg_strings.push_back(strdup(step.task_->functions_path_.c_str()));
-  arg_strings.push_back(strdup(localTaskData->env_path_.c_str()));
-  arg_strings.push_back(strdup(localTaskData->common_path_.c_str()));
-  arg_strings.push_back(strdup(localTaskData->output_path_.c_str()));
-  arg_strings.push_back(strdup(config.scriptPath_.c_str()));
-  arg_strings.push_back(strdup(step.task_->files_path_.c_str()));
-  arg_strings.push_back(strdup(std::to_string(step.next_ == &step).c_str()));
-  arg_strings.push_back(strdup(std::to_string(sessionPid).c_str()));
-  arg_strings.push_back(strdup(step.id_.c_str()));
-  arg_strings.push_back(strdup(std::to_string(step.attempt_id_).c_str()));
-  arg_strings.push_back(strdup(std::to_string(step.run_id_).c_str()));
-  std::string cores;
-  for(uint64_t core: localData->cores_) {
-    cores += std::to_string(core) + ',';
-  }
-  if (cores.empty()) {
-    FREE_ARG_STRINGS(arg_strings);
-    return std::vector<char*>();
-  }
-  cores.pop_back();
-  arg_strings.push_back(strdup(cores.c_str()));
-  arg_strings.push_back(strdup(step.function_.c_str()));
-  arg_strings.push_back(strdup("./.parameters"));
-  arg_strings.push_back(strdup("---"));
-
-  arg_strings.push_back(nullptr);
-  return arg_strings;
-}
-
-bool ns_Executor::Local::VerifyProcessArgs(pid_t pid, 
-    std::vector<char*> const& expectedArgs) {
-  if (expectedArgs.size() < 3) {
-    return false;
-  }
-  std::ifstream cmdline("/proc/" + std::to_string(pid) + "/cmdline");
-  if (!cmdline.is_open()) {
-    return false;
-  }
-
-  size_t expectedArgsSize = 
-      expectedArgs.back() == nullptr ? expectedArgs.size() - 1 : expectedArgs.size();
-
-  std::vector<std::string> actualArgs;
-  std::string arg;
-  char c;
-  while (cmdline.get(c)) {
-    if (c == '\0') {
-      actualArgs.push_back(arg);
-      arg.clear();
-    } else {
-      arg += c;
-    }
-  }
-  if (!arg.empty()) {
-    actualArgs.push_back(arg);
-  }
-
-  if (actualArgs.size() < expectedArgsSize) {
-    return false;
-  }
-
-  size_t startIndex = 1;
-  for(; startIndex<actualArgs.size(); ++startIndex) {
-    if (actualArgs[startIndex].compare(expectedArgs[1]) == 0) {
-      startIndex;
-      break;
-    }
-  }
-
-  if ((startIndex >= actualArgs.size()) || 
-      ((expectedArgsSize - 1) > (actualArgs.size() - startIndex))) {
-    return false;
-  }
-  for(size_t i=2; i<expectedArgsSize; ++i) {
-    if (actualArgs[startIndex+i-1].compare(expectedArgs[i]) != 0) {
-      return false;
-    }
-  }
-
-  return true;
 }
