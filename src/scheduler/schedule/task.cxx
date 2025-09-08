@@ -143,7 +143,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   }
 
   std::filesystem::path stepsFile = logs_path_ / ".steps.json";
-  steps_file_.open(stepsFile);
+  steps_file_.open(stepsFile, std::ios::app);
   if (!steps_file_.is_open()) {
     throw std::runtime_error("Unable to create file " + 
         stepsFile.string());
