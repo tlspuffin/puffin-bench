@@ -22,9 +22,9 @@ void ns_API::ScheduleAPI::GetTaskInfos(uint64_t task_id) {
 }
 
 std::string ns_API::ScheduleAPI::GetOutput(
-    std::string const& type, std::string const& taskID, std::string const& stepID,
-    std::string const& rankID, std::string const& attemptID, size_t readSize, 
-    ssize_t readOffset, ns_Schedule::OutputState& state) {
-  return schedule_.GetOutput(type, taskID, stepID, rankID, attemptID, 
+    std::string const& type, std::string const& taskID, uint64_t stepUUID, 
+    std::string const& stepID, size_t readSize, ssize_t readOffset, 
+    ns_Schedule::OutputState& state) {
+  return schedule_.GetOutput(type, taskID, stepUUID, stepID, 
       readSize, readOffset, state);
 }

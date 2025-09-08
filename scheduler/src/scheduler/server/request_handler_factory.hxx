@@ -37,10 +37,10 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     if (method == "GET") {
       std::smatch matches;
       if (std::regex_match(uri, matches, std::regex(
-          R"(/api/task/output/(\d+)/(stdout|stderr)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+))"))) {
-        requestHandler = new RequestHandlerTaskOutputs(
-            matches[1].str(), matches[2].str(), matches[3].str(), matches[4].str(), 
-            matches[5].str(), std::stoull(matches[6].str()), std::stoll(matches[7].str()));
+          R"(/api/task/output/(\d+)/(\d+)/(\d+-\d+-\d+)/(stdout|stderr)/(\d+)/(-?\d+))"))) {
+        requestHandler = new RequestHandlerTaskOutputs(matches[1].str(), 
+            std::stoull(matches[2].str()), matches[3].str(), matches[4].str(), 
+            std::stoull(matches[5].str()), std::stoll(matches[6].str()));
       } else if (uri == "/api/tasks/running") {
         requestHandler = new RequestHandlerTasksRunning;
       } else if (std::regex_match(uri, matches, std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))"))) {

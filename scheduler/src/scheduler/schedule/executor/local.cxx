@@ -99,6 +99,13 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
       continue;
     }
     nbCoresFree -= nbCoresRequired;
+    {
+      std::stringstream oss;
+      oss << "Can run step " << step->task_->id_ << " / " << step->ID() << 
+          " requires " << nbCoresRequired << " cores, left " << nbCoresFree << 
+          " cores " << std::endl;
+      std::cerr << oss.str();
+    }
     result.push_back(step);
   }
 
@@ -145,7 +152,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   if (!std::filesystem::create_directories(localData->run_path_, ec)) {
     throw std::runtime_error(
         std::string("create dir ") + localData->run_path_.string() + 
-        std::string("/.output failed: errno=") + std::to_string(ec.value()) +
+        std::string(" failed: errno=") + std::to_string(ec.value()) +
         " (" + ec.message() + ")"
     );
   }

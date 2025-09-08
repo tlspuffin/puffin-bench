@@ -74,7 +74,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
     configurations = &rootJSON["configurations"];
   }
   ns_Schedule::Task* task = new ns_Schedule::Task(task_id, taskName, 
-      inDataPath, functionsFile, 
+      inDataPath, functionsFile, config_.toolsPath_,
       config_.runPath_ / std::to_string(task_id), args, 
       publisherConfiguration, configurations);
   task->root_steps_ = CreateStepsFromJson(rootJSON, task, schedule);
@@ -125,18 +125,16 @@ void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
 }
 
 std::string ns_Schedule::TasksManager::GetRunningOutput(
-    std::string const& type, uint64_t taskID, uint64_t stepID, 
-    uint64_t rankID, uint64_t attemptID, 
+    std::string const& type, uint64_t taskID, uint64_t stepUUID, 
     size_t readSize, ssize_t readOffset, 
     enum ns_Schedule::OutputState& state) {
+  std::cerr << "Look for task: " << taskID << std::endl;
   state = OutputState::UNKNOWN;
   std::lock_guard<std::mutex> lock(lock_);
   for(auto const& task: tasks_) {
     if (task->id_ != taskID) {
       continue;
     }
-
-    std::cerr << "Got task: " << task->id_ << " : " << taskID << std::endl;
 
     ns_Schedule::Step const* firstStep = task->root_steps_.front();
     ns_Schedule::Step const* step = nullptr;
@@ -149,7 +147,7 @@ std::string ns_Schedule::TasksManager::GetRunningOutput(
         std::cerr << "Check step: " << step->ID()  <<
             " uuid: " << step->uuid_ << std::endl;
 
-        if ((step->step_id_ == stepID) && (step->rank_id_ == rankID) && (step->attempt_id_ == attemptID)) {
+        if (step->uuid_ == stepUUID) {
           std::cerr << "\tFound " << std::endl;
           return step->executor_->GetRunningOutput(
               *step, type, readSize, readOffset, state);

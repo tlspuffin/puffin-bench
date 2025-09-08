@@ -10,6 +10,7 @@
 namespace ns_Schedule {
 
 struct Config {
+  std::filesystem::path toolsPath_;
   std::filesystem::path runPath_;
   std::filesystem::path exportPath_;
   std::filesystem::path userPath_;

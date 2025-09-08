@@ -1,6 +1,0 @@
----
-title: Commits
-listing:
-  contents: commit
-  type: table
----

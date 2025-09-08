@@ -5,6 +5,7 @@
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Net/HTTPServerRequest.h>
 #include <Poco/Base64Encoder.h>
+#include <Poco/StreamCopier.h>
 #include <Poco/URI.h>
 
 static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
@@ -19,6 +20,13 @@ static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
     return true;
   }
   return false;
+}
+
+void ns_Server::RequestHandlerError::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+  response.setContentType("text/plain");
+  response.send() << "404 - Path not found: " << request.getURI();
 }
 
 void ns_Server::RequestHandlerNotify::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -49,22 +57,87 @@ void ns_Server::RequestHandlerNotify::handleRequest(Poco::Net::HTTPServerRequest
 
 void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
-  if (ManageCORS(request, response)) {
-    return;
-  }
 
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
-  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
-  response.set("Pragma", "no-cache");
 
-  std::ostream& out = response.send();
+  //std::string const& prefix = std::get<0>(args_);
+  std::string const& prefix = "/files";
+
+  std::ostream* out = nullptr;
   try {
-    //apis_->publisherAPI_.Files(....);
-    out << R"({"success": true})";
-  } catch(std::runtime_error const& e) {
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-    out << R"({"success": false})";
+    Poco::URI uri(request.getURI());
+    std::string path = uri.getPath();
+    path = path.substr(prefix.size());
+
+    if (path.compare("/") == 0) {
+      path = "index.html";
+    } else if (path[0] == '/') {
+      path = path.substr(1);
+    }
+
+    std::filesystem::path rootPath = apis_->publishAPI_.Storage();
+
+    std::filesystem::path filename = rootPath / path;
+    try {
+      filename = std::filesystem::canonical(filename);
+    } catch(...) {
+      //detectHostileIP_.SetHostileIP(srcIP);
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send();
+      return;
+    }
+
+    std::error_code ec;
+    std::string relativePath = std::filesystem::relative(filename, rootPath, ec).string();
+    if (ec || (relativePath.find("..") == 0)) {
+      //detectHostileIP_.SetHostileIP(srcIP);
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+      response.send();
+      return;
+    }
+
+    static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
+        mimeType {
+            {".html", {"text/html", std::ios_base::in}}, 
+            {".css", {"text/css", std::ios_base::in}},
+            {".json", {"application/json", std::ios_base::in}},
+            {".js", {"text/javascript", std::ios_base::in}}, 
+            {".jpg", {"image/jpeg", std::ios_base::binary}}, 
+            {".jpeg", {"image/jpeg", std::ios_base::binary}}, 
+            {".png", {"image/png", std::ios_base::binary}}, 
+            {".svg", {"image/svg+xml", std::ios_base::in}}, 
+    };
+    std::string extension = filename.extension().string();
+
+    std::string contentType = "application/octet-stream";
+    std::ios_base::openmode openmode = std::ios_base::in;
+    auto const& mimeTypeIT = mimeType.find(extension);
+    if (mimeTypeIT != mimeType.end()) {
+      contentType = mimeTypeIT->second.first;
+      openmode = mimeTypeIT->second.second;
+    }
+
+    std::ifstream file(filename, openmode);
+    if (!file.is_open()) {
+      //detectHostileIP_.RecordFailedRequest(srcIP);
+      //char cwd[4096] = {};
+      //getcwd(cwd, 4096);
+      ///LOGWARNING("[%s][%s] unable to access %s cwd: %s", GenerateHumanTS().c_str(), srcIP.c_str(), filename.c_str(), cwd);
+      throw std::runtime_error("file open failed");
+    }
+
+    response.setContentType(contentType);
+    response.setChunkedTransferEncoding(true);
+    out = &response.send();
+    Poco::StreamCopier::copyStream(file, *out);
+    out->flush();
+  } catch (const std::exception& e) {
+    std::cerr << "File server error: " << e.what() << std::endl;
+    if (out != nullptr) {
+      out->flush();
+    } else if (!response.sent()) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      response.send();
+    }
   }
-  out.flush();
 }

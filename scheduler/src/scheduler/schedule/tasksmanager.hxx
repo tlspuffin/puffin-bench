@@ -24,8 +24,7 @@ public:
   void TaskEnded(ns_Schedule::Task* task);
 
   std::string GetRunningOutput(std::string const& type, 
-    uint64_t taskID, uint64_t stepID, 
-    uint64_t rankID, uint64_t attemptID, 
+    uint64_t taskID, uint64_t stepUUID, 
     size_t readSize, ssize_t readOffset, 
     enum ns_Schedule::OutputState& state);
 

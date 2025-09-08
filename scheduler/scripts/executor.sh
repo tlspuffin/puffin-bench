@@ -192,5 +192,6 @@ if [[ "${UPDATE_ENV}" == "1" ]]; then
   echo "${GLBPARMS}" > ${ENVFILE}
 fi
 
-echo ${RETVAL} > .done
+echo ${RETVAL} > .done.tmp
+mv .done.tmp .done
 exit ${RETVAL}
