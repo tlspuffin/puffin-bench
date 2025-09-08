@@ -39,25 +39,6 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   run_id_ = Get<uint64_t>(config, "run_id");
   executor_name_ = Get<std::string>(config, "executor_name");
 
-
-  std::string executorName = GetOrDefault<std::string>(config, "executor", "");
-  executor_ = nullptr;
-  executor_data_ = nullptr;
-  if (!executorName.empty()) {
-    executor_ = schedule->GetExecutor(executorName);
-    if (executorName.compare(executor_->Name()) != 0) {
-      throw std::runtime_error("Step JSON unable to find required executor: " + 
-          executor_name_);
-    }
-
-    if (config.HasMember("executor_data")) {
-      if (!config["executor_data"].IsObject()) {
-        throw std::runtime_error("Step JSON executor_data must be an object");
-      }
-      executor_data_ = executor_->CreateLocalData(config["executor_data"]);
-    }
-  }
-
   function_ = Get<std::string>(config, "function");
 
   args_.clear();
@@ -114,6 +95,24 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   }
   if (!hasTimePoints) {
     throw std::runtime_error("Step JSON missing time_points_ms array");
+  }
+
+  std::string executorName = GetOrDefault<std::string>(config, "executor", "");
+  executor_ = nullptr;
+  executor_data_ = nullptr;
+  if (!executorName.empty()) {
+    executor_ = schedule->GetExecutor(executorName);
+    if (executorName.compare(executor_->Name()) != 0) {
+      throw std::runtime_error("Step JSON unable to find required executor: " + 
+          executor_name_);
+    }
+
+    if (config.HasMember("executor_data")) {
+      if (!config["executor_data"].IsObject()) {
+        throw std::runtime_error("Step JSON executor_data must be an object");
+      }
+      executor_data_ = executor_->CreateLocalData(config["executor_data"]);
+    }
   }
 }
 
