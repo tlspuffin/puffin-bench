@@ -5,6 +5,7 @@
 #include "tasksmanager.hxx"
 #include "output_state.hxx"
 #include "executor/executor.hxx"
+#include "monitor/monitor.hxx"
 #include <vector>
 #include <list>
 #include <string>
@@ -56,6 +57,8 @@ private:
   std::list<ns_Schedule::Step*> stepsDone_;
   std::string defaultExecutor_;
   std::unordered_map<std::string, ns_Executor::Executor*> executors_;
+
+  ns_Monitor::Monitor monitor_;
 
   static bool shutdownTasksAtExit__;
   static void HandlerUSR1(int sig);

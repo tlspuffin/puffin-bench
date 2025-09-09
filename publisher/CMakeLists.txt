@@ -57,7 +57,7 @@ EmbedTextFile("scripts/executor.sh"
 
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
-  src/scheduler/utils/variables.cxx
+  src/scheduler/utils/rapidjson.cxx src/scheduler/utils/variables.cxx
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
@@ -65,6 +65,7 @@ set(SRV_SRC
   src/scheduler/schedule/executor/linux_cores.cxx
   src/scheduler/api/schedule_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
+  src/scheduler/schedule/monitor/thread.cxx src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})

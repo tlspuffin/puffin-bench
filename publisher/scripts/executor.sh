@@ -57,7 +57,7 @@ if [ ! -r "$1" ]; then
   echo "Unable to read $1"
   exit 1
 fi
-SRCFILE=$1
+SRCFILE="$1"
 shift
 
 if [ ! -r "$1" ]; then
@@ -65,44 +65,44 @@ if [ ! -r "$1" ]; then
     echo "Required env file is missing"
     exit 1
   fi
-  touch $1
+  touch "$1"
 fi
-ENVFILE=$1
+ENVFILE="$1"
 shift
 
 if [ ! -w "$1" ]; then
   echo "Output directory is not writable: $1"
   exit 1
 fi
-COMMONPATH=$1
+COMMONPATH="$1"
 shift
 
 if [ ! -w "$1" ]; then
   echo "Output directory is not writable: $1"
   exit 1
 fi
-OUTPATH=$1
+OUTPATH="$1"
 shift
 
 if [ ! -r "$1" ]; then
   echo "Tools directory is not readable: $1"
   exit 1
 fi
-TOOLSPATH=$1
+TOOLSPATH="$1"
 shift
 
 if [ ! -r "$1" ]; then
   echo "Input directory is not readable: $1"
   exit 1
 fi
-INPATH=$1
+INPATH="$1"
 shift
 
 if [ -z "$1" ]; then
   echo "Update env info missing"
   exit 1
 fi
-UPDATE_ENV=$1
+UPDATE_ENV="$1"
 shift
 echo "UPDATE_ENV= ${UPDATE_ENV}"
 
@@ -110,14 +110,14 @@ if [ -z "$1" ]; then
   echo "Missing sid"
   exit 1
 fi
-SID=$1
+SID="$1"
 shift
 
 if [ -z "$1" ]; then
   echo "Missing step name"
   exit 1
 fi
-STEP_NAME=$1
+STEP_NAME="$1"
 if [ "${STEP_NAME}" = "." ]; then
   STEP_NAME=
 fi
@@ -127,21 +127,21 @@ if [ -z "$1" ]; then
   echo "Missing attempt id"
   exit 1
 fi
-ATTEMPT_ID=$1
+ATTEMPT_ID="$1"
 shift
 
 if [ -z "$1" ]; then
   echo "Missing run id"
   exit 1
 fi
-RUN_ID=$1
+RUN_ID="$1"
 shift
 
 if [ -z "$1" ]; then
   echo "Missing cores list"
   exit 1
 fi
-CORES=$1
+CORES="$1"
 NBCORES=$(IFS=, read -ra cpus <<<"$CORES"; echo "${#cpus[@]}")
 shift
 
@@ -149,14 +149,14 @@ if [ -z "$1" ]; then
   echo "Missing function name"
   exit 1
 fi
-COMMAND=$1
+COMMAND="$1"
 shift
 
 if [ -z "$1" ]; then
   echo "Missing parameters data"
   exit 1
 fi
-PARAMETERSFILE=$1
+PARAMETERSFILE="$1"
 shift
 
 if [[ "$1" != "---" ]]; then
@@ -165,20 +165,20 @@ if [[ "$1" != "---" ]]; then
 fi
 shift
 
-source ${SRCFILE}
+source "${SRCFILE}"
 
 if ! declare -F "${COMMAND}" > /dev/null; then
   echo "${COMMAND} does not exist"
   exit 1
 fi
 
-GLBPARMS=$( cat ${ENVFILE} )
-echo "task env: $( cat ${ENVFILE})"
+GLBPARMS=$( cat "${ENVFILE}" )
+echo "task env: $( cat "${ENVFILE}" )"
 eval ${GLBPARMS}
 echo "In: ${GLBPARMS}"
 
-RUNPARMS=$( cat ${PARAMETERSFILE} )
-echo "step run params: $( cat ${PARAMETERSFILE})"
+RUNPARMS=$( cat "${PARAMETERSFILE}" )
+echo "step run params: $( cat "${PARAMETERSFILE}" )"
 eval ${RUNPARMS}
 echo "Params: ${RUNPARMS}"
 
