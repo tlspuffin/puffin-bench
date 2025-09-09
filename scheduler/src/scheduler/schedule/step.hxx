@@ -3,6 +3,7 @@
 #include "task.hxx"
 #include "executor/executor.hxx"
 #include "step_configurations.hxx"
+#include "monitor/task.hxx"
 #include <cstdint>
 #include <string>
 #include <list>
@@ -35,7 +36,9 @@ public:
     }
   };
 
-  Step(ns_Schedule::Task* task, std::string const& name);
+  Step(Step const& source);
+  Step(ns_Schedule::Task* task, std::string const& name, 
+      rapidjson::Value const* monitorJSON);
   Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
       ns_Schedule::Schedule const* schedule, 
       struct UUIDDependencies& dependencies);
@@ -101,6 +104,8 @@ public:
   int32_t monitor_count_;
 
   bool request_cancel_;
+
+  std::shared_ptr<ns_Monitor::Task> monitor_;
 
 private:
   enum class State { 

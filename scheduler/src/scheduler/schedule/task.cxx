@@ -26,8 +26,11 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     args_(args), configurations_(), 
     root_steps_(), executors_(), 
     steps_file_(), request_cancel_(false), 
-    publish_(*publishConfiguration)
+    publish_()
 {
+  if (publishConfiguration != nullptr) {
+    publish_.ReadJSON(*publishConfiguration);
+  }
   if (configurations != nullptr) {
     configurations_.ReadFromTaskJSON(*configurations);
   }

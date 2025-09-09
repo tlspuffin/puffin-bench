@@ -1,19 +1,8 @@
 #include "step_configurations.hxx"
 #include "../utils/rapidjson.hxx"
 
-static uint64_t ParseTimeout(const std::string& str) {
-    if (str.empty()) return 0;
-    char unit = str.back();
-    int value = std::stoi(str.substr(0, str.size() - 1));
-    if (unit == 'd') return value * 60 * 60 * 24;
-    if (unit == 'h') return value * 60 * 60;
-    if (unit == 'm') return value * 60;
-    if (unit == 's') return value;
-    return value;
-}
-
 ns_Schedule::StepConfigurations::Configuration::Configuration() : 
-    executor_name_(""), nb_cores_(0), nb_retry_(0), 
+    executor_name_(""), nb_cores_(1), nb_retry_(1), 
     timeout_(0), args_{} {
 }
 
@@ -55,17 +44,23 @@ void ns_Schedule::StepConfigurations::ReadFromTaskJSON(rapidjson::Value const& e
 ns_Schedule::StepConfigurations::Configuration  
 ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     std::vector<rapidjson::Value const*> const& overrides) const {
+  std::string id;
+  std::string executor_name;
+  uint32_t nb_cores = 1;
+  uint32_t nb_retry = 1;
+  uint64_t timeout = 0;
+  std::unordered_map<std::string, std::string> args;
   auto configurationIT = configurations_.find(name);
-  if (configurationIT == configurations_.end()) {
-    throw std::runtime_error("unknown configuration name: " + name);
+  if (configurationIT != configurations_.end()) {
+    ns_Schedule::StepConfigurations::Configuration const& base = configurationIT->second;
+
+    id = base.id_;
+    executor_name = base.executor_name_;
+    nb_cores = base.nb_cores_;
+    nb_retry = base.nb_retry_;
+    timeout = base.timeout_;
+    args = base.args_;
   }
-  ns_Schedule::StepConfigurations::Configuration const& base = configurationIT->second;
-  std::string id = base.id_;
-  std::string executor_name = base.executor_name_;
-  uint32_t nb_cores = base.nb_cores_;
-  uint32_t nb_retry = base.nb_retry_;
-  uint64_t timeout = base.timeout_;
-  std::unordered_map<std::string, std::string> args = base.args_;
   for (rapidjson::Value const* override : overrides) {
     if (!override || !override->IsObject()) {
       throw std::runtime_error("override_configurations entry must be an object");
@@ -76,7 +71,7 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     nb_retry = GetOrDefault<uint32_t>(*override, "nb_retry", nb_retry);
     std::string timeoutStr = GetOrDefault<std::string>(
         *override, "timeout", std::to_string(timeout)+"s");
-    timeout = ParseTimeout(timeoutStr);
+    timeout = ParseDurationToSeconds(timeoutStr);
     if (override->HasMember("args")) {
       rapidjson::Value const& argsJSON = (*override)["args"];
       if (!argsJSON.IsObject()) {
@@ -116,7 +111,7 @@ ns_Schedule::StepConfigurations::ReadEntryFromTaskJSON(std::string const& name,
       entry, "nb_retry", defaultConfiguration.nb_retry_);
   std::string timeoutString = GetOrDefault<std::string>(
       entry, "timeout", std::to_string(defaultConfiguration.timeout_)+"s");
-  uint64_t timeout = ParseTimeout(timeoutString);
+  uint64_t timeout = ParseDurationToSeconds(timeoutString);
 
   std::unordered_map<std::string, std::string> args;
   if (entry.HasMember("args")) {
