@@ -4,15 +4,34 @@
 
 std::atomic<uint64_t> ns_Schedule::Step::next_uuid_ = 0;
 
-ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name) 
+ns_Schedule::Step::Step(ns_Schedule::Step const& source) 
+    : task_(source.task_), name_(source.name_), uuid_(++next_uuid_),
+    step_id_(source.step_id_), rank_id_(source.rank_id_), 
+    attempt_id_(source.attempt_id_), run_id_(source.run_id_), 
+    executor_name_(source.executor_name_), executor_(source.executor_), 
+    executor_data_(source.executor_data_), function_(source.function_), 
+    args_(source.args_), nb_cores_(source.nb_cores_), nb_retry_(source.nb_retry_), 
+    timeout_(source.timeout_), next_(const_cast <ns_Schedule::Step *>(&source)), 
+    previous_(const_cast <ns_Schedule::Step *>(&source)), 
+    dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
+    stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
+    request_cancel_(false), monitor_(source.monitor_), state_(State::Pending)
+{}
+
+ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name, 
+    rapidjson::Value const* monitorJSON) 
     : task_(task), name_(name), uuid_(++next_uuid_), step_id_(0), 
-      rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
-      executor_(nullptr), executor_data_(nullptr), function_(name), 
-      args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
-      next_(this), previous_(this), dependencies_(), depend_from_(), 
-      state_(State::Pending), stdout_(), stderr_(), 
-      exit_code_(exitCode_NotSet_), monitor_count_(0), request_cancel_(false)
+    rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
+    executor_(nullptr), executor_data_(nullptr), function_(name), 
+    args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
+    next_(this), previous_(this), dependencies_(), depend_from_(), 
+    stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
+    request_cancel_(false), monitor_(), state_(State::Pending)
 {
+  std::shared_ptr<ns_Monitor::Task> monitor;
+  if (monitorJSON != nullptr) {
+    monitor_ = std::make_shared<ns_Monitor::Task>(*monitorJSON);
+  }
 }
 
 ns_Schedule::Step::Step(ns_Schedule::Task* task, 
@@ -95,6 +114,10 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   }
   if (!hasTimePoints) {
     throw std::runtime_error("Step JSON missing time_points_ms array");
+  }
+
+  if (config.HasMember("monitor") && config["monitor"].IsObject()) {
+    monitor_ = std::make_shared<ns_Monitor::Task>(config["monitor"]);
   }
 
   std::string executorName = GetOrDefault<std::string>(config, "executor", "");
@@ -248,6 +271,12 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   timepoints.PushBack(ToMillis(time_points_[0]), alloc);
   timepoints.PushBack(ToMillis(time_points_[1]), alloc);
   out.AddMember("time_points_ms", timepoints, alloc);
+
+  if (monitor_) {
+    rapidjson::Value monitor(rapidjson::kObjectType);
+    monitor_->ToJSON(monitor, alloc);
+    out.AddMember("monitor", monitor, alloc);
+  }
 }
 
 inline uint64_t ns_Schedule::Step::ToMillis(

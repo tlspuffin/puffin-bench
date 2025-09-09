@@ -32,7 +32,8 @@ bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
-      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local")
+      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
+      monitor_(config.toolsPath_, 1)
 {
   static int installHandler = InstallSigUSRHandler();
 
@@ -49,6 +50,11 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config)
   if (steps_.empty()) {
     ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
   } else {
+    for(auto const& step : stepsRunning_) {
+      if (step->monitor_) {
+        monitor_.Add(step->monitor_);
+      }
+    }
     threadRunning_ = true;
     thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
   }
@@ -230,6 +236,9 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     for(ns_Schedule::Step* step : toRun) {
       step->Execute();
       DEBUG_STEP_MSG("Step execute", step);
+      if (step->monitor_) {
+        monitor_.Add(step->monitor_);
+      }
     }
     stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
 
@@ -274,6 +283,10 @@ void ns_Schedule::Schedule::ScheduleLoop() {
           stepsRunning_, step_delayed_delete, stepsDoneFile);
 
       for(ns_Schedule::Step* step : stepsDone_) {
+        if (step->monitor_) {
+          monitor_.Remove(step->monitor_);
+        }
+
         if (step->monitor_count_ > 0) {
           step_delayed_delete.push_back(step);
         } else {

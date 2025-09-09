@@ -243,10 +243,10 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
 
   uint64_t step_id = 0;
 
-  const rapidjson::Value& flow = root["flow"];
+  rapidjson::Value const& flow = root["flow"];
 
   for (rapidjson::SizeType i = 0; i < flow.Size(); ++i) {
-    const rapidjson::Value& stepJSON = flow[i];
+    rapidjson::Value const& stepJSON = flow[i];
     uint64_t run_id = 0;
 
     if (!stepJSON.HasMember("step") || !stepJSON["step"].IsString()) {
@@ -255,30 +255,33 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateStepsFromJson(
 
     current_stack.clear();
 
-    const std::string& step_name = stepJSON["step"].GetString();
+    std::string const& step_name = stepJSON["step"].GetString();
+
+    rapidjson::Value const* monitorJSON = nullptr;
+    if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
+      monitorJSON = &(stepJSON["monitor"]);
+    }
 
     std::vector<rapidjson::Value const*> configurationsStack;
     if (stepJSON.HasMember("configuration")) {
       configurationsStack.push_back(&stepJSON["configuration"]);
     }
 
-    ns_Schedule::Step* step = new ns_Schedule::Step(task, step_name);
+    ns_Schedule::Step* step = new ns_Schedule::Step(task, step_name, monitorJSON);
     rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
     step->ReadFromTaskJSON(task->configurations_, configurationsStack, runConfiguration);
     configurationsStack.push_back(runConfiguration);
 
     if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
-      const rapidjson::Value& run_array = stepJSON["run"];
+      rapidjson::Value const& run_array = stepJSON["run"];
 
       ns_Schedule::Step* first_step = step;
       ns_Schedule::Step* last_step = step;
       for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-        const rapidjson::Value& run = run_array[j];
+        rapidjson::Value const& run = run_array[j];
         if (j != 0) {
-          step->next_ = new ns_Schedule::Step(task, step_name);
-          step->next_->previous_ = step;
+          step->next_ = new ns_Schedule::Step(*step);
           step = step->next_;
-          step->CopyParameters(*(step->previous_));
         }
 
         step->ReadFromTaskJSON(task->configurations_, configurationsStack, &run);
@@ -348,14 +351,11 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateRetrySteps(
   uint64_t nb_retry = base_step->nb_retry_;      
   std::list<ns_Schedule::Step*> attempts;
   attempts.push_back(base_step);
-  ns_Schedule::Step* prev_attempt = base_step;
+  ns_Schedule::Step* step = base_step;
 
   for (uint64_t attempt=1; attempt<nb_retry; ++attempt) {
-    ns_Schedule::Step* step = new ns_Schedule::Step(base_step->task_, base_step->name_);
-    step->CopyParameters(*base_step);
-    step->step_id_ = base_step->step_id_;
-    step->rank_id_ = base_step->rank_id_;
-    step->attempt_id_ = attempt;
+    step->next_ = new ns_Schedule::Step(*step);
+    step = step->next_;
     step->run_id_ = run_id++;
 
     std::string step_name = std::to_string(step->step_id_) + "-" + 
@@ -365,14 +365,9 @@ std::list<ns_Schedule::Step*> ns_Schedule::TasksManager::CreateRetrySteps(
     step->stdout_ = step->task_->logs_path_ / ("stdout." + step_name + ".txt");
     step->stderr_ = step->task_->logs_path_ / ("stderr." + step_name + ".txt");
 
-    if (prev_attempt) {
-      prev_attempt->next_ = step;
-      step->previous_ = prev_attempt;
-    }
-
-    prev_attempt = step;
     attempts.push_back(step);
   }
+  base_step->previous_ = attempts.front();
 
   return attempts;
 }

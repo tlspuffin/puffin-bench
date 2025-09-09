@@ -3,6 +3,20 @@
 #include <filesystem>
 #include <rapidjson/document.h>
 
+template<typename T> T GetOrDefault(rapidjson::Value const& obj,
+    char const* name, T const defaultValue);
+std::filesystem::path GetOrDefaultPath(
+    rapidjson::Value const& obj, char const* name,
+    std::filesystem::path const defaultValue);
+template<typename T> T Get(rapidjson::Value const& obj,
+    char const* name);
+std::filesystem::path GetPath(rapidjson::Value const& obj, 
+    char const* name);
+
+uint64_t ParseDurationToSeconds(const std::string& str);
+uint64_t ParseDurationToMilliSeconds(const std::string& str);
+
+
 template<typename T> inline T GetOrDefault(rapidjson::Value const& obj,
     char const* name, T const defaultValue) {
   auto it = obj.FindMember(name);
