@@ -106,6 +106,7 @@ public:
   bool request_cancel_;
 
   std::shared_ptr<ns_Monitor::Task> monitor_;
+  std::string message_from_run_;
 
 private:
   enum class State { 

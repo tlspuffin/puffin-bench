@@ -16,5 +16,4 @@ wheels/
 CMakeLists.conf
 .vscode/
 build/
-src/scheduler/schedule/executor/embeded/
-src/publisher/publish/embeded/
+**/embeded/

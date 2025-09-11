@@ -31,6 +31,7 @@ public:
   std::filesystem::path logs_path_;
   std::filesystem::path env_path_;
   std::filesystem::path outputs_path_;
+  std::filesystem::path monitors_path_;
 
   std::unordered_map<std::string, std::string> args_;
 
@@ -52,6 +53,7 @@ public:
       std::filesystem::path const& functionsFile, 
       std::filesystem::path const& toolsFolders, 
       std::filesystem::path const& runRootPath, 
+      std::filesystem::path const& monitorsRootPath, 
       std::unordered_map<std::string, std::string>& args, 
       rapidjson::Value const* publishConfiguration, 
       rapidjson::Value const* configurations);

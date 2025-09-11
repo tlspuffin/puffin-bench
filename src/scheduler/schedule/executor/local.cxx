@@ -558,6 +558,11 @@ std::vector<std::string> ns_Executor::Local::BuildExecutorArgs(
   arg_strings.push_back(cores.c_str());
   arg_strings.push_back(step.function_.c_str());
   arg_strings.push_back("./.parameters");
+  if (step.monitor_) {
+    arg_strings.push_back(step.monitor_->ToArgs());
+  } else {
+    arg_strings.push_back("");
+  }
   arg_strings.push_back("---");
 
   return arg_strings;
