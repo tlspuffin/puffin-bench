@@ -75,7 +75,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   }
   ns_Schedule::Task* task = new ns_Schedule::Task(task_id, taskName, 
       inDataPath, functionsFile, config_.toolsPath_,
-      config_.runPath_ / std::to_string(task_id), args, 
+      config_.runPath_ / std::to_string(task_id), config_.monitorsPath_ , args, 
       publisherConfiguration, configurations);
   task->root_steps_ = CreateStepsFromJson(rootJSON, task, schedule);
 

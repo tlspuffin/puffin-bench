@@ -65,12 +65,12 @@
       "configuration": {
         "nb_cores": 1,
         "timeout": "1m",
-        "nb_retry": 2,
-        "monitoring": {
-          "entry_point": "CheckObjectif",
-          "delay_start": "30s",
-          "interval": "1m"
-        }
+        "nb_retry": 2
+      },
+      "monitor": {
+        "entry_point": "CheckObjectif",
+        "delay_start": "30s",
+        "interval": "1m"
       }
     },
     {

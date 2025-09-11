@@ -1,30 +1,46 @@
 #include "task.hxx"
-#include "thread.hxx"
+#include "../step.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/logs.hxx"
 
-ns_Monitor::Task::Task() : monitorFile(".monitor"), thread(nullptr),
-    delayStartMS(0), timeoutS(0), intervalS(0)
+ns_Monitor::Task::Task() : entryPoint_(), monitorPath_("./.monitor"), 
+    delayStartS_("0"), timeoutS_("0"), intervalS_("0")
 {}
 
-ns_Monitor::Task::Task(rapidjson::Value const& json) : Task()
+ns_Monitor::Task::Task(ns_Schedule::Step const* step, rapidjson::Value const& json) 
+    : Task()
 {
-  entryPoint = Get<std::string>(json, "entry_point");
+  monitorPath_ = step->task_->monitors_path_ / 
+      (std::to_string(step->task_->id_) + '-' + step->ID() + ".txt");
+
+  entryPoint_ = Get<std::string>(json, "entry_point");
   std::string value = Get<std::string>(json, "interval");
-  intervalS = ParseDurationToSeconds(value);
+  intervalS_ = std::to_string(ParseDurationToSeconds(value));
   value = GetOrDefault<std::string>(json, "timeout", "0s");
-  timeoutS = ParseDurationToSeconds(value);
+  timeoutS_ = std::to_string(ParseDurationToSeconds(value));
   value = GetOrDefault<std::string>(json, "delay_start", "0ms");
-  delayStartMS = ParseDurationToMilliSeconds(value);
+  delayStartS_ = std::to_string(ParseDurationToSeconds(value));
+}
+
+std::string ns_Monitor::Task::GetMessage() {
+  std::ifstream file(monitorPath_);
+  if (!file.is_open()) {
+    LOGE("Monitor can extract run message from " << monitorPath_);
+    return "";
+  }
+  std::ostringstream buffer;
+  buffer << file.rdbuf();
+  return buffer.str();
 }
 
 void ns_Monitor::Task::ToJSON(rapidjson::Value& out, 
-      rapidjson::Document::AllocatorType& alloc) const {
+    rapidjson::Document::AllocatorType& alloc) const {
   out.AddMember("entry_point", 
-      rapidjson::Value(entryPoint.c_str(), alloc), alloc);
+      rapidjson::Value(entryPoint_.c_str(), alloc), alloc);
   out.AddMember("interval", 
-      rapidjson::Value((std::to_string(intervalS) + "s").c_str(), alloc), alloc);
+      rapidjson::Value((intervalS_ + "s").c_str(), alloc), alloc);
   out.AddMember("timeout", 
-      rapidjson::Value((std::to_string(timeoutS) + "s").c_str(), alloc), alloc);
+      rapidjson::Value((timeoutS_ + "s").c_str(), alloc), alloc);
   out.AddMember("delay_start", 
-      rapidjson::Value((std::to_string(delayStartMS) + "ms").c_str(), alloc), alloc);
+      rapidjson::Value((delayStartS_ + "s").c_str(), alloc), alloc);
 }

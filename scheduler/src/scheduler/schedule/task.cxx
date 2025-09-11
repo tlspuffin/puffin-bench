@@ -13,16 +13,18 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& toolsFolders, 
     std::filesystem::path const& runRootPath, 
+    std::filesystem::path const& monitorsRootPath, 
     std::unordered_map<std::string, std::string>& args, 
     rapidjson::Value const* publishConfiguration, 
     rapidjson::Value const* configurations)
     : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
     tools_path_(toolsFolders), 
-    run_root_path_(runRootPath), 
+    run_root_path_(runRootPath / std::to_string(id)), 
     logs_path_(run_root_path_ / ".output"), 
     env_path_(run_root_path_ / ".taskenv"), 
     outputs_path_(run_root_path_ / "output"),
+    monitors_path_(monitorsRootPath),
     args_(args), configurations_(), 
     root_steps_(), executors_(), 
     steps_file_(), request_cancel_(false), 
@@ -55,6 +57,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   logs_path_ = GetPath(config, "logs_path");
   env_path_ = GetPath(config, "env_path");
   outputs_path_ = GetPath(config, "outputs_path");
+  monitors_path_ = GetPath(config, "monitors_path");
 
   if ((config.HasMember("args")) && (config["args"].IsArray())) {
     rapidjson::Value const& argsArray = config["args"];
@@ -195,7 +198,9 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
     steps_file_.close();
   }
 
-  std::filesystem::path finalSavePath = savePath / std::to_string(id_);
+  std::string id = std::to_string(id_);
+
+  std::filesystem::path finalSavePath = savePath / id;
   try {
     if (!std::filesystem::create_directory(finalSavePath)) {
       throw std::runtime_error("Unable to create save directory (" + finalSavePath.string() + ")");
@@ -218,7 +223,7 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
     for (const auto& [key, value] : args_) {
       variables.emplace(key, value);
     }
-    variables.emplace("task_id", std::to_string(id_));
+    variables.emplace("task_id", id);
 
     publish_.PublishResults(finalSavePath / "logs", finalSavePath / "output" / "artefacts", variables);
   } catch(std::runtime_error const& e) {
@@ -231,10 +236,19 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
 
   for(std::filesystem::path const& path: 
       { run_root_path_, functions_path_, files_path_ }) {
-  std::error_code ec;
+    std::error_code ec;
     if (std::filesystem::remove_all(path, ec) == -1) {
       std::cerr << "Error while removing " << path << "\n" << 
           "\t" << ec.value() << ": " << ec.message() << std::endl;
+    }
+  }
+  id += '-';
+  for (const auto& entry : std::filesystem::directory_iterator(monitors_path_)) {
+    if (entry.is_regular_file()) {
+      std::string filename = entry.path().filename().string();
+      if (filename.rfind(id, 0) == 0) {
+        std::filesystem::remove(entry.path());
+      }
     }
   }
 }
@@ -252,6 +266,8 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("logs_path", rapidjson::Value(logs_path_.c_str(), alloc), alloc);
   out.AddMember("env_path", rapidjson::Value(env_path_.c_str(), alloc), alloc);
   out.AddMember("outputs_path", rapidjson::Value(outputs_path_.c_str(), alloc), alloc);
+
+  out.AddMember("monitors_path", rapidjson::Value(monitors_path_.c_str(), alloc), alloc);
 
   out.AddMember("request_cancel", request_cancel_, alloc);
 

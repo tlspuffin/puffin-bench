@@ -1,44 +1,28 @@
 #include "monitor.hxx"
+#include "../step.hxx"
+#include "../../utils/logs.hxx"
+#include <iostream>
+#include <climits>
+#include <unistd.h>
+#include <sys/inotify.h>
 
-ns_Monitor::Monitor::Monitor(std::filesystem::path const& toolsPath, 
-    size_t poolSize) : tasks_(), runningTask_(), lock_(), cv_(), 
-    running_(true), thread_(&ns_Monitor::Monitor::Main, this)
+ns_Monitor::Monitor::Monitor(std::filesystem::path const& path) 
+    : monitorsMessage_(), stepsList_(), path_(path), lock_(), cv_(), 
+    running_(false), thread_()
 {
-  std::lock_guard<std::mutex> lock(lock_);
-  for(size_t i=0; i<poolSize; ++i) {
-    threadsPool_.emplace(std::make_unique<Thread>(*this, toolsPath / "monitoring.sh"));
+  std::error_code ec;
+  if ((!std::filesystem::create_directories(path, ec)) && (ec.value() != 0)) {
+    throw std::runtime_error("Unable to create monitors directories: " + path_.string());
   }
+  int fd = 0;
+  int wd = 0;
+  InitINotify(fd, wd);
+  running_ = true;
+  thread_ = std::thread(&ns_Monitor::Monitor::Main, this, fd, wd);
 }
 
 ns_Monitor::Monitor::~Monitor() {
   Shutdown();
-}
-
-void ns_Monitor::Monitor::Add(std::shared_ptr<Task>& task) {
-  std::lock_guard<std::mutex> lock(lock_);
-  if (task->thread) {
-    throw std::runtime_error("Monitor task can not be added, already running");
-  }
-  task->CreateExecutionTime();
-  auto [it, success] = tasks_.insert(task);
-  if (!success) {
-    throw std::runtime_error("Monitor task can not be added, already monitored");
-  }
-  cv_.notify_one();
-}
-
-void ns_Monitor::Monitor::Remove(std::shared_ptr<Task>& task) {
-  std::lock_guard<std::mutex> lock(lock_);
-  if (tasks_.erase(task) == 0) {
-    if (runningTask_.erase(task) == 0) {
-      //throw std::runtime_error("Monitor task is not planned");
-      // may try remove a 1 shoot monitor
-      return;
-    }
-    task->thread->KillTask();
-    threadsPool_.push(std::move(task->thread));
-  }
-  cv_.notify_one();
 }
 
 void ns_Monitor::Monitor::Shutdown() {
@@ -55,42 +39,97 @@ void ns_Monitor::Monitor::Shutdown() {
   }
 }
 
-void ns_Monitor::Monitor::TaskDone(std::shared_ptr<ns_Monitor::Task>& task) {
+void ns_Monitor::Monitor::Add(std::list<ns_Schedule::Step*> steps) {
   std::lock_guard<std::mutex> lock(lock_);
-  if (!task->thread) {
-    throw std::runtime_error("Monitor trying to manage the end of a not running task");
+  for (auto const& step : steps) {
+    if (step->monitor_) {
+      LOGI("add to monitoring step: " << step->task_->id_ << " " << step->ID());
+      stepsList_.insert(std::make_pair<>(step->monitor_->monitorPath_.filename(), step));
+    }
   }
-  if (runningTask_.erase(task) != 1) {
-    throw std::runtime_error("Monitor trying to manage the end of an unplanned task");
-  }
-  threadsPool_.push(std::move(task->thread));
-  if (task->UpdateExecutionTime()) {
-    tasks_.insert(task);
-  }
-  cv_.notify_one();
 }
 
-void ns_Monitor::Monitor::Main() {
-  std::unique_lock<std::mutex> lock(lock_);
-  while(running_) {
-    if (tasks_.empty()) {
-      cv_.wait(lock);
-    } else {
-      cv_.wait_until(lock, (*(tasks_.begin()))->executionTime);
+void ns_Monitor::Monitor::Remove(std::list<ns_Schedule::Step*> steps) {
+  std::lock_guard<std::mutex> lock(lock_);
+  for (auto const& step : steps) {
+    LOGI("remove from monitoring step: " << step->task_->id_ << " " << step->ID());
+    stepsList_.erase(step->monitor_->monitorPath_);
+  }
+}
+
+bool ns_Monitor::Monitor::GetChange() {
+  std::lock_guard<std::mutex> lock(lock_);
+  bool haveMessage = monitorsMessage_.size() > 0;
+
+  for(auto const& [step, message] : monitorsMessage_) {
+    step->message_from_run_ = message;
+    LOGI(message);
+  }
+  monitorsMessage_.clear();
+
+  return haveMessage;
+}
+
+void ns_Monitor::Monitor::Main(int fd, int wd) {
+  LOGI("Monitoring: " << path_);
+
+  std::vector<char> buffer(1024 * (sizeof(struct inotify_event) + NAME_MAX + 1), 0);
+
+  while(true) {
+    ssize_t length = read(fd, buffer.data(), buffer.size());
+    {
+      std::unique_lock<std::mutex> lock(lock_);
+      if ((!running_) || (length == 0)) {
+        break;
+      }
+      if (length == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          cv_.wait_for(lock, std::chrono::seconds(1));
+        } else if (errno == EINTR) {
+          continue;
+        } else {
+          break;
+        }
+      }
     }
 
-    while ((!threadsPool_.empty()) && ((!tasks_.empty()) && 
-        (std::chrono::steady_clock::now() >= (*(tasks_.begin()))->executionTime))) {
-
-      std::shared_ptr<Task> task = *(tasks_.begin());
-      tasks_.erase(tasks_.begin());
-
-      task->thread = std::move(threadsPool_.top());
-      threadsPool_.pop();
-
-      task->thread->Do(task);
-
-      runningTask_.insert(task);
+    ssize_t i = 0;
+    while (i < length) {
+      struct inotify_event *event = (struct inotify_event *) &buffer[i];
+      if (event->len > 0) {
+        if (event->mask & IN_MOVED_TO) {
+          LOGI("Step monitor updated: " << event->name);
+          {
+            std::unique_lock<std::mutex> lock(lock_);
+            auto const& it = stepsList_.find(event->name);
+            if (it != stepsList_.end()) {
+              monitorsMessage_.insert(std::make_pair<>(it->second, it->second->monitor_->GetMessage()));
+            }/* else {
+              LOGE("Ignoring modification on " << event->name);
+            }*/
+          }
+        }
+      }
+      i += sizeof(struct inotify_event) + event->len;
+      if (i >= buffer.size()) {
+        break;
+      }
     }
+  }
+
+  inotify_rm_watch(fd, wd);
+  close(fd);
+}
+
+void ns_Monitor::Monitor::InitINotify(int& fd, int& wd) {
+  fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+  if (fd == -1) {
+    throw std::runtime_error("Unable to init inotify");
+  }
+
+  wd = inotify_add_watch(fd, path_.c_str(), IN_MOVED_TO);
+  if (wd == -1) {
+    close(fd);
+    throw std::runtime_error("Unable to add inotify watch on " + path_.string());
   }
 }
