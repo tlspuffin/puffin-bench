@@ -47,6 +47,38 @@ CreateArtefact() {
   jq -c -n "${jq_args[@]}" "$jq_expr" >> "${artefact_file}"
 }
 
+StartMonitor() {
+  if [ -z "${MONITOR}" ]; then
+    echo "No monitor entry point for this step" >&2
+    return 0
+  fi
+  local MONITOR_ENTRY MONITOR_INTERVAL_S MONITOR_TIMEOUT_S MONITOR_DELAY_S MONITOR_OUTPUT
+  read -r MONITOR_ENTRY MONITOR_INTERVAL_S MONITOR_TIMEOUT_S MONITOR_DELAY_S MONITOR_OUTPUT <<< "${MONITOR}"
+  {
+    MONITOR_OUTPUT_TMP="${MONITOR_OUTPUT}.tmp.$$"
+    sleep ${MONITOR_DELAY_S}
+    while [ true ]; do
+      if [ -z "${MONITOR_TIMEOUT_S}" ]; then
+        ${MONITOR_ENTRY} "${MONITOR_OUTPUT_TMP}" "$@"
+      else 
+        timeout ${MONITOR_TIMEOUT_S} bash -c "source \"${SRCFILE}\"; ${MONITOR_ENTRY} \"${MONITOR_OUTPUT_TMP}\" \"$@\"";
+        case $? in
+          124)
+            echo "monitor has timeouted" >> "${MONITOR_OUTPUT_TMP}"
+            ;;
+          125)
+            echo "timeout internal fail" >> "${MONITOR_OUTPUT_TMP}"
+            ;;
+          *)
+            ;;
+        esac
+      fi
+      mv "${MONITOR_OUTPUT_TMP}" "${MONITOR_OUTPUT}"
+      sleep ${MONITOR_INTERVAL_S}
+    done
+  }&
+}
+
 AbortFail() {
   "$@" || ( echo "Fail: $*"; false )
 }
@@ -159,6 +191,9 @@ fi
 PARAMETERSFILE="$1"
 shift
 
+MONITOR="$1"
+shift
+
 if [[ "$1" != "---" ]]; then
   echo "Missing end of executor parameter: $1"
   exit 1
@@ -170,6 +205,14 @@ source "${SRCFILE}"
 if ! declare -F "${COMMAND}" > /dev/null; then
   echo "${COMMAND} does not exist"
   exit 1
+fi
+
+if [ !-z "${MONITOR}" ]; then
+  MONITOR_ENTRY="${MONITOR%% *}"
+  if ! declare -F "${MONITOR_ENTRY}" > /dev/null; then
+    echo "${MONITOR_ENTRY} does not exist"
+    exit 1
+  fi
 fi
 
 GLBPARMS=$( cat "${ENVFILE}" )

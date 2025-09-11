@@ -15,6 +15,9 @@ struct Config {
   std::filesystem::path exportPath_;
   std::filesystem::path userPath_;
   std::unordered_map<std::string, ns_Executor::Config*> executors_;
+
+  std::filesystem::path monitorsPath_;
+
   Config();
   ~Config();
   void Load(std::string const& name, rapidjson::Value& doc);

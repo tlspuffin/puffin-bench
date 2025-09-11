@@ -1,0 +1,16 @@
+{
+  "flow" : [
+    {
+      "step": "SimulationLongue",
+      "configuration": {
+        "timeout": "5m"
+      },
+      "monitor": {
+        "entry_point": "MonitorSimulation",
+        "delay_start": "10s",
+        "interval": "15s",
+        "timeout": "30s"
+      }
+    }
+  ]
+}

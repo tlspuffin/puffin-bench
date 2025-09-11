@@ -15,7 +15,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source)
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), monitor_(source.monitor_), state_(State::Pending)
+    request_cancel_(false), monitor_(source.monitor_), message_from_run_(""), 
+    state_(State::Pending)
 {}
 
 ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name, 
@@ -26,11 +27,11 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
     next_(this), previous_(this), dependencies_(), depend_from_(), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), monitor_(), state_(State::Pending)
+    request_cancel_(false), monitor_(), message_from_run_(""), state_(State::Pending)
 {
   std::shared_ptr<ns_Monitor::Task> monitor;
   if (monitorJSON != nullptr) {
-    monitor_ = std::make_shared<ns_Monitor::Task>(*monitorJSON);
+    monitor_ = std::make_shared<ns_Monitor::Task>(this, *monitorJSON);
   }
 }
 
@@ -117,8 +118,9 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   }
 
   if (config.HasMember("monitor") && config["monitor"].IsObject()) {
-    monitor_ = std::make_shared<ns_Monitor::Task>(config["monitor"]);
+    monitor_ = std::make_shared<ns_Monitor::Task>(this, config["monitor"]);
   }
+  message_from_run_ = Get<std::string>(config, "message_from_run");
 
   std::string executorName = GetOrDefault<std::string>(config, "executor", "");
   executor_ = nullptr;
@@ -277,6 +279,7 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     monitor_->ToJSON(monitor, alloc);
     out.AddMember("monitor", monitor, alloc);
   }
+  out.AddMember("message_from_run", rapidjson::Value(message_from_run_.c_str(), alloc), alloc);
 }
 
 inline uint64_t ns_Schedule::Step::ToMillis(

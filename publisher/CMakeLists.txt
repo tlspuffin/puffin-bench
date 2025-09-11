@@ -65,7 +65,7 @@ set(SRV_SRC
   src/scheduler/schedule/executor/linux_cores.cxx
   src/scheduler/api/schedule_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
-  src/scheduler/schedule/monitor/thread.cxx src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
+  src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})
