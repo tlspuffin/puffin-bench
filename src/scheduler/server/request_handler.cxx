@@ -38,7 +38,7 @@ void ns_Server::RequestHandlerError::handleRequest(Poco::Net::HTTPServerRequest&
 void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
+  response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
@@ -99,7 +99,7 @@ void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerR
   }
 
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
+  response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
@@ -125,8 +125,8 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
     return;
   }
 
+  response.setContentType("application/json; charset=utf-8");
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
 
   std::ostream* out = nullptr;
   try {
@@ -141,9 +141,9 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
       throw std::runtime_error("Missing required parameter(s)");
     }
 
-    ns_Schedule::OutputState state;
-    std::string output = apis_->scheduleAPI_.GetOutput(
-        type, taskid, stepuuid, stepid, readsize, readoffset, state);
+    struct FileExtractedText data;
+    ns_Schedule::OutputState state = apis_->scheduleAPI_.GetOutput(
+        type, taskid, stepuuid, stepid, readsize, readoffset, data);
     if (state == ns_Schedule::OutputState::UNKNOWN) {
       throw std::runtime_error("Server can't read requested output");
     } else if (state != ns_Schedule::OutputState::POSSIBLE_MORE_DATA) {
@@ -154,14 +154,13 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
     std::ostringstream oss;
     Poco::Base64Encoder encoder(oss);
     encoder.rdbuf()->setLineLength(0);
-    encoder << output;
+    encoder << data.buffer;
     encoder.close();
 
     out = &(response.send());
 
-    //*out << R"({"success": true, "data": ")" << oss.str() << R"(", "state": )" << state << "}";
     *out << R"({"success": true, "data": ")" << oss.str() << R"(", "size": )" << 
-        output.size() << R"(, "state": )" << state << "}";
+        data.buffer.size() << R"(, "filesize": )" << data.filesize << R"(, "state": )" << state << "}";
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {
@@ -181,7 +180,7 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
   }
 
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
+  response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
@@ -208,7 +207,7 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
   }
 
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
+  response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
@@ -228,7 +227,7 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
 void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
+  response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
@@ -265,7 +264,7 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
 void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.setChunkedTransferEncoding(true);
-  response.setContentType("application/json");
+  response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
@@ -333,7 +332,7 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
         mimeType {
             {".html", {"text/html", std::ios_base::in}}, 
             {".css", {"text/css", std::ios_base::in}},
-            {".json", {"application/json", std::ios_base::in}},
+            {".json", {"application/json; charset=utf-8", std::ios_base::in}},
             {".js", {"text/javascript", std::ios_base::in}}, 
             {".jpg", {"image/jpeg", std::ios_base::binary}}, 
             {".jpeg", {"image/jpeg", std::ios_base::binary}}, 

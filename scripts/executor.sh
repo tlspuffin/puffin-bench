@@ -2,197 +2,102 @@
 
 echo "task parameters: $*"
 
-GLBPARMS=
-
-AddParam() {
-  local varname="$1"
-  local key="$2"
-  local value="$3"
-  value="${value//\"/\\\"}"
-  eval "$varname+=\ \"$key=\\\"$value\\\"\""
-}
-
-AddGlobalParam() {
-  AddParam GLBPARMS "$1" "$2"
-}
-
-CreateArtefact() {
-  local path=$( realpath "$1" )
-  local name="$2"
-  shift 2
-
-  local artefact_file="${ROOT_PATH}/.artefacts"
-
-  local jq_expr='{"path": $path, "name": $name}'
-  local jq_args=(--arg path "$path" --arg name "$name")
-
-  if [ "$#" -gt 0 ]; then
-    jq_expr+=' | .metadata = {}'
-    for pair in "$@"; do
-      key="${pair%%:*}"
-      value="${pair#*:}"
-      if [[ "$value" =~ ^[0-9]+$ ]]; then
-        jq_expr+=" | .metadata[\"$key\"] = \$meta_${key}"
-        jq_args+=(--argjson "meta_${key}" "$value")
-      elif [[ "$value" =~ ^(true|false|null)$ ]]; then
-        jq_expr+=" | .metadata[\"$key\"] = \$meta_${key}"
-        jq_args+=(--argjson "meta_${key}" "$value")
-      else
-        jq_expr+=" | .metadata[\"$key\"] = \$meta_${key}"
-        jq_args+=(--arg "meta_${key}" "$value")
-      fi
-    done
-  fi
-
-  jq -c -n "${jq_args[@]}" "$jq_expr" >> "${artefact_file}"
-}
-
-StartMonitor() {
-  if [ -z "${MONITOR}" ]; then
-    echo "No monitor entry point for this step" >&2
-    return 0
-  fi
-  local MONITOR_ENTRY MONITOR_INTERVAL_S MONITOR_TIMEOUT_S MONITOR_DELAY_S MONITOR_OUTPUT
-  read -r MONITOR_ENTRY MONITOR_INTERVAL_S MONITOR_TIMEOUT_S MONITOR_DELAY_S MONITOR_OUTPUT <<< "${MONITOR}"
-  {
-    MONITOR_OUTPUT_TMP="${MONITOR_OUTPUT}.tmp.$$"
-    sleep ${MONITOR_DELAY_S}
-    while [ true ]; do
-      if [ -z "${MONITOR_TIMEOUT_S}" ]; then
-        ${MONITOR_ENTRY} "${MONITOR_OUTPUT_TMP}" "$@"
-      else 
-        timeout ${MONITOR_TIMEOUT_S} bash -c "source \"${SRCFILE}\"; ${MONITOR_ENTRY} \"${MONITOR_OUTPUT_TMP}\" \"$@\"";
-        case $? in
-          124)
-            echo "monitor has timeouted" >> "${MONITOR_OUTPUT_TMP}"
-            ;;
-          125)
-            echo "timeout internal fail" >> "${MONITOR_OUTPUT_TMP}"
-            ;;
-          *)
-            ;;
-        esac
-      fi
-      mv "${MONITOR_OUTPUT_TMP}" "${MONITOR_OUTPUT}"
-      sleep ${MONITOR_INTERVAL_S}
-    done
-  }&
-}
-
-AbortFail() {
-  "$@" || ( echo "Fail: $*"; false )
-}
-
-ROOT_PATH=$( pwd )
-
+THEJOB_GLBPARMS=
 if [ ! -r "$1" ]; then
-  echo "Unable to read $1"
+  echo "Unable to read configuration file $1"
   exit 1
 fi
-SRCFILE="$1"
+THEJOB_SH_CONFIG_FILE="$1"
 shift
 
-if [ ! -r "$1" ]; then
-  if [ -z "$1" ]; then
-    echo "Required env file is missing"
-    exit 1
-  fi
-  touch "$1"
-fi
-ENVFILE="$1"
-shift
+FUNCSPATH="$( dirname $( realpath $0 ) )/functions.sh"
+source "${FUNCSPATH}"
 
-if [ ! -w "$1" ]; then
-  echo "Output directory is not writable: $1"
+if [ ! -r "${THEJOB_FUNCTIONS_PATH}" ]; then
+  echo "Tools directory is not readable: ${THEJOB_FUNCTIONS_PATH}"
   exit 1
 fi
-COMMONPATH="$1"
-shift
 
-if [ ! -w "$1" ]; then
-  echo "Output directory is not writable: $1"
+if [ ! -w "${THEJOB_OUT_PATH}" ]; then
+  echo "Output directory is not writable: ${THEJOB_OUT_PATH}"
   exit 1
 fi
-OUTPATH="$1"
-shift
 
-if [ ! -r "$1" ]; then
-  echo "Tools directory is not readable: $1"
+if [ -z "${THEJOB_ARTEFACTS_FILE}" ]; then
+  echo "Artefacts metada file is missing"
   exit 1
 fi
-TOOLSPATH="$1"
-shift
 
-if [ ! -r "$1" ]; then
-  echo "Input directory is not readable: $1"
+if [ ! -r "${THEJOB_ARTEFACTS_PATH}" ]; then
+  echo "Artefacts directory is missing"
   exit 1
 fi
-INPATH="$1"
-shift
 
-if [ -z "$1" ]; then
+if [ ! -r "${THEJOB_TOOLS_PATH}" ]; then
+  echo "Tools directory is not readable: ${THEJOB_TOOLS_PATH}"
+  exit 1
+fi
+
+if [ ! -r "${THEJOB_USER_FILES_PATH}" ]; then
+  echo "Input directory is not readable: ${THEJOB_USER_FILES_PATH}"
+  exit 1
+fi
+
+if [ -z "${THEJOB_UNIQ_STEP}" ]; then
   echo "Update env info missing"
   exit 1
 fi
-UPDATE_ENV="$1"
-shift
-echo "UPDATE_ENV= ${UPDATE_ENV}"
+echo "UPDATE_ENV= ${THEJOB_UNIQ_STEP}"
 
-if [ -z "$1" ]; then
+if [ -z "${THEJOB_PID}" ]; then
   echo "Missing sid"
   exit 1
 fi
-SID="$1"
-shift
 
-if [ -z "$1" ]; then
+if [ -z "${THEJOB_STEP_ID}" ]; then
   echo "Missing step name"
   exit 1
 fi
-STEP_NAME="$1"
-if [ "${STEP_NAME}" = "." ]; then
-  STEP_NAME=
+if [ "${THEJOB_STEP_ID}" = "." ]; then
+  THEJOB_STEP_ID="unnamed"
 fi
-shift
 
-if [ -z "$1" ]; then
+if [ -z "${THEJOB_ATTEMPT_ID}" ]; then
   echo "Missing attempt id"
   exit 1
 fi
-ATTEMPT_ID="$1"
-shift
 
-if [ -z "$1" ]; then
+
+if [ -z "${THEJOB_RUN_ID}" ]; then
   echo "Missing run id"
   exit 1
 fi
-RUN_ID="$1"
-shift
 
-if [ -z "$1" ]; then
+if [ -z "${THEJOB_CORES}" ]; then
   echo "Missing cores list"
   exit 1
 fi
-CORES="$1"
-NBCORES=$(IFS=, read -ra cpus <<<"$CORES"; echo "${#cpus[@]}")
-shift
+THEJOB_NB_CORES=$(IFS=, read -ra cpus <<<"${THEJOB_CORES}"; echo "${#cpus[@]}")
 
-if [ -z "$1" ]; then
+if [ -z "${THEJOB_ENTRYPOINT}" ]; then
   echo "Missing function name"
   exit 1
 fi
-COMMAND="$1"
-shift
 
-if [ -z "$1" ]; then
+if [ -z "${THEJOB_PARAMETERS_PATH}" ]; then
   echo "Missing parameters data"
   exit 1
 fi
-PARAMETERSFILE="$1"
-shift
 
-MONITOR="$1"
-shift
+if [ -z "${THEJOB_STDOUT_PATH}" ]; then
+  echo "Missing stdout file"
+  exit 1
+fi
+
+if [ -z "${THEJOB_STDERR_PATH}" ]; then
+  echo "Missing stderr file"
+  exit 1
+fi
 
 if [[ "$1" != "---" ]]; then
   echo "Missing end of executor parameter: $1"
@@ -200,41 +105,44 @@ if [[ "$1" != "---" ]]; then
 fi
 shift
 
-source "${SRCFILE}"
+if [ ! -r "${THEJOB_ENV_PATH}" ]; then
+  if [ -z "${THEJOB_ENV_PATH}" ]; then
+    echo "Required env file is missing"
+    exit 1
+  fi
+  touch "${THEJOB_ENV_PATH}"
+fi
 
-if ! declare -F "${COMMAND}" > /dev/null; then
-  echo "${COMMAND} does not exist"
+source "${THEJOB_FUNCTIONS_PATH}"
+
+if ! declare -F "${THEJOB_ENTRYPOINT}" > /dev/null; then
+  echo "${THEJOB_ENTRYPOINT} does not exist"
   exit 1
 fi
 
-if [ !-z "${MONITOR}" ]; then
-  MONITOR_ENTRY="${MONITOR%% *}"
-  if ! declare -F "${MONITOR_ENTRY}" > /dev/null; then
-    echo "${MONITOR_ENTRY} does not exist"
+if [ ! -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
+  if ! declare -F "${THEJOB_MONITOR_ENTRY}" > /dev/null; then
+    echo "${THEJOB_MONITOR_ENTRY} does not exist"
     exit 1
   fi
 fi
 
-GLBPARMS=$( cat "${ENVFILE}" )
-echo "task env: $( cat "${ENVFILE}" )"
-eval ${GLBPARMS}
-echo "In: ${GLBPARMS}"
+echo "task env: $( cat "${THEJOB_ENV_PATH}" )"
+echo "In: ${THEJOB_GLBPARMS}"
 
-RUNPARMS=$( cat "${PARAMETERSFILE}" )
-echo "step run params: $( cat "${PARAMETERSFILE}" )"
-eval ${RUNPARMS}
-echo "Params: ${RUNPARMS}"
+echo "step run params: $( cat "${THEJOB_PARAMETERS_PATH}" )"
+echo "Params: ${THEJOB_RUNPARMS}"
 
 pushd . >/dev/null
-${COMMAND} "$@"
-RETVAL=$?
+${THEJOB_ENTRYPOINT} "$@"
+THEJOB_RETVAL=$?
 popd >/dev/null
 
-if [[ "${UPDATE_ENV}" == "1" ]]; then
-  echo "Out: ${GLBPARMS}"
-  echo "${GLBPARMS}" > ${ENVFILE}
+if [[ "${THEJOB_UNIQ_STEP}" == "1" ]]; then
+  echo "Out: ${THEJOB_GLBPARMS}"
+  echo "${THEJOB_GLBPARMS}" > "${THEJOB_ENV_PATH}"
 fi
 
-echo ${RETVAL} > .done.tmp
+echo ${THEJOB_RETVAL} > .done.tmp
 mv .done.tmp .done
-exit ${RETVAL}
+exit ${THEJOB_RETVAL}

@@ -15,12 +15,8 @@ class Thread;
 
 class Task {
 public:
-  std::filesystem::path monitorPath_;
-
   Task();
   Task(ns_Schedule::Step const* step, rapidjson::Value const& json);
-
-  std::string GetMessage();
 
   std::string ToArgs();
   void ToJSON(rapidjson::Value& out, 
@@ -34,8 +30,7 @@ private:
 };
 
 inline std::string ns_Monitor::Task::ToArgs() {
-  return entryPoint_ + " " + intervalS_ + " " + timeoutS_ + " " + delayStartS_ + 
-      " " + monitorPath_.string();
+  return entryPoint_ + " " + intervalS_ + " " + timeoutS_ + " " + delayStartS_;
 }
 
 };

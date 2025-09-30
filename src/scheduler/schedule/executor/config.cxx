@@ -2,7 +2,8 @@
 #include "linux_cores.hxx"
 #include "../../utils/rapidjson.hxx"
 
-#include "embeded/executor_sh.h"
+#include "../../../embeded/scheduler/executor_sh.h"
+#include "../../../embeded/scheduler/functions_sh.h"
 
 #include <iostream>
 #include <fstream>
@@ -68,7 +69,8 @@ void ns_Executor::LocalConfig::Validate() const {
   }
   auto discard = std::filesystem::canonical(scriptPath_);
   for(auto const& [ file, data, size ] : { 
-      std::tuple{ "executor.sh", Executor_Script_data, Executor_Script_size }
+      std::tuple{ "executor.sh", Executor_Script_data, Executor_Script_size },
+      std::tuple{ "functions.sh", Functions_Script_data, Functions_Script_size },
     }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(scriptPath_ / file);

@@ -3,6 +3,7 @@
 #include "config.hxx"
 #include "../task.hxx"
 #include "../output_state.hxx"
+#include "../../utils/file.hxx"
 #include <string>
 #include <list>
 #include <unordered_map>
@@ -34,7 +35,7 @@ inline ExecutorTaskData::~ExecutorTaskData() {}
 
 class Executor {
 public:
-  static Executor* Build(ns_Executor::Config* config);
+  static Executor* Build(ns_Executor::Config* config, uint16_t cachePort);
   virtual ~Executor();
 
   std::string Name() const;
@@ -46,10 +47,10 @@ public:
   virtual void GatherFilesToLocal(ns_Schedule::Step& step) = 0;
   virtual void CheckReloadRunning(ns_Schedule::Step& step) = 0;
 
-  virtual std::string GetRunningOutput(ns_Schedule::Step const& step, 
+  virtual enum ns_Schedule::OutputState GetRunningOutput(ns_Schedule::Step const& step, 
       std::string const& type, 
       size_t readSize, ssize_t readOffset, 
-      enum ns_Schedule::OutputState& state) const = 0;
+      struct FileExtractedText& data) const = 0;
 
   virtual ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const = 0;
   virtual ExecutorData* CreateLocalData(rapidjson::Value const& config) const = 0;

@@ -2,6 +2,7 @@
 
 #include "task.hxx"
 #include "executor/executor.hxx"
+#include "executor/executors_provider.hxx"
 #include "step_configurations.hxx"
 #include "monitor/task.hxx"
 #include <cstdint>
@@ -36,23 +37,31 @@ public:
     }
   };
 
-  Step(Step const& source);
+  Step(Step const& source, uint64_t run_id, uint64_t attempt_id);
+  Step(Step const& source, uint64_t run_id, 
+      uint64_t rank_id, uint64_t attempt_id, 
+      ns_Executor::ExecutorsProvider const& executorsProvider,
+      std::vector<rapidjson::Value const*> configurationStack, 
+      rapidjson::Value const* configuration);
   Step(ns_Schedule::Task* task, std::string const& name, 
-      rapidjson::Value const* monitorJSON);
+    uint64_t run_id, uint64_t step_id, 
+    std::list<ns_Schedule::Step*> dependFrom, 
+    ns_Executor::ExecutorsProvider const& executorsProvider,
+    std::vector<rapidjson::Value const*> configurationStack, 
+    rapidjson::Value const* configuration,
+    rapidjson::Value const* monitorJSON);
   Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
-      ns_Schedule::Schedule const* schedule, 
+      ns_Executor::ExecutorsProvider const* executorsProvider, 
       struct UUIDDependencies& dependencies);
   ~Step();
 
-  void CopyParameters(Step const& step);
-
   void ReadFromTaskJSON(
-      StepConfigurations const& configurations, 
       std::vector<rapidjson::Value const*> configurationStack, 
       rapidjson::Value const* configuration);
 
   uint64_t TaskID() const;
 
+  bool IsPending() const;
   bool IsReady() const;
   bool IsRunning() const;
   bool IsDone() const;
@@ -61,11 +70,12 @@ public:
   void MarkPending();
   void MarkRunning();
   void MarkDone(uint16_t exit_code);
+  void MarkCancel();
   void MarkLaunchError();
   void KillAndMarkTimedout();
   void KillAndMarkCancel();
 
-  bool TaskDone();
+  bool TaskLastStep();
   bool TaskCancelled();
   void Execute();
   void Shutdown();
@@ -106,6 +116,7 @@ public:
   bool request_cancel_;
 
   std::shared_ptr<ns_Monitor::Task> monitor_;
+  std::filesystem::path monitor_path_;
   std::string message_from_run_;
 
 private:
@@ -119,7 +130,10 @@ private:
     LaunchError, 
   };
   State state_;
+  bool end_processed_;
   std::chrono::time_point<std::chrono::system_clock> time_points_[2];
+
+  Step(Step const& src);
 
   static std::atomic<uint64_t> next_uuid_;
   static uint64_t ToMillis(std::chrono::time_point<std::chrono::system_clock> const& tp);
@@ -130,6 +144,10 @@ private:
 
 inline uint64_t Step::TaskID() const {
   return task_->id_;
+}
+
+inline bool Step::IsPending() const { 
+  return state_ == State::Pending;
 }
 
 inline bool Step::IsReady() const { 
@@ -178,6 +196,16 @@ inline void Step::MarkDone(uint16_t exit_code) {
   exit_code_ = exit_code;
 }
 
+inline void Step::MarkCancel() {
+  if (state_ != State::Pending) {
+    throw std::runtime_error("Can not mark cancel a not pending task");
+  }
+  state_ = State::Cancelled;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_Cancelled_;
+  end_processed_ = true;
+}
+
 inline void Step::MarkLaunchError() {
   state_ = State::LaunchError;
   time_points_[1] = std::chrono::system_clock::now();
@@ -218,6 +246,7 @@ inline void Step::Shutdown() {
 inline void Step::GatherFilesToLocal() {
   if (state_ >= State::Running) {
     executor_->GatherFilesToLocal(*this);
+    end_processed_ = true;
   }
 }
 

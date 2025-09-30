@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../schedule/schedule.hxx"
+#include "../utils/file.hxx"
 #include <sstream>
 #include <fstream>
 
@@ -8,7 +9,7 @@ namespace ns_API {
 
 class ScheduleAPI {
 public:
-  ScheduleAPI(ns_Schedule::Config const& config);
+  ScheduleAPI(ns_Schedule::Config const& config, uint16_t cache_port);
 
   uint64_t AddTask(std::string const& name, 
       std::vector<uint8_t> const& flow, 
@@ -18,9 +19,9 @@ public:
   void GetRunningTaskSummary();
   void GetTaskInfos(uint64_t task_id);
   std::filesystem::path ExportPath();
-  std::string GetOutput(std::string const& type, 
+  ns_Schedule::OutputState GetOutput(std::string const& type, 
     std::string const& taskID, uint64_t stepUUID, std::string const& stepID, 
-    size_t readSize, ssize_t readOffset, ns_Schedule::OutputState& state);
+    size_t readSize, ssize_t readOffset, struct FileExtractedText& data);
   bool CancelStep(uint64_t taskID, uint64_t stepID);
   bool CancelTask(uint64_t taskID);
 

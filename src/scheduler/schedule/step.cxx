@@ -1,43 +1,105 @@
 #include "step.hxx"
 #include "schedule.hxx"
 #include "../utils/rapidjson.hxx"
+#include "../utils/logs.hxx"
 
 std::atomic<uint64_t> ns_Schedule::Step::next_uuid_ = 0;
 
-ns_Schedule::Step::Step(ns_Schedule::Step const& source) 
-    : task_(source.task_), name_(source.name_), uuid_(++next_uuid_),
-    step_id_(source.step_id_), rank_id_(source.rank_id_), 
-    attempt_id_(source.attempt_id_), run_id_(source.run_id_), 
-    executor_name_(source.executor_name_), executor_(source.executor_), 
+ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
+    uint64_t attempt_id) 
+    : task_(source.task_), name_(source.name_), id_(source.id_), uuid_(++next_uuid_),
+    step_id_(source.step_id_), rank_id_(source.rank_id_), attempt_id_(attempt_id), 
+    run_id_(run_id), executor_name_(source.executor_name_), executor_(source.executor_), 
     executor_data_(source.executor_data_), function_(source.function_), 
     args_(source.args_), nb_cores_(source.nb_cores_), nb_retry_(source.nb_retry_), 
     timeout_(source.timeout_), next_(const_cast <ns_Schedule::Step *>(&source)), 
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), monitor_(source.monitor_), message_from_run_(""), 
-    state_(State::Pending)
-{}
+    request_cancel_(false), monitor_(source.monitor_), monitor_path_(), 
+    message_from_run_(""), state_(State::Pending), end_processed_(false)
+{
+  std::string step_name = ID();
+  stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
+  stderr_ = source.task_->logs_path_ / ("stderr." + step_name + ".txt");
+
+  if (monitor_) {
+    monitor_path_ = task_->monitors_path_ / (std::to_string(task_->id_) + "-" + ID() + ".txt");
+  }
+
+  //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
+}
+
+ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
+    uint64_t rank_id, uint64_t attempt_id, 
+    ns_Executor::ExecutorsProvider const& executorsProvider,
+    std::vector<rapidjson::Value const*> configurationStack, 
+    rapidjson::Value const* configuration) 
+    : task_(source.task_), name_(source.name_), id_(source.id_), uuid_(++next_uuid_),
+    step_id_(source.step_id_), rank_id_(rank_id), attempt_id_(attempt_id), 
+    run_id_(run_id), executor_name_(source.executor_name_), executor_(source.executor_), 
+    executor_data_(source.executor_data_), function_(source.function_), 
+    args_(source.args_), nb_cores_(source.nb_cores_), nb_retry_(source.nb_retry_), 
+    timeout_(source.timeout_), next_(const_cast <ns_Schedule::Step *>(&source)), 
+    previous_(const_cast <ns_Schedule::Step *>(&source)), 
+    dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
+    stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
+    request_cancel_(false), monitor_(source.monitor_), monitor_path_(), message_from_run_(""), 
+    state_(State::Pending), end_processed_(false)
+{
+  ReadFromTaskJSON(configurationStack, configuration);
+
+  if (executor_name_.compare(source.executor_name_) != 0) {
+    executor_ = executorsProvider.GetExecutor(executor_name_);
+  }
+
+  std::string step_name = ID();
+  stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
+  stderr_ = source.task_->logs_path_ / ("stderr." + step_name + ".txt");
+
+  if (monitor_) {
+    monitor_path_ = task_->monitors_path_ / (std::to_string(task_->id_) + "-" + ID() + ".txt");
+  }
+
+  //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
+}
 
 ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name, 
+    uint64_t run_id, uint64_t step_id, 
+    std::list<ns_Schedule::Step*> dependFrom, 
+    ns_Executor::ExecutorsProvider const& executorsProvider,
+    std::vector<rapidjson::Value const*> configurationStack, 
+    rapidjson::Value const* configuration,
     rapidjson::Value const* monitorJSON) 
-    : task_(task), name_(name), uuid_(++next_uuid_), step_id_(0), 
-    rank_id_(0), attempt_id_(0), run_id_(0), executor_name_("default"), 
+    : task_(task), name_(name), id_(), uuid_(++next_uuid_), step_id_(step_id), 
+    rank_id_(0), attempt_id_(0), run_id_(run_id), executor_name_("default"), 
     executor_(nullptr), executor_data_(nullptr), function_(name), 
     args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
-    next_(this), previous_(this), dependencies_(), depend_from_(), 
+    next_(this), previous_(this), dependencies_(), depend_from_(dependFrom), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), monitor_(), message_from_run_(""), state_(State::Pending)
+    request_cancel_(false), monitor_(), monitor_path_(), message_from_run_(""), 
+    state_(State::Pending), end_processed_(false)
 {
+  ReadFromTaskJSON(configurationStack, configuration);
+
+  executor_ = executorsProvider.GetExecutor(executor_name_);
+
+  std::string step_name = ID();
+  stdout_ = task_->logs_path_ / ("stdout." + step_name + ".txt");
+  stderr_ = task_->logs_path_ / ("stderr." + step_name + ".txt");
+
   std::shared_ptr<ns_Monitor::Task> monitor;
   if (monitorJSON != nullptr) {
     monitor_ = std::make_shared<ns_Monitor::Task>(this, *monitorJSON);
+    monitor_path_ = task_->monitors_path_ / (std::to_string(task_->id_) + "-" + ID() + ".txt");
   }
+
+  //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
 ns_Schedule::Step::Step(ns_Schedule::Task* task, 
     rapidjson::Value const& config, 
-    ns_Schedule::Schedule const* schedule, 
+    ns_Executor::ExecutorsProvider const* executorsProvider, 
     struct UUIDDependencies& dependencies) {
   dependencies.Reset();
 
@@ -104,6 +166,8 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
 
   state_ = StateStringToEnum(Get<std::string>(config, "state"));
 
+  end_processed_ = Get<bool>(config, "end_processed");
+
   bool hasTimePoints = false;
   if (config.HasMember("time_points_ms") && config["time_points_ms"].IsArray()) {
     rapidjson::Value const& array = config["time_points_ms"];
@@ -119,14 +183,15 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
 
   if (config.HasMember("monitor") && config["monitor"].IsObject()) {
     monitor_ = std::make_shared<ns_Monitor::Task>(this, config["monitor"]);
+    monitor_path_ = GetPath(config, "monitor_path");
+    message_from_run_ = Get<std::string>(config, "message_from_run");
   }
-  message_from_run_ = Get<std::string>(config, "message_from_run");
 
   std::string executorName = GetOrDefault<std::string>(config, "executor", "");
   executor_ = nullptr;
   executor_data_ = nullptr;
   if (!executorName.empty()) {
-    executor_ = schedule->GetExecutor(executorName);
+    executor_ = executorsProvider->GetExecutor(executorName);
     if (executorName.compare(executor_->Name()) != 0) {
       throw std::runtime_error("Step JSON unable to find required executor: " + 
           executor_name_);
@@ -139,43 +204,33 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
       executor_data_ = executor_->CreateLocalData(config["executor_data"]);
     }
   }
+
+  //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
 ns_Schedule::Step::~Step() {
+  //LOGE(__LINE__ << " Delete step " << this << " " << uuid_ << " " << id_);
   if (executor_data_ != nullptr) {
     delete executor_data_;
   }
 }
 
-void ns_Schedule::Step::CopyParameters(Step const& step) {
-  id_ = step.id_;
-  executor_ = step.executor_;
-  function_ = step.function_;
-  depend_from_ = step.depend_from_;
-
-  args_ = step.args_;
-  nb_cores_ = step.nb_cores_;
-  nb_retry_ = step.nb_retry_;
-  timeout_ = step.timeout_;
-}
-
 void ns_Schedule::Step::ReadFromTaskJSON(
-    StepConfigurations const& configurations, 
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration) {
   StepConfigurations::Configuration stepConfiguration;
   if (configuration->IsString()) {
-    stepConfiguration = configurations.MakeWithOverrides(
+    stepConfiguration = task_->configurations_.MakeWithOverrides(
         configuration->GetString(), configurationStack);
   } else if (configuration->IsObject()) {
     if ((configuration->HasMember("configuration")) && ((*configuration)["configuration"].IsString()) && 
         (configuration->HasMember("override")) && ((*configuration)["override"].IsObject())) {
       configurationStack.push_back(&((*configuration)["override"]));
-      stepConfiguration = configurations.MakeWithOverrides(
+      stepConfiguration = task_->configurations_.MakeWithOverrides(
           (*configuration)["configuration"].GetString(), configurationStack);
     } else {
       configurationStack.push_back(configuration);
-      stepConfiguration = configurations.MakeWithOverrides("", configurationStack);
+      stepConfiguration = task_->configurations_.MakeWithOverrides("", configurationStack);
     }
   } else {
     throw std::runtime_error("step configuration not have expected format");
@@ -189,13 +244,14 @@ void ns_Schedule::Step::ReadFromTaskJSON(
   args_= stepConfiguration.args_;
 }
 
-bool ns_Schedule::Step::TaskDone() {
-  if (dependencies_.empty()) {
-    bool allStepDone = true;
+bool ns_Schedule::Step::TaskLastStep() {
+  if (dependencies_.empty() || task_->request_cancel_) {
     for(ns_Schedule::Step* itStep = next_; itStep != this; itStep = itStep->next_) {
-      allStepDone &= itStep->IsDone();
+      if (!itStep->end_processed_) {
+        return false;
+      }
     }
-    return allStepDone;
+    return true;
   }
   return false;
 }
@@ -269,6 +325,8 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
 
   out.AddMember("state", rapidjson::Value(StateEnumToString(state_).c_str(), alloc), alloc);
 
+  out.AddMember("end_processed", end_processed_, alloc);
+
   rapidjson::Value timepoints(rapidjson::kArrayType);
   timepoints.PushBack(ToMillis(time_points_[0]), alloc);
   timepoints.PushBack(ToMillis(time_points_[1]), alloc);
@@ -278,8 +336,9 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     rapidjson::Value monitor(rapidjson::kObjectType);
     monitor_->ToJSON(monitor, alloc);
     out.AddMember("monitor", monitor, alloc);
+    out.AddMember("monitor_path", rapidjson::Value(monitor_path_.c_str(), alloc), alloc);
+    out.AddMember("message_from_run", rapidjson::Value(message_from_run_.c_str(), alloc), alloc);
   }
-  out.AddMember("message_from_run", rapidjson::Value(message_from_run_.c_str(), alloc), alloc);
 }
 
 inline uint64_t ns_Schedule::Step::ToMillis(
