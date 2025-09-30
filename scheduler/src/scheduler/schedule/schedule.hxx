@@ -4,8 +4,10 @@
 #include "step.hxx"
 #include "tasksmanager.hxx"
 #include "output_state.hxx"
+#include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
 #include "monitor/monitor.hxx"
+#include "../utils/file.hxx"
 #include <vector>
 #include <list>
 #include <string>
@@ -16,9 +18,9 @@
 
 namespace ns_Schedule {
 
-class Schedule {
+class Schedule : public ns_Executor::ExecutorsProvider {
 public:
-  Schedule(ns_Schedule::Config const& config);
+  Schedule(ns_Schedule::Config const& config, uint16_t cachePort);
   ~Schedule();
   uint64_t AddTask(std::string const& name, std::string const& tasksList, 
       std::string const& functions, 
@@ -28,20 +30,19 @@ public:
   bool CancelTask(uint64_t taskID);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
-  std::string GetOutput(
+  OutputState GetOutput(
       std::string const& type, std::string const& taskID,
       uint64_t stepUUID, std::string const& stepID, 
-      size_t readSize, ssize_t readOffset, OutputState& state);
+      size_t readSize, ssize_t readOffset, struct FileExtractedText& data);
 
 private:
   void ScheduleLoop();
   std::list<ns_Schedule::Step*> SearchTasksToRun();
-  bool ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& steps, 
-      std::list<ns_Schedule::Step*>& delayedSteps, 
+  bool ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& delayedSteps, 
       std::ofstream& stepsDoneFile);
-  void ManageEndOfStep(std::list<ns_Schedule::Step*>& steps, 
-      ns_Schedule::Step* step, std::ofstream& stepsDoneFile);
-  void ExportRunningSteps(std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
+  void ManageEndOfStep(ns_Schedule::Step* step, std::ofstream& stepsDoneFile);
+  void ExportRunningSteps(
+      std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
   static void AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step);
 
   ns_Schedule::Config const& config_;

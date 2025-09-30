@@ -1,5 +1,5 @@
 #include "config.hxx"
-#include "embeded/get_file_sh.h"
+#include "../../embeded/scheduler/get_file_sh.h"
 #ifdef STATIC
 #include "reserve_port-static.h"
 #else
@@ -34,7 +34,7 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
       GetOrDefault<std::string>(*scheduleConfig, "toolsPath", defaultConfig.toolsPath_))
       .string();
   userPath_  = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(*scheduleConfig, "userPath", defaultConfig.toolsPath_))
+      GetOrDefault<std::string>(*scheduleConfig, "userPath", defaultConfig.userPath_))
       .string();
   runPath_  = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(*scheduleConfig, "runPath", defaultConfig.runPath_))

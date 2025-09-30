@@ -3,6 +3,7 @@
 #include "config.hxx"
 #include "task.hxx"
 #include "step.hxx"
+#include "../utils/file.hxx"
 #include <mutex>
 #include <rapidjson/document.h>
 
@@ -13,6 +14,7 @@ class Schedule;
 class TasksManager {
 public:
   TasksManager(ns_Schedule::Config const& config);
+  ~TasksManager();
 
   ns_Schedule::Task* CreateTask(std::string const& name, 
       rapidjson::Value const& rootJSON, std::string const& functionsPath, 
@@ -23,10 +25,10 @@ public:
   void DeleteTasks();
   void TaskEnded(ns_Schedule::Task* task);
 
-  std::string GetRunningOutput(std::string const& type, 
+  enum OutputState GetRunningOutput(std::string const& type, 
     uint64_t taskID, uint64_t stepUUID, 
     size_t readSize, ssize_t readOffset, 
-    enum ns_Schedule::OutputState& state);
+    struct FileExtractedText& data);
 
   void SaveStatus();
   std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
@@ -39,15 +41,6 @@ private:
   std::list<ns_Schedule::Task*> tasks_;
 
   void DeleteTaskInternal(ns_Schedule::Task* task);
-  std::list<ns_Schedule::Step*> CreateStepsFromJson(
-      rapidjson::Value const& root, ns_Schedule::Task* task, 
-      ns_Schedule::Schedule const& schedule);
-  std::list<ns_Schedule::Step*> CreateRetrySteps(ns_Schedule::Step* base_step, 
-      uint64_t& run_id);
-  std::list<ns_Schedule::Step*> ConfigureStep(ns_Schedule::Step* step, 
-      uint64_t step_id, uint64_t rank_id, uint64_t& run_id, 
-      std::list<ns_Schedule::Step*>& parent_stack, 
-      ns_Schedule::Schedule const& schedule);
   void SaveStatusInternal() const;
 };
 

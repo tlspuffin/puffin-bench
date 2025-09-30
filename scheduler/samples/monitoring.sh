@@ -1,16 +1,24 @@
+SimulationCourte() {
+  echo "Début simulation..." 1>&2;
+  echo "Début simulation..."
+  echo "Simulation terminée !"
+}
+
 # Fonction principale - simule un travail long
 SimulationLongue() {
   echo "Début simulation..." 1>&2;
   echo "Début simulation..."
 
   StartMonitor
-  for i in {1..100}; do
-    echo "Progress: $i%" > progress.txt
-    echo "$(date): Iteration $i/100"
-    sleep 2  # Simule du travail
+  while [ true ]; do
+    for i in {1..100}; do
+      echo "Progress: $i%" > progress.txt
+      echo "$(date): Iteration $i/100"
+      sleep 2  # Simule du travail
 
-    # Créer des fichiers de résultats
-    echo "Result $i: $(( $RANDOM % 1000 ))" >> results.txt
+      # Créer des fichiers de résultats
+      echo "Result $i: $(( $RANDOM % 1000 ))" >> results.txt
+    done
   done
 
   echo "Simulation terminée !"

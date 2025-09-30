@@ -1,7 +1,7 @@
 #include "publish.hxx"
-#include "embeded/index_html.h"
-#include "embeded/index_css.h"
-#include "embeded/index_js.h"
+#include "../../embeded/publisher/index_html.h"
+#include "../../embeded/publisher/index_css.h"
+#include "../../embeded/publisher/index_js.h"
 #include <fstream>
 #include <algorithm>
 #include <iostream>

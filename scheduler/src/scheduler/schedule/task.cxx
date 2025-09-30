@@ -7,40 +7,64 @@
 #include <unordered_set>
 #include <fstream>
 #include <regex>
+#include <rapidjson/ostreamwrapper.h>
+#include <rapidjson/prettywriter.h>
 
 ns_Schedule::Task::Task(uint64_t id, std::string const& name, 
+    rapidjson::Value const& configJSON, 
     std::filesystem::path const& inDataPath, 
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& toolsFolders, 
     std::filesystem::path const& runRootPath, 
     std::filesystem::path const& monitorsRootPath, 
     std::unordered_map<std::string, std::string>& args, 
-    rapidjson::Value const* publishConfiguration, 
-    rapidjson::Value const* configurations)
+    ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
     tools_path_(toolsFolders), 
     run_root_path_(runRootPath / std::to_string(id)), 
-    logs_path_(run_root_path_ / ".output"), 
+    logs_path_(run_root_path_ / "logs"), 
     env_path_(run_root_path_ / ".taskenv"), 
     outputs_path_(run_root_path_ / "output"),
+    artefacts_path_(run_root_path_ / "artefacts"),
     monitors_path_(monitorsRootPath),
     args_(args), configurations_(), 
     root_steps_(), executors_(), 
     steps_file_(), request_cancel_(false), 
     publish_()
 {
-  if (publishConfiguration != nullptr) {
-    publish_.ReadJSON(*publishConfiguration);
+  std::string taskName = name;
+  if (taskName.empty()) {
+    taskName = GetOrDefault<std::string>(configJSON, "name", "Unamed Task");
+  }
+
+  rapidjson::Value const* publisherConfiguration = nullptr;
+  if (configJSON.HasMember("publish")) {
+    if (!configJSON["publish"].IsObject()) {
+      throw std::runtime_error("Invalid 'publish' in JSON");
+    }
+    publisherConfiguration = &configJSON["publish"];
+  }
+  rapidjson::Value const* configurations = nullptr;
+  if (configJSON.HasMember("configurations") && 
+      (configJSON["configurations"].IsObject())) {
+    configurations = &configJSON["configurations"];
+  }
+
+  if (publisherConfiguration != nullptr) {
+    publish_.ReadJSON(*publisherConfiguration);
   }
   if (configurations != nullptr) {
     configurations_.ReadFromTaskJSON(*configurations);
   }
+
   PrepareToRun();
+
+  CreateStepsFromJson(configJSON, executorsProvider);
 }
 
 ns_Schedule::Task::Task(rapidjson::Value const& config, 
-    ns_Schedule::Schedule const* schedule, 
+    ns_Executor::ExecutorsProvider const& executorsProvider, 
     std::list<ns_Schedule::Step*>& stepsPending, 
     std::list<ns_Schedule::Step*>& stepsRunning, 
     std::list<ns_Schedule::Step*>& stepsDone) {
@@ -57,6 +81,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   logs_path_ = GetPath(config, "logs_path");
   env_path_ = GetPath(config, "env_path");
   outputs_path_ = GetPath(config, "outputs_path");
+  artefacts_path_ = GetPath(config, "artefacts_path");
   monitors_path_ = GetPath(config, "monitors_path");
 
   if ((config.HasMember("args")) && (config["args"].IsArray())) {
@@ -84,7 +109,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     rapidjson::Value const& executorDataJson = config["task_executor_data"];
     for (auto it = executorDataJson.MemberBegin(); it != executorDataJson.MemberEnd(); ++it) {
       std::string executorName = it->name.GetString();
-      ns_Executor::Executor* executor = schedule->GetExecutor(executorName);
+      ns_Executor::Executor* executor = executorsProvider.GetExecutor(executorName);
       if ((executor == nullptr) || (executorName.compare(executor->Name()) != 0)) {
         throw std::runtime_error("Unable to find executor: " + executorName);
       }
@@ -102,7 +127,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
       uint64_t stepUUID = std::stoull(stepIt->name.GetString());
       const rapidjson::Value& stepConfig = stepIt->value;
       ns_Schedule::Step::UUIDDependencies& dependencies = loadedStepsDeps[stepUUID];
-      ns_Schedule::Step* step = new Step(this, stepConfig, schedule, dependencies);
+      ns_Schedule::Step* step = new Step(this, stepConfig, &executorsProvider, dependencies);
       loadedSteps.push_back(step);
       loadedStepsIndex.emplace(stepUUID, step);
     }
@@ -171,6 +196,15 @@ ns_Schedule::Task::~Task() {
   }
 }
 
+void ns_Schedule::Task::Cancel() {
+  for(ns_Schedule::Step* step : steps_) {
+    if (step->IsPending()) {
+      step->MarkCancel();
+    }
+  }
+  request_cancel_ = true;
+}
+
 bool ns_Schedule::Task::PrepareToRun() {
   std::unordered_map<std::string, std::string> variables;
   for (const auto& [key, value] : args_) {
@@ -199,14 +233,33 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
   }
 
   std::string id = std::to_string(id_);
-
   std::filesystem::path finalSavePath = savePath / id;
+
   try {
     if (!std::filesystem::create_directory(finalSavePath)) {
       throw std::runtime_error("Unable to create save directory (" + finalSavePath.string() + ")");
     }
-    std::filesystem::rename(run_root_path_ / "output", finalSavePath / "output");
-    std::filesystem::rename(run_root_path_ / ".output", finalSavePath / "logs");
+
+    rapidjson::Document doc;
+    doc.SetObject();
+    rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
+    rapidjson::Value taskJSON(rapidjson::kObjectType);
+    ToJSON(taskJSON, alloc, nullptr);
+    doc.AddMember("task", taskJSON, alloc);
+    std::filesystem::path filename = finalSavePath / "task.json";
+    std::ofstream ofs(filename);
+    if (ofs.is_open()) {
+      rapidjson::OStreamWrapper osw(ofs);
+      rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(osw);
+      doc.Accept(writer);
+      ofs.close();
+    } else {
+      std::cerr << "Error while saving task informations in save storage: " << filename << std::endl;
+    }
+
+    std::filesystem::rename(artefacts_path_, finalSavePath / "artefacts");
+    std::filesystem::rename(outputs_path_, finalSavePath / "output");
+    std::filesystem::rename(logs_path_, finalSavePath / "logs");
   } catch(std::runtime_error const& e) {
     std::cerr << "Error while moving resultats from running to save storage\n" <<
         "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;
@@ -225,13 +278,13 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
     }
     variables.emplace("task_id", id);
 
-    publish_.PublishResults(finalSavePath / "logs", finalSavePath / "output" / "artefacts", variables);
+    publish_.PublishResults(finalSavePath / "logs", finalSavePath / "artefacts", variables);
   } catch(std::runtime_error const& e) {
     std::cerr << "Error while moving resultats from save to user save storage\n" <<
-        "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;
+        "All keep in " << finalSavePath << "\n\t" << e.what() << std::endl;
   } catch(...) {
     std::cerr << "Unknown Error while moving resultats from save to user save storage\n" <<
-        "All keep in " << run_root_path_ << std::endl;
+        "All keep in " << finalSavePath << std::endl;
   }
 
   for(std::filesystem::path const& path: 
@@ -266,6 +319,7 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("logs_path", rapidjson::Value(logs_path_.c_str(), alloc), alloc);
   out.AddMember("env_path", rapidjson::Value(env_path_.c_str(), alloc), alloc);
   out.AddMember("outputs_path", rapidjson::Value(outputs_path_.c_str(), alloc), alloc);
+  out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
 
   out.AddMember("monitors_path", rapidjson::Value(monitors_path_.c_str(), alloc), alloc);
 
@@ -336,7 +390,7 @@ bool ns_Schedule::Task::CreateRunFolders() {
   std::error_code ec;
   for(std::filesystem::path path : { 
       run_root_path_, logs_path_, 
-      outputs_path_, outputs_path_ / "artefacts"
+      outputs_path_, artefacts_path_
   }) {
     if (!std::filesystem::create_directories(path, ec)) {
       throw std::runtime_error(
@@ -346,6 +400,108 @@ bool ns_Schedule::Task::CreateRunFolders() {
     }
   }
   return true;
+}
+
+void ns_Schedule::Task::CreateStepsFromJson(
+    rapidjson::Value const& configJSON, 
+    ns_Executor::ExecutorsProvider const& executorsProvider) {
+  std::list<ns_Schedule::Step*> parent_stack;
+  std::list<ns_Schedule::Step*> current_stack;
+  bool is_root_steps = true;
+
+  if (!configJSON.HasMember("flow") || !configJSON["flow"].IsArray()) {
+    throw std::runtime_error("Invalid or missing 'flow' in JSON");
+  }
+
+  rapidjson::Value runEmptyConfiguration(rapidjson::kObjectType);
+
+  uint64_t step_id = 0;
+
+  rapidjson::Value const& flow = configJSON["flow"];
+
+  for (rapidjson::SizeType i = 0; i < flow.Size(); ++i) {
+    rapidjson::Value const& stepJSON = flow[i];
+    uint64_t run_id = 0;
+
+    if (!stepJSON.HasMember("step") || !stepJSON["step"].IsString()) {
+      continue;
+    }
+
+    current_stack.clear();
+
+    std::string const& step_name = stepJSON["step"].GetString();
+
+    rapidjson::Value const* monitorJSON = nullptr;
+    if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
+      monitorJSON = &(stepJSON["monitor"]);
+    }
+
+    std::vector<rapidjson::Value const*> configurationsStack;
+    if (stepJSON.HasMember("configuration")) {
+      configurationsStack.push_back(&stepJSON["configuration"]);
+    }
+
+    rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
+    ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
+        run_id++, step_id, parent_stack, executorsProvider, 
+        configurationsStack, runConfiguration, monitorJSON);
+    configurationsStack.push_back(runConfiguration);
+
+    ns_Schedule::Step* first_step = step;
+    if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
+      rapidjson::Value const& run_array = stepJSON["run"];
+
+      for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+        rapidjson::Value const& run = run_array[j];
+        if (j != 0) {
+          step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, 
+              executorsProvider, configurationsStack, &run);
+          step = step->next_;
+        } else {
+          step->ReadFromTaskJSON(configurationsStack, &run);
+        }
+
+        current_stack.push_back(step);
+        steps_.push_front(step);
+        ns_Schedule::Step* attemptStep = step;
+        for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
+          attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt);
+          attemptStep = attemptStep->next_;
+          current_stack.push_back(attemptStep);
+          steps_.push_front(attemptStep);
+        }
+        step = attemptStep;
+      }
+    } else {
+      current_stack.push_back(step);
+      steps_.push_front(step);
+      ns_Schedule::Step* attemptStep = step;
+      for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
+        attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt);
+        attemptStep = attemptStep->next_;
+        current_stack.push_back(attemptStep);
+        steps_.push_front(attemptStep);
+      }
+    }
+    first_step->previous_ = current_stack.back();
+    first_step->previous_->next_ = first_step;
+
+    for(auto& parent : parent_stack) {
+      parent->dependencies_.insert(
+          parent->dependencies_.end(),
+          current_stack.rbegin(), current_stack.rend()
+      );
+    }
+
+    if (is_root_steps) {
+      root_steps_ = current_stack;
+      is_root_steps = false;
+    }
+
+    parent_stack = current_stack;
+
+    step_id++;
+  }
 }
 
 std::unordered_map<std::string, std::string> 

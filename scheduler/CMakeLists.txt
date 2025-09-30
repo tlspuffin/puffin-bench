@@ -50,14 +50,13 @@ else()
   target_link_libraries(Poco INTERFACE ssl crypto)
 endif()
 
-EmbedTextFile("scripts/get_file.sh" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/scheduler/schedule/embeded/get_file_sh.h" GetFile_Script)
-EmbedTextFile("scripts/executor.sh" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/scheduler/schedule/executor/embeded/executor_sh.h" Executor_Script)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/get_file.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/get_file_sh.h" GetFile_Script)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/executor.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/executor_sh.h" Executor_Script)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/functions_sh.h" Functions_Script)
 
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
-  src/scheduler/utils/rapidjson.cxx src/scheduler/utils/variables.cxx
+  src/scheduler/utils/rapidjson.cxx src/scheduler/utils/variables.cxx src/scheduler/utils/file.cxx 
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
@@ -66,6 +65,7 @@ set(SRV_SRC
   src/scheduler/api/schedule_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
+  src/embeded/scheduler/get_file_sh.h src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})
@@ -82,18 +82,16 @@ add_dependencies(srv-static reserve_port-static_blob_h)
 
 add_executable(testcpu src/cpu.cxx src/scheduler/schedule/executor/linux_cores.cxx)
 
-EmbedTextFile("${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/index.html" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/embeded/index_html.h" Publisher_Index)
-EmbedTextFile("${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/index.css" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/embeded/index_css.h" Publisher_CSS)
-EmbedTextFile("${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/index.js" 
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/publisher/publish/embeded/index_js.h" Publisher_JS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/publisher/index.html" "${CMAKE_SOURCE_DIR}/src/embeded/publisher/index_html.h" Publisher_Index)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/publisher/index.css" "${CMAKE_SOURCE_DIR}/src/embeded/publisher/index_css.h" Publisher_CSS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/publisher/index.js" "${CMAKE_SOURCE_DIR}/src/embeded/publisher/index_js.h" Publisher_JS)
 
 set(PUBLISHER_SRC
   src/publisher/main.cxx src/publisher/config.cxx 
   src/publisher/server/config.cxx src/publisher/server/server.cxx 
   src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
   src/publisher/publish/config.cxx src/publisher/publish/publish.cxx
+  src/embeded/publisher/index_html.h src/embeded/publisher/index_css.h src/embeded/publisher/index_js.h
 )
 
 add_executable(publisher ${PUBLISHER_SRC})
