@@ -2,12 +2,14 @@
 
 #include "step_configurations.hxx"
 #include "publish.hxx"
+#include "executor/executors_provider.hxx"
 #include <cstdint>
 #include <iostream>
 #include <list>
 #include <unordered_map>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <rapidjson/document.h>
 
 namespace ns_Executor {
@@ -31,6 +33,7 @@ public:
   std::filesystem::path logs_path_;
   std::filesystem::path env_path_;
   std::filesystem::path outputs_path_;
+  std::filesystem::path artefacts_path_;
   std::filesystem::path monitors_path_;
 
   std::unordered_map<std::string, std::string> args_;
@@ -48,21 +51,25 @@ public:
 
   Publish publish_;
 
+  std::mutex metadata_index_lock_;
+
   Task(uint64_t id, std::string const& name, 
+      rapidjson::Value const& configJSON, 
       std::filesystem::path const& inDataPath, 
       std::filesystem::path const& functionsFile, 
       std::filesystem::path const& toolsFolders, 
       std::filesystem::path const& runRootPath, 
       std::filesystem::path const& monitorsRootPath, 
       std::unordered_map<std::string, std::string>& args, 
-      rapidjson::Value const* publishConfiguration, 
-      rapidjson::Value const* configurations);
+      ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 
-      ns_Schedule::Schedule const* schedule, 
+      ns_Executor::ExecutorsProvider const& executorsProvider, 
       std::list<ns_Schedule::Step*>& stepsPending, 
       std::list<ns_Schedule::Step*>& stepsRunning, 
       std::list<ns_Schedule::Step*>& stepsDone);
   ~Task();
+
+  void Cancel();
 
   bool PrepareToRun();
 
@@ -74,6 +81,11 @@ public:
 
 private:
   bool CreateRunFolders();
+
+  void CreateStepsFromJson(rapidjson::Value const& configJSON, 
+      ns_Executor::ExecutorsProvider const& executorsProvider);
+
+  std::list<ns_Schedule::Step*> steps_;
 
   static std::unordered_map<std::string, std::string> 
   LoadGlobalParameters(std::filesystem::path const& file);

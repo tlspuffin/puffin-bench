@@ -43,8 +43,8 @@ void ns_Monitor::Monitor::Add(std::list<ns_Schedule::Step*> steps) {
   std::lock_guard<std::mutex> lock(lock_);
   for (auto const& step : steps) {
     if (step->monitor_) {
-      LOGI("add to monitoring step: " << step->task_->id_ << " " << step->ID());
-      stepsList_.insert(std::make_pair<>(step->monitor_->monitorPath_.filename(), step));
+      //LOGI("add to monitoring step: " << step->task_->id_ << " " << step->ID());
+      stepsList_.insert(std::make_pair<>(step->monitor_path_.filename(), step));
     }
   }
 }
@@ -52,21 +52,24 @@ void ns_Monitor::Monitor::Add(std::list<ns_Schedule::Step*> steps) {
 void ns_Monitor::Monitor::Remove(std::list<ns_Schedule::Step*> steps) {
   std::lock_guard<std::mutex> lock(lock_);
   for (auto const& step : steps) {
-    LOGI("remove from monitoring step: " << step->task_->id_ << " " << step->ID());
-    stepsList_.erase(step->monitor_->monitorPath_);
+    if (step->monitor_) {
+      //LOGI("remove from monitoring step: " << step->task_->id_ << " " << step->ID());
+      stepsList_.erase(step->monitor_path_);
+    }
   }
 }
 
 bool ns_Monitor::Monitor::GetChange() {
-  std::lock_guard<std::mutex> lock(lock_);
-  bool haveMessage = monitorsMessage_.size() > 0;
-
-  for(auto const& [step, message] : monitorsMessage_) {
-    step->message_from_run_ = message;
-    LOGI(message);
+  std::map<ns_Schedule::Step*, std::string> monitorsMessage;
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    monitorsMessage.swap(monitorsMessage_);
   }
-  monitorsMessage_.clear();
-
+  bool haveMessage = monitorsMessage.size() > 0;
+  for(auto const& [step, message] : monitorsMessage) {
+    step->message_from_run_ = message;
+    //LOGI(message);
+  }
   return haveMessage;
 }
 
@@ -98,16 +101,15 @@ void ns_Monitor::Monitor::Main(int fd, int wd) {
       struct inotify_event *event = (struct inotify_event *) &buffer[i];
       if (event->len > 0) {
         if (event->mask & IN_MOVED_TO) {
-          LOGI("Step monitor updated: " << event->name);
-          {
-            std::unique_lock<std::mutex> lock(lock_);
-            auto const& it = stepsList_.find(event->name);
-            if (it != stepsList_.end()) {
-              monitorsMessage_.insert(std::make_pair<>(it->second, it->second->monitor_->GetMessage()));
-            }/* else {
-              LOGE("Ignoring modification on " << event->name);
-            }*/
-          }
+          std::unique_lock<std::mutex> lock(lock_);
+          //LOGI("Step monitor updated: " << event->name);
+          auto const& it = stepsList_.find(event->name);
+          if (it != stepsList_.end()) {
+            monitorsMessage_.insert(
+                std::make_pair<>(it->second, GetMessage(it->second->monitor_path_)));
+          }/* else {
+            LOGE("Ignoring modification on " << event->name);
+          }*/
         }
       }
       i += sizeof(struct inotify_event) + event->len;
@@ -132,4 +134,15 @@ void ns_Monitor::Monitor::InitINotify(int& fd, int& wd) {
     close(fd);
     throw std::runtime_error("Unable to add inotify watch on " + path_.string());
   }
+}
+
+std::string ns_Monitor::Monitor::GetMessage(std::filesystem::path const& filePath) {
+  std::ifstream file(filePath);
+  if (!file.is_open()) {
+    LOGE("Monitor can extract run message from " << filePath);
+    return "";
+  }
+  std::ostringstream buffer;
+  buffer << file.rdbuf();
+  return buffer.str();
 }

@@ -39,6 +39,8 @@ private:
   std::condition_variable cv_;
   bool running_;
   std::thread thread_;
+
+  static std::string GetMessage(std::filesystem::path const& filePath);
 };
 
 };

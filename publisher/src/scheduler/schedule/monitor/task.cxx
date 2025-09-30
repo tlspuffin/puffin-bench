@@ -3,16 +3,13 @@
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/logs.hxx"
 
-ns_Monitor::Task::Task() : entryPoint_(), monitorPath_("./.monitor"), 
+ns_Monitor::Task::Task() : entryPoint_(), 
     delayStartS_("0"), timeoutS_("0"), intervalS_("0")
 {}
 
 ns_Monitor::Task::Task(ns_Schedule::Step const* step, rapidjson::Value const& json) 
     : Task()
 {
-  monitorPath_ = step->task_->monitors_path_ / 
-      (std::to_string(step->task_->id_) + '-' + step->ID() + ".txt");
-
   entryPoint_ = Get<std::string>(json, "entry_point");
   std::string value = Get<std::string>(json, "interval");
   intervalS_ = std::to_string(ParseDurationToSeconds(value));
@@ -20,17 +17,6 @@ ns_Monitor::Task::Task(ns_Schedule::Step const* step, rapidjson::Value const& js
   timeoutS_ = std::to_string(ParseDurationToSeconds(value));
   value = GetOrDefault<std::string>(json, "delay_start", "0ms");
   delayStartS_ = std::to_string(ParseDurationToSeconds(value));
-}
-
-std::string ns_Monitor::Task::GetMessage() {
-  std::ifstream file(monitorPath_);
-  if (!file.is_open()) {
-    LOGE("Monitor can extract run message from " << monitorPath_);
-    return "";
-  }
-  std::ostringstream buffer;
-  buffer << file.rdbuf();
-  return buffer.str();
 }
 
 void ns_Monitor::Task::ToJSON(rapidjson::Value& out, 

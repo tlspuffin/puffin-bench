@@ -1,6 +1,7 @@
 #include "schedule.hxx"
 #include "task.hxx"
 #include "executor/local.hxx"
+#include "../utils/file.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -30,7 +31,7 @@
 
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
-ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config) 
+ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
       monitor_(config.monitorsPath_)
@@ -38,7 +39,7 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config)
   static int installHandler = InstallSigUSRHandler();
 
   for (auto const& executorConfig : config.executors_) {
-    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second);
+    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, cachePort);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
 
@@ -143,16 +144,25 @@ bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
 
 bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
   std::lock_guard<std::mutex> lock(lockThread_);
-  for(ns_Schedule::Step* step : steps_) {
-    if (step->task_->id_ != taskID) {
-      continue;
+  ns_Schedule::Task* task = nullptr;
+  bool found = false;
+  for (auto it = steps_.begin(); it != steps_.end(); ) {
+    ns_Schedule::Step* step = *it;
+    if (step->task_->id_ == taskID) {
+      task = step->task_;
+      if (step->IsPending()) {
+        it = steps_.erase(it);
+        continue;
+      }
     }
-    step->task_->request_cancel_ = true;
-    return true;
+    ++it;
   }
-  return false;
+  if (task == nullptr) {
+    return false;
+  }
+  task->Cancel();
+  return true;
 }
-
 
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
   auto const& executorIT = executors_.find(name);
@@ -167,43 +177,40 @@ ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& nam
   return executorIT->second;
 }
 
-std::string ns_Schedule::Schedule::GetOutput(
+ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     uint64_t stepUUID, std::string const& stepID,
-    size_t readSize, ssize_t readOffset, OutputState& state) {
-  state = OutputState::UNKNOWN;
-  std::string output = tasksManager_.GetRunningOutput(type, 
-      std::stoull(taskID), stepUUID, readSize, readOffset, state);
+    size_t readSize, ssize_t readOffset, struct FileExtractedText& data) {
+  ns_Schedule::OutputState state = OutputState::UNKNOWN;
+
+  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
+    return state;
+  }
+
+  state = tasksManager_.GetRunningOutput(type, 
+      std::stoull(taskID), stepUUID, readSize, readOffset, data);
   if (state != OutputState::UNKNOWN) {
-    return output;
+    return state;
   }
 
   std::filesystem::path outputPath = config_.exportPath_;
   outputPath = outputPath / taskID / "logs";
-  std::string prefix = "stdout";
-  if (type.compare("error") == 0) {
-    prefix = "stderr";
-  }
   std::stringstream oss;
-  oss << prefix << '.' << stepID << ".txt";
+  oss << type << '.' << stepID << ".txt";
   outputPath = outputPath / oss.str();
-  if (!std::filesystem::exists(outputPath)) {
-    return "";
+
+  FileReadState fileState = FileExtractText(outputPath, readSize, readOffset, data);
+  switch (fileState) {
+    case FileReadState::Ok:
+      state = ns_Schedule::OutputState::GOT_DATA;
+      break;
+    case FileReadState::EndOfFile:
+      state = ns_Schedule::OutputState::END_OF_DATA;
+      break;
+    default:
+      break;
   }
-  std::ifstream ifs(outputPath);
-  if (!ifs) {
-    return "";
-  }
-  ifs.seekg(readOffset, readOffset >= 0 ? std::ios::beg : std::ios::end);
-  if (!ifs) {
-    return "";
-  }
-  std::string buffer;
-  buffer.resize(readSize);
-  ifs.read(&buffer[0], readSize);
-  buffer.resize(ifs.gcount());
-  state = buffer.size() == readSize ? OutputState::GOT_DATA : OutputState::END_OF_DATA; 
-  return buffer;
+  return state;
 }
 
 
@@ -221,7 +228,7 @@ std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
 void ns_Schedule::Schedule::ScheduleLoop() {
   std::ofstream stepsDoneFile(config_.exportPath_ / "steps_done.json", std::ios::app);
   std::runtime_error fatal_error("");
-  std::list<ns_Schedule::Step*> step_delayed_delete;
+  std::list<ns_Schedule::Step*> stepDelayedDelete;
 
   bool updateStatus = false;
   lockThread_.lock();
@@ -242,7 +249,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       updateStatus = false;
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     for(auto& executor : executors_) {
       std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(stepsRunning_);
@@ -264,26 +271,22 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     lockThread_.lock();
     try {
-      for (ns_Schedule::Step* step : steps_) {
-        if (step->task_->request_cancel_ || step->request_cancel_) {
-          DEBUG_STEP_MSG("Step cancelled", step);
-          if (!step->IsRunning()) {
-            stepsRunning_.push_back(step);
-          }
+      for (ns_Schedule::Step* step : stepsRunning_) {
+        if (step->IsRunning() && (step->task_->request_cancel_ || step->request_cancel_)) {
+          DEBUG_STEP_MSG("Step/Task cancelled", step);
           step->KillAndMarkCancel();
           stepsDone_.push_back(step);
         }
       }
 
-      updateStatus |= ProcessDelayedCleanup(
-          stepsRunning_, step_delayed_delete, stepsDoneFile);
+      updateStatus |= ProcessDelayedCleanup(stepDelayedDelete, stepsDoneFile);
 
       monitor_.Remove(stepsDone_);
       for(ns_Schedule::Step* step : stepsDone_) {
         if (step->monitor_count_ > 0) {
-          step_delayed_delete.push_back(step);
+          stepDelayedDelete.push_back(step);
         } else {
-          ManageEndOfStep(stepsRunning_, step, stepsDoneFile);
+          ManageEndOfStep(step, stepsDoneFile);
           updateStatus = true;
         }
       }
@@ -315,14 +318,13 @@ ns_Schedule__Schedule__ScheduleLoop_fatal:
 }
 
 inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
-    std::list<ns_Schedule::Step*>& steps, 
     std::list<ns_Schedule::Step*>& delayedSteps, 
     std::ofstream& stepsDoneFile) {
   bool aStepProcessed = false;
   for (auto it = delayedSteps.begin(); it != delayedSteps.end(); ) {
     ns_Schedule::Step* step = *it;
     if (step->monitor_count_ == 0) {
-      ManageEndOfStep(steps, step, stepsDoneFile);
+      ManageEndOfStep(step, stepsDoneFile);
       it = delayedSteps.erase(it);
       aStepProcessed = true;
     } else {
@@ -333,20 +335,19 @@ inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
 }
 
 void ns_Schedule::Schedule::ManageEndOfStep(
-    std::list<ns_Schedule::Step*>& steps, ns_Schedule::Step* step, 
-    std::ofstream& stepsDoneFile) {
+    ns_Schedule::Step* step, std::ofstream& stepsDoneFile) {
   DEBUG_STEP_MSG("Step removed", step);
   AppendStepToFinishLog(step->task_->steps_file_, *step);
   AppendStepToFinishLog(stepsDoneFile, *step);
 
-  steps.remove(step);
+  stepsRunning_.remove(step);
   auto itStep = std::find(steps_.begin(), steps_.end(), step);
   if (itStep == steps_.end()) {
     throw std::runtime_error("Trying to delete an unknown step: name=" +
         step->name_ + ", id=" + step->ID());
   }
-  bool taskCancelled = step->TaskCancelled();
-  if (!taskCancelled) {
+
+  if (!step->TaskCancelled()) {
     for (auto rit = step->dependencies_.rbegin(); rit != step->dependencies_.rend(); ++rit) {
       ns_Schedule::Step* stepChild = *rit;
       stepChild->depend_from_.remove(step);
@@ -357,15 +358,8 @@ void ns_Schedule::Schedule::ManageEndOfStep(
   }
   steps_.remove(step);
   step->GatherFilesToLocal();
-  if (taskCancelled) {
-    for(auto const& aStep: steps_) {
-      if (aStep->task_ == step->task_) {
-        taskCancelled = false;
-        break;
-      }
-    }
-  }
-  if (step->TaskDone() || taskCancelled) {
+
+  if (step->TaskLastStep()) {
     // todo signal end of the flow
     uint64_t task_id = step->TaskID();
     step->FinalizeAndArchive(config_.exportPath_);

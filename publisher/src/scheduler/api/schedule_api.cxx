@@ -1,7 +1,7 @@
 #include "schedule_api.hxx"
 
-ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config)
-    : config_(config), schedule_(config)
+ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, uint16_t cache_port)
+    : config_(config), schedule_(config, cache_port)
 {
 }
 
@@ -21,10 +21,10 @@ void ns_API::ScheduleAPI::GetRunningTaskSummary() {
 void ns_API::ScheduleAPI::GetTaskInfos(uint64_t task_id) {
 }
 
-std::string ns_API::ScheduleAPI::GetOutput(
+ns_Schedule::OutputState ns_API::ScheduleAPI::GetOutput(
     std::string const& type, std::string const& taskID, uint64_t stepUUID, 
     std::string const& stepID, size_t readSize, ssize_t readOffset, 
-    ns_Schedule::OutputState& state) {
+    struct FileExtractedText& data) {
   return schedule_.GetOutput(type, taskID, stepUUID, stepID, 
-      readSize, readOffset, state);
+      readSize, readOffset, data);
 }
