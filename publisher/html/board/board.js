@@ -86,6 +86,15 @@ const logsInfos = {
   },
 }
 
+function CloseModal() {
+  logsInfos.timerRun = false;
+  if (logsInfos.timerID != null) {
+    window.clearTimeout(logsInfos.timerID);
+    logsInfos.timerID = null;
+  }
+  document.getElementById('logs-modal').classList.remove('show');
+}
+
 function SwitchOutput(newOutput) {
   document.getElementById(`log-${logsInfos.type}`).classList.toggle('active');
   document.getElementById(`${logsInfos.type}-content`).classList.toggle('active');
@@ -109,18 +118,10 @@ async function RetrieveStepLogs(logsInfos, size) {
       `http://${window.location.host}/api/task/output/${taskID}/${stepUUID}/${stepID}/${type}/${size}/${logsInfos[type].lastoffset}`);
 
   if (!response.ok) {
-    document.getElementById('modal-close').onclick = (event) => {
-        document.getElementById('logs-modal').classList.remove('show');
-        document.getElementById('modal-close').onclick = null;
-    };
     return [false, 0];
   }
   var data = await response.json();
   if (!data.success) {
-    document.getElementById('modal-close').onclick = (event) => {
-        document.getElementById('logs-modal').classList.remove('show');
-        document.getElementById('modal-close').onclick = null;
-    };
     return [false, 0];
   }
 
@@ -175,21 +176,17 @@ async function StepLogs(step, taskName) {
   }
   stepName += ` (${taskName})`;
 
+  document.getElementById(`log-${logsInfos.type}`).classList.add('active');
+  document.getElementById(`${logsInfos.type}-content`).classList.add('active');
+  let inactiveType = logsInfos.type === 'stdout' ? 'stderr' : 'stdout';
+  document.getElementById(`log-${inactiveType}`).classList.remove('active');
+  document.getElementById(`${inactiveType}-content`).classList.remove('active');
+
   document.getElementById('step-name').innerText = stepName;
   document.getElementById('logs-modal').classList.add('show');
 
   logsInfos.timerRun = true;
   await RetrieveFullStepLogs(logsInfos, 65535);
-
-  document.getElementById('modal-close').onclick = (event) => {
-      logsInfos.timerRun = false;
-      if (logsInfos.timerID != null) {
-        window.clearInterval(logsInfos.timerID);
-        logsInfos.timerID = null;
-      }
-      document.getElementById('logs-modal').classList.remove('show');
-      document.getElementById('modal-close').onclick = null;
-  };
 }
 
 async function CancelTask(taskID) {
@@ -341,12 +338,12 @@ function CreateAttemptCard(step, taskName) {
 
   div.appendChild(details);
 
-  if ((step.state != 'Pending') && (step.message_from_run != '')) {
+  if ((step.state != 'Pending') && (step?.message_from_run)) {
     const monitor = document.createElement('div');
     monitor.classList.add('card-attempt-details');
     monitor.appendChild(CreateCardLine(
         null, 'attempt-detail-item',
-        ['attempt-detail-label', 'attempt-detail-value'],
+        ['attempt-detail-label', 'attempt-detail-value-monitor'],
         ['Monitor', step.message_from_run],
     ));
     div.appendChild(monitor);
@@ -377,10 +374,55 @@ function CreateStepsCard(steps, taskName) {
 
   if (steps.length > 1) {
     div.appendChild(CreateCardLine(
-        null, ['step-attempts-detail', 'step-attempts-detail-end'], 
+        null, ['step-attempts-detail', 'step-attempts-detail'], 
         ['step-attempts-detail-name', 'step-attempts-detail-value'], 
         ['NB Attempts', steps.length]
     ));
+
+    const counts = steps.reduce((acc, step) => 
+        {
+          const state = (step.state || "").toLowerCase();
+          switch (state) {
+            case "pending":
+              acc.pending++;
+              break;
+            case "running":
+              acc.running++;
+              break;
+            case "timedout":
+              acc.timedout++;
+              break;
+            case "cancelled":
+              acc.cancelled++;
+              break;
+            case "done":
+              if (step.exit_code === 0) {
+                acc.done++;
+              } else {
+                acc.fail++;
+              }
+            break;
+          }
+          return acc; 
+        },
+        {
+          pending: 0,
+          running: 0,
+          timedout: 0,
+          cancelled: 0,
+          done: 0,
+          fail: 0
+        }
+    );
+    const parts = Object.entries(counts)
+        .filter(([_, v]) => v > 0)
+        .map(([k, v]) => `${k}:${v}`);
+    const summary = parts.join(" ");
+    div.appendChild(CreateCardLine(
+            null, ['step-attempts-detail', 'step-attempts-detail-end'], 
+            ['step-attempts-detail-name', 'step-attempts-detail-value'], 
+            ['', summary]
+        ));
   }
 
   if (Object.keys(steps[0].args).length) {
@@ -508,10 +550,10 @@ async function GetServerStatus() {
     return [ false, {} ];
   }
   var data = await response.json();
-  /*if (!data.success) {
+  if (!data.success) {
     return [ false, {} ];
   }
-  data = data.data.running_steps;*/
+  /*data = data.data.running_steps;*/
   //data = data.tasks;
   data = data.data.tasks;
   return [ true, data ];
@@ -574,6 +616,8 @@ function main() {
 
   document.getElementById('log-stdout').onclick = SwitchOutput.bind(null, 'stdout');
   document.getElementById('log-stderr').onclick = SwitchOutput.bind(null, 'stderr');
+
+  document.getElementById('modal-close').onclick = CloseModal;
 }
 
 main();

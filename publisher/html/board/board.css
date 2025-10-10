@@ -248,6 +248,14 @@ body {
   grid-column: span 2;
 }
 
+.card-attempt-detail-value-monitor {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  font-family: monospace;
+}
+
 
 .card-attempt-logs-btn {
   min-width: 5em;
