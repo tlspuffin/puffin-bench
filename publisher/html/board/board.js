@@ -18,18 +18,44 @@ function Duration(step) {
 function ExitCodeLabel(step) {
   switch(step.exit_code) {
     case null:
-      return 'N/A';
+    return 'N/A';
     default:
-      return step.exit_code;
+    return step.exit_code;
     case 0x0100:
-      return 'Not set';
+    return 'Not set';
     case 0x0200:
-      return 'Timedout';
+    return 'Timedout';
     case 0x0400:
-      return 'Cancelled';
+    return 'Cancelled';
     case 0x0800:
-      return 'Launch Error';
+    return 'Launch Error';
   }
+}
+
+function TimeoutLabel(timeout) {
+  if (timeout < 60) {
+    return timeout + ' s';
+  }
+  const seconds = timeout % 60;
+  let remainMinutes = timeout / 60;
+  const minutes = remainMinutes % 60;
+  remainMinutes -= minutes;
+  const hours = remainMinutes / 60;
+
+  let label = '';
+  if (hours > 0) {
+    label = hours + ' h';
+  }
+  if (minutes > 0) {
+    if (label != '') {
+      label += ' ';
+    }
+    label += minutes + ' m';
+  }
+  if (seconds > 0) {
+    label += ' ' + seconds + ' s';
+  }
+  return label;
 }
 
 function DisableUI() {
@@ -84,16 +110,16 @@ async function RetrieveStepLogs(logsInfos, size) {
 
   if (!response.ok) {
     document.getElementById('modal-close').onclick = (event) => {
-      document.getElementById('logs-modal').classList.remove('show');
-      document.getElementById('modal-close').onclick = null;
+        document.getElementById('logs-modal').classList.remove('show');
+        document.getElementById('modal-close').onclick = null;
     };
     return [false, 0];
   }
   var data = await response.json();
   if (!data.success) {
     document.getElementById('modal-close').onclick = (event) => {
-      document.getElementById('logs-modal').classList.remove('show');
-      document.getElementById('modal-close').onclick = null;
+        document.getElementById('logs-modal').classList.remove('show');
+        document.getElementById('modal-close').onclick = null;
     };
     return [false, 0];
   }
@@ -112,12 +138,12 @@ async function RetrieveFullStepLogs(logsInfos, size) {
   var state = 1;
   while(success && (state == 1)) {
     [success, state] = await RetrieveStepLogs(logsInfos, size);
-  if (success) {
-    document.getElementById(`${logsInfos.type}-content`).innerText = 
-        new TextDecoder('utf-8').decode(
-            new Uint8Array([...logsInfos[logsInfos.type].data].map(c => c.charCodeAt(0)))
-        );
-  }
+    if (success) {
+      document.getElementById(`${logsInfos.type}-content`).innerText = 
+          new TextDecoder('utf-8').decode(
+              new Uint8Array([...logsInfos[logsInfos.type].data].map(c => c.charCodeAt(0)))
+          );
+    }
   }
 
   if (logsInfos.timerRun) {
@@ -156,13 +182,13 @@ async function StepLogs(step, taskName) {
   await RetrieveFullStepLogs(logsInfos, 65535);
 
   document.getElementById('modal-close').onclick = (event) => {
-    logsInfos.timerRun = false;
-    if (logsInfos.timerID != null) {
-      window.clearInterval(logsInfos.timerID);
-      logsInfos.timerID = null;
-    }
-    document.getElementById('logs-modal').classList.remove('show');
-    document.getElementById('modal-close').onclick = null;
+      logsInfos.timerRun = false;
+      if (logsInfos.timerID != null) {
+        window.clearInterval(logsInfos.timerID);
+        logsInfos.timerID = null;
+      }
+      document.getElementById('logs-modal').classList.remove('show');
+      document.getElementById('modal-close').onclick = null;
   };
 }
 
@@ -203,7 +229,6 @@ async function CancelStep(taskID, stepUUID) {
   }
 }
 
-
 function CreateCardLine(id, type, style, infos) {
   const div = document.createElement('div');
   if (id != null) {
@@ -211,20 +236,20 @@ function CreateCardLine(id, type, style, infos) {
   }
   if (type instanceof Array) {
     type.forEach(value => {
-      div.classList.add('card-'+value);
+        div.classList.add('card-'+value);
     });
   } else {
     div.classList.add('card-'+type);
   }
   infos.forEach((info, index) => {
-    const element = document.createElement('div');
-    if (info instanceof HTMLElement) {
-      element.appendChild(info);
-    } else {
-      element.innerHTML = info;
-    }
-    element.classList.add('card-'+style[index]);
-    div.appendChild(element);
+      const element = document.createElement('div');
+      if (info instanceof HTMLElement) {
+        element.appendChild(info);
+      } else {
+        element.innerHTML = info;
+      }
+      element.classList.add('card-'+style[index]);
+      div.appendChild(element);
   });
   return div;
 }
@@ -255,10 +280,10 @@ function CreateAttemptCard(step, taskName) {
   } else {
     details.appendChild(CreateCardLine(
         null, 'attempt-detail-item',
-        ['attempt-detail-label', 'attempt-detail-value'],
-        ['PID', step.executor_data?.pid || 'N/A']
+        ['attempt-detail-label', 'attempt-detail-value', 'attempt-detail-value'],
+        ['PID', step.executor_data?.pid || 'N/A', step.state]
     ));
-  
+
     if (step.state == 'Running') {
       const coresList = document.createElement('div');
       coresList.classList.add('cores-list');
@@ -269,7 +294,7 @@ function CreateAttemptCard(step, taskName) {
           coresList.appendChild(chip);
       }); 
       details.appendChild(CreateCardLine(
-           null, 'attempt-detail-item',
+          null, 'attempt-detail-item',
           ['attempt-detail-label', 'attempt-detail-value'],
           ['Cores', coresList]
       ));
@@ -323,11 +348,22 @@ function CreateStepsCard(steps, taskName) {
   const div = document.createElement('div');
   div.classList.add('card-step-running');
 
-  div.appendChild(CreateCardLine(
-      null, 'step-name', 
-      ['step-value-name', 'step-value-id'], 
-      [steps[0].name, steps[0].id]
-  ));
+  if ((steps[0].id != '') && (steps[0].id != '.')) {
+    div.appendChild(CreateCardLine(
+        null, 'step-name', 
+        [/*'step-value-name'*/'step-attempts-detail-name', 'step-value-id'], 
+        [/*steps[0].name*/'Configuration', steps[0].id]
+    ));
+  }
+
+  if (steps[0].timeout > 0) {
+    div.appendChild(CreateCardLine(
+        null, ['step-attempts-detail', 'step-attempts-detail-end'], 
+        ['step-attempts-detail-name', 'step-attempts-detail-value'], 
+        ['Timeout', TimeoutLabel(steps[0].timeout)]
+    ));
+  }
+
   if (steps.length > 1) {
     div.appendChild(CreateCardLine(
         null, ['step-attempts-detail', 'step-attempts-detail-end'], 
@@ -335,30 +371,33 @@ function CreateStepsCard(steps, taskName) {
         ['NB Attempts', steps.length]
     ));
   }
-  div.appendChild(CreateCardLine(
-      null, 'step-attempts-detail', 
-      ['step-attempts-detail-name'], 
-      ['Arguments:']
-  ));
 
-  Object.entries(steps[0].args || {}).map(([key, value], index, array) => {
-    let style = 'step-attempts-detail';
-    if (index == (array.length-1)) {
-      style = ['step-attempts-detail', 'step-attempts-detail-end'];
-    }
-    console.log(index, array);
+  if (Object.keys(steps[0].args).length) {
     div.appendChild(CreateCardLine(
-        null, style, 
-        ['step-attempts-detail-name', 'step-attempts-detail-value'], 
-        ['', key+': '+value]
+        null, 'step-attempts-detail', 
+        ['step-attempts-detail-name'], 
+        ['Arguments:']
     ));
 
-  })
+    Object.entries(steps[0].args || {}).map(([key, value], index, array) => {
+        let style = 'step-attempts-detail';
+        if (index == (array.length-1)) {
+          style = ['step-attempts-detail', 'step-attempts-detail-end'];
+        }
+        console.log(index, array);
+        div.appendChild(CreateCardLine(
+            null, style, 
+            ['step-attempts-detail-name', 'step-attempts-detail-value'], 
+            ['', key+': '+value]
+        ));
+
+    })
+  }
 
   steps.forEach(step => {
-    //if (step.state != 'Pending') {
+      //if (step.state != 'Pending') {
       div.appendChild(CreateAttemptCard(step, taskName));
-    //}
+      //}
   });
 
   return div
@@ -372,7 +411,7 @@ function CreateTaksCard(task, steps) {
   cancelButton.classList.add('card-attempt-cancel-btn');
   cancelButton.textContent = 'Cancel';
   cancelButton.onclick = async (event) => {
-    await CancelTask(task.id);
+      await CancelTask(task.id);
   };
 
   let taskName = task.name;
@@ -400,28 +439,56 @@ function CreateTaksCard(task, steps) {
   separator.classList.add('card-task-separator');
   div.appendChild(separator);
 
-
   div.appendChild(CreateCardLine(
       null, 'task-label-args', 
       ['task-args-label'], 
       ['Arguments:']
   ));
   task.args.forEach(arg => {
-    div.appendChild(CreateCardLine(
-        null, 'task-args', 
-        ['task-args-name', 'task-args-name'], 
-        [arg.key, arg.value]
-    ));
+      div.appendChild(CreateCardLine(
+          null, 'task-args', 
+          ['task-args-name', 'task-args-name'], 
+          [arg.key, arg.value]
+      ));
   });
 
-  console.log("Steps:", steps);
+  /*console.log("Steps:", steps);
   steps.forEach(step => {
-    console.log("Step:", step);
-    div.appendChild(CreateStepsCard(step, taskName));
+      console.log(step.name, step.id);
+      console.log("Step:", step);
+      div.appendChild(CreateStepsCard(step, taskName));
+  });*/
+  const regroupedSteps = new Map();
+  steps.forEach(attemps => {
+      attemps.forEach(attemp => {
+          if (!regroupedSteps.get(attemp.name)) {
+            regroupedSteps.set(attemp.name, new Map());
+          }
+          if (!regroupedSteps.get(attemp.name).get(attemp.id)) {
+            regroupedSteps.get(attemp.name).set(attemp.id, []);
+          }
+          regroupedSteps.get(attemp.name).get(attemp.id).push(attemp);
+      });
   });
-  
+  console.log("Steps:", regroupedSteps);
+  regroupedSteps.forEach((steps, functionID) => {
+      const divStep = document.createElement('div');
+      divStep.classList.add('card-step');
+
+      const divStepName = document.createElement('div');
+      divStepName.innerText = functionID;
+      divStepName.classList.add('card-step-main-name');
+      divStep.appendChild(divStepName);
+
+      steps.forEach((step, functionID) => {
+          console.log(" - Step:", functionID, steps);
+          divStep.appendChild(CreateStepsCard(step, taskName));
+      });
+      div.appendChild(divStep);
+  });
+
   document.getElementById('container-running-steps').appendChild(div);
-}
+ }
 
 async function GetServerStatus() {
   //var response = await fetch(`http://${window.location.host}/files/board/out.json`);
@@ -457,29 +524,29 @@ async function RefreshBoard() {
   const stateCount = {};
   const state = {};
   tasks.forEach((task, taskindex) => {
-    Object.entries(task.steps).forEach(([stepuuid, step]) => {
-      if (state[step.state] == null) {
-        state[step.state] = {}
-        stateCount[step.state] = 0;
-      }
-      stateCount[step.state]++;
-      if (state[step.state][taskindex] == null) {
-        state[step.state][taskindex] = new Map();
-      }
-      if (!state[step.state][taskindex].has(step.step_id+'-'+step.rank_id)) {
-        state[step.state][taskindex].set(step.step_id+'-'+step.rank_id, []);
-      }
-      state[step.state][taskindex].get(step.step_id+'-'+step.rank_id).push(step);
-    });
+      Object.entries(task.steps).forEach(([stepuuid, step]) => {
+          if (state[step.state] == null) {
+            state[step.state] = {}
+            stateCount[step.state] = 0;
+          }
+          stateCount[step.state]++;
+          if (state[step.state][taskindex] == null) {
+            state[step.state][taskindex] = new Map();
+          }
+          if (!state[step.state][taskindex].has(step.step_id+'-'+step.rank_id)) {
+            state[step.state][taskindex].set(step.step_id+'-'+step.rank_id, []);
+          }
+          state[step.state][taskindex].get(step.step_id+'-'+step.rank_id).push(step);
+      });
 
-    const steps = new Map();
-    Object.entries(task.steps).forEach(([stepid, step]) => {
-      if (!steps.has(step.step_id+'-'+step.rank_id)) {
-        steps.set(step.step_id+'-'+step.rank_id, []);
-      }
-      steps.get(step.step_id+'-'+step.rank_id, []).push(step);
-    });
-    CreateTaksCard(task, steps);
+      const steps = new Map();
+      Object.entries(task.steps).forEach(([stepid, step]) => {
+          if (!steps.has(step.step_id+'-'+step.rank_id)) {
+            steps.set(step.step_id+'-'+step.rank_id, []);
+          }
+          steps.get(step.step_id+'-'+step.rank_id, []).push(step);
+      });
+      CreateTaksCard(task, steps);
   });
   console.log(state);
   SetHeader(stateCount);

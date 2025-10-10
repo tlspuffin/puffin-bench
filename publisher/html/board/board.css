@@ -19,7 +19,7 @@ body {
   overflow-wrap: anywhere;
   background: #2d2d2d;
   transition: background 0.2s;
-  padding: 1rem 1.5rem;
+  padding: 20px 10px;
   border-radius: 15px;
   border: 1px solid #404040;
 }
@@ -69,6 +69,24 @@ body {
   margin-bottom: 15px;
 }
 
+.card-step {
+  margin-top: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px 4px;
+  transition: all 0.2s ease;
+}
+
+.card-step:hover {
+  background: rgba(0, 0, 200, 0.06);
+  transform: translateY(-1px);
+}
+
+.card-step-main-name {
+  padding-left: 8px;
+  color: greenyellow;
+}
+
 .card-step-running {
   margin-top: 8px;
   background: #353535;
@@ -104,10 +122,13 @@ body {
   margin-right: 10px;
 }
 
+.card-step-running > .card-step-attempts-detail:first-of-type {
+  padding-top: 15px;
+}
+
 .card-step-attempts-detail-end {
   border-bottom: 2px solid #555;
 }
-
 
 .card-step-attempts-detail-name {
   display: flex;
