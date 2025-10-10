@@ -1,0 +1,88 @@
+{
+  "publish": {
+    "server": "http://127.0.0.1:8081/api/notify",
+    "storage_path": "/local-unsafe/demengeo/XP/archives/${COMMIT_ID}/${task_id}/"
+    },
+  "configurations": {
+    "SDOS2": {
+      "args": {
+        "experiment": "SDOS2",
+        "features": "'wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173'",
+        "extra_flags": "'--put-use-clear'"
+      }
+    },
+    "HEAP": {
+      "args": {
+	"experiment": "HEAP",
+        "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
+      }
+    },
+    "CDOS": {
+      "args": {
+	"experiment": "CDOS",
+        "features": "'wolfssl530,fix-CVE-2022-39173'"
+      }
+    },
+    "SKIP": {
+      "args": {
+	"experiment": "SKIP",
+        "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"        
+      } 
+    },
+    "BUF": {
+      "args": {
+	"experiment": "BUF",
+        "features": "'wolfssl540,fix-CVE-2022-42905'"
+      }
+    },
+    "SDOS1": {
+      "args": {
+        "experiment": "SDOS1",
+        "features": "'openssl111j'"
+      }
+    },
+    "SIG": {
+      "args": {
+        "experiment": "SIG",
+        "features": "'wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173'"
+      }
+    }
+  },
+  "name" : "Vulnerabilities search - ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init"
+    },
+    {
+      "step": "Build",
+      "run": [ 
+        "SIG" 
+      ]
+    },
+    {
+      "step": "Experiment",
+      "run": [ 
+        "SIG" 
+      ],
+      "configuration": {
+        "nb_cores": 1,
+        "timeout": "48h",
+        "nb_retry": 90 
+      },
+      "monitor": {
+        "entry_point": "CheckObjectif",
+        "delay_start": "10s",
+        "interval": "60s"
+      }
+    },
+    {
+      "step": "ManageResults",
+      "configuration": {
+        "args": {
+          "vulnerabilities": "SIG",
+          "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
+        }
+      }
+    }
+  ]
+}
