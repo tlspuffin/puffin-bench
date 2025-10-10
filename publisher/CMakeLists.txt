@@ -50,7 +50,6 @@ else()
   target_link_libraries(Poco INTERFACE ssl crypto)
 endif()
 
-EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/get_file.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/get_file_sh.h" GetFile_Script)
 EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/executor.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/executor_sh.h" Executor_Script)
 EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/functions_sh.h" Functions_Script)
 
@@ -65,7 +64,7 @@ set(SRV_SRC
   src/scheduler/api/schedule_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
-  src/embeded/scheduler/get_file_sh.h src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
+  src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})

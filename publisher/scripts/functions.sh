@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 THEJOB_UTILS_PATH="$( realpath "${BASH_SOURCE[0]}" )"
 
@@ -63,6 +63,17 @@ QueryCache() {
   return 0
 }
 
+SetCache() {
+  local cache_id="$1"
+  [ -z "${cache_id}" ] && return 64;
+  shift
+  local file="$1"
+  [ ! -r "${file}" ] && return 64;
+  shift
+  curl -s -X PUT "http://localhost:${THEJOB_CACHE_PORT}/api/cache/${cache_id}" -H "Content-Type: application/json" --data-binary "{\"path\": \"${file}\"}"
+  return $?
+}
+
 AddParam() {
   local varname="$1"
   local key="$2"
@@ -104,21 +115,58 @@ CreateArtefact() {
   jq -c -n "${jq_args[@]}" "$jq_expr" >> "${THEJOB_ARTEFACTS_FILE}"
 }
 
+EndDirectChild() {
+  local pid=$1;
+  if [ -z "${pid}" ]; then
+    echo "EndDirectChild require a pid as parameter" >&2
+    return 0;
+  fi
+  if ! kill -0 ${pid} 2>/dev/null; then
+    echo "EndDirectChild: ${pid} is not running" >&2
+    return 0;
+  fi
+  local ppid=$( ps -o ppid= -p ${pid} 2>/dev/null | tr -d ' ' )
+  if [ "${ppid}" != "$$" ]; then
+    echo "EndDirectChild: running ${pid} is not a direct child of $$" >&2
+    return 0;
+  fi
+  local sleepTime=0.5
+  local maxAttempt=8
+  for sig in TERM KILL; do
+    kill -${sig} ${pid} 2>/dev/null
+    local attempt=0
+    while (( $attempt < $maxAttempt )); do
+      sleep ${sleepTime}
+      if ! kill -0 ${pid} 2>/dev/null; then
+        wait ${pid} 2>/dev/null
+        return 0;
+      fi
+      attempt=$(( $attempt + 1))
+    done
+  done
+  echo "EndDirectChild: Failed to kill process ${pid} after all attempts" >&2
+  return 0;
+}
+
 StartMonitor() {
   if [ -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
     echo "No monitor entry point for this step" >&2
     return 0
   fi
+  if [ ! -z "${THEJOB_MONITOR_PID}" ]; then
+    echo "Monitor already running, pid: ${THEJOB_MONITOR_PID}" >&2
+    return 0
+  fi
   local monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output
   read -r monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output <<< "${THEJOB_MONITOR_PARAMETERS_PATH}"
   {
-    monitor_output_tmp="${monitor_output}.tmp.$$"
+    monitor_output_tmp="${monitor_output}.tmp.${BASHPID}"
     sleep ${monitor_delay_s}
-    while [ true ]; do
+    while true ; do
       if [ -z "${monitor_timeout_s}" ]; then
         ${monitor_entry} "${monitor_output_tmp}" $@
       else 
-        timeout ${monitor_timeout_s} /bin/bash -x -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
+        timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
         case $? in
           124)
             echo "monitor has timeouted" >> "${monitor_output_tmp}"
@@ -134,6 +182,35 @@ StartMonitor() {
       sleep ${monitor_interval_s}
     done
   }&
+  THEJOB_MONITOR_PID=$!
+}
+
+StopMonitor() {
+  if [ ! -z "${THEJOB_MONITOR_PID}" ]; then
+    EndDirectChild ${THEJOB_MONITOR_PID}
+  fi
+  if [ -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
+    return 0
+  fi
+  local monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output
+  read -r monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output <<< "${THEJOB_MONITOR_PARAMETERS_PATH}"
+  monitor_output_tmp="${monitor_output}.tmp.${THEJOB_MONITOR_PID}"
+  if [ -z "${monitor_timeout_s}" ]; then
+    ${monitor_entry} "${monitor_output_tmp}" $@
+  else
+    timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
+    case $? in
+      124)
+        echo "monitor has timeouted" >> "${monitor_output_tmp}"
+        ;;
+      125)
+        echo "timeout internal fail" >> "${monitor_output_tmp}"
+        ;;
+      *)
+        ;;
+    esac
+  fi
+  mv "${monitor_output_tmp}" "${monitor_output}"
 }
 
 SetupEnv() {
@@ -151,7 +228,6 @@ SetupEnv() {
   fi
 
   if [ ! -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
-    echo "MONITOR_INFOS= ${THEJOB_MONITOR_PARAMETERS_PATH}"
     THEJOB_MONITOR_ENTRY="${THEJOB_MONITOR_PARAMETERS_PATH%% *}"
   fi
 }

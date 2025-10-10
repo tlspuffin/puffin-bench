@@ -136,6 +136,8 @@ echo "Params: ${THEJOB_RUNPARMS}"
 pushd . >/dev/null
 ${THEJOB_ENTRYPOINT} "$@"
 THEJOB_RETVAL=$?
+
+StopMonitor
 popd >/dev/null
 
 if [[ "${THEJOB_UNIQ_STEP}" == "1" ]]; then
