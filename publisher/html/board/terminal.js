@@ -1,4 +1,6 @@
 export class Terminal {
+  #isScrollbarActive
+
   constructor(containerId) {
     this.container = document.getElementById(containerId);;
     this.lines = []; // Buffer de toutes les lignes
@@ -8,32 +10,46 @@ export class Terminal {
     this.lineHeight = 0; // Hauteur d'une ligne en pixels
     this.charWidth = 0; // Largeur d'un caractère en pixels
     
-    this.spacerTop = document.getElementById(`${containerId.replace('-container', '')}-spacer-top`);
+    this.scrollContainer = document.getElementById(`${containerId.replace('-container', '')}-scroll-overlay`);
     this.contentPre = document.getElementById(`${containerId.replace('-container', '')}-content`);
-    this.spacerBottom = document.getElementById(`${containerId.replace('-container', '')}-spacer-bottom`);
     
-    this.init();
+    this.#isScrollbarActive = false;
+
+    this. #Init();
   }
   
-  init() {
-    // Vider le container et créer la structure
-    this.container.innerHTML = '';
-    
+  #Init() {
     // Mesurer les dimensions
-    this.measureDimensions();
+    this.#FontDimensions();
     
     // Écouter les événements
-    this.container.addEventListener('scroll', () => this.onScroll());
+    this.scrollContainer.addEventListener('scroll', () => this.#OnScroll());
+    this.container.addEventListener('mousemove', (e) => {
+        const rect = this.scrollContainer.getBoundingClientRect();
+        const scrollbarWidth = this.scrollContainer.offsetWidth - this.scrollContainer.clientWidth;
+        const isOverScrollbar = e.clientX > rect.right - scrollbarWidth - 10; // Marge généreuse
+        if (isOverScrollbar && !this.#isScrollbarActive) {
+          this.#isScrollbarActive = true;
+          this.scrollContainer.style.pointerEvents = 'auto';
+        } else if (!isOverScrollbar && this.#isScrollbarActive) {
+          this.#isScrollbarActive = false;
+          this.scrollContainer.style.pointerEvents = 'none';
+        }
+    });
+    this.contentPre.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        this.scrollContainer.scrollTop += e.deltaY;
+    });
     
     // Observer les changements de taille
     this.resizeObserver = new ResizeObserver(() => {
-      this.measureDimensions();
-      this.render();
+      this.#MeasureDimensions();
+      this.#Render();
     });
     this.resizeObserver.observe(this.container);
   }
   
-  measureDimensions() {
+  #FontDimensions() {
     // Mesurer avec un caractère test
     const testChar = document.createElement('span');
     testChar.textContent = 'M';
@@ -47,112 +63,135 @@ export class Terminal {
     this.charWidth = testChar.offsetWidth;
     this.lineHeight = testChar.offsetHeight;
     document.body.removeChild(testChar);
-    
+
+    console.log(this.charWidth, this.lineHeight);
+  }
+
+  #MeasureDimensions() {
     // Calculer les dimensions du terminal
     const containerWidth = this.container.clientWidth;
     const containerHeight = this.container.clientHeight;
     
     this.charsPerLine = Math.floor(containerWidth / this.charWidth);
     this.visibleLines = Math.ceil(containerHeight / this.lineHeight);
+
+    console.log(containerWidth, containerHeight);
   }
   
-  wrapText(text) {
-    // Découper le texte en lignes selon la largeur
+  #PrepareText(text) {
     const inputLines = text.split('\n');
-    const wrappedLines = [];
-    
-    for (const line of inputLines) {
-      if (line.length <= this.charsPerLine) {
-        wrappedLines.push(line);
-      } else {
-        // Découper les lignes trop longues
-        for (let i = 0; i < line.length; i += this.charsPerLine) {
-          wrappedLines.push(line.slice(i, i + this.charsPerLine));
-        }
-      }
-    }
-    
-    return wrappedLines;
+    return inputLines.map(line => ({
+        content: line,
+        charCount: line.length
+    }));
   }
   
-  appendText(text) {
-    const newLines = this.wrapText(text);
-    this.lines.push(...newLines);
+  AppendText(text) {
+    const newLines = this.#PrepareText(text);
+    //this.lines.push(...newLines);
+    for (const line of newLines) {
+        this.lines.push(line);
+    }
     
     // Auto-scroll si on était en bas
-    const wasAtBottom = this.isAtBottom();
+    const wasAtBottom = this.#IsAtBottom();
     
-    this.render();
+    this.#Render();
     
     if (wasAtBottom) {
-      this.scrollToBottom();
+      this.ScrollToBottom();
     }
   }
   
-  setText(text) {
-    this.lines = this.wrapText(text);
+  SetText(text) {
+    this.lines = this.#PrepareText(text);
     this.visibleStartLine = 0;
-    this.render();
+    this.#Render();
   }
   
-  clear() {
+  Clear() {
     this.lines = [];
     this.visibleStartLine = 0;
-    this.render();
+    this.#Render();
   }
   
-  onScroll() {
-    const scrollTop = this.container.scrollTop;
-    const newStartLine = Math.floor(scrollTop / this.lineHeight);
+  #OnScroll() {
+    const scrollTop = this.scrollContainer.scrollTop;
+    
+    // Trouver quelle ligne logique correspond à scrollTop
+    let cumulativeHeight = 0;
+    let newStartLine = 0;
+    
+    for (let i = 0; i < this.lines.length; i++) {
+        const visualLines = Math.ceil(this.lines[i].charCount / this.charsPerLine) || 1;
+        const lineHeight = visualLines * this.lineHeight;
+        
+        if (cumulativeHeight + lineHeight > scrollTop) {
+            newStartLine = i;
+            break;
+        }
+        
+        cumulativeHeight += lineHeight;
+    }
     
     if (newStartLine !== this.visibleStartLine) {
-      this.visibleStartLine = newStartLine;
-      this.render();
+        this.visibleStartLine = newStartLine;
+        this.#Render();
     }
   }
   
-  render() {
+  #Render() {
     const totalLines = this.lines.length;
-    const endLine = Math.min(this.visibleStartLine + this.visibleLines + 5, totalLines); // +5 pour le buffer
+    const bufferLines = 5;
+    const targetVisualLines = this.visibleLines + bufferLines;
     
-    // Calculer les espaceurs
-    const topSpacerHeight = this.visibleStartLine * this.lineHeight;
-    const bottomSpacerHeight = Math.max(0, (totalLines - endLine) * this.lineHeight);
+    // Calculer endLine en fonction des lignes visuelles réelles
+    let currentVisualLine = 0;
+    let endLine = this.visibleStartLine;
     
-    // Mettre à jour les espaceurs
-    this.spacerTop.style.height = topSpacerHeight + 'px';
-    this.spacerBottom.style.height = bottomSpacerHeight + 'px';
+    while (currentVisualLine < targetVisualLines && endLine < totalLines) {
+        const visualLines = Math.ceil(this.lines[endLine].charCount / this.charsPerLine) || 1;
+        currentVisualLine += visualLines;
+        endLine++;
+    }
+    
+    // Calculer les espaceurs basés sur les lignes visuelles
+    const totalVisualLines = this.lines.reduce((sum, line) => 
+        sum + (Math.ceil(line.charCount / this.charsPerLine) || 1), 0
+    );
+    const phantomHeight = totalVisualLines * this.lineHeight;
+    this.scrollContainer.innerHTML = `<div style="height: ${phantomHeight}px; width: 1px;"></div>`;
     
     // Afficher les lignes visibles
     const visibleLines = this.lines.slice(this.visibleStartLine, endLine);
-    this.contentPre.textContent = visibleLines.join('\n');
+    this.contentPre.textContent = visibleLines.map(line => line.content).join('\n');
   }
   
-  scrollToBottom() {
+  ScrollToBottom() {
     const maxScroll = Math.max(0, (this.lines.length - this.visibleLines) * this.lineHeight);
-    this.container.scrollTop = maxScroll;
+    this.scrollContainer.scrollTop = maxScroll;
   }
   
-  scrollToTop() {
-    this.container.scrollTop = 0;
+  ScrollToTop() {
+    this.scrollContainer.scrollTop = 0;
   }
   
-  scrollToLine(lineNumber) {
+  ScrollToLine(lineNumber) {
     const targetScroll = lineNumber * this.lineHeight;
-    this.container.scrollTop = targetScroll;
+    this.scrollContainer.scrollTop = targetScroll;
   }
   
-  isAtBottom() {
-    const scrollTop = this.container.scrollTop;
+  #IsAtBottom() {
+    const scrollTop = this.scrollContainer.scrollTop;
     const maxScroll = Math.max(0, (this.lines.length - this.visibleLines) * this.lineHeight);
     return Math.abs(scrollTop - maxScroll) < this.lineHeight;
   }
   
-  getLineCount() {
+  GetLineCount() {
     return this.lines.length;
   }
   
-  getVisibleRange() {
+  GetVisibleRange() {
     return {
       start: this.visibleStartLine,
       end: Math.min(this.visibleStartLine + this.visibleLines, this.lines.length)
@@ -163,7 +202,7 @@ export class Terminal {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
-    this.container.removeEventListener('scroll', this.onScroll);
+    this.container.removeEventListener('scroll', this.#OnScroll);
   }
 }
 

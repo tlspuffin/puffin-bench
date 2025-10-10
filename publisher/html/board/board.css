@@ -490,12 +490,32 @@ body {
     overflow: hidden;
 }
 
-.logs-content pre {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
+.logs-scroll-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  pointer-events: none;
+  /*background: rgba(22, 215, 215, 0.35);*/
+  background: transparent;
+  z-index: 1;
+}
+
+.logs-container {
     height: 100%;
+    display: none;
+    position: relative;
+}
+
+.logs-container.active {
+    display: block;
+}
+
+.logs-content pre {
+    position: relative;
+    z-index: 0;
     margin: 0;
     padding: 20px;
     background: #1a1a1a;
@@ -503,30 +523,34 @@ body {
     font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
     font-size: 12px;
     line-height: 1.4;
-    overflow: auto;
+    overflow: hidden;
     white-space: pre-wrap;
     word-wrap: break-word;
     display: none;
+    height: 100%;
+    width: 100%;
 }
 
 .logs-content pre.active {
     display: block;
 }
 
-.logs-content pre::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+.logs-scroll-overlay::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  display: block;
 }
 
-.logs-content pre::-webkit-scrollbar-track {
-    background: #2d2d2d;
+.logs-scroll-overlay::-webkit-scrollbar-track {
+  background: #2d2d2d;
 }
 
-.logs-content pre::-webkit-scrollbar-thumb {
-    background: #555;
-    border-radius: 4px;
+.logs-scroll-overlay::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
 }
 
-.logs-content pre::-webkit-scrollbar-thumb:hover {
-    background: #666;
+.logs-scroll-overlay::-webkit-scrollbar-thumb:hover {
+  background: #666;
 }
+
