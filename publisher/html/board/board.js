@@ -1,3 +1,5 @@
+import { Terminal } from './terminal.js';
+
 function StepID(step) {
   return step.step_id + '-' + step.rank_id + '-' + step.attempt_id;
 }
@@ -75,14 +77,16 @@ const logsInfos = {
   step: null,
   type: 'stdout',
   stdout: {
+    terminal: new Terminal('stdout-container'),
+    decoder: new TextDecoder("utf-8"),
     lastoffset: 0,
     state: 0,
-    data: ''
   },
   stderr: {
+    terminal: new Terminal('stderr-container'),
+    decoder: new TextDecoder("utf-8"),
     lastoffset: 0,
     state: 0,
-    data: ''
   },
 }
 
@@ -97,13 +101,15 @@ function CloseModal() {
 
 function SwitchOutput(newOutput) {
   document.getElementById(`log-${logsInfos.type}`).classList.toggle('active');
-  document.getElementById(`${logsInfos.type}-content`).classList.toggle('active');
+  document.getElementById(`${logsInfos.type}-container`).classList.toggle('active');
+  document.getElementById(`${logsInfos.type}-content`).classList.add('active');
   logsInfos.type = newOutput;
   document.getElementById(`log-${logsInfos.type}`).classList.toggle('active');
-  document.getElementById(`${logsInfos.type}-content`).classList.toggle('active');
+  document.getElementById(`${logsInfos.type}-container`).classList.toggle('active');
+  document.getElementById(`${logsInfos.type}-content`).classList.add('active');
   if ((logsInfos.timerID != null) && (logsInfos.timerRun)) {
     window.clearTimeout(logsInfos.timerID);
-    RetrieveFullStepLogs(logsInfos, 65535);
+    RetrieveFullStepLogs(logsInfos, 10000000);
   }
 }
 
@@ -114,22 +120,22 @@ async function RetrieveStepLogs(logsInfos, size) {
 
   const type = logsInfos.type;
 
+  console.log('query');
   var response = await fetch(
       `http://${window.location.host}/api/task/output/${taskID}/${stepUUID}/${stepID}/${type}/${size}/${logsInfos[type].lastoffset}`);
 
   if (!response.ok) {
-    return [false, 0];
+    return [false, 0, null];
   }
   var data = await response.json();
   if (!data.success) {
-    return [false, 0];
+    return [false, 0, null];
   }
 
   logsInfos[type].state = data.state;  
-  logsInfos[type].data += atob(data.data);
   logsInfos[type].lastoffset += data.size;
 
-  return [true, data.state];
+  return [true, data.state, atob(data.data)];
 }
 
 async function RetrieveFullStepLogs(logsInfos, size) {
@@ -137,20 +143,26 @@ async function RetrieveFullStepLogs(logsInfos, size) {
 
   var success = true;
   var state = 1;
+  var data;
   while(success && (state == 1)) {
-    [success, state] = await RetrieveStepLogs(logsInfos, size);
-    if (success) {
-      document.getElementById(`${logsInfos.type}-content`).innerText = 
-          new TextDecoder('utf-8').decode(
-              new Uint8Array([...logsInfos[logsInfos.type].data].map(c => c.charCodeAt(0)))
-          );
+    [success, state, data] = await RetrieveStepLogs(logsInfos, size);
+    if (success && (data.length > 0)) {
+      console.log('update', data.length);
+      //document.getElementById(`${logsInfos.type}-content`).innerText += 
+      logsInfos[logsInfos.type].terminal.AppendText(
+          logsInfos[logsInfos.type].decoder.decode(
+              Uint8Array.from(data, c => c.charCodeAt(0)),
+              { stream: state != 2 }
+          )
+      );
     }
+  }
+  if (state == 2) {
+    logsInfos.timerRun = false;
   }
 
   if (logsInfos.timerRun) {
-    logsInfos.timerID = window.setTimeout(async (event)=> {
-        await RetrieveFullStepLogs(logsInfos, size);
-    }, 5000);
+    logsInfos.timerID = window.setTimeout(RetrieveFullStepLogs, 5000, logsInfos, size);
   }
 }
 
@@ -160,14 +172,16 @@ async function StepLogs(step, taskName) {
     logsInfos.id = id;
     logsInfos.step = step;
     logsInfos.type = 'stdout',
+    logsInfos.stdout.terminal.SetText("");
+    logsInfos.stdout.decoder = new TextDecoder("utf-8");
     logsInfos.stdout.lastoffset = 0;
     logsInfos.stdout.state = 0;
-    logsInfos.stdout.data = '';
+    logsInfos.stderr.terminal.SetText("");
+    logsInfos.stderr.decoder = new TextDecoder("utf-8");
     logsInfos.stderr.lastoffset = 0;
     logsInfos.stderr.state = 0;
-    logsInfos.stderr.data = '';
-    document.getElementById('stdout-content').innerText = '';
-    document.getElementById('stderr-content').innerText = '';
+    //document.getElementById('stdout-content').innerText = '';
+    //document.getElementById('stderr-content').innerText = '';
   }
 
   let stepName = step.name;
@@ -177,16 +191,18 @@ async function StepLogs(step, taskName) {
   stepName += ` (${taskName})`;
 
   document.getElementById(`log-${logsInfos.type}`).classList.add('active');
+  document.getElementById(`${logsInfos.type}-container`).classList.add('active');
   document.getElementById(`${logsInfos.type}-content`).classList.add('active');
   let inactiveType = logsInfos.type === 'stdout' ? 'stderr' : 'stdout';
   document.getElementById(`log-${inactiveType}`).classList.remove('active');
+  document.getElementById(`${inactiveType}-container`).classList.remove('active');
   document.getElementById(`${inactiveType}-content`).classList.remove('active');
 
   document.getElementById('step-name').innerText = stepName;
   document.getElementById('logs-modal').classList.add('show');
 
   logsInfos.timerRun = true;
-  await RetrieveFullStepLogs(logsInfos, 65535);
+  await RetrieveFullStepLogs(logsInfos, 10000000);
 }
 
 async function CancelTask(taskID) {
@@ -547,11 +563,11 @@ async function GetServerStatus() {
   //var response = await fetch(`http://${window.location.host}/files/board/out.json`);
   var response = await fetch(`http://${window.location.host}/api/tasks/running`);
   if (!response.ok) {
-    return [ false, {} ];
+    return [ false, [] ];
   }
   var data = await response.json();
   if (!data.success) {
-    return [ false, {} ];
+    return [ data.error === 'Server can\'t read schedule status', [] ];
   }
   /*data = data.data.running_steps;*/
   //data = data.tasks;

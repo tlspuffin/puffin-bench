@@ -46,8 +46,15 @@
           <button class="tab-btn" id="log-stderr">STDERR</button>
         </div>
         <div class="logs-content">
-          <pre class="active" id="stdout-content"></pre>
-          <pre id="stderr-content"></pre>
+          <div class="logs-container active" id="stdout-container">
+            <div class="logs-scroll-overlay" id="stdout-scroll-overlay"></div>
+            <pre id="stdout-content"></pre>
+          </div>
+          <div class="logs-container" id="stderr-container">
+            <div class="logs-scroll-overlay" id="stderr-scroll-overlay"></div>
+            <pre id="stderr-content"></pre>
+          </div>
+        </div>
       </div>
     </div>
   </div>
