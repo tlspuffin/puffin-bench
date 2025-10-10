@@ -1,5 +1,4 @@
 #include "config.hxx"
-#include "../../embeded/scheduler/get_file_sh.h"
 #ifdef STATIC
 #include "reserve_port-static.h"
 #else
@@ -84,8 +83,7 @@ void ns_Schedule::Config::Validate() const {
   auto discard = std::filesystem::canonical(toolsPath_);
 
   for(auto const& [ file, data, size ] : { 
-      std::tuple{ "reserve_port", (char const*)ReservePort_Binary, (size_t)ReservePort_Binary_len }, 
-      std::tuple{ "get_file.sh", GetFile_Script_data, GetFile_Script_size }
+      std::tuple{ "reserve_port", (char const*)ReservePort_Binary, (size_t)ReservePort_Binary_len }
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(toolsPath_ / file);

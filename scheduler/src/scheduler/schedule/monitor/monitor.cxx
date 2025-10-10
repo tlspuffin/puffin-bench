@@ -50,11 +50,18 @@ void ns_Monitor::Monitor::Add(std::list<ns_Schedule::Step*> steps) {
 }
 
 void ns_Monitor::Monitor::Remove(std::list<ns_Schedule::Step*> steps) {
-  std::lock_guard<std::mutex> lock(lock_);
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    for (auto const& step : steps) {
+      if (step->monitor_) {
+        //LOGI("remove from monitoring step: " << step->task_->id_ << " " << step->ID());
+        stepsList_.erase(step->monitor_path_.filename());
+      }
+    }
+  }
   for (auto const& step : steps) {
     if (step->monitor_) {
-      //LOGI("remove from monitoring step: " << step->task_->id_ << " " << step->ID());
-      stepsList_.erase(step->monitor_path_);
+      step->message_from_run_ = GetMessage(step->monitor_path_);
     }
   }
 }
