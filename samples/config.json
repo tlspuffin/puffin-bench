@@ -21,7 +21,8 @@
     },
     "runPath": "../runs",
     "userPath": "../users_data",
-    "exportPath": "../exports/schedule"
+    "exportPath": "../exports/schedule",
+    "toolsPath": "../tools"
   },
   "cache": {
     "storagePath": "../cache",

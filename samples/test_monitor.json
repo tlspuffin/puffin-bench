@@ -14,7 +14,7 @@
     {
       "step": "Step3",
       "configuration": {
-        "timeout": "10m",
+        "timeout": "6m",
         "args": {
           "features": "'wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173'"
         }
