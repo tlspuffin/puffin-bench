@@ -25,15 +25,16 @@ Step3() {
   CreateArtefact "./progress.txt" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-README.md" "step:${THEJOB_STEP_ID}" "features:${features}"
 
   StartMonitor 1 2 3
-  while [ true ]; do
+  #while true ; do
     for i in {1..100}; do
       echo "Progress: $i%" > progress.txt
       echo "Iteration $i/100"
       sleep 1  # Simule du travail
       echo "Result $i: $(( $RANDOM % 1000 ))" >> results.txt
     done
-  done
+  #done
 
+  echo "Done" >> results.txt
   echo "Step3 done !" 1>&2;
   echo "Step3 done !"
 }
