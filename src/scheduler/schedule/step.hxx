@@ -203,7 +203,6 @@ inline void Step::MarkCancel() {
   state_ = State::Cancelled;
   time_points_[1] = std::chrono::system_clock::now();
   exit_code_ = exitCode_Cancelled_;
-  end_processed_ = true;
 }
 
 inline void Step::MarkLaunchError() {
@@ -246,8 +245,8 @@ inline void Step::Shutdown() {
 inline void Step::GatherFilesToLocal() {
   if (state_ >= State::Running) {
     executor_->GatherFilesToLocal(*this);
-    end_processed_ = true;
   }
+  end_processed_ = true;
 }
 
 inline void Step::FinalizeAndArchive(std::filesystem::path const& savePath) {

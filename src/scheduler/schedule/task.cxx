@@ -4,6 +4,7 @@
 #include "executor/executor.hxx"
 #include "../utils/rapidjson.hxx"
 #include "../utils/variables.hxx"
+#include "../utils/logs.hxx"
 #include <unordered_set>
 #include <fstream>
 #include <regex>
@@ -197,12 +198,8 @@ ns_Schedule::Task::~Task() {
 }
 
 void ns_Schedule::Task::Cancel() {
-  for(ns_Schedule::Step* step : steps_) {
-    if (step->IsPending()) {
-      step->MarkCancel();
-    }
-  }
   request_cancel_ = true;
+  LOGE("Cancel task " << id_);
 }
 
 bool ns_Schedule::Task::PrepareToRun() {

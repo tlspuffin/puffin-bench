@@ -144,24 +144,14 @@ bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
 
 bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
   std::lock_guard<std::mutex> lock(lockThread_);
-  ns_Schedule::Task* task = nullptr;
-  bool found = false;
-  for (auto it = steps_.begin(); it != steps_.end(); ) {
+  for (auto it = steps_.begin(); it != steps_.end(); ++it) {
     ns_Schedule::Step* step = *it;
     if (step->task_->id_ == taskID) {
-      task = step->task_;
-      if (step->IsPending()) {
-        it = steps_.erase(it);
-        continue;
-      }
+      step->task_->Cancel();
+      return true;
     }
-    ++it;
   }
-  if (task == nullptr) {
-    return false;
-  }
-  task->Cancel();
-  return true;
+  return false;
 }
 
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
@@ -271,11 +261,17 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     lockThread_.lock();
     try {
-      for (ns_Schedule::Step* step : stepsRunning_) {
-        if (step->IsRunning() && (step->task_->request_cancel_ || step->request_cancel_)) {
-          DEBUG_STEP_MSG("Step/Task cancelled", step);
-          step->KillAndMarkCancel();
-          stepsDone_.push_back(step);
+      for (ns_Schedule::Step* step : steps_) {
+        if (step->task_->request_cancel_ || step->request_cancel_) {
+          if (step->IsRunning()) {
+            DEBUG_STEP_MSG("Running step / task cancelled", step);
+            step->KillAndMarkCancel();
+            stepsDone_.push_back(step);
+          } else if (step->IsPending()) {
+            DEBUG_STEP_MSG("Step / Task cancelled", step);
+            step->MarkCancel();
+            stepsDone_.push_back(step);
+          }
         }
       }
 
