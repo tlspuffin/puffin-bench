@@ -259,7 +259,7 @@ function CreateAttemptCard(step, taskName) {
   div.classList.add('card-attempt-item');
 
   const state = step.state.toLowerCase();
-  div.classList.add(`card-attempt-item-${state}`);
+  div.classList.add('card-attempt-item', `state-${state}`);
 
   if (step.nb_retry > 1) {
     div.appendChild(CreateCardLine(
@@ -274,13 +274,13 @@ function CreateAttemptCard(step, taskName) {
   if (step.state == 'Pending') {
     details.appendChild(CreateCardLine(
         null, 'attempt-detail-item',
-        ['attempt-detail-value'],
+        ['attempt-detail-value-state'],
         ['Pending']
     ));
   } else {
     details.appendChild(CreateCardLine(
         null, 'attempt-detail-item',
-        ['attempt-detail-label', 'attempt-detail-value', 'attempt-detail-value'],
+        ['attempt-detail-label', 'attempt-detail-value', 'attempt-detail-value-state'],
         ['PID', step.executor_data?.pid || 'N/A', step.state]
     ));
 
@@ -340,6 +340,17 @@ function CreateAttemptCard(step, taskName) {
   } 
 
   div.appendChild(details);
+
+  if ((step.state != 'Pending') && (step.message_from_run != '')) {
+    const monitor = document.createElement('div');
+    monitor.classList.add('card-attempt-details');
+    monitor.appendChild(CreateCardLine(
+        null, 'attempt-detail-item',
+        ['attempt-detail-label', 'attempt-detail-value'],
+        ['Monitor', step.message_from_run],
+    ));
+    div.appendChild(monitor);
+  }
 
   return div;
 }
