@@ -3,7 +3,12 @@
 Step1() {
   echo "Step1 running..." 1>&2;
   echo "Step1 running..."
-  sleep 30
+  attempt=0;
+  while (( attempt < 300000)); do
+    sleep 0.25
+    echo ".${attempt}"
+    attempt=$(( attempt + 1 ))
+  done
   echo "Step1 done !" 1>&2;
   echo "Step1 done !"
 }

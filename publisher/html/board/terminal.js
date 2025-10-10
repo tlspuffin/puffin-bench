@@ -88,7 +88,13 @@ export class Terminal {
   
   AppendText(text) {
     const newLines = this.#PrepareText(text);
+    if (newLines.length === 0) return;
+
     //this.lines.push(...newLines);
+    if ((this.lines.length > 0) && 
+        (this.lines[this.lines.length - 1].charCount == 0)) {
+      this.lines[this.lines.length - 1] = newLines.shift();
+    }
     for (const line of newLines) {
         this.lines.push(line);
     }
@@ -165,6 +171,14 @@ export class Terminal {
     // Afficher les lignes visibles
     const visibleLines = this.lines.slice(this.visibleStartLine, endLine);
     this.contentPre.textContent = visibleLines.map(line => line.content).join('\n');
+
+    if ((this.scrollContainer.scrollTop == 0) && (this.visibleStartLine > 0)) {
+      let nbAboveLine = 0;
+      for(let i=0; i<this.visibleStartLine; ++i) {
+        nbAboveLine += Math.ceil(this.lines[i].charCount / this.charsPerLine) || 1;
+      }
+      this.scrollContainer.scrollTop = nbAboveLine * this.lineHeight;
+   }
   }
   
   ScrollToBottom() {
