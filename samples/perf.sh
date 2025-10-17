@@ -26,7 +26,6 @@ Init () {
   fi
 
   if [ ! -z "${prefix_faketime}" ]; then
-    #sed -i 's/\(.*];\)/    pkgs.libfaketime\n\1/' shell.nix || return 1
     sed -i 's/\(.*nativeBuildInputs = \[.*\)/\1\n    pkgs.libfaketime/' shell.nix || return 1
   fi
 
@@ -88,6 +87,7 @@ Build() {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }
+
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
   md5sum_res=$( echo "tlspuffin-${COMMIT_ID}-${features}-${vendor}" | md5sum )
   cache_id="tlspuffin-${md5sum_res%% *}"
@@ -106,9 +106,8 @@ Build() {
     if ${cputs}; then
       nix-shell --run "./tools/mk_vendor make '${vendor}'"
     fi
-    nix-shell --run "cargo build --bin tlspuffin --release --features=${features}" || return 1;
+    nix-shell --run "cargo build --bin tlspuffin --release --features=${features}" || return 1
     binary=$( realpath ./target/release/tlspuffin )
-    #curl -s -X PUT "http://localhost:10081/api/cache/${cache_id}" -H "Content-Type: application/json" --data-binary "{\"path\": \"${binary}\"}" || return 1;
     SetCache "${cache_id}" "${binary}"
   else
     echo "Found in cache"
@@ -124,6 +123,11 @@ Experiment () {
   binary="${THEJOB_OUT_PATH}/tlspuffin-${THEJOB_STEP_ID}"
   last_core=$(( THEJOB_NB_CORES - 1 ))
 
+  if [ -x "{binary"} ]; then
+    echo "No binary found ${binary}, skipping run"
+    return 1
+  fi
+
   ipcrm --all
 
   if [ ! -e "shell.nix" ]; then
@@ -137,7 +141,7 @@ Experiment () {
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
   nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
-  tlspuffin_pid=$!
+  local tlspuffin_pid=$!
 
   sleep 10
   kill -0 ${tlspuffin_pid} 2>/dev/null
@@ -155,38 +159,14 @@ Experiment () {
 
   StartMonitor ${tlspuffin_pid}
 
-  crashed=0
-  while true; do
-    sleep 10
-    kill -0 ${tlspuffin_pid} 2>/dev/null
-    if (( $? != 0 )); then
-      crashed=1
-      break;
-    fi
-    obj_count=$( find experiments/*/objective -maxdepth 1 -type f -name '*.trace' 2>/dev/null | wc -l )
-    if (( ${obj_count} > 0 )); then
-      kill -15 ${tlspuffin_pid} 2> /dev/null
-      for (( i=0; i<10; i++ )); do
-        kill -0 ${tlspuffin_pid} 2> /dev/null
-        if (( $? != 0 )); then
-          break;
-        fi
-      done
-      kill -0 ${tlspuffin_pid} 2> /dev/null
-      if (( $? == 0 )); then
-        sleep 5
-        kill -9 ${tlspuffin_pid} 2> /dev/null
-      fi
-      break;
-    fi
-  done
   wait "${tlspuffin_pid}" 2>/dev/null
+  local status=$?
 
   kill ${RESERVED_PORT_PID}
 
   ipcrm --all
 
-  return ${crashed}
+  return ${status}
 }
 
 CheckObjectif () {

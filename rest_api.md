@@ -6,6 +6,9 @@ git log --reverse --oneline --first-parent 3bc37034a9a9decd0a069aa810929c0e51805
 
 sed 's/.*"name":"\([^"]*\)","id":"\([^"]*\)".*"exit_code":\([^,]*\),.*"state":"\([^"]*\)".*"time_points_ms":\[\([^,]*\),\([^]]*\)].*/\1 \2 \3 \4 \5 \6/' .steps.json | awk '{diff = ($6 - $5)/3600000; print $1, $2, $3, $4, diff}' | grep "Experiment SDOS1 0 Done" | cut -d ' ' -f 5 | sort -n | sed 's/,/./'
 
+3f648f016 header of branch evaluation-2022
+
+master:
 3bc37034a Merge pull request #217 from tlspuffin/evaluation
 6e308c703 Fix CLI parsing (#236)
 c1d942d95 Downgrade LibAFL 0.9 (#238)
@@ -37,3 +40,26 @@ dfbee75a2 Merge pull request #383 from tlspuffin/cput_wolfssl
 2ed7077aa Merge pull request #408 from tlspuffin/pr/truncate-traces-fail
 2f38bf22a Merge pull request #411 from tlspuffin/pr/codec-error
 e866693e0 Merge pull request #420 from tlspuffin/pr/tls-add-symbols-for-hrr
+
+git log --graph --oneline --first-parent 3bc37034a9a9decd0a069aa810929c0e518056c9^..main | grep "Merge pull" | awk 'NR%3==1'
+* 2d000bfe0 Merge pull request #417 from tlspuffin/pr/bit-mutations/rework-term-zoo
+* 76d5b7b5c Merge pull request #419 from tlspuffin/pr/tls-fn-symbols-list-of-namedgroups
+* 034948150 Merge pull request #409 from tlspuffin/pr/wolf-add-finished-after-sh
+* 2dad52a3c Merge pull request #406 from tlspuffin/pr/new-sats
+* 556e480f9 Merge pull request #400 from tlspuffin/wolfssl_c_mastersecret
+* 47d1ee217 Merge pull request #386 from tlspuffin/pr/improve-execute-output
+* 300534832 Merge pull request #396 from tlspuffin/wolfssl_rng
+* 07e2f717e Merge pull request #392 from tlspuffin/pr/fix-openssl-not-setting-ciphers
+* 60b3f3185 Merge pull request #387 from tlspuffin/pr/modular-logging
+* ec1f09894 Merge pull request #376 from tlspuffin/pr/extract_knowledge_macro
+* 80dff41a4 Merge pull request #379 from tlspuffin/update-readme
+* afe34c1ce Merge pull request #370 from tlspuffin/pr/fix-macos-put-relocation
+* 15e7d3240 Merge pull request #353 from tlspuffin/pr/adding-openssl320-and-openssl340
+* 47c97cd7a Merge pull request #343 from tlspuffin/pr/bit-mutations/refactor
+* aa7213ac1 Merge pull request #333 from tlspuffin/precomputations
+* cd649d6bf Merge pull request #334 from tlspuffin/refactor/unified-vendor-build
+* 012aa525c Merge pull request #327 from tlspuffin/new_knowledge_storage_2
+* c070a2ad8 Merge pull request #310 from tlspuffin/fix-boring-determinism
+* e625a6ab9 Merge pull request #286 from aeyno/fix_wolfssl_hanging
+* e866693e0
+* d1f510dcb
