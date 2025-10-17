@@ -20,6 +20,7 @@ public:
   std::string server_;
   std::filesystem::path storage_;
   bool checkServerCertificat_;
+  std::string goal_;
 
 private:
   void PublishToServer(std::filesystem::path const& archivePath);

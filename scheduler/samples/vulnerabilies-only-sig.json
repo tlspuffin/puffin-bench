@@ -1,7 +1,8 @@
 {
   "publish": {
     "server": "http://127.0.0.1:8081/api/notify",
-    "storage_path": "/local-unsafe/demengeo/XP/archives/${COMMIT_ID}/${task_id}/"
+    "storage_path": "/local-unsafe/demengeo/XP/archives/${COMMIT_ID}/PR/Vuln/${task_id}/",
+    "goal": "Mesurer PR/Commit ${COMMIT_ID}"
     },
   "configurations": {
     "SDOS2": {

@@ -89,13 +89,13 @@ Experiment () {
   kill -0 ${tlspuffin_pid} 2>/dev/null
   if (( $? == 0 )); then
     tlspuffin_outpath=$( ls experiments/ )
-    CreateArtefact "./experiments/${tlspuffin_outpath}/README.md" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-README.md" "commit_id:${COMMIT_ID}" "features:${features}"
+    CreateArtefact "./experiments/${tlspuffin_outpath}/README.md" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-README.md" "commit_id:${COMMIT_ID}" "features:${features}"
     if [ -e "./experiments/${tlspuffin_outpath}/stats.json" ]; then
-      CreateArtefact "./experiments/${tlspuffin_outpath}/stats.json" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-      CreateArtefact "./experiments/${tlspuffin_outpath}/tlspuffin.log" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-tlspuffin.log" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "./experiments/${tlspuffin_outpath}/stats.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "./experiments/${tlspuffin_outpath}/tlspuffin.log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-tlspuffin.log" "commit_id:${COMMIT_ID}" "features:${features}"
     else
-      CreateArtefact "./experiments/${tlspuffin_outpath}/log/stats.json" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-      CreateArtefact "./experiments/${tlspuffin_outpath}/log/tlspuffin.log" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-tlspuffin.log" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "./experiments/${tlspuffin_outpath}/log/stats.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "./experiments/${tlspuffin_outpath}/log/tlspuffin.log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-tlspuffin.log" "commit_id:${COMMIT_ID}" "features:${features}"
     fi
   fi
 

@@ -11,7 +11,7 @@ Step1() {
 Step2() {
   echo "Pause..." 1>&2;
   echo "Pause..."
-  CreateArtefact "./the_end.txt" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-the_end"
+  CreateArtefact "./the_end.txt" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-the_end"
   sleep 60
   date > ./the_end.txt
   echo "Pause done !" 1>&2;
@@ -22,7 +22,7 @@ Step3() {
   echo "Step3 running..." 1>&2;
   echo "Step3 running..."
 
-  CreateArtefact "./progress.txt" "${THEJOB_STEP_ID}/${THEJOB_ATTEMPT_ID}-README.md" "step:${THEJOB_STEP_ID}" "features:${features}"
+  CreateArtefact "./progress.txt" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-README.md" "step:${THEJOB_STEP_ID}" "features:${features}"
 
   StartMonitor 1 2 3
   #while true ; do

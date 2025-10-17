@@ -62,8 +62,18 @@ if [ "${THEJOB_STEP_ID}" = "." ]; then
   THEJOB_STEP_ID="unnamed"
 fi
 
-if [ -z "${THEJOB_ATTEMPT_ID}" ]; then
-  echo "Missing attempt id"
+if [ -z "${THEJOB_STEP_NUMID}" ]; then
+  echo "Missing step numeric id"
+  exit 1
+fi
+
+if [ -z "${THEJOB_STEP_RANK_ID}" ]; then
+  echo "Missing step rank id"
+  exit 1
+fi
+
+if [ -z "${THEJOB_STEP_ATTEMPT_ID}" ]; then
+  echo "Missing step attempt id"
   exit 1
 fi
 

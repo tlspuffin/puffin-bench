@@ -330,6 +330,7 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
 
     static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
         mimeType {
+            {".txt", {"text/text", std::ios_base::in}},
             {".html", {"text/html", std::ios_base::in}}, 
             {".css", {"text/css", std::ios_base::in}},
             {".json", {"application/json; charset=utf-8", std::ios_base::in}},
