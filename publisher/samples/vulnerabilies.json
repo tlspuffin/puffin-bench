@@ -1,8 +1,9 @@
 {
   "publish": {
     "server": "http://127.0.0.1:8081/api/notify",
-    "storage_path": "/local-unsafe/demengeo/XP/archives/${COMMIT_ID}/${task_id}/"
-    },
+    "storage_path": "/local-unsafe/demengeo/XP/archives/${COMMIT_ID}/PR/Vuln/${task_id}/",
+    "goal": "Mesurer PR/Commit ${COMMIT_ID}"
+  },
   "configurations": {
     "SDOS2": {
       "args": {
@@ -13,25 +14,25 @@
     },
     "HEAP": {
       "args": {
-	"experiment": "HEAP",
+        "experiment": "HEAP",
         "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
       }
     },
     "CDOS": {
       "args": {
-	"experiment": "CDOS",
+        "experiment": "CDOS",
         "features": "'wolfssl530,fix-CVE-2022-39173'"
       }
     },
     "SKIP": {
       "args": {
-	"experiment": "SKIP",
+        "experiment": "SKIP",
         "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"        
       } 
     },
     "BUF": {
       "args": {
-	"experiment": "BUF",
+        "experiment": "BUF",
         "features": "'wolfssl540,fix-CVE-2022-42905'"
       }
     },
@@ -57,12 +58,12 @@
       "step": "Build",
       "run": [ 
         "SDOS2", 
-	"HEAP",
-	"CDOS",
-	"SKIP",
-	"BUF",
-	"SDOS1",
-	"SIG"
+        "HEAP",
+        "CDOS",
+        "SKIP",
+        "BUF",
+        "SDOS1",
+        "SIG"
       ]
     },
     {
@@ -70,25 +71,25 @@
       "run": [ 
         "SDOS2", 
         "HEAP",
-	"CDOS",
+        "CDOS",
         "SKIP",
         "BUF",
-	{
-	  "configuration": "SDOS1",
-	  "override": {
+        {
+          "configuration": "SDOS1",
+          "override": {
             "nb_cores": 1,
-	    "timeout": "48h",
-	    "nb_retry": 90
-	  }
-	},
-	{
+            "timeout": "48h",
+            "nb_retry": 90
+          }
+        },
+        {
           "configuration": "SIG",
-	  "override": {
+          "override": {
             "nb_cores": 1,
-	    "timeout": "48h",
-	    "nb_retry": 90
-	  }
-	}
+            "timeout": "48h",
+            "nb_retry": 90
+          }
+        }
       ],
       "configuration": {
         "nb_cores": 12,

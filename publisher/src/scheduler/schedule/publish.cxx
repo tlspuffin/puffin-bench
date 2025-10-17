@@ -27,6 +27,7 @@ void ns_Schedule::Publish::ReadJSON(rapidjson::Value const& config) {
       GetOrDefault<bool>(config, "check_server_certificat", false);
   storage_  = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(config, "storage_path", ""));
+  goal_ = GetOrDefault<std::string>(config, "goal", "");
 }
 
 void ns_Schedule::Publish::ToJSON(rapidjson::Value& node, 
@@ -34,6 +35,7 @@ void ns_Schedule::Publish::ToJSON(rapidjson::Value& node,
   node.AddMember("server", rapidjson::Value(server_.c_str(), alloc), alloc);
   node.AddMember("check_server_certificat", checkServerCertificat_, alloc);
   node.AddMember("storage_path", rapidjson::Value(storage_.c_str(), alloc), alloc);
+  node.AddMember("goal", rapidjson::Value(goal_.c_str(), alloc), alloc);
 }
 
 void ns_Schedule::Publish::PublishResults(std::filesystem::path const& inLogs, 

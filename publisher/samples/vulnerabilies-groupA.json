@@ -14,83 +14,55 @@
     },
     "HEAP": {
       "args": {
-	"experiment": "HEAP",
+      "experiment": "HEAP",
         "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
       }
     },
     "CDOS": {
       "args": {
-	"experiment": "CDOS",
+      "experiment": "CDOS",
         "features": "'wolfssl530,fix-CVE-2022-39173'"
       }
     },
     "SKIP": {
       "args": {
-	"experiment": "SKIP",
-        "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"        
-      } 
+      "experiment": "SKIP",
+        "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"
+      }
     },
     "BUF": {
       "args": {
-	"experiment": "BUF",
+      "experiment": "BUF",
         "features": "'wolfssl540,fix-CVE-2022-42905'"
-      }
-    },
-    "SDOS1": {
-      "args": {
-        "experiment": "SDOS1",
-        "features": "'openssl111j'"
-      }
-    },
-    "SIG": {
-      "args": {
-        "experiment": "SIG",
-        "features": "'wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173'"
       }
     }
   },
-  "name" : "Vulnerabilities search - ${COMMIT_ID}",
+  "name" : "Vulnerabilities (group A) search - ${COMMIT_ID}",
   "flow" : [
     {
       "step": "Init"
     },
     {
       "step": "Build",
-      "run": [ 
-        "SDOS2", 
-	"HEAP",
-	"CDOS",
-	"SKIP",
-	"SDOS1",
-	"SIG"
+      "run": [
+        "SDOS2",
+        "HEAP",
+        "CDOS",
+        "SKIP",
+        "BUF"
       ]
     },
     {
       "step": "Experiment",
-      "run": [ 
-        "SDOS2", 
+      "run": [
+        "SDOS2",
         "HEAP",
-	"CDOS",
+        "CDOS",
         "SKIP",
-	{
-	  "configuration": "SDOS1",
-	  "override": {
-            "nb_cores": 1,
-	    "timeout": "48h",
-	    "nb_retry": 90
-	  }
-	},
-	{
-          "configuration": "SIG",
-	  "override": {
-            "nb_cores": 1,
-	    "timeout": "48h",
-	    "nb_retry": 90
-	  }
-	}
+        "BUF"
       ],
       "configuration": {
-        "nb_cores": 12,
+        "nb_cores": 4,
         "timeout": "3h",
         "nb_retry": 5
       },
@@ -104,7 +76,7 @@
       "step": "ManageResults",
       "configuration": {
         "args": {
-          "vulnerabilities": "SDOS2 HEAP CDOS SKIP SDOS1 SIG",
+          "vulnerabilities": "SDOS2 HEAP CDOS SKIP BUF",
           "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
         }
       }
