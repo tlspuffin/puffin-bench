@@ -488,8 +488,8 @@ function CreateTaksCard(task, steps) {
     taskName = task.id;
     div.appendChild(CreateCardLine(
         null, 'task-id', 
-        ['task-label-id', 'task-value-id'], 
-        ['Task', task.id]
+        ['task-label-id', 'task-value-name'], 
+        ['Task '+task.id, cancelButton]
     ));
   } else {
     div.appendChild(CreateCardLine(
