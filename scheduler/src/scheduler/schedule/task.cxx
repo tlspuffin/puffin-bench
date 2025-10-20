@@ -34,9 +34,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     steps_file_(), request_cancel_(false), 
     publish_()
 {
-  std::string taskName = name;
-  if (taskName.empty()) {
-    taskName = GetOrDefault<std::string>(configJSON, "name", "Unamed Task");
+  if (name_.empty()) {
+    name_ = GetOrDefault<std::string>(configJSON, "name", "");
   }
 
   rapidjson::Value const* publisherConfiguration = nullptr;
