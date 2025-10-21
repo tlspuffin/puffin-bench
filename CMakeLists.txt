@@ -25,6 +25,7 @@ set(SRV_SRC
   src/scheduler/utils/rapidjson.cxx src/scheduler/utils/variables.cxx src/scheduler/utils/file.cxx 
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/api/schedule_api.cxx
+  src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})

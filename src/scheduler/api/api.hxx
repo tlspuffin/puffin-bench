@@ -8,8 +8,8 @@ namespace ns_API {
 struct APIS {
   ns_API::ScheduleAPI scheduleAPI_;
   ns_API::CacheAPI cacheAPI_;
-  APIS() 
-      : scheduleAPI_(), cacheAPI_() {}
+  APIS(ns_Cache::Config const& configCache) 
+      : scheduleAPI_(), cacheAPI_(configCache) {}
 };
 
 };
