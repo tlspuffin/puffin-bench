@@ -26,6 +26,11 @@ public:
   void DeleteTasks();
   void TaskEnded(ns_Schedule::Task* task);
 
+  enum OutputState GetRunningOutput(std::string const& type, 
+    uint64_t taskID, uint64_t stepUUID, 
+    size_t readSize, ssize_t readOffset, 
+    struct FileExtractedText& data);
+
   void SaveStatus();
   std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
   LoadStatus(ns_Schedule::Schedule const* schedule);

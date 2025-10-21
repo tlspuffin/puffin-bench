@@ -1,6 +1,8 @@
 #pragma once
 
 #include "task.hxx"
+#include "executor/executor.hxx"
+#include "executor/executors_provider.hxx"
 #include "step_configurations.hxx"
 #include <cstdint>
 #include <string>
@@ -37,14 +39,17 @@ public:
   Step(Step const& source, uint64_t run_id, uint64_t attempt_id);
   Step(Step const& source, uint64_t run_id, 
       uint64_t rank_id, uint64_t attempt_id, 
+      ns_Executor::ExecutorsProvider const& executorsProvider,
       std::vector<rapidjson::Value const*> configurationStack, 
       rapidjson::Value const* configuration);
   Step(ns_Schedule::Task* task, std::string const& name, 
     uint64_t run_id, uint64_t step_id, 
     std::list<ns_Schedule::Step*> dependFrom, 
+    ns_Executor::ExecutorsProvider const& executorsProvider,
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration);
   Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
+      ns_Executor::ExecutorsProvider const* executorsProvider, 
       struct UUIDDependencies& dependencies);
   ~Step();
 
@@ -89,6 +94,9 @@ public:
   uint64_t rank_id_;
   uint64_t attempt_id_;
   uint64_t run_id_;
+  std::string executor_name_;
+  ns_Executor::Executor* executor_;
+  ns_Executor::ExecutorData* executor_data_;
   std::string function_;
   std::unordered_map<std::string, std::string> args_;
   uint32_t nb_cores_;
@@ -159,6 +167,10 @@ inline bool Step::IsTimedOut() const {
 
 inline void Step::MarkPending() {
   state_ = State::Pending;
+  if (executor_data_ != nullptr) {
+    delete executor_data_;
+    executor_data_ = nullptr;
+  }
 }
 
 inline void Step::MarkRunning() {
@@ -194,12 +206,16 @@ inline void Step::MarkLaunchError() {
 }
 
 inline void Step::KillAndMarkTimedout() {
+  executor_->Shutdown(*this);
   state_ = State::TimedOut;
   time_points_[1] = std::chrono::system_clock::now();
   exit_code_ = exitCode_Timedout_;
 }
 
 inline void Step::KillAndMarkCancel() {
+  if (state_ == State::Running) {
+    executor_->Shutdown(*this);
+  }
   state_ = State::Cancelled;
   time_points_[1] = std::chrono::system_clock::now();
   exit_code_ = exitCode_Cancelled_;
@@ -210,15 +226,20 @@ inline bool Step::TaskCancelled() {
 }
 
 inline void Step::Execute() {
+  executor_->Execute(*this);
 }
 
 inline void Step::Shutdown() {
   if (state_ == State::Running) {
+    executor_->Shutdown(*this);
     state_ = State::Shutdown;
   }
 }
 
 inline void Step::GatherFilesToLocal() {
+  if (state_ >= State::Running) {
+    executor_->GatherFilesToLocal(*this);
+  }
   end_processed_ = true;
 }
 

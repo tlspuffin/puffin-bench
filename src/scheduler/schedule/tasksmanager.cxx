@@ -61,7 +61,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
 
   ns_Schedule::Task* task = new ns_Schedule::Task(
     task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
-    config_.runPath_, args);
+    config_.runPath_, args, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);
@@ -108,6 +108,43 @@ void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
   }
 }
 
+enum ns_Schedule::OutputState ns_Schedule::TasksManager::GetRunningOutput(
+    std::string const& type, uint64_t taskID, uint64_t stepUUID, 
+    size_t readSize, ssize_t readOffset, 
+    struct FileExtractedText& data) {
+  //std::cerr << "Look for task: " << taskID << std::endl;
+  enum ns_Schedule::OutputState state = OutputState::UNKNOWN;
+  std::lock_guard<std::mutex> lock(lock_);
+  for(auto const& task: tasks_) {
+    if (task->id_ != taskID) {
+      continue;
+    }
+
+    ns_Schedule::Step const* firstStep = task->root_steps_.front();
+    ns_Schedule::Step const* step = nullptr;
+    do {
+      if (step != nullptr) {
+        firstStep = step->dependencies_.front();
+      }
+      step = firstStep;
+      do {
+        /*std::cerr << "Check step: " << step->ID()  <<
+            " uuid: " << step->uuid_ << std::endl;*/
+
+        if (step->uuid_ == stepUUID) {
+          //std::cerr << "\tFound " << std::endl;
+          return step->executor_->GetRunningOutput(
+              *step, type, readSize, readOffset, data);
+        }
+        step = step->next_;
+      } while(step != firstStep);
+    } while(!step->dependencies_.empty());
+
+    break;
+  }
+  return state;
+}
+
 std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
 ns_Schedule::TasksManager::LoadStatus(
     ns_Schedule::Schedule const* schedule) {
@@ -141,7 +178,7 @@ ns_Schedule::TasksManager::LoadStatus(
   for (rapidjson::SizeType i = 0; i < tasksArray.Size(); i++) {
     rapidjson::Value const& taskJson = tasksArray[i];
     ns_Schedule::Task* task = 
-        new ns_Schedule::Task(taskJson, stepsPending, stepsRunning, stepsDone);
+        new ns_Schedule::Task(taskJson, *schedule, stepsPending, stepsRunning, stepsDone);
     {
       std::lock_guard<std::mutex> lock(lock_);
       tasks_.push_back(task);

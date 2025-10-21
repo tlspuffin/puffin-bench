@@ -4,6 +4,8 @@
 #include "step.hxx"
 #include "tasksmanager.hxx"
 #include "output_state.hxx"
+#include "executor/executors_provider.hxx"
+#include "executor/executor.hxx"
 #include "../utils/file.hxx"
 #include <vector>
 #include <list>
@@ -15,7 +17,7 @@
 
 namespace ns_Schedule {
 
-class Schedule {
+class Schedule : public ns_Executor::ExecutorsProvider {
 public:
   Schedule(ns_Schedule::Config const& config, uint16_t cachePort);
   ~Schedule();
@@ -26,7 +28,8 @@ public:
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
   bool CancelTask(uint64_t taskID);
 
-  ns_Schedule::OutputState GetOutput(
+  ns_Executor::Executor* GetExecutor(std::string const& name) const;
+  OutputState GetOutput(
       std::string const& type, std::string const& taskID,
       uint64_t stepUUID, std::string const& stepID, 
       size_t readSize, ssize_t readOffset, struct FileExtractedText& data);
@@ -52,6 +55,8 @@ private:
   std::list<ns_Schedule::Step*> steps_;
   std::list<ns_Schedule::Step*> stepsRunning_;
   std::list<ns_Schedule::Step*> stepsDone_;
+  std::string defaultExecutor_;
+  std::unordered_map<std::string, ns_Executor::Executor*> executors_;
 
   static bool shutdownTasksAtExit__;
   static void HandlerUSR1(int sig);

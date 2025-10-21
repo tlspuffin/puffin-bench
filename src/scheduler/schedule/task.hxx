@@ -2,6 +2,7 @@
 
 #include "step_configurations.hxx"
 #include "publish.hxx"
+#include "executor/executors_provider.hxx"
 #include <cstdint>
 #include <iostream>
 #include <list>
@@ -10,6 +11,11 @@
 #include <fstream>
 #include <mutex>
 #include <rapidjson/document.h>
+
+namespace ns_Executor {
+  class Executor;
+  class ExecutorTaskData;
+}
 
 namespace ns_Schedule {
 
@@ -33,6 +39,9 @@ public:
 
   StepConfigurations configurations_;
 
+  std::unordered_map<ns_Executor::Executor*, ns_Executor::ExecutorTaskData*> 
+      executors_;
+
   std::list<ns_Schedule::Step*> root_steps_;
 
   std::ofstream steps_file_;
@@ -49,8 +58,10 @@ public:
       std::filesystem::path const& functionsFile, 
       std::filesystem::path const& toolsFolders, 
       std::filesystem::path const& runRootPath, 
-      std::unordered_map<std::string, std::string>& args);
+      std::unordered_map<std::string, std::string>& args, 
+      ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 
+      ns_Executor::ExecutorsProvider const& executorsProvider, 
       std::list<ns_Schedule::Step*>& stepsPending, 
       std::list<ns_Schedule::Step*>& stepsRunning, 
       std::list<ns_Schedule::Step*>& stepsDone);
@@ -69,7 +80,8 @@ public:
 private:
   bool CreateRunFolders();
 
-  void CreateStepsFromJson(rapidjson::Value const& configJSON);
+  void CreateStepsFromJson(rapidjson::Value const& configJSON, 
+      ns_Executor::ExecutorsProvider const& executorsProvider);
 
   std::list<ns_Schedule::Step*> steps_;
 

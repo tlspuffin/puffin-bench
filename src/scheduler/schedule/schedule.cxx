@@ -1,5 +1,6 @@
 #include "schedule.hxx"
 #include "task.hxx"
+#include "executor/local.hxx"
 #include "../utils/file.hxx"
 #include <stdlib.h>
 #include <iostream>
@@ -32,9 +33,14 @@ bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
-      threadRunning_(false), steps_(), stepsRunning_()
+      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local")
 {
   static int installHandler = InstallSigUSRHandler();
+
+  for (auto const& executorConfig : config.executors_) {
+    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, cachePort);
+    executors_.insert(std::make_pair<>(executor->Name(), executor));
+  }
 
   auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
   steps_.insert(steps_.end(), pendingsSteps.begin(), pendingsSteps.end());
@@ -63,6 +69,10 @@ ns_Schedule::Schedule::~Schedule() {
     tasksManager_.DeleteTasks();
   } catch(std::exception const& e) {
     std::cerr << "DeleteTasks exception: " << e.what() << std::endl;
+  }
+
+  for(auto& executor : executors_) {
+    delete executor.second;
   }
 
   lockThread_.unlock();
@@ -142,6 +152,19 @@ bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
   return false;
 }
 
+ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
+  auto const& executorIT = executors_.find(name);
+  if (executorIT == executors_.end()) {
+    auto const& executorIT = executors_.find(defaultExecutor_);
+    if (executorIT != executors_.end()) {
+      return executorIT->second;
+    }
+    std::cerr << "Unable to retrieve default executor " << defaultExecutor_ << std::endl;
+    return nullptr;
+  }
+  return executorIT->second;
+}
+
 ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     uint64_t stepUUID, std::string const& stepID,
@@ -152,7 +175,11 @@ ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
     return state;
   }
 
-  // Need check output of running steps
+  state = tasksManager_.GetRunningOutput(type, 
+      std::stoull(taskID), stepUUID, readSize, readOffset, data);
+  if (state != OutputState::UNKNOWN) {
+    return state;
+  }
 
   std::filesystem::path outputPath = config_.exportPath_;
   outputPath = outputPath / taskID / "logs";
@@ -178,6 +205,11 @@ ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
   std::list<ns_Schedule::Step*> result;
 
+  for(auto const& executor : executors_) {
+    std::list<ns_Schedule::Step*> elements = executor.second->FindRunnableSteps(steps_);
+    result.insert(result.end(), elements.begin(), elements.end());
+  }
+
   return result;
 }
 
@@ -192,8 +224,6 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     std::list<ns_Schedule::Step*> toRun = SearchTasksToRun();
     lockThread_.unlock();
 
-    // Find step that are finished
-
     for(ns_Schedule::Step* step : toRun) {
       step->Execute();
       DEBUG_STEP_MSG("Step execute", step);
@@ -207,6 +237,14 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+    for(auto& executor : executors_) {
+      std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(stepsRunning_);
+      stepsDone_.insert(stepsDone_.end(), executorStepsDone.begin(), executorStepsDone.end());
+      for(ns_Schedule::Step* step : executorStepsDone) {
+        DEBUG_STEP_MSG("Step done", step);
+      }
+    }
 
     for (ns_Schedule::Step* step : stepsRunning_) {
       if (step->IsRunning() && step->IsTimedOut()) {

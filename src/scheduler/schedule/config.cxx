@@ -8,10 +8,13 @@ static ns_Schedule::Config defaultConfig;
 ns_Schedule::Config::Config() 
     : toolsPath_("tools"), runPath_("runs"), 
     exportPath_(std::filesystem::path("exports") / "schedule"), 
-    userPath_("users_data")
+    userPath_("users_data"), executors_()
 {}
 
 ns_Schedule::Config::~Config() {
+  for(auto& it : executors_) {
+    delete it.second;
+  }
 }
 
 void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
@@ -33,6 +36,18 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
   exportPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(*scheduleConfig, "exportPath", defaultConfig.exportPath_))
       .string();
+
+  if (scheduleConfig->HasMember("executors") && 
+      (*scheduleConfig)["executors"].IsObject()) {
+    for (auto const& [ found, jsonConfig ] : (*scheduleConfig)["executors"].GetObject()) {
+      ns_Executor::Config* executorConfig = ns_Executor::Config::BuildConfig(jsonConfig);
+      executors_.emplace(executorConfig->name_, executorConfig);
+    }
+  }
+  if (executors_.empty()) {
+    ns_Executor::LocalConfig* localConfig = new ns_Executor::LocalConfig("local");
+    executors_.emplace(localConfig->name_, localConfig);
+  }
 }
 
 void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc, 
@@ -48,6 +63,12 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
   node.AddMember("exportPath",
       rapidjson::Value(exportPath_.c_str(), alloc), alloc);
 
+  rapidjson::Value executorsConfig(rapidjson::kObjectType);
+  for (auto const& [name, executorConfig] : executors_) {
+    executorConfig->Save(name, executorsConfig, alloc);
+  }
+  node.AddMember("executors", executorsConfig, alloc);
+
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
@@ -56,4 +77,7 @@ void ns_Schedule::Config::Validate() const {
   discard = std::filesystem::canonical(runPath_);
   discard = std::filesystem::canonical(userPath_);
   discard = std::filesystem::canonical(exportPath_);
+  for (auto const& [name, executorConfig] : executors_) {
+    executorConfig->Validate();
+  }
 }

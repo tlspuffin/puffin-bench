@@ -20,14 +20,20 @@ else()
   target_link_libraries(Poco INTERFACE ssl crypto)
 endif()
 
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/executor.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/executor_sh.h" Executor_Script)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/functions_sh.h" Functions_Script)
+
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
   src/scheduler/utils/rapidjson.cxx src/scheduler/utils/variables.cxx src/scheduler/utils/file.cxx 
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
+  src/scheduler/schedule/executor/config.cxx src/scheduler/schedule/executor/executor.cxx src/scheduler/schedule/executor/local.cxx 
+  src/scheduler/schedule/executor/linux_cores.cxx
   src/scheduler/api/schedule_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
+  src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})
@@ -39,3 +45,5 @@ target_link_libraries(srv-static PRIVATE Poco)
 target_include_directories(srv-static PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
 target_link_options(srv-static PRIVATE -static)
 target_compile_definitions(srv-static PRIVATE STATIC)
+
+add_executable(testcpu src/cpu.cxx src/scheduler/schedule/executor/linux_cores.cxx)

@@ -1,6 +1,7 @@
 #include "task.hxx"
 #include "step.hxx"
 #include "schedule.hxx"
+#include "executor/executor.hxx"
 #include "../utils/rapidjson.hxx"
 #include "../utils/variables.hxx"
 #include "../utils/logs.hxx"
@@ -16,7 +17,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& toolsFolders, 
     std::filesystem::path const& runRootPath, 
-    std::unordered_map<std::string, std::string>& args)
+    std::unordered_map<std::string, std::string>& args, 
+    ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
     tools_path_(toolsFolders), 
@@ -26,7 +28,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     outputs_path_(run_root_path_ / "output"),
     artefacts_path_(run_root_path_ / "artefacts"),
     args_(args), configurations_(), 
-    root_steps_(), steps_file_(), request_cancel_(false), 
+    root_steps_(), executors_(), 
+    steps_file_(), request_cancel_(false), 
     publish_()
 {
   std::string taskName = name;
@@ -56,10 +59,11 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
 
   PrepareToRun();
 
-  CreateStepsFromJson(configJSON);
+  CreateStepsFromJson(configJSON, executorsProvider);
 }
 
 ns_Schedule::Task::Task(rapidjson::Value const& config, 
+    ns_Executor::ExecutorsProvider const& executorsProvider, 
     std::list<ns_Schedule::Step*>& stepsPending, 
     std::list<ns_Schedule::Step*>& stepsRunning, 
     std::list<ns_Schedule::Step*>& stepsDone) {
@@ -99,6 +103,18 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     }
   }
 
+  if ((config.HasMember("task_executor_data")) && (config["task_executor_data"].IsObject())) {
+    rapidjson::Value const& executorDataJson = config["task_executor_data"];
+    for (auto it = executorDataJson.MemberBegin(); it != executorDataJson.MemberEnd(); ++it) {
+      std::string executorName = it->name.GetString();
+      ns_Executor::Executor* executor = executorsProvider.GetExecutor(executorName);
+      if ((executor == nullptr) || (executorName.compare(executor->Name()) != 0)) {
+        throw std::runtime_error("Unable to find executor: " + executorName);
+      }
+      executors_.emplace(executor, executor->CreateLocalTaskData(it->value));
+    }
+  }
+
   std::list<ns_Schedule::Step*> loadedSteps;
   std::unordered_map<uint64_t, ns_Schedule::Step*> loadedStepsIndex;
   std::unordered_map<uint64_t, ns_Schedule::Step::UUIDDependencies> loadedStepsDeps;
@@ -109,7 +125,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
       uint64_t stepUUID = std::stoull(stepIt->name.GetString());
       const rapidjson::Value& stepConfig = stepIt->value;
       ns_Schedule::Step::UUIDDependencies& dependencies = loadedStepsDeps[stepUUID];
-      ns_Schedule::Step* step = new Step(this, stepConfig, dependencies);
+      ns_Schedule::Step* step = new Step(this, stepConfig, &executorsProvider, dependencies);
       loadedSteps.push_back(step);
       loadedStepsIndex.emplace(stepUUID, step);
     }
@@ -125,7 +141,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
       step->dependencies_.push_back(loadedStepsIndex[stepUUID]);
     }
     if (step->IsRunning()) {
-      // update step internal status by checking running process
+      step->executor_->CheckReloadRunning(*step);
       if (step->IsRunning()) {
         stepsRunning.push_back(step);
         stepsPending.push_back(step);
@@ -172,6 +188,9 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
 ns_Schedule::Task::~Task() {
   if (steps_file_.is_open()) {
     steps_file_.close();
+  }
+  for(auto& it : executors_) {
+    delete it.second;
   }
 }
 
@@ -327,6 +346,23 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
     argsArray.PushBack(argObject, alloc);
   }
   out.AddMember("args", argsArray, alloc);
+  if (step != nullptr) {
+    auto const& executorTaskData = executors_.find(step->executor_);
+    if (executorTaskData != executors_.end()) {
+      rapidjson::Value executorTaskDataJSON(rapidjson::kObjectType);
+      executorTaskData->second->ToJSON(executorTaskDataJSON, alloc);
+      out.AddMember("task_executor_data", executorTaskDataJSON, alloc);
+    }
+  } else {
+    rapidjson::Value executorTasksDataJSON(rapidjson::kObjectType);
+    for(auto const& [executor, executorTaskData]: executors_) {
+      rapidjson::Value executorTaskDataJSON(rapidjson::kObjectType);
+      executorTaskData->ToJSON(executorTaskDataJSON, alloc);
+      executorTasksDataJSON.AddMember(
+          rapidjson::Value(executor->Name().c_str(), alloc), executorTaskDataJSON, alloc);
+    }
+    out.AddMember("task_executor_data", executorTasksDataJSON, alloc);
+  }
 
   rapidjson::Value publishObject(rapidjson::kObjectType);
   publish_.ToJSON(publishObject, alloc);
@@ -350,7 +386,8 @@ bool ns_Schedule::Task::CreateRunFolders() {
 }
 
 void ns_Schedule::Task::CreateStepsFromJson(
-    rapidjson::Value const& configJSON) {
+    rapidjson::Value const& configJSON, 
+    ns_Executor::ExecutorsProvider const& executorsProvider) {
   std::list<ns_Schedule::Step*> parent_stack;
   std::list<ns_Schedule::Step*> current_stack;
   bool is_root_steps = true;
@@ -384,7 +421,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
 
     rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
     ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
-        run_id++, step_id, parent_stack, 
+        run_id++, step_id, parent_stack, executorsProvider, 
         configurationsStack, runConfiguration);
     configurationsStack.push_back(runConfiguration);
 
@@ -396,7 +433,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
         rapidjson::Value const& run = run_array[j];
         if (j != 0) {
           step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, 
-              configurationsStack, &run);
+              executorsProvider, configurationsStack, &run);
           step = step->next_;
         } else {
           step->ReadFromTaskJSON(configurationsStack, &run);
