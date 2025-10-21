@@ -35,6 +35,7 @@ bool Config::Load(std::string const& filepath) {
     doc.SetObject();
   }
   server_.Load("server", doc);
+  schedule_.Load("schedule", doc);
   cache_.Load("cache", doc);
   return sucess;
 }
@@ -44,6 +45,7 @@ void Config::Save(std::string const& filepath) const {
   doc.SetObject();
   rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
   server_.Save("server", doc, alloc);
+  schedule_.Save("schedule", doc, alloc);
   cache_.Save("cache", doc, alloc);
   std::ofstream ofs(filepath);
   if (!ofs) {
@@ -58,5 +60,6 @@ void Config::Save(std::string const& filepath) const {
 
 void Config::Validate() {
   server_.Validate();
+  schedule_.Validate();
   cache_.Validate();
 }

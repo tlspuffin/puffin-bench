@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
   }
   config.Validate();
 
-  struct ns_API::APIS apis(config.cache_);
+  struct ns_API::APIS apis(config.schedule_, config.cache_, config.server_.port_);
 
   ns_Server::MyServerApp app(config.server_, apis);
   try {

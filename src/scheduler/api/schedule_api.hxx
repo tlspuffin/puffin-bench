@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../schedule/schedule.hxx"
 #include "../utils/file.hxx"
 #include <cstdint>
 #include <vector>
@@ -7,15 +8,11 @@
 #include <sstream>
 #include <fstream>
 
-namespace ns_Schedule {
-enum OutputState { UNKNOWN, POSSIBLE_MORE_DATA };
-};
-
 namespace ns_API {
 
 class ScheduleAPI {
 public:
-  ScheduleAPI();
+  ScheduleAPI(ns_Schedule::Config const& config, uint16_t cache_port);
 
   uint64_t AddTask(std::string const& name, 
       std::vector<uint8_t> const& flow, 
@@ -32,18 +29,20 @@ public:
   bool CancelTask(uint64_t taskID);
 
 private:
+  ns_Schedule::Config const& config_;
+  ns_Schedule::Schedule schedule_;
 };
 
 inline std::filesystem::path ScheduleAPI::ExportPath() {
-  return "";
+  return config_.exportPath_;
 }
 
 inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
-  return true;
+  return schedule_.CancelStep(taskID, stepUUID);
 }
 
 inline bool ScheduleAPI::CancelTask(uint64_t taskID) {
-  return true;
+  return schedule_.CancelTask(taskID);
 }
 
 };

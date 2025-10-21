@@ -1,6 +1,7 @@
 #include "schedule_api.hxx"
 
-ns_API::ScheduleAPI::ScheduleAPI()
+ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, uint16_t cache_port)
+    : config_(config), schedule_(config, cache_port)
 {
 }
 
@@ -11,7 +12,7 @@ uint64_t ns_API::ScheduleAPI::AddTask(std::string const& name,
     std::unordered_map<std::string, std::string>& args) {
   std::string flowStr(flow.begin(), flow.end());
   std::string functionstr(functions.begin(), functions.end());
-  return 0;
+  return schedule_.AddTask(name, flowStr, functionstr, files, args);
 }
 
 void ns_API::ScheduleAPI::GetRunningTaskSummary() {
@@ -24,5 +25,6 @@ ns_Schedule::OutputState ns_API::ScheduleAPI::GetOutput(
     std::string const& type, std::string const& taskID, uint64_t stepUUID, 
     std::string const& stepID, size_t readSize, ssize_t readOffset, 
     struct FileExtractedText& data) {
-  return ns_Schedule::OutputState::UNKNOWN;
+  return schedule_.GetOutput(type, taskID, stepUUID, stepID, 
+      readSize, readOffset, data);
 }

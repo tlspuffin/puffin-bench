@@ -1,0 +1,237 @@
+#pragma once
+
+#include "task.hxx"
+#include "step_configurations.hxx"
+#include <cstdint>
+#include <string>
+#include <list>
+#include <vector>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <rapidjson/document.h>
+
+namespace ns_Schedule {
+
+class Schedule;
+
+class Step {
+public:
+  static uint16_t constexpr exitCode_NotSet_ = 0x0100;
+  static uint16_t constexpr exitCode_Timedout_ = 0x0200;
+  static uint16_t constexpr exitCode_Cancelled_ = 0x0400;
+  static uint16_t constexpr exitCode_LaunchError_ = 0x0800;
+  static uint16_t constexpr exitCode_Lost_ = 0x1000;
+
+  struct UUIDDependencies {
+    uint64_t next;
+    uint64_t previous;
+    std::vector<uint64_t> dependencies;
+    std::vector<uint64_t> depend_from;
+
+    void Reset() {
+      next = 0; previous = 0; depend_from.clear(); dependencies.clear();
+    }
+  };
+
+  Step(Step const& source, uint64_t run_id, uint64_t attempt_id);
+  Step(Step const& source, uint64_t run_id, 
+      uint64_t rank_id, uint64_t attempt_id, 
+      std::vector<rapidjson::Value const*> configurationStack, 
+      rapidjson::Value const* configuration);
+  Step(ns_Schedule::Task* task, std::string const& name, 
+    uint64_t run_id, uint64_t step_id, 
+    std::list<ns_Schedule::Step*> dependFrom, 
+    std::vector<rapidjson::Value const*> configurationStack, 
+    rapidjson::Value const* configuration);
+  Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
+      struct UUIDDependencies& dependencies);
+  ~Step();
+
+  void ReadFromTaskJSON(
+      std::vector<rapidjson::Value const*> configurationStack, 
+      rapidjson::Value const* configuration);
+
+  uint64_t TaskID() const;
+
+  bool IsPending() const;
+  bool IsReady() const;
+  bool IsRunning() const;
+  bool IsDone() const;
+  bool IsTimedOut() const;
+
+  void MarkPending();
+  void MarkRunning();
+  void MarkDone(uint16_t exit_code);
+  void MarkCancel();
+  void MarkLaunchError();
+  void KillAndMarkTimedout();
+  void KillAndMarkCancel();
+
+  bool TaskLastStep();
+  bool TaskCancelled();
+  void Execute();
+  void Shutdown();
+  void GatherFilesToLocal();
+  void FinalizeAndArchive(std::filesystem::path const& savePath);
+
+  void ToJSON(rapidjson::Value& out, 
+      rapidjson::Document::AllocatorType& alloc, 
+      bool exportTask) const;
+
+  std::string ID() const;
+
+  ns_Schedule::Task* task_;
+  std::string name_;
+  std::string id_;
+  uint64_t uuid_;
+  uint64_t step_id_;
+  uint64_t rank_id_;
+  uint64_t attempt_id_;
+  uint64_t run_id_;
+  std::string function_;
+  std::unordered_map<std::string, std::string> args_;
+  uint32_t nb_cores_;
+  uint32_t nb_retry_;
+  uint64_t timeout_;
+  Step* next_;
+  Step* previous_;
+  std::list<Step*> dependencies_;
+  std::list<Step*> depend_from_;
+  std::filesystem::path stdout_;
+  std::filesystem::path stderr_;
+  uint16_t exit_code_;
+  int32_t monitor_count_;
+
+  bool request_cancel_;
+
+private:
+  enum class State { 
+    Pending, 
+    Running, 
+    Done, 
+    TimedOut, 
+    Cancelled, 
+    Shutdown, 
+    LaunchError, 
+  };
+  State state_;
+  bool end_processed_;
+  std::chrono::time_point<std::chrono::system_clock> time_points_[2];
+
+  Step(Step const& src);
+
+  static std::atomic<uint64_t> next_uuid_;
+  static uint64_t ToMillis(std::chrono::time_point<std::chrono::system_clock> const& tp);
+  static std::chrono::system_clock::time_point FromMillis(uint64_t millis);
+  static std::string StateEnumToString(State state);
+  static State StateStringToEnum(std::string const& state);
+};
+
+inline uint64_t Step::TaskID() const {
+  return task_->id_;
+}
+
+inline bool Step::IsPending() const { 
+  return state_ == State::Pending;
+}
+
+inline bool Step::IsReady() const { 
+  return state_ == State::Pending && depend_from_.empty();
+}
+
+inline bool Step::IsRunning() const { 
+  return state_ == State::Running;
+}
+
+inline bool Step::IsDone() const {
+  return state_ >= State::Done;
+}
+
+inline bool Step::IsTimedOut() const {
+  if (state_ > State::Running) {
+    return (exit_code_ & 0x0200) == 0x0200;
+  }
+  auto now = std::chrono::system_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - time_points_[0]);
+  return (timeout_ > 0) && (elapsed.count() >= timeout_);
+}
+
+inline void Step::MarkPending() {
+  state_ = State::Pending;
+}
+
+inline void Step::MarkRunning() {
+  if (state_ != State::Pending) {
+    throw std::runtime_error("Can not mark running a not pending task");
+  }
+  state_ = State::Running;
+  time_points_[0] = std::chrono::system_clock::now();
+}
+
+inline void Step::MarkDone(uint16_t exit_code) {
+  if (state_ != State::Running) {
+    throw std::runtime_error("Can not mark done a not running task");
+  }
+  state_ = State::Done;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exit_code;
+}
+
+inline void Step::MarkCancel() {
+  if (state_ != State::Pending) {
+    throw std::runtime_error("Can not mark cancel a not pending task");
+  }
+  state_ = State::Cancelled;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_Cancelled_;
+}
+
+inline void Step::MarkLaunchError() {
+  state_ = State::LaunchError;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_LaunchError_;
+}
+
+inline void Step::KillAndMarkTimedout() {
+  state_ = State::TimedOut;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_Timedout_;
+}
+
+inline void Step::KillAndMarkCancel() {
+  state_ = State::Cancelled;
+  time_points_[1] = std::chrono::system_clock::now();
+  exit_code_ = exitCode_Cancelled_;
+}
+
+inline bool Step::TaskCancelled() {
+  return task_->request_cancel_;
+}
+
+inline void Step::Execute() {
+}
+
+inline void Step::Shutdown() {
+  if (state_ == State::Running) {
+    state_ = State::Shutdown;
+  }
+}
+
+inline void Step::GatherFilesToLocal() {
+  end_processed_ = true;
+}
+
+inline void Step::FinalizeAndArchive(std::filesystem::path const& savePath) {
+  if (state_ >= State::Running) {
+    task_->FinalizeAndArchive(savePath);
+  }
+}
+
+inline std::string Step::ID() const {
+  return std::to_string(step_id_) + '-' +
+    std::to_string(rank_id_) + '-' +
+    std::to_string(attempt_id_);
+}
+
+};

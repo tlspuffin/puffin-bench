@@ -1,0 +1,379 @@
+#include "schedule.hxx"
+#include "task.hxx"
+#include "../utils/file.hxx"
+#include <stdlib.h>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <stack>
+#include <unordered_set>
+#include <algorithm>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <rapidjson/filereadstream.h>
+#include <rapidjson/error/en.h>
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/filewritestream.h>
+
+#undef RAPIDJSON_ASSERT
+#define RAPIDJSON_ASSERT(x) { throw std::runtime_error(x); }
+#define DEBUG_STEP_MSG(label, step) {\
+  std::stringstream oss;\
+  oss << label << ": " << step->task_->id_ << " / " << step->ID()  << \
+      " uuid: " << step->uuid_ << std::endl;\
+  std::cerr << oss.str();\
+}
+
+bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
+
+ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
+    : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
+      threadRunning_(false), steps_(), stepsRunning_()
+{
+  static int installHandler = InstallSigUSRHandler();
+
+  auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
+  steps_.insert(steps_.end(), pendingsSteps.begin(), pendingsSteps.end());
+  stepsRunning_.insert(stepsRunning_.end(), stepsRunning.begin(), stepsRunning.end());
+  stepsDone_.insert(stepsDone_.end(), stepsDone.begin(), stepsDone.end());
+
+  if (steps_.empty()) {
+    ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+  } else {
+    threadRunning_ = true;
+    thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
+  }
+}
+
+ns_Schedule::Schedule::~Schedule() {
+  lockThread_.lock();
+  if (threadRunning_) {
+    threadRunning_ = false;
+  }
+  if (thread_.joinable()) {
+    lockThread_.unlock();
+    thread_.join();
+    lockThread_.lock();
+  }
+  try {
+    tasksManager_.DeleteTasks();
+  } catch(std::exception const& e) {
+    std::cerr << "DeleteTasks exception: " << e.what() << std::endl;
+  }
+
+  lockThread_.unlock();
+}
+
+uint64_t ns_Schedule::Schedule::AddTask(std::string const& name, 
+    std::string const& tasksList, 
+    std::string const& functions, 
+    std::unordered_map<std::string, std::vector<uint8_t>>& files,
+    std::unordered_map<std::string, std::string>& args) {
+  rapidjson::Document stepsJSON;
+  stepsJSON.Parse(tasksList.c_str());
+
+  if (stepsJSON.HasParseError()) {
+    throw std::runtime_error(
+        std::string("Parsing JSON Error : ") +
+        rapidjson::GetParseError_En(stepsJSON.GetParseError()) +
+        " byte " + std::to_string(stepsJSON.GetErrorOffset())
+    );
+  }
+
+  ns_Schedule::Task* task = 
+      tasksManager_.CreateTask(name, stepsJSON, functions, files, args, *this);
+
+  std::string taskFilePath = (config_.userPath_ / std::to_string(task->id_) / 
+      std::string(std::to_string(task->id_) + ".json")).string();
+  std::ofstream taskFile(taskFilePath, std::ios::trunc);
+  if (!taskFile.is_open()) {
+    throw std::runtime_error(
+      "Unable to open file '" + taskFilePath + 
+      "': " + std::strerror(errno));
+  }
+  taskFile << tasksList;
+  taskFile.close();
+
+  lockThread_.lock();
+
+  for(ns_Schedule::Step* step : task->root_steps_) {
+    steps_.push_back(step);
+  }
+  
+  if (!threadRunning_) {
+    if (thread_.joinable()) {
+      lockThread_.unlock();
+      thread_.join();
+      lockThread_.lock();
+    }
+    threadRunning_ = true;
+    thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
+  }
+  lockThread_.unlock();
+
+  return task->id_;
+}
+
+bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  for(ns_Schedule::Step* step : steps_) {
+    if ((step->task_->id_ != taskID) || (step->uuid_ != stepUUID)) {
+      continue;
+    }
+    step->request_cancel_ = true;
+    return true;
+  }
+  return false;
+}
+
+bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  for (auto it = steps_.begin(); it != steps_.end(); ++it) {
+    ns_Schedule::Step* step = *it;
+    if (step->task_->id_ == taskID) {
+      step->task_->Cancel();
+      return true;
+    }
+  }
+  return false;
+}
+
+ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
+    std::string const& type, std::string const& taskID, 
+    uint64_t stepUUID, std::string const& stepID,
+    size_t readSize, ssize_t readOffset, struct FileExtractedText& data) {
+  ns_Schedule::OutputState state = OutputState::UNKNOWN;
+
+  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
+    return state;
+  }
+
+  // Need check output of running steps
+
+  std::filesystem::path outputPath = config_.exportPath_;
+  outputPath = outputPath / taskID / "logs";
+  std::stringstream oss;
+  oss << type << '.' << stepID << ".txt";
+  outputPath = outputPath / oss.str();
+
+  FileReadState fileState = FileExtractText(outputPath, readSize, readOffset, data);
+  switch (fileState) {
+    case FileReadState::Ok:
+      state = ns_Schedule::OutputState::GOT_DATA;
+      break;
+    case FileReadState::EndOfFile:
+      state = ns_Schedule::OutputState::END_OF_DATA;
+      break;
+    default:
+      break;
+  }
+  return state;
+}
+
+
+std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
+  std::list<ns_Schedule::Step*> result;
+
+  return result;
+}
+
+void ns_Schedule::Schedule::ScheduleLoop() {
+  std::ofstream stepsDoneFile(config_.exportPath_ / "steps_done.json", std::ios::app);
+  std::runtime_error fatal_error("");
+  std::list<ns_Schedule::Step*> stepDelayedDelete;
+
+  bool updateStatus = false;
+  lockThread_.lock();
+  while((!steps_.empty()) && (threadRunning_)) {
+    std::list<ns_Schedule::Step*> toRun = SearchTasksToRun();
+    lockThread_.unlock();
+
+    // Find step that are finished
+
+    for(ns_Schedule::Step* step : toRun) {
+      step->Execute();
+      DEBUG_STEP_MSG("Step execute", step);
+    }
+    stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
+
+    if ((toRun.size() > 0) || updateStatus) {
+      tasksManager_.SaveStatus();
+      ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+      updateStatus = false;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+    for (ns_Schedule::Step* step : stepsRunning_) {
+      if (step->IsRunning() && step->IsTimedOut()) {
+        DEBUG_STEP_MSG("Step timeouted", step);
+        step->KillAndMarkTimedout();
+        stepsDone_.push_back(step);
+      }
+    }
+
+    lockThread_.lock();
+    try {
+      for (ns_Schedule::Step* step : steps_) {
+        if (step->task_->request_cancel_ || step->request_cancel_) {
+          if (step->IsRunning()) {
+            DEBUG_STEP_MSG("Running step / task cancelled", step);
+            step->KillAndMarkCancel();
+            stepsDone_.push_back(step);
+          } else if (step->IsPending()) {
+            DEBUG_STEP_MSG("Step / Task cancelled", step);
+            step->MarkCancel();
+            stepsDone_.push_back(step);
+          }
+        }
+      }
+
+      updateStatus |= ProcessDelayedCleanup(stepDelayedDelete, stepsDoneFile);
+
+      for(ns_Schedule::Step* step : stepsDone_) {
+        if (step->monitor_count_ > 0) {
+          stepDelayedDelete.push_back(step);
+        } else {
+          ManageEndOfStep(step, stepsDoneFile);
+          updateStatus = true;
+        }
+      }
+    } catch (std::runtime_error& e) {
+      fatal_error = e;
+      goto ns_Schedule__Schedule__ScheduleLoop_fatal;
+    }
+
+    stepsDone_.clear();
+  }
+
+  tasksManager_.SaveStatus();
+  ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+  if (shutdownTasksAtExit__) {
+    for (ns_Schedule::Step* step: steps_) {
+      if (step->IsRunning()) {
+        step->Shutdown();
+      }
+    }
+  }
+  threadRunning_ = false;
+  lockThread_.unlock();
+  return;
+
+ns_Schedule__Schedule__ScheduleLoop_fatal:
+  threadRunning_ = false;
+  lockThread_.unlock();
+  throw fatal_error;
+}
+
+inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
+    std::list<ns_Schedule::Step*>& delayedSteps, 
+    std::ofstream& stepsDoneFile) {
+  bool aStepProcessed = false;
+  for (auto it = delayedSteps.begin(); it != delayedSteps.end(); ) {
+    ns_Schedule::Step* step = *it;
+    if (step->monitor_count_ == 0) {
+      ManageEndOfStep(step, stepsDoneFile);
+      it = delayedSteps.erase(it);
+      aStepProcessed = true;
+    } else {
+      ++it;
+    }
+  }
+  return aStepProcessed;
+}
+
+void ns_Schedule::Schedule::ManageEndOfStep(
+    ns_Schedule::Step* step, std::ofstream& stepsDoneFile) {
+  DEBUG_STEP_MSG("Step removed", step);
+  AppendStepToFinishLog(step->task_->steps_file_, *step);
+  AppendStepToFinishLog(stepsDoneFile, *step);
+
+  stepsRunning_.remove(step);
+  auto itStep = std::find(steps_.begin(), steps_.end(), step);
+  if (itStep == steps_.end()) {
+    throw std::runtime_error("Trying to delete an unknown step: name=" +
+        step->name_ + ", id=" + step->ID());
+  }
+
+  if (!step->TaskCancelled()) {
+    for (auto rit = step->dependencies_.rbegin(); rit != step->dependencies_.rend(); ++rit) {
+      ns_Schedule::Step* stepChild = *rit;
+      stepChild->depend_from_.remove(step);
+      if (stepChild->depend_from_.size() == 0) {
+        steps_.insert(itStep, stepChild);
+      }
+    }
+  }
+  steps_.remove(step);
+  step->GatherFilesToLocal();
+
+  if (step->TaskLastStep()) {
+    // todo signal end of the flow
+    uint64_t task_id = step->TaskID();
+    step->FinalizeAndArchive(config_.exportPath_);
+    tasksManager_.TaskEnded(step->task_);
+    std::cout << "Tasks " << task_id << " done" << std::endl;
+  }
+
+  tasksManager_.SaveStatus();
+}
+
+void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename, 
+    std::list<ns_Schedule::Step*> const& steps) const {
+  rapidjson::Document doc;
+  doc.SetObject();
+  rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
+
+  rapidjson::Value arr(rapidjson::kArrayType);
+  for (Step const* step : steps) {
+    rapidjson::Value val;
+    step->ToJSON(val, alloc, true);
+    arr.PushBack(val, alloc);
+  }
+  doc.AddMember("running_steps", arr, alloc);
+
+  FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
+  if (!fp) {
+    throw std::system_error(errno, std::generic_category(), "Impossible d'ouvrir " + filename);
+  }
+  char buffer[65536];
+  rapidjson::FileWriteStream os(fp, buffer, sizeof(buffer));
+  rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
+  doc.Accept(writer);
+  std::fclose(fp);
+
+  std::filesystem::rename((filename + "tmp"), filename);
+}
+
+void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  step.ToJSON(doc, doc.GetAllocator(), true);
+  doc.Accept(writer);
+
+  log << buffer.GetString() << std::endl;
+  log.flush();
+}
+
+void ns_Schedule::Schedule::HandlerUSR1(int sig) {
+  shutdownTasksAtExit__ = !shutdownTasksAtExit__;
+  std::stringstream oss;
+  oss << "ctl + c will shutdown tasks at exit: " << 
+      (shutdownTasksAtExit__ ? "true" : "false") <<
+      std::endl;
+  std::cerr << oss.str();
+}
+
+int ns_Schedule::Schedule::InstallSigUSRHandler() {
+    struct sigaction sa = {0};
+    sa.sa_handler = HandlerUSR1;
+    return sigaction(SIGUSR1, &sa, NULL);
+}
+
