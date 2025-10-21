@@ -12,3 +12,8 @@ wheels/
 .venv
 
 /.quarto/
+
+CMakeLists.conf
+.vscode/
+build/
+**/embeded/
