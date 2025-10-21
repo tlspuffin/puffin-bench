@@ -7,6 +7,36 @@ include(CMakeUtils.cmake)
 
 include(CMakeLists.conf)
 
+add_executable(reserve_port src/reserve_port.c)
+
+add_executable(reserve_port-static src/reserve_port.c)
+target_link_options(reserve_port-static PRIVATE -static)
+
+find_program(XXD xxd REQUIRED)
+
+set(RESERVE_PORT_BLOB_H "reserve_port.h")
+add_custom_command(
+  OUTPUT ${RESERVE_PORT_BLOB_H}
+  COMMAND ${CMAKE_COMMAND} -E env
+          OUT=${RESERVE_PORT_BLOB_H}
+          sh -c "${XXD} -i -n ReservePort_Binary \"$<TARGET_FILE:reserve_port>\" > \"${RESERVE_PORT_BLOB_H}\""
+  DEPENDS reserve_port
+  COMMENT "Generating ${RESERVE_PORT_BLOB_H} from reserve_port with xxd -i"
+  VERBATIM
+)
+add_custom_target(reserve_port_blob_h DEPENDS ${RESERVE_PORT_BLOB_H})
+set(RESERVE_PORT-STATIC_BLOB_H "reserve_port-static.h")
+add_custom_command(
+  OUTPUT ${RESERVE_PORT-STATIC_BLOB_H}
+  COMMAND ${CMAKE_COMMAND} -E env
+          OUT=${RESERVE_PORT-STATIC_BLOB_H}
+          sh -c "${XXD} -i -n ReservePort_Binary \"$<TARGET_FILE:reserve_port-static>\" > \"${RESERVE_PORT-STATIC_BLOB_H}\""
+  DEPENDS reserve_port-static
+  COMMENT "Generating ${RESERVE_PORT-STATIC_BLOB_H} from reserve_port-static with xxd -i"
+  VERBATIM
+)
+add_custom_target(reserve_port-static_blob_h DEPENDS ${RESERVE_PORT-STATIC_BLOB_H})
+
 if(DEFINED OPENSSL_PATH)
   GetLibs(openssl STATIC ${OPENSSL_PATH}  "ssl;crypto" openssllibs VERBOSE)
   CreateExternalLib(openssl "${openssllibs}" DEPLOYTARGET setupDLL)
@@ -39,11 +69,13 @@ set(SRV_SRC
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})
 target_link_libraries(srv PRIVATE Poco)
 target_include_directories(srv PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+add_dependencies(srv reserve_port_blob_h)
 
 add_executable(srv-static ${SRV_SRC} ${RESERVE_PORT-STATIC_BLOB_H})
 target_link_libraries(srv-static PRIVATE Poco)
 target_include_directories(srv-static PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
 target_link_options(srv-static PRIVATE -static)
 target_compile_definitions(srv-static PRIVATE STATIC)
+add_dependencies(srv-static reserve_port-static_blob_h)
 
 add_executable(testcpu src/cpu.cxx src/scheduler/schedule/executor/linux_cores.cxx)
