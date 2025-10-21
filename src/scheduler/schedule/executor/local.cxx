@@ -203,6 +203,10 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
         << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
         << "THEJOB_CACHE_PORT=\"" << cachePort_ << "\"\n";
+    if (step.monitor_) {
+      stepLauncher << "THEJOB_MONITOR_PARAMETERS_PATH=\"" << step.monitor_->ToArgs() << 
+        " " << step.monitor_path_.string() << "\"\n";
+    }
     stepLauncher.close();
 
     std::vector<std::string> args_strings = BuildExecutorArgs(step);

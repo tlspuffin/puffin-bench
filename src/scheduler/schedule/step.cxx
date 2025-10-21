@@ -16,11 +16,16 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), state_(State::Pending), end_processed_(false)
+    request_cancel_(false), monitor_(source.monitor_), monitor_path_(), 
+    message_from_run_(""), state_(State::Pending), end_processed_(false)
 {
   std::string step_name = ID();
   stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
   stderr_ = source.task_->logs_path_ / ("stderr." + step_name + ".txt");
+
+  if (monitor_) {
+    monitor_path_ = task_->monitors_path_ / (std::to_string(task_->id_) + "-" + ID() + ".txt");
+  }
 
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
@@ -39,7 +44,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), state_(State::Pending), end_processed_(false)
+    request_cancel_(false), monitor_(source.monitor_), monitor_path_(), message_from_run_(""), 
+    state_(State::Pending), end_processed_(false)
 {
   ReadFromTaskJSON(configurationStack, configuration);
 
@@ -51,6 +57,10 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
   stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
   stderr_ = source.task_->logs_path_ / ("stderr." + step_name + ".txt");
 
+  if (monitor_) {
+    monitor_path_ = task_->monitors_path_ / (std::to_string(task_->id_) + "-" + ID() + ".txt");
+  }
+
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
@@ -59,14 +69,16 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     std::list<ns_Schedule::Step*> dependFrom, 
     ns_Executor::ExecutorsProvider const& executorsProvider,
     std::vector<rapidjson::Value const*> configurationStack, 
-    rapidjson::Value const* configuration) 
+    rapidjson::Value const* configuration,
+    rapidjson::Value const* monitorJSON) 
     : task_(task), name_(name), id_(), uuid_(++next_uuid_), step_id_(step_id), 
     rank_id_(0), attempt_id_(0), run_id_(run_id), executor_name_("default"), 
     executor_(nullptr), executor_data_(nullptr), function_(name), 
     args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
     next_(this), previous_(this), dependencies_(), depend_from_(dependFrom), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), state_(State::Pending), end_processed_(false)
+    request_cancel_(false), monitor_(), monitor_path_(), message_from_run_(""), 
+    state_(State::Pending), end_processed_(false)
 {
   ReadFromTaskJSON(configurationStack, configuration);
 
@@ -75,6 +87,12 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
   std::string step_name = ID();
   stdout_ = task_->logs_path_ / ("stdout." + step_name + ".txt");
   stderr_ = task_->logs_path_ / ("stderr." + step_name + ".txt");
+
+  std::shared_ptr<ns_Monitor::Task> monitor;
+  if (monitorJSON != nullptr) {
+    monitor_ = std::make_shared<ns_Monitor::Task>(this, *monitorJSON);
+    monitor_path_ = task_->monitors_path_ / (std::to_string(task_->id_) + "-" + ID() + ".txt");
+  }
 
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
@@ -161,6 +179,12 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   }
   if (!hasTimePoints) {
     throw std::runtime_error("Step JSON missing time_points_ms array");
+  }
+
+  if (config.HasMember("monitor") && config["monitor"].IsObject()) {
+    monitor_ = std::make_shared<ns_Monitor::Task>(this, config["monitor"]);
+    monitor_path_ = GetPath(config, "monitor_path");
+    message_from_run_ = Get<std::string>(config, "message_from_run");
   }
 
   std::string executorName = GetOrDefault<std::string>(config, "executor", "");
@@ -307,6 +331,14 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   timepoints.PushBack(ToMillis(time_points_[0]), alloc);
   timepoints.PushBack(ToMillis(time_points_[1]), alloc);
   out.AddMember("time_points_ms", timepoints, alloc);
+
+  if (monitor_) {
+    rapidjson::Value monitor(rapidjson::kObjectType);
+    monitor_->ToJSON(monitor, alloc);
+    out.AddMember("monitor", monitor, alloc);
+    out.AddMember("monitor_path", rapidjson::Value(monitor_path_.c_str(), alloc), alloc);
+    out.AddMember("message_from_run", rapidjson::Value(message_from_run_.c_str(), alloc), alloc);
+  }
 }
 
 inline uint64_t ns_Schedule::Step::ToMillis(

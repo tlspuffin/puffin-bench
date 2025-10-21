@@ -34,6 +34,7 @@ public:
   std::filesystem::path env_path_;
   std::filesystem::path outputs_path_;
   std::filesystem::path artefacts_path_;
+  std::filesystem::path monitors_path_;
 
   std::unordered_map<std::string, std::string> args_;
 
@@ -58,6 +59,7 @@ public:
       std::filesystem::path const& functionsFile, 
       std::filesystem::path const& toolsFolders, 
       std::filesystem::path const& runRootPath, 
+      std::filesystem::path const& monitorsRootPath, 
       std::unordered_map<std::string, std::string>& args, 
       ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 

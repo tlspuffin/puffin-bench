@@ -33,7 +33,8 @@ bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
-      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local")
+      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
+      monitor_(config.monitorsPath_)
 {
   static int installHandler = InstallSigUSRHandler();
 
@@ -50,6 +51,7 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cach
   if (steps_.empty()) {
     ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
   } else {
+    monitor_.Add(stepsRunning_);
     threadRunning_ = true;
     thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
   }
@@ -229,6 +231,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       DEBUG_STEP_MSG("Step execute", step);
     }
     stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
+    monitor_.Add(toRun);
 
     if ((toRun.size() > 0) || updateStatus) {
       tasksManager_.SaveStatus();
@@ -254,6 +257,8 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       }
     }
 
+    updateStatus |= monitor_.GetChange();
+
     lockThread_.lock();
     try {
       for (ns_Schedule::Step* step : steps_) {
@@ -272,6 +277,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
       updateStatus |= ProcessDelayedCleanup(stepDelayedDelete, stepsDoneFile);
 
+      monitor_.Remove(stepsDone_);
       for(ns_Schedule::Step* step : stepsDone_) {
         if (step->monitor_count_ > 0) {
           stepDelayedDelete.push_back(step);

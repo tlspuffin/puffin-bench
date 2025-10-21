@@ -13,7 +13,7 @@ static ns_Schedule::Config defaultConfig;
 ns_Schedule::Config::Config() 
     : toolsPath_("tools"), runPath_("runs"), 
     exportPath_(std::filesystem::path("exports") / "schedule"), 
-    userPath_("users_data"), executors_()
+    userPath_("users_data"), executors_(), monitorsPath_(runPath_ / "monitors")
 {}
 
 ns_Schedule::Config::~Config() {
@@ -41,6 +41,8 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
   exportPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(*scheduleConfig, "exportPath", defaultConfig.exportPath_))
       .string();
+
+  monitorsPath_ = runPath_ / "monitors";
 
   if (scheduleConfig->HasMember("executors") && 
       (*scheduleConfig)["executors"].IsObject()) {

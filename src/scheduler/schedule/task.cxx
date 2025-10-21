@@ -17,6 +17,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& toolsFolders, 
     std::filesystem::path const& runRootPath, 
+    std::filesystem::path const& monitorsRootPath, 
     std::unordered_map<std::string, std::string>& args, 
     ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
@@ -27,6 +28,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     env_path_(run_root_path_ / ".taskenv"), 
     outputs_path_(run_root_path_ / "output"),
     artefacts_path_(run_root_path_ / "artefacts"),
+    monitors_path_(monitorsRootPath),
     args_(args), configurations_(), 
     root_steps_(), executors_(), 
     steps_file_(), request_cancel_(false), 
@@ -81,6 +83,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   env_path_ = GetPath(config, "env_path");
   outputs_path_ = GetPath(config, "outputs_path");
   artefacts_path_ = GetPath(config, "artefacts_path");
+  monitors_path_ = GetPath(config, "monitors_path");
 
   if ((config.HasMember("args")) && (config["args"].IsArray())) {
     rapidjson::Value const& argsArray = config["args"];
@@ -289,6 +292,15 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
           "\t" << ec.value() << ": " << ec.message() << std::endl;
     }
   }
+  id += '-';
+  for (const auto& entry : std::filesystem::directory_iterator(monitors_path_)) {
+    if (entry.is_regular_file()) {
+      std::string filename = entry.path().filename().string();
+      if (filename.rfind(id, 0) == 0) {
+        std::filesystem::remove(entry.path());
+      }
+    }
+  }
 }
 
 void ns_Schedule::Task::ToJSON(rapidjson::Value& out, 
@@ -305,6 +317,8 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("env_path", rapidjson::Value(env_path_.c_str(), alloc), alloc);
   out.AddMember("outputs_path", rapidjson::Value(outputs_path_.c_str(), alloc), alloc);
   out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
+
+  out.AddMember("monitors_path", rapidjson::Value(monitors_path_.c_str(), alloc), alloc);
 
   out.AddMember("request_cancel", request_cancel_, alloc);
 
@@ -414,6 +428,11 @@ void ns_Schedule::Task::CreateStepsFromJson(
 
     std::string const& step_name = stepJSON["step"].GetString();
 
+    rapidjson::Value const* monitorJSON = nullptr;
+    if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
+      monitorJSON = &(stepJSON["monitor"]);
+    }
+
     std::vector<rapidjson::Value const*> configurationsStack;
     if (stepJSON.HasMember("configuration")) {
       configurationsStack.push_back(&stepJSON["configuration"]);
@@ -422,7 +441,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
     rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
     ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
         run_id++, step_id, parent_stack, executorsProvider, 
-        configurationsStack, runConfiguration);
+        configurationsStack, runConfiguration, monitorJSON);
     configurationsStack.push_back(runConfiguration);
 
     ns_Schedule::Step* first_step = step;
