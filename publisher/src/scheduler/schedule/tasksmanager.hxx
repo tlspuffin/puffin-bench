@@ -3,6 +3,7 @@
 #include "config.hxx"
 #include "task.hxx"
 #include "step.hxx"
+#include "output_state.hxx"
 #include "../utils/file.hxx"
 #include <mutex>
 #include <rapidjson/document.h>

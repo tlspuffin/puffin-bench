@@ -4,6 +4,7 @@
 #include "executor/executor.hxx"
 #include "executor/executors_provider.hxx"
 #include "step_configurations.hxx"
+#include "archiver.hxx"
 #include "monitor/task.hxx"
 #include <cstdint>
 #include <string>
@@ -80,7 +81,7 @@ public:
   void Execute();
   void Shutdown();
   void GatherFilesToLocal();
-  void FinalizeAndArchive(std::filesystem::path const& savePath);
+  struct ArchiveJob FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
       rapidjson::Document::AllocatorType& alloc, 
@@ -249,10 +250,11 @@ inline void Step::GatherFilesToLocal() {
   end_processed_ = true;
 }
 
-inline void Step::FinalizeAndArchive(std::filesystem::path const& savePath) {
+inline struct ArchiveJob Step::FinalizeAndArchive(std::filesystem::path const& savePath) {
   if (state_ >= State::Running) {
-    task_->FinalizeAndArchive(savePath);
+    return task_->FinalizeAndArchive(savePath);
   }
+  return ArchiveJob();
 }
 
 inline std::string Step::ID() const {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <filesystem>
 #include <rapidjson/document.h>
 #include <unordered_map>
@@ -13,9 +14,9 @@ public:
 
   void ReadJSON(rapidjson::Value const& config);
   void ToJSON(rapidjson::Value& node, rapidjson::Document::AllocatorType& alloc) const;
-  void PublishResults(std::filesystem::path const& inLogs, 
-      std::filesystem::path const& inArtefacts, 
-      std::unordered_map<std::string, std::string> const& taskVariables);
+  void PublishResults(std::unordered_map<std::string, std::string> const& taskVariables, 
+      std::filesystem::path const& taskJSONfile,
+      std::vector<std::filesystem::path> const& data);
 
   std::string server_;
   std::filesystem::path storage_;

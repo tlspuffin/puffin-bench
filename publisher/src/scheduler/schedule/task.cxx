@@ -223,7 +223,8 @@ bool ns_Schedule::Task::PrepareToRun() {
   return true;
 }
 
-void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath) {
+struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
+    std::filesystem::path const& savePath) {
   if (steps_file_.is_open()) {
     steps_file_.close();
   }
@@ -231,6 +232,7 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
   std::string id = std::to_string(id_);
   std::filesystem::path finalSavePath = savePath / id;
 
+  std::filesystem::path taskJSONfile = savePath / (id+".json");
   try {
     if (!std::filesystem::create_directory(finalSavePath)) {
       throw std::runtime_error("Unable to create save directory (" + finalSavePath.string() + ")");
@@ -242,46 +244,34 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
     rapidjson::Value taskJSON(rapidjson::kObjectType);
     ToJSON(taskJSON, alloc, nullptr);
     doc.AddMember("task", taskJSON, alloc);
-    std::filesystem::path filename = finalSavePath / "task.json";
-    std::ofstream ofs(filename);
+    std::ofstream ofs(taskJSONfile);
     if (ofs.is_open()) {
       rapidjson::OStreamWrapper osw(ofs);
       rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(osw);
       doc.Accept(writer);
       ofs.close();
     } else {
-      std::cerr << "Error while saving task informations in save storage: " << filename << std::endl;
+      std::cerr << "Error while saving task informations in save storage: " << taskJSONfile << std::endl;
     }
 
     std::filesystem::rename(artefacts_path_, finalSavePath / "artefacts");
-    std::filesystem::rename(outputs_path_, finalSavePath / "output");
+    //std::filesystem::rename(outputs_path_, finalSavePath / "output");
     std::filesystem::rename(logs_path_, finalSavePath / "logs");
   } catch(std::runtime_error const& e) {
     std::cerr << "Error while moving resultats from running to save storage\n" <<
         "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;
-    return;
+    return ArchiveJob();
   } catch(...) {
     std::cerr << "Unknown Error while moving resultats from running to save storage\n" <<
         "All keep in " << run_root_path_ << std::endl;
-    return;
+    return ArchiveJob();
   }
 
-  try {
-    std::unordered_map<std::string, std::string> variables = 
-        LoadGlobalParameters(env_path_);
-    for (const auto& [key, value] : args_) {
-      variables.emplace(key, value);
-    }
-    variables.emplace("task_id", id);
-
-    publish_.PublishResults(finalSavePath / "logs", finalSavePath / "artefacts", variables);
-  } catch(std::runtime_error const& e) {
-    std::cerr << "Error while moving resultats from save to user save storage\n" <<
-        "All keep in " << finalSavePath << "\n\t" << e.what() << std::endl;
-  } catch(...) {
-    std::cerr << "Unknown Error while moving resultats from save to user save storage\n" <<
-        "All keep in " << finalSavePath << std::endl;
+  std::unordered_map<std::string, std::string> variables = LoadGlobalParameters(env_path_);
+  for (const auto& [key, value] : args_) {
+    variables.emplace(key, value);
   }
+  variables.emplace("task_id", id);
 
   for(std::filesystem::path const& path: 
       { run_root_path_, functions_path_, files_path_ }) {
@@ -291,15 +281,11 @@ void ns_Schedule::Task::FinalizeAndArchive(std::filesystem::path const& savePath
           "\t" << ec.value() << ": " << ec.message() << std::endl;
     }
   }
-  id += '-';
-  for (const auto& entry : std::filesystem::directory_iterator(monitors_path_)) {
-    if (entry.is_regular_file()) {
-      std::string filename = entry.path().filename().string();
-      if (filename.rfind(id, 0) == 0) {
-        std::filesystem::remove(entry.path());
-      }
-    }
-  }
+
+  std::filesystem::path pathID = id;
+  return ArchiveJob(publish_, variables, finalSavePath.string() + ".tgz", 
+      { taskJSONfile, finalSavePath / "artefacts", finalSavePath / "logs" }, 
+      finalSavePath, finalSavePath);
 }
 
 void ns_Schedule::Task::ToJSON(rapidjson::Value& out, 

@@ -315,6 +315,8 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       ReleaseCores(localData->cores_);
       SaveArtefacts(*step);
       std::filesystem::remove_all(localData->run_path_, ec);
+      std::filesystem::remove(localData->run_path_.string() + "-parameters");
+      std::filesystem::remove(localData->run_path_.string() + "-launcher");
       result.push_back(step);
     }
   }
@@ -705,4 +707,7 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
   std::ofstream outFile(finalDir / "metadata.json", std::ios::app);
   outFile << metadataBuffer.GetString() << std::endl;
   outFile.close();
+
+  std::error_code ec;
+  std::filesystem::remove(localData->artefacts_path_, ec);
 }

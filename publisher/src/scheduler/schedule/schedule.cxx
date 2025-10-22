@@ -303,6 +303,9 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       }
     }
   }
+
+  archiver_.WaitForCompletion();
+
   threadRunning_ = false;
   lockThread_.unlock();
   return;
@@ -358,7 +361,10 @@ void ns_Schedule::Schedule::ManageEndOfStep(
   if (step->TaskLastStep()) {
     // todo signal end of the flow
     uint64_t task_id = step->TaskID();
-    step->FinalizeAndArchive(config_.exportPath_);
+    ArchiveJob archiveJob = step->FinalizeAndArchive(config_.exportPath_);
+    if (archiveJob.sources_.size() > 0) {
+      archiver_.AddJob(archiveJob);
+    }
     tasksManager_.TaskEnded(step->task_);
     std::cout << "Tasks " << task_id << " done" << std::endl;
   }

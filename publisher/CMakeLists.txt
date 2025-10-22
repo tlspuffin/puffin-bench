@@ -64,6 +64,7 @@ set(SRV_SRC
   src/scheduler/api/schedule_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
+  src/scheduler/schedule/archiver.cxx
   src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
 )
 

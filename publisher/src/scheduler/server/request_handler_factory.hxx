@@ -2,6 +2,7 @@
 
 #include "config.hxx"
 #include "request_handler.hxx"
+#include <iostream>
 #include <regex>
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
 #include <Poco/Net/HTTPServerRequest.h>

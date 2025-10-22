@@ -15,17 +15,24 @@ Init () {
     git merge-base --is-ancestor "${COMMIT_ID}" 8b29ce76d && PREFIX_FAKETIME="faketime 2022-12-24" || PREFIX_FAKETIME=""
     AddGlobalParam PREFIX_FAKETIME "${PREFIX_FAKETIME}"
   fi
+  if [ -n "${PREFIX_FAKETIME}" ]; then
+    echo "Faketime setup to ${PREFIX_FAKETIME}";
+  fi
 
   sed -i 's$\(.*url = \)git@github.com:tlspuffin$\1https://github.com/tlspuffin$' .gitmodules 
   git submodule update --init --recursive || return 1;
 
   if [ ! -e "shell.nix" ]; then
+    echo "Use provided shell.nix"
     cp "${THEJOB_USER_FILES_PATH}/shell.nix" . || return 1;
   else
+    echo "Update shell.nix repo header"
+    head -1 shell.nix
     sed -i 's${ pkgs ? import <nixpkgs> { } }:${ pkgs ? import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-22.11.tar.gz") {} }:$' shell.nix
   fi
 
-  if [ ! -z "${prefix_faketime}" ]; then
+  if [ ! -z "${PREFIX_FAKETIME}" ]; then
+    echo "Setup faketime in shell.nix"
     sed -i 's/\(.*nativeBuildInputs = \[.*\)/\1\n    pkgs.libfaketime/' shell.nix || return 1
   fi
 
@@ -100,9 +107,6 @@ Build() {
   if [[ $cache_ok -ne 0 ]]; then
     cp -apr "${THEJOB_OUT_PATH}/repo" . || return 1;
     cd repo || return 1;
-    if [ ! -e "shell.nix" ]; then
-      cp "${THEJOB_USER_FILES_PATH}/shell.nix" . || return 1
-    fi
     if ${cputs}; then
       nix-shell --run "./tools/mk_vendor make '${vendor}'"
     fi
@@ -130,9 +134,8 @@ Experiment () {
 
   ipcrm --all
 
-  if [ ! -e "shell.nix" ]; then
-    cp "${THEJOB_USER_FILES_PATH}/shell.nix" . || return 1
-  fi
+  cp -apr "${THEJOB_OUT_PATH}/repo" . || return 1;
+  cd repo || return 1;
 
   nix-shell --run "\"${binary}\" seed" || return 1;
 
@@ -150,14 +153,15 @@ Experiment () {
     CreateArtefact "./experiments/${tlspuffin_outpath}/README.md" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-README.md" "commit_id:${COMMIT_ID}" "features:${features}"
     if [ -e "./experiments/${tlspuffin_outpath}/stats.json" ]; then
       CreateArtefact "./experiments/${tlspuffin_outpath}/stats.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-      CreateArtefact "./experiments/${tlspuffin_outpath}/tlspuffin.log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-tlspuffin.log" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "./experiments/${tlspuffin_outpath}/tlspuffin.out" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-tlspuffin.out" "commit_id:${COMMIT_ID}" "features:${features}"
     else
       CreateArtefact "./experiments/${tlspuffin_outpath}/log/stats.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-      CreateArtefact "./experiments/${tlspuffin_outpath}/log/tlspuffin.log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-tlspuffin.log" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "./experiments/${tlspuffin_outpath}/log/tlspuffin.out" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-tlspuffin.out" "commit_id:${COMMIT_ID}" "features:${features}"
     fi
+    CreateArtefact "./log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log" "commit_id:${COMMIT_ID}" "features:${features}"
   fi
 
-  StartMonitor ${tlspuffin_pid}
+  StartMonitor
 
   wait "${tlspuffin_pid}" 2>/dev/null
   local status=$?
@@ -169,6 +173,10 @@ Experiment () {
   return ${status}
 }
 
+Clean() {
+  rm -rf "${THEJOB_OUT_PATH}/repo" 
+}
+
 CheckObjectif () {
   outfile="$1";
   if [ -z "${outfile}" ]; then
@@ -176,12 +184,6 @@ CheckObjectif () {
     return 1;
   fi
   shift;
-  tlspuffin_pid=$1;
-  if [ -z "${tlspuffin_pid}" ]; then
-    echo "Missing PID arg" > ${outfile}
-    return 1;
-  fi
-  shift
 
   now=$(date +%s)
 
