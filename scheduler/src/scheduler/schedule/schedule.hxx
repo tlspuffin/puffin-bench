@@ -4,6 +4,7 @@
 #include "step.hxx"
 #include "tasksmanager.hxx"
 #include "output_state.hxx"
+#include "archiver.hxx"
 #include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
 #include "monitor/monitor.hxx"
@@ -60,6 +61,8 @@ private:
   std::unordered_map<std::string, ns_Executor::Executor*> executors_;
 
   ns_Monitor::Monitor monitor_;
+
+  Archiver archiver_;
 
   static bool shutdownTasksAtExit__;
   static void HandlerUSR1(int sig);

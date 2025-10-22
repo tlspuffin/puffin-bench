@@ -62,6 +62,8 @@ void ns_Monitor::Monitor::Remove(std::list<ns_Schedule::Step*> steps) {
   for (auto const& step : steps) {
     if (step->monitor_) {
       step->message_from_run_ = GetMessage(step->monitor_path_);
+      std::error_code ec;
+      std::filesystem::remove(step->monitor_path_, ec);
     }
   }
 }
@@ -146,7 +148,7 @@ void ns_Monitor::Monitor::InitINotify(int& fd, int& wd) {
 std::string ns_Monitor::Monitor::GetMessage(std::filesystem::path const& filePath) {
   std::ifstream file(filePath);
   if (!file.is_open()) {
-    LOGE("Monitor can extract run message from " << filePath);
+    LOGE("Monitor can not extract run message from " << filePath);
     return "";
   }
   std::ostringstream buffer;

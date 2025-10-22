@@ -3,6 +3,7 @@
 #include "../utils/variables.hxx"
 #include <memory>
 #include <iostream>
+#include <fstream>
 #include <Poco/URI.h>
 #include <Poco/Net/HTTPClientSession.h>
 #include <Poco/Net/HTTPSClientSession.h>
@@ -38,9 +39,10 @@ void ns_Schedule::Publish::ToJSON(rapidjson::Value& node,
   node.AddMember("goal", rapidjson::Value(goal_.c_str(), alloc), alloc);
 }
 
-void ns_Schedule::Publish::PublishResults(std::filesystem::path const& inLogs, 
-    std::filesystem::path const& inArtefacts, 
-    std::unordered_map<std::string, std::string> const& taskVariables) {
+void ns_Schedule::Publish::PublishResults(
+    std::unordered_map<std::string, std::string> const& taskVariables, 
+    std::filesystem::path const& taskJSONfile,
+    std::vector<std::filesystem::path> const& data) {
   if (storage_.empty()) {
     return;
   }
@@ -55,8 +57,10 @@ void ns_Schedule::Publish::PublishResults(std::filesystem::path const& inLogs,
     std::filesystem::copy_options copyOptions = 
         std::filesystem::copy_options::update_existing |
         std::filesystem::copy_options::recursive;
-    std::filesystem::copy(inLogs, finalStoragePath / ".process_logs", copyOptions);
-    std::filesystem::copy(inArtefacts, finalStoragePath, copyOptions);
+    for(auto const& file: data) {
+      std::filesystem::copy(file, finalStoragePath, copyOptions);
+    }
+    std::filesystem::copy(taskJSONfile, finalStoragePath / taskJSONfile.filename(), copyOptions);
   }
 
   if (server_.empty()) {
@@ -107,7 +111,7 @@ void ns_Schedule::Publish::PublishToServer(std::filesystem::path const& archiveP
           std::to_string(response.getStatus()) + 
           ": " + responseBody);
     }
-        
+
   } catch (const Poco::Exception& e) {
     throw std::runtime_error("HTTP[S] request failed: " + e.displayText());
   }

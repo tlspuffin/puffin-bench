@@ -2,6 +2,9 @@
 
 #include "../schedule/schedule.hxx"
 #include "../utils/file.hxx"
+#include <cstdint>
+#include <vector>
+#include <unordered_map>
 #include <sstream>
 #include <fstream>
 

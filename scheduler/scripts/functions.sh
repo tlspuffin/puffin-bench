@@ -157,6 +157,7 @@ StartMonitor() {
     echo "Monitor already running, pid: ${THEJOB_MONITOR_PID}" >&2
     return 0
   fi
+  THEJOB_MONITOR_LAST_CALL=( "$@" )
   local monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output
   read -r monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output <<< "${THEJOB_MONITOR_PARAMETERS_PATH}"
   {
@@ -192,13 +193,16 @@ StopMonitor() {
   if [ -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
     return 0
   fi
+  if [ ${#THEJOB_MONITOR_LAST_CALL[@]} -eq 0 ]; then
+    THEJOB_MONITOR_LAST_CALL=()
+  fi
   local monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output
   read -r monitor_entry monitor_interval_s monitor_timeout_s monitor_delay_s monitor_output <<< "${THEJOB_MONITOR_PARAMETERS_PATH}"
   monitor_output_tmp="${monitor_output}.tmp.${THEJOB_MONITOR_PID}"
   if [ -z "${monitor_timeout_s}" ]; then
-    ${monitor_entry} "${monitor_output_tmp}" $@
+    ${monitor_entry} "${monitor_output_tmp}" "${THEJOB_MONITOR_LAST_CALL[@]}"
   else
-    timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
+    timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- "${THEJOB_MONITOR_LAST_CALL[@]}";
     case $? in
       124)
         echo "monitor has timeouted" >> "${monitor_output_tmp}"

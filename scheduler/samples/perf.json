@@ -64,6 +64,9 @@
         "delay_start": "10s",
         "interval": "60s"
       }
+    },
+    {
+      "step": "Clean"
     }
   ]
 }

@@ -2,6 +2,7 @@
 
 #include "step_configurations.hxx"
 #include "publish.hxx"
+#include "archiver.hxx"
 #include "executor/executors_provider.hxx"
 #include <cstdint>
 #include <iostream>
@@ -73,7 +74,7 @@ public:
 
   bool PrepareToRun();
 
-  void FinalizeAndArchive(std::filesystem::path const& savePath);
+  struct ArchiveJob FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
       rapidjson::Document::AllocatorType& alloc, 
