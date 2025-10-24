@@ -1,0 +1,413 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --color-success: #27ae60;
+  --color-warning: #f39c12;
+  --color-error: #e74c3c;
+  --color-gray: #95a5a6;
+  --color-primary: #3498db;
+  --color-primary-dark: #2980b9;
+  --color-bg: #f5f5f5;
+  --color-card: #ffffff;
+  --color-text: #2c3e50;
+  --color-text-light: #7f8c8d;
+  --color-border: #ecf0f1;
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.15);
+  --transition: all 0.3s ease;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.header-left h1 {
+  color: var(--color-text);
+  margin-bottom: 5px;
+  font-size: 32px;
+}
+
+.header-info {
+  color: var(--color-text-light);
+  font-size: 14px;
+}
+
+.refresh-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refresh-btn:hover {
+  background: var(--color-primary-dark);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.refresh-btn:active {
+  transform: translateY(0);
+}
+
+/* Filters */
+.filters {
+  background: var(--color-card);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-group {
+  margin-bottom: 15px;
+}
+
+.filter-group label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.filter-btn {
+  padding: 8px 16px;
+  margin-right: 10px;
+  margin-bottom: 10px;
+  border: 2px solid var(--color-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 14px;
+  transition: var(--transition);
+}
+
+.filter-btn:hover {
+  border-color: var(--color-primary);
+  background: #f0f8ff;
+}
+
+.filter-btn.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: white;
+  font-weight: 600;
+}
+
+.search-group {
+  margin-top: 15px;
+}
+
+#search-input {
+  width: 100%;
+  max-width: 400px;
+  padding: 10px 15px;
+  border: 2px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 14px;
+  transition: var(--transition);
+}
+
+#search-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+/* Loading */
+.loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-text-light);
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  margin: 0 auto 20px;
+  border: 4px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.error {
+  background: var(--color-error);
+  color: white;
+  padding: 20px;
+  border-radius: 8px;
+  margin: 20px 0;
+  text-align: center;
+  font-weight: 600;
+}
+
+.no-results {
+  text-align: center;
+  padding: 40px;
+  color: var(--color-text-light);
+  font-style: italic;
+}
+
+/* Commits container */
+.commits-container {
+  min-height: 200px;
+}
+
+/* Commit card */
+.commit {
+  background: var(--color-card);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 15px;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+  opacity: 0;
+  animation: fadeIn 0.3s ease forwards;
+}
+
+@keyframes fadeIn {
+  to {
+    opacity: 1;
+  }
+}
+
+.commit:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.commit.hidden {
+  display: none;
+}
+
+/* Commit header */
+.commit-header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.pastille {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.commit-id {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--color-primary);
+}
+
+.date {
+  color: var(--color-text-light);
+  margin-left: auto;
+  font-size: 14px;
+}
+
+/* Status specific borders */
+.commit-success .commit-header {
+  border-bottom-color: var(--color-success);
+}
+
+.commit-fail .commit-header {
+  border-bottom-color: var(--color-error);
+}
+
+.commit-mixed .commit-header {
+  border-bottom-color: var(--color-warning);
+}
+
+.commit-no-run .commit-header {
+  border-bottom-color: var(--color-gray);
+}
+
+/* No run message */
+.no-run {
+  color: var(--color-text-light);
+  font-style: italic;
+  padding: 10px 0;
+}
+
+/* Libs summary */
+.libs-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.lib-item {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  transition: var(--transition);
+}
+
+.lib-item:hover {
+  background: #e9ecef;
+}
+
+.lib-name {
+  font-weight: 600;
+  min-width: 140px;
+  color: var(--color-text);
+}
+
+.lib-stats {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.lib-icon {
+  margin-left: auto;
+  font-size: 20px;
+}
+
+/* Actions */
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.actions button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.actions button:hover {
+  background: var(--color-primary-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.actions button:active {
+  transform: translateY(0);
+}
+
+.actions button:last-child {
+  background: var(--color-success);
+}
+
+.actions button:last-child:hover {
+  background: #229954;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+  
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+  
+  .header-right {
+    width: 100%;
+  }
+  
+  .refresh-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .filter-btn {
+    font-size: 12px;
+    padding: 6px 12px;
+  }
+  
+  .commit-header {
+    flex-wrap: wrap;
+  }
+  
+  .date {
+    margin-left: 0;
+    width: 100%;
+  }
+  
+  .lib-item {
+    flex-wrap: wrap;
+  }
+  
+  .lib-name {
+    min-width: auto;
+    width: 100%;
+  }
+  
+  .actions {
+    flex-direction: column;
+  }
+  
+  .actions button {
+    width: 100%;
+  }
+}
+
+/* Print styles */
+@media print {
+  .filters,
+  .actions,
+  .refresh-btn {
+    display: none;
+  }
+  
+  .commit {
+    page-break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #ddd;
+  }
+}

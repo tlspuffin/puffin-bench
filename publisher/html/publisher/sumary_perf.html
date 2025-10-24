@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Performance Results</title>
+  <link rel="stylesheet" href="/files/.html/sumary_perf.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <h1>Performance Results</h1>
+        <div class="header-info">
+          <span id="total-commits">Chargement...</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="refresh-btn" onclick="refreshData()">🔄 Actualiser</button>
+      </div>
+    </header>
+    
+    <div class="filters">
+      <div class="filter-group">
+        <label>Filtrer par statut:</label>
+        <button class="filter-btn active" data-filter="all">Tous</button>
+        <button class="filter-btn" data-filter="with-results">📊 Avec résultats uniquement</button>
+        <button class="filter-btn" data-filter="success">🟢 Succès</button>
+        <button class="filter-btn" data-filter="mixed">🟡 Mixte</button>
+        <button class="filter-btn" data-filter="fail">🔴 Échec</button>
+        <button class="filter-btn" data-filter="no run">⚪ Sans résultat</button>
+      </div>
+      
+      <div class="search-group">
+        <input type="text" id="search-input" placeholder="Rechercher un commit..." />
+      </div>
+    </div>
+    
+    <div id="commits-list" class="commits-container">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Chargement des commits...</p>
+      </div>
+    </div>
+    
+    <div id="no-results" class="no-results" style="display: none;">
+      Aucun commit ne correspond aux filtres
+    </div>
+  </div>
+  
+  <script src="/files/.html/sumary_perf.js"></script>
+</body>
+</html>
