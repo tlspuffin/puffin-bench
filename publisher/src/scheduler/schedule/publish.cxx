@@ -1,6 +1,6 @@
 #include "publish.hxx"
-#include "../utils/rapidjson.hxx"
-#include "../utils/variables.hxx"
+#include "../../utils/rapidjson.hxx"
+#include "../../utils/variables.hxx"
 #include <memory>
 #include <iostream>
 #include <fstream>

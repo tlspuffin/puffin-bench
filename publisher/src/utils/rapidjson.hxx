@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <rapidjson/document.h>
 
+void ReadJSONFile(std::string const& file, rapidjson::Document& doc);
+
 template<typename T> T GetOrDefault(rapidjson::Value const& obj,
     char const* name, T const defaultValue);
 std::filesystem::path GetOrDefaultPath(
@@ -15,7 +17,6 @@ std::filesystem::path GetPath(rapidjson::Value const& obj,
 
 uint64_t ParseDurationToSeconds(const std::string& str);
 uint64_t ParseDurationToMilliSeconds(const std::string& str);
-
 
 template<typename T> inline T GetOrDefault(rapidjson::Value const& obj,
     char const* name, T const defaultValue) {

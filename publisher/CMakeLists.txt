@@ -55,7 +55,7 @@ EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_D
 
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
-  src/scheduler/utils/rapidjson.cxx src/scheduler/utils/variables.cxx src/scheduler/utils/file.cxx 
+  src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx 
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
@@ -81,24 +81,3 @@ target_compile_definitions(srv-static PRIVATE STATIC)
 add_dependencies(srv-static reserve_port-static_blob_h)
 
 add_executable(testcpu src/cpu.cxx src/scheduler/schedule/executor/linux_cores.cxx)
-
-EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/publisher/index.html" "${CMAKE_SOURCE_DIR}/src/embeded/publisher/index_html.h" Publisher_Index)
-EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/publisher/index.css" "${CMAKE_SOURCE_DIR}/src/embeded/publisher/index_css.h" Publisher_CSS)
-EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/publisher/index.js" "${CMAKE_SOURCE_DIR}/src/embeded/publisher/index_js.h" Publisher_JS)
-
-set(PUBLISHER_SRC
-  src/publisher/main.cxx src/publisher/config.cxx 
-  src/publisher/server/config.cxx src/publisher/server/server.cxx 
-  src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
-  src/publisher/publish/config.cxx src/publisher/publish/publish.cxx
-  src/embeded/publisher/index_html.h src/embeded/publisher/index_css.h src/embeded/publisher/index_js.h
-)
-
-add_executable(publisher ${PUBLISHER_SRC})
-target_link_libraries(publisher PRIVATE Poco)
-target_include_directories(publisher PRIVATE ${RAPIDJSON_PATH})
-
-add_executable(publisher-static ${PUBLISHER_SRC})
-target_link_libraries(publisher-static PRIVATE Poco)
-target_include_directories(publisher-static PRIVATE ${RAPIDJSON_PATH})
-target_link_options(publisher-static PRIVATE -static)

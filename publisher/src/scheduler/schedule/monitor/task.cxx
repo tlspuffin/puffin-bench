@@ -1,7 +1,7 @@
 #include "task.hxx"
 #include "../step.hxx"
-#include "../../utils/rapidjson.hxx"
-#include "../../utils/logs.hxx"
+#include "../../../utils/rapidjson.hxx"
+#include "../../../utils/logs.hxx"
 
 ns_Monitor::Task::Task() : entryPoint_(), 
     delayStartS_("0"), timeoutS_("0"), intervalS_("0")

@@ -1,5 +1,5 @@
 #include "step_configurations.hxx"
-#include "../utils/rapidjson.hxx"
+#include "../../utils/rapidjson.hxx"
 
 ns_Schedule::StepConfigurations::Configuration::Configuration() : 
     executor_name_(""), nb_cores_(1), nb_retry_(1), 
