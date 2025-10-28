@@ -1,5 +1,16 @@
 import { Terminal } from './terminal.js';
 
+const dataSource = {
+  mode: 'api',
+  url: null,
+  fileContent: null
+};
+
+function GetQueryParam(name) {
+  const params = new URLSearchParams(window.location.search);
+  return params.get(name);
+}
+
 function StepID(step) {
   return step.step_id + '-' + step.rank_id + '-' + step.attempt_id;
 }
@@ -21,8 +32,6 @@ function ExitCodeLabel(step) {
   switch(step.exit_code) {
     case null:
     return 'N/A';
-    default:
-    return step.exit_code;
     case 0x0100:
     return 'Not set';
     case 0x0200:
@@ -31,6 +40,8 @@ function ExitCodeLabel(step) {
     return 'Cancelled';
     case 0x0800:
     return 'Launch Error';
+    default:
+    return step.exit_code;
   }
 }
 
@@ -331,6 +342,9 @@ function CreateAttemptCard(step, taskName) {
     logsButton.onclick = () => {
         StepLogs(step, taskName);
     };
+    if (dataSource.mode === 'url') {
+      logsButton.style.display = 'none';
+    }
     if (step.state == 'Running') {
       const cancelButton = document.createElement('button');
       cancelButton.classList.add('card-attempt-cancel-btn');
@@ -483,6 +497,14 @@ function CreateTaksCard(task, steps) {
       await CancelTask(task.id);
   };
 
+  let count = 0;
+  for (const [, someSteps] of steps) {
+    count += someSteps.filter(step => step.state === 'Running' || step.state === 'Pending').length;
+  }
+  if (count == 0) {
+    cancelButton.style.display = 'none';
+  }
+
   let taskName = task.name;
   if (taskName === '') {
     taskName = task.id;
@@ -559,7 +581,29 @@ function CreateTaksCard(task, steps) {
   document.getElementById('container-running-steps').appendChild(div);
  }
 
+function NormalizeTasksPayload(raw) {
+  if (raw && raw.data && Array.isArray(raw.data.tasks)) {
+    return { success: true, tasks: raw.data.tasks };
+  }
+  if (raw && Array.isArray(raw.tasks)) {
+    return { success: true, tasks: raw.tasks };
+  }
+  if (Array.isArray(raw)) {
+    return { success: true, tasks: raw };
+  }
+  //return { success: false, tasks: [], error: 'Format de JSON non reconnu' };
+  return { success: true, tasks: [raw.task] };
+}
+
 async function GetServerStatus() {
+  if (dataSource.mode === 'url' && dataSource.url) {
+    const resp = await fetch(dataSource.url, { cache: 'no-store' });
+    if (!resp.ok) return [false, []];
+    const json = await resp.json();
+    let success = (json.task && (typeof json.task === 'object'));
+    return [success, success ? [json.task] : []];
+  }
+
   //var response = await fetch(`http://${window.location.host}/files/board/out.json`);
   var response = await fetch(`http://${window.location.host}/api/tasks/running`);
   if (!response.ok) {
@@ -627,6 +671,13 @@ async function RefreshBoard() {
 }
 
 function main() {
+  const fileInURL = GetQueryParam('data');
+  if (fileInURL) {
+    dataSource.mode = 'url';
+    dataSource.url = fileInURL;
+    document.getElementById('refresh-button').style.display = 'none';
+  }
+
   RefreshBoard();
   document.getElementById('refresh-button').onclick = RefreshBoard;
 
