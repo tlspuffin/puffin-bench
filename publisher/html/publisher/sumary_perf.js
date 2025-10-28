@@ -3,7 +3,7 @@ var currentFilter = 'all';
 
 const config = {
   location: window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1),
-  detailURI: '/files/.html/board.html'
+  detailURI: '/html/board/board.html'
 };
 
 document.addEventListener('DOMContentLoaded', () => {
