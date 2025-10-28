@@ -1,5 +1,6 @@
 #pragma once
 #include <sstream>
+#include <iostream>
 
 #define LOGE(MSG) do {\
   std::stringstream oss;\

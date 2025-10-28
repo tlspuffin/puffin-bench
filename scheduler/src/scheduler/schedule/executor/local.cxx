@@ -1,6 +1,6 @@
 #include "local.hxx"
 #include "../step.hxx"
-#include "../../utils/rapidjson.hxx"
+#include "../../../utils/rapidjson.hxx"
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/stat.h>

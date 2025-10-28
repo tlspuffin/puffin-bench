@@ -1,5 +1,5 @@
 #include "config.hxx"
-#include "../utils/rapidjson.hxx"
+#include "../../utils/rapidjson.hxx"
 
 static ns_Server::Config defaultConfig;
 
