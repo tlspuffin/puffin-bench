@@ -1,11 +1,11 @@
-#include "publish_action_perf.hxx"
+#include "publish_action_vuln.hxx"
 #include "../../utils/logs.hxx"
 #include <fstream>
 #include <rapidjson/document.h>
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/writer.h>
 
-ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionPerf::Analyze(std::string jsonTaskFile) {
+ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionVuln::Analyze(std::string jsonTaskFile) {
   TaskAnalysis experiments = ExtractExperiments(jsonTaskFile);
   LOGI("Found " << experiments.experiments.size() << " Experiment steps");
   std::unordered_set<std::string> libs;
@@ -17,7 +17,7 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionPerf::Analyze(s
   );
   for (auto const& exp : experiments.experiments) {
     libs.insert(exp.id);
-    if (exp.exit_code == 512) {
+    if ((exp.exit_code == 0) && (exp.state == "Done")) {
       haveSuccess = true;
       experiments.libs_summary[exp.id].success_count++;
       experiments.libs_summary[exp.id].total_runs++;
@@ -46,12 +46,12 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionPerf::Analyze(s
   return experiments;
 }
 
-bool ns_Publish::PublishActionPerf::GenerateCommitJson(
+bool ns_Publish::PublishActionVuln::GenerateCommitJson(
     ns_Publish::PublishAction::TaskAnalysis const& analysis,
     std::filesystem::path const& outputPath) {
 
-  std::filesystem::create_directories(outputPath / "Perf");
-  std::filesystem::path jsonPath = outputPath / "Perf" / (analysis.commit_id + ".json");
+  std::filesystem::create_directories(outputPath / "Vuln");
+  std::filesystem::path jsonPath = outputPath / "Vuln" / (analysis.commit_id + ".json");
 
   rapidjson::Document doc;
   doc.SetObject();

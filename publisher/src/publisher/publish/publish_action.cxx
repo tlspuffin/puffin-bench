@@ -1,5 +1,6 @@
 #include "publish_action.hxx"
 #include "publish_action_perf.hxx"
+#include "publish_action_vuln.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/time.hxx"
 #include <fstream>
@@ -76,7 +77,7 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
     }
 
     std::string stepName = step["name"].GetString();
-    if (stepName == "Experiment") {
+    if (stepName.find("Experiment") != std::string::npos) {
       ExperimentResult exp;
       exp.state = step.HasMember("state") && step["state"].IsString()
           ? step["state"].GetString() : "Unknown";
@@ -109,7 +110,7 @@ ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& a
   if(action == "GenerateReportPerf") {
     return new PublishActionPerf(name, filesFilter);
   } else if (action == "GenerateReportVuln") {
-    return new PublishAction(name, filesFilter);
+    return new PublishActionVuln(name, filesFilter);
   }
   return nullptr;
 }

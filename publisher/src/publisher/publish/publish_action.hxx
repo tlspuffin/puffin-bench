@@ -21,6 +21,8 @@ public:
   struct LibSummary {
     int success_count;
     int total_runs;
+    std::vector<uint64_t> success_durations_ms;
+    std::vector<uint64_t> fail_durations_ms;
   };
   struct TaskAnalysis {
     std::string commit_id;
@@ -38,7 +40,7 @@ public:
   virtual ~PublishAction();
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
   TaskAnalysis ExtractExperiments(std::string const& jsonTaskFile);
-  virtual bool Run(std::filesystem::path const& inputPath, std::filesystem::path const& outputPath) { return true; };
+  virtual bool Run(std::filesystem::path const& inputPath, std::filesystem::path const& outputPath) = 0;
   static PublishAction* Build(std::string const& action, std::string const& name, std::string const& onFiles);
 protected:
   std::string name_;

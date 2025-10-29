@@ -1,12 +1,34 @@
 var allCommits = [];
 var currentFilter = 'all';
+var dataType = 'Perf';
 
 const config = {
   location: window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1),
   detailURI: '/html/board/board.html'
 };
 
+function formatDuration(durationMs) {
+  const seconds = Math.floor(durationMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `${hours}h${minutes % 60}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m${seconds % 60}s`;
+  } else {
+    return `${seconds}s`;
+  }
+}
+
+function formatDurationsList(durations) {
+  if (!durations || durations.length === 0) return '-';
+  return durations.map(d => formatDuration(d)).join(', ');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  dataType = new URLSearchParams(window.location.search)?.get('type') ?? 'Perf';
+  document.getElementById('header-title').textContent = `${dataType} Results`;
   loadData();
   setupFilters();
   setupSearch();
@@ -43,7 +65,7 @@ async function loadCommits(commitIds) {
     const batch = commitIds.slice(i, i + batchSize);
 
     const promises = batch.map(commitId => 
-      fetch(`${config.location}/JSON/Perf/${commitId}.json`)
+      fetch(`${config.location}/JSON/${dataType}/${commitId}.json`)
         .then(r => r.ok ? r.json() : { commit_id: commitId, global_status: 'no run' })
         .catch(() => ({ commit_id: commitId, global_status: 'no run' }))
     );
@@ -89,11 +111,23 @@ function renderCommit(commit, container) {
       const libItem = document.createElement('div');
       libItem.className = 'lib-item';
 
+      const successDurations = libData.success_durations_ms || [];
+      const successDurationsFormatted = successDurations.length > 0 ? 
+          '✓ ' + successDurations.map(d => formatDuration(d)).join(', ') : '';
+
+      const failDurations = libData.fail_durations_ms || [];
+      const failDurationsFormatted = failDurations.length > 0 ?
+          '✗ ' + failDurations.map(d => formatDuration(d)).join(', ') : '';
+
       const icon = getLibIcon(libData.success_count, libData.total_runs);
       libItem.innerHTML = `
         <span class="lib-name">${libName}</span>
         <span class="lib-stats">${libData.success_count}/${libData.total_runs}</span>
         <span class="lib-icon">${icon}</span>
+        <span class="lib-durations">
+          <span class="duration-success">${successDurationsFormatted}</span>
+          <span class="duration-fail">${failDurationsFormatted}</span>
+        </span>
       `;
 
       libsDiv.appendChild(libItem);
@@ -193,7 +227,7 @@ function applyFilters() {
     } else {
       statusMatch = status === currentFilter;
     }
-    
+
     const searchMatch = commitId.includes(searchTerm);
 
     if (statusMatch && searchMatch) {
@@ -221,11 +255,11 @@ function setupSearch() {
 }
 
 function showDetails(commitId, taskId) {
-  window.open(`${window.location.origin}${config.detailURI}?data=${config.location}/PR/${commitId}/Perf/${taskId}.json`);
+  window.open(`${window.location.origin}${config.detailURI}?data=${config.location}/PR/${commitId}/${dataType}/${taskId}.json`);
 }
 
 function downloadResults(commitId, taskId) {
-  window.location.href = `${config.location}/PR/${commitId}/Perf/${taskId}.tgz`;
+  window.location.href = `${config.location}/PR/${commitId}/${dataType}/${taskId}.tgz`;
 }
 
 function refreshData() {
