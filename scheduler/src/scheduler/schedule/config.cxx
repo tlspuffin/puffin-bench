@@ -46,8 +46,8 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
 
   if (scheduleConfig->HasMember("executors") && 
       (*scheduleConfig)["executors"].IsObject()) {
-    for (auto const& [ found, jsonConfig ] : (*scheduleConfig)["executors"].GetObject()) {
-      ns_Executor::Config* executorConfig = ns_Executor::Config::BuildConfig(jsonConfig);
+    for (auto const& [ key, jsonConfig ] : (*scheduleConfig)["executors"].GetObject()) {
+      ns_Executor::Config* executorConfig = ns_Executor::Config::BuildConfig(key.GetString(), jsonConfig);
       executors_.emplace(executorConfig->name_, executorConfig);
     }
   }
@@ -55,6 +55,17 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
     ns_Executor::LocalConfig* localConfig = new ns_Executor::LocalConfig("local");
     executors_.emplace(localConfig->name_, localConfig);
   }
+
+  if (scheduleConfig->HasMember("publisher") && (*scheduleConfig)["publisher"].IsObject()) {
+    for (auto const& [ key, jsonConfig ] : (*scheduleConfig)["publisher"].GetObject()) {
+      struct PublisherConfig publisherConfig;
+      publisherConfig.uri_ = Get<std::string>(jsonConfig, "uri");
+      publisherConfig.storage_ = GetPath(jsonConfig, "storage");
+      publisherConfig.checkServerCertificat_ = GetOrDefault<bool>(jsonConfig, "check_server_certificat", false);
+      publishers_.emplace(key.GetString(), publisherConfig);
+    }
+  }
+
 }
 
 void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc, 

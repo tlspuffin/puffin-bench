@@ -16,7 +16,7 @@ struct Config {
   std::string name_;
   Config(enum Type type, std::string const& name);
   virtual ~Config() {};
-  static Config* BuildConfig(rapidjson::Value const& node);
+  static Config* BuildConfig(std::string const& name, rapidjson::Value const& node);
   void Save(std::string const& name, rapidjson::Value& node, 
       rapidjson::MemoryPoolAllocator<>& alloc) const;
   virtual void Validate() const = 0;

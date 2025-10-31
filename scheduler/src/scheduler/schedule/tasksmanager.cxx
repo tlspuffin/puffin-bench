@@ -61,7 +61,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
 
   ns_Schedule::Task* task = new ns_Schedule::Task(
     task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
-    config_.runPath_, config_.monitorsPath_ , args, schedule);
+    config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);
@@ -178,7 +178,7 @@ ns_Schedule::TasksManager::LoadStatus(
   for (rapidjson::SizeType i = 0; i < tasksArray.Size(); i++) {
     rapidjson::Value const& taskJson = tasksArray[i];
     ns_Schedule::Task* task = 
-        new ns_Schedule::Task(taskJson, *schedule, stepsPending, stepsRunning, stepsDone);
+        new ns_Schedule::Task(taskJson, config_.publishers_, *schedule, stepsPending, stepsRunning, stepsDone);
     {
       std::lock_guard<std::mutex> lock(lock_);
       tasks_.push_back(task);

@@ -61,9 +61,11 @@ public:
       std::filesystem::path const& toolsFolders, 
       std::filesystem::path const& runRootPath, 
       std::filesystem::path const& monitorsRootPath, 
+      std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
       std::unordered_map<std::string, std::string>& args, 
       ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 
+      std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
       ns_Executor::ExecutorsProvider const& executorsProvider, 
       std::list<ns_Schedule::Step*>& stepsPending, 
       std::list<ns_Schedule::Step*>& stepsRunning, 

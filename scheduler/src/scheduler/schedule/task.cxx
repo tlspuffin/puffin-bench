@@ -17,7 +17,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::filesystem::path const& functionsFile, 
     std::filesystem::path const& toolsFolders, 
     std::filesystem::path const& runRootPath, 
-    std::filesystem::path const& monitorsRootPath, 
+    std::filesystem::path const& monitorsRootPath,
+    std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     std::unordered_map<std::string, std::string>& args, 
     ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
@@ -52,7 +53,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   }
 
   if (publisherConfiguration != nullptr) {
-    publish_.ReadJSON(*publisherConfiguration);
+    publish_.ReadJSON(publishersConfig, *publisherConfiguration);
   }
   if (configurations != nullptr) {
     configurations_.ReadFromTaskJSON(*configurations);
@@ -64,6 +65,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
 }
 
 ns_Schedule::Task::Task(rapidjson::Value const& config, 
+    std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     ns_Executor::ExecutorsProvider const& executorsProvider, 
     std::list<ns_Schedule::Step*>& stepsPending, 
     std::list<ns_Schedule::Step*>& stepsRunning, 
@@ -183,7 +185,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   request_cancel_ = Get<bool>(config, "request_cancel");
 
   if (config.HasMember("publish")) {
-    publish_.ReadJSON(config["publish"]);
+    publish_.ReadJSON(publishersConfig, config["publish"]);
   }
 }
 

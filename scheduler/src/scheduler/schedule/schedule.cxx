@@ -34,7 +34,7 @@ bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
-      monitor_(config.monitorsPath_)
+      monitor_(config.monitorsPath_), archiver_()
 {
   static int installHandler = InstallSigUSRHandler();
 

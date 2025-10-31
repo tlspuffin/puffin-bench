@@ -19,6 +19,12 @@
         "scriptPath": "../scripts"
       }
     },
+    "publisher": {
+      "default": {
+        "uri": "http://127.0.0.1:8081/api/notify",
+        "storage": "/home/olivier/Desktop/Archives"
+      }
+    },
     "runPath": "../runs",
     "userPath": "../users_data",
     "exportPath": "../exports/schedule",

@@ -78,7 +78,7 @@ void ns_Schedule::Archiver::ThreadLoop() {
       LOGI("[Archiver] Success: " << job.archivePath_);
 
       try {
-      job.publish_.PublishResults(job.variables_, job.sources_[0], { job.archivePath_ });
+        job.publish_.PublishResults(job.variables_, job.sources_[0], { job.archivePath_ });
       } catch(std::runtime_error const& e) {
         LOGW("Error while moving resultats from save to user save storage\n" <<
             "All keep in " << job.baseDir_ << "\n\t" << e.what());

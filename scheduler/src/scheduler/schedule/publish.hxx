@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.hxx"
 #include <vector>
 #include <filesystem>
 #include <rapidjson/document.h>
@@ -10,9 +11,11 @@ namespace ns_Schedule {
 class Publish {
 public:
   Publish();
-  Publish(rapidjson::Value const& config);
+  Publish(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
+      rapidjson::Value const& config);
 
-  void ReadJSON(rapidjson::Value const& config);
+  void ReadJSON(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
+      rapidjson::Value const& config);
   void ToJSON(rapidjson::Value& node, rapidjson::Document::AllocatorType& alloc) const;
   void PublishResults(std::unordered_map<std::string, std::string> const& taskVariables, 
       std::filesystem::path const& taskJSONfile,

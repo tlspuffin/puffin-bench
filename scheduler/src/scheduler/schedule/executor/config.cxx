@@ -15,13 +15,9 @@ ns_Executor::Config::Config(enum ns_Executor::Config::Type type, std::string con
     : type_(type), name_(name)
 {}
 
-ns_Executor::Config* ns_Executor::Config::BuildConfig(rapidjson::Value const& node) {
+ns_Executor::Config* ns_Executor::Config::BuildConfig(std::string const& name, rapidjson::Value const& node) {
   enum Type type = (enum Type)GetOrDefault<int>(node, "type", 
       (int)Config::Type::Local);
-  std::string name = GetOrDefault<std::string>(node, "name", "");
-  if (name.empty()) {
-    throw std::runtime_error("Executor config missing name");
-  }
   Config* config = nullptr;
   switch (type) {
     case Config::Type::Local:

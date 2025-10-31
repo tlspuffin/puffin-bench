@@ -9,6 +9,12 @@
 
 namespace ns_Schedule {
 
+struct PublisherConfig {
+  std::string uri_;
+  bool checkServerCertificat_;
+  std::filesystem::path storage_;
+};
+
 struct Config {
   std::filesystem::path toolsPath_;
   std::filesystem::path runPath_;
@@ -17,6 +23,8 @@ struct Config {
   std::unordered_map<std::string, ns_Executor::Config*> executors_;
 
   std::filesystem::path monitorsPath_;
+
+  std::unordered_map<std::string, PublisherConfig> publishers_;
 
   Config();
   ~Config();

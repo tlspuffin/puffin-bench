@@ -1,6 +1,7 @@
 #include "publish.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/variables.hxx"
+#include "../../utils/logs.hxx"
 #include <memory>
 #include <iostream>
 #include <fstream>
@@ -14,21 +15,31 @@ ns_Schedule::Publish::Publish()
     : server_(), storage_(), checkServerCertificat_(false) {
 }
 
-ns_Schedule::Publish::Publish(rapidjson::Value const& config) 
-    : Publish() {
-  ReadJSON(config);
+ns_Schedule::Publish::Publish(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
+    rapidjson::Value const& config) : Publish() {
+  ReadJSON(publishersConfig, config);
 }
 
-void ns_Schedule::Publish::ReadJSON(rapidjson::Value const& config) {
+void ns_Schedule::Publish::ReadJSON(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
+    rapidjson::Value const& config) {
   if (!config.IsObject()) {
     throw std::runtime_error("publish config should be an object");
   }
+
+  goal_ = GetOrDefault<std::string>(config, "goal", "");
+
   server_ = GetOrDefault<std::string>(config, "server", "");
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
   storage_  = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(config, "storage_path", ""));
-  goal_ = GetOrDefault<std::string>(config, "goal", "");
+
+  auto const& itConfig = publishersConfig.find(server_);
+  if (itConfig != publishersConfig.end()) {
+    server_ = itConfig->second.uri_;
+    checkServerCertificat_ = itConfig->second.checkServerCertificat_;
+    storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
+  }
 }
 
 void ns_Schedule::Publish::ToJSON(rapidjson::Value& node, 
@@ -49,10 +60,7 @@ void ns_Schedule::Publish::PublishResults(
 
   std::filesystem::path finalStoragePath = ResolveVariables(storage_, taskVariables);
   if (!finalStoragePath.empty()) {
-    if (!std::filesystem::create_directories(finalStoragePath)) {
-      throw std::runtime_error(
-          "Unable to create user save directory (" + finalStoragePath.string() + ")");
-    }
+    std::filesystem::create_directories(finalStoragePath);
 
     std::filesystem::copy_options copyOptions = 
         std::filesystem::copy_options::update_existing |
@@ -66,7 +74,13 @@ void ns_Schedule::Publish::PublishResults(
   if (server_.empty()) {
     return;
   }
-  PublishToServer(finalStoragePath);
+  try {
+    PublishToServer(finalStoragePath);
+  } catch(std::runtime_error const& e) {
+    LOGW("Error with publish server " << server_ << "\n\t" << e.what());
+  } catch(...) {
+    LOGW("Unknown Error with publish server " << server_);
+  }
 }
 
 void ns_Schedule::Publish::PublishToServer(std::filesystem::path const& archivePath) {
