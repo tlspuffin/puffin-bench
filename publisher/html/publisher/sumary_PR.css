@@ -261,6 +261,12 @@ header {
   border-bottom-color: var(--color-gray);
 }
 
+.commit-comment {
+  margin: 8px 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 /* No run message */
 .no-run {
   color: var(--color-text-light);

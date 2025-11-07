@@ -44,20 +44,21 @@ function loadData() {
     })
     .then(data => {
       document.getElementById('total-commits').textContent = 
-        `${data.commits.length} commits dans l'historique`;
+        `${data.commits.length} commits in history`;
 
       document.querySelector('.loading')?.remove();
 
-      loadCommits(data.commits);
+      loadCommits(data);
     })
     .catch(error => {
       console.error('Error loading git_index.json:', error);
       document.getElementById('commits-list').innerHTML = 
-        '<div class="error">❌ Erreur de chargement de l\'index Git</div>';
+        '<div class="error">❌ Error loading git index</div>';
     });
 }
 
-async function loadCommits(commitIds) {
+async function loadCommits(commitsInfos) {
+  const commitIds = commitsInfos.commits;
   const container = document.getElementById('commits-list');
   const batchSize = 10;
 
@@ -76,9 +77,9 @@ async function loadCommits(commitIds) {
       allCommits.push(commitData);
 
       if (commitData.global_status === 'no run' && !commitData.libs) {
-        renderNoRunCommit(commitData.commit_id, container);
+        renderNoRunCommit(commitData.commit_id, commitsInfos[commitData.commit_id], container);
       } else {
-        renderCommit(commitData, container);
+        renderCommit(commitData, commitsInfos[commitData.commit_id], container);
       }
     });
   }
@@ -86,7 +87,7 @@ async function loadCommits(commitIds) {
   applyFilters();
 }
 
-function renderCommit(commit, container) {
+function renderCommit(commit, commitInfos, container) {
   const commitDiv = document.createElement('div');
   commitDiv.className = `commit commit-${commit.global_status}`;
   commitDiv.dataset.commitId = commit.commit_id;
@@ -99,15 +100,23 @@ function renderCommit(commit, container) {
       ${getPastilleIcon(commit.global_status)}
     </span>
     <span class="commit-id">${commit.commit_id}</span>
-    <span class="date">${commit.date || ''}</span>
+    <span class="date">${commitInfos?.date || 'no date'}</span>
   `;
   commitDiv.appendChild(header);
+
+  if (commitInfos?.comment) {
+    const commentEl = document.createElement('div');
+    commentEl.className = 'commit-comment';
+    commentEl.textContent = commitInfos.comment;
+    commitDiv.appendChild(commentEl);
+  }
 
   if (commit.libs && Object.keys(commit.libs).length > 0) {
     const libsDiv = document.createElement('div');
     libsDiv.className = 'libs-summary';
 
-    for (const [libName, libData] of Object.entries(commit.libs)) {
+    for (const [libName, libData] of 
+        Object.entries(commit.libs).sort((a,b)=> a[0].localeCompare(b[0]))) {
       const libItem = document.createElement('div');
       libItem.className = 'lib-item';
 
@@ -139,15 +148,15 @@ function renderCommit(commit, container) {
   const actions = document.createElement('div');
   actions.className = 'actions';
   actions.innerHTML = `
-    <button onclick="showDetails('${commit.commit_id}', '${commit.task_id}')">📊 Détails</button>
-    <button onclick="downloadResults('${commit.commit_id}', ${commit.task_id})">⬇️ Télécharger</button>
+    <button onclick="showDetails('${commit.commit_id}', '${commit.task_id}')">📊 Details</button>
+    <button onclick="downloadResults('${commit.commit_id}', ${commit.task_id})">⬇️ Download</button>
   `;
   commitDiv.appendChild(actions);
 
   container.appendChild(commitDiv);
 }
 
-function renderNoRunCommit(commitId, container) {
+function renderNoRunCommit(commitId, commitInfos, container) {
   const commitDiv = document.createElement('div');
   commitDiv.className = 'commit commit-no-run';
   commitDiv.dataset.commitId = commitId;
@@ -158,12 +167,20 @@ function renderNoRunCommit(commitId, container) {
   header.innerHTML = `
     <span class="pastille pastille-gray">⚪</span>
     <span class="commit-id">${commitId}</span>
+    <span class="date">${commitInfos?.date || 'no date'}</span>
   `;
   commitDiv.appendChild(header);
 
+  if (commitInfos?.comment) {
+    const commentEl = document.createElement('div');
+    commentEl.className = 'commit-comment';
+    commentEl.textContent = commitInfos.comment;
+    commitDiv.appendChild(commentEl);
+  }
+
   const noRun = document.createElement('div');
   noRun.className = 'no-run';
-  noRun.textContent = 'Pas de résultats';
+  noRun.textContent = 'No resultats';
   commitDiv.appendChild(noRun);
 
   container.appendChild(commitDiv);

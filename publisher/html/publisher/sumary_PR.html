@@ -12,23 +12,23 @@
       <div class="header-left">
         <h1 id="header-title"></h1>
         <div class="header-info">
-          <span id="total-commits">Chargement...</span>
+          <span id="total-commits">Loading...</span>
         </div>
       </div>
       <div class="header-right">
-        <button class="refresh-btn" onclick="refreshData()">🔄 Actualiser</button>
+        <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
       </div>
     </header>
     
     <div class="filters">
       <div class="filter-group">
-        <label>Filtrer par statut:</label>
-        <button class="filter-btn active" data-filter="all">Tous</button>
-        <button class="filter-btn" data-filter="with-results">📊 Avec résultats uniquement</button>
-        <button class="filter-btn" data-filter="success">🟢 Succès</button>
-        <button class="filter-btn" data-filter="mixed">🟡 Mixte</button>
-        <button class="filter-btn" data-filter="fail">🔴 Échec</button>
-        <button class="filter-btn" data-filter="no run">⚪ Sans résultat</button>
+        <label>Filter by status:</label>
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="with-results">📊 With results</button>
+        <button class="filter-btn" data-filter="success">🟢 Success</button>
+        <button class="filter-btn" data-filter="mixed">🟡 Mixed</button>
+        <button class="filter-btn" data-filter="fail">🔴 Fail</button>
+        <button class="filter-btn" data-filter="no run">⚪ No run</button>
       </div>
       
       <div class="search-group">
@@ -39,12 +39,12 @@
     <div id="commits-list" class="commits-container">
       <div class="loading">
         <div class="spinner"></div>
-        <p>Chargement des commits...</p>
+        <p>Loading commits...</p>
       </div>
     </div>
     
     <div id="no-results" class="no-results" style="display: none;">
-      Aucun commit ne correspond aux filtres
+      No commit match filters
     </div>
   </div>
   
