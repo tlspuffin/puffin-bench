@@ -7,6 +7,40 @@ const config = {
   detailURI: '/html/board/board.html'
 };
 
+function calculateStats(durations) {
+  if (!durations || durations.length === 0) return null;
+  if (durations.length === 1) return null;
+
+  const sorted = [...durations].sort((a, b) => a - b);
+  const n = sorted.length;
+
+  const min = sorted[0];
+  const max = sorted[n - 1];
+  const sum = sorted.reduce((acc, val) => acc + val, 0);
+  const mean = sum / n;
+
+  const median = n % 2 === 0
+    ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+    : sorted[Math.floor(n / 2)];
+
+  const variance = sorted.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+  const stddev = Math.sqrt(variance);
+
+  return { min, max, median, mean, stddev };
+}
+
+function formatStats(stats, prefix) {
+  if (!stats) return '';
+
+  const minStr = formatDuration(stats.min);
+  const maxStr = formatDuration(stats.max);
+  const medStr = formatDuration(stats.median);
+  const meanStr = formatDuration(stats.mean);
+  const stddevStr = formatDuration(stats.stddev);
+
+  return `${prefix} Stats: [${minStr}–${maxStr}] med:${medStr} μ:${meanStr}(±${stddevStr})`;
+}
+
 function formatDuration(durationMs) {
   const seconds = Math.floor(durationMs / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -128,15 +162,22 @@ function renderCommit(commit, commitInfos, container) {
       const failDurationsFormatted = failDurations.length > 0 ?
           '✗ ' + failDurations.map(d => formatDuration(d)).join(', ') : '';
 
+      const successStats = calculateStats(successDurations);
+      const failStats = calculateStats(failDurations);
+
       const icon = getLibIcon(libData.success_count, libData.total_runs);
       libItem.innerHTML = `
         <span class="lib-name">${libName}</span>
         <span class="lib-stats">${libData.success_count}/${libData.total_runs}</span>
         <span class="lib-icon">${icon}</span>
-        <span class="lib-durations">
-          <span class="duration-success">${successDurationsFormatted}</span>
-          <span class="duration-fail">${failDurationsFormatted}</span>
-        </span>
+        <div class="lib-durations">
+          <span >
+            <span class="duration-success">${successDurationsFormatted}</span>
+            <span class="duration-fail">${failDurationsFormatted}</span>
+          </span>
+          ${successStats ? `<div class="duration-success">${formatStats(successStats, '✓')}</div>` : ''}
+          ${failStats ? `<div class="duration-fail">${formatStats(failStats, '✗')}</div>` : ''}
+        </div>
       `;
 
       libsDiv.appendChild(libItem);

@@ -299,7 +299,9 @@ header {
 
 .lib-durations {
   display: flex;
-  gap: 15px;
+  flex-direction: column;
+  align-items: end;
+  gap: 4px;
   font-size: 13px;
   color: var(--color-text-light);
   font-family: 'Courier New', Courier, monospace;
