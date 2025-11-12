@@ -133,7 +133,12 @@ function renderCommit(commit, commitInfos, container) {
     <span class="pastille ${getPastilleClass(commit.global_status)}">
       ${getPastilleIcon(commit.global_status)}
     </span>
-    <span class="commit-id">${commit.commit_id}</span>
+    <span class="commit-id">
+      <a href="https://github.com/tlspuffin/tlspuffin/commit/${commit.commit_id}"
+        target="_blank" rel="noopener noreferrer">
+        ${commit.commit_id}
+      </a>
+    </span>
     <span class="date">${commitInfos?.date || 'no date'}</span>
   `;
   commitDiv.appendChild(header);
@@ -207,7 +212,12 @@ function renderNoRunCommit(commitId, commitInfos, container) {
   header.className = 'commit-header';
   header.innerHTML = `
     <span class="pastille pastille-gray">⚪</span>
-    <span class="commit-id">${commitId}</span>
+    <span class="commit-id">
+      <a href="https://github.com/tlspuffin/tlspuffin/commit/${commitId}"
+        target="_blank" rel="noopener noreferrer">
+        ${commitId}
+      </a>
+    </span>
     <span class="date">${commitInfos?.date || 'no date'}</span>
   `;
   commitDiv.appendChild(header);

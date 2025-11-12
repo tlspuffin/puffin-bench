@@ -238,6 +238,16 @@ header {
   color: var(--color-primary);
 }
 
+.commit-id a {
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
+}
+
+.commit-id a:hover {
+  text-decoration: underline;
+}
+
 .date {
   color: var(--color-text-light);
   margin-left: auto;
