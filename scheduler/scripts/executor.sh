@@ -10,6 +10,12 @@ fi
 THEJOB_SH_CONFIG_FILE="$1"
 shift
 
+if [[ "$1" != "---" ]]; then
+  echo "Missing end of executor parameter: $1"
+  exit 1
+fi
+shift
+
 FUNCSPATH="$( dirname $( realpath $0 ) )/functions.sh"
 source "${FUNCSPATH}"
 
@@ -109,11 +115,10 @@ if [ -z "${THEJOB_STDERR_PATH}" ]; then
   exit 1
 fi
 
-if [[ "$1" != "---" ]]; then
-  echo "Missing end of executor parameter: $1"
+if [ -z "${THEJOB_USER_STATE_FILE}" ]; then
+  echo "Missing user state file"
   exit 1
 fi
-shift
 
 if [ ! -r "${THEJOB_ENV_PATH}" ]; then
   if [ -z "${THEJOB_ENV_PATH}" ]; then
@@ -128,6 +133,14 @@ source "${THEJOB_FUNCTIONS_PATH}"
 if ! declare -F "${THEJOB_ENTRYPOINT}" > /dev/null; then
   echo "${THEJOB_ENTRYPOINT} does not exist"
   exit 1
+fi
+
+if [ -n "${THEJOB_SHUTDOWN}" ]; then
+  THEJOB_ENTRYPOINT="${THEJOB_ENTRYPOINT}__Shutdown"
+  if ! declare -F "${THEJOB_ENTRYPOINT}" > /dev/null; then
+    echo "${THEJOB_ENTRYPOINT} does not exist"
+    exit 0
+  fi
 fi
 
 if [ ! -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then

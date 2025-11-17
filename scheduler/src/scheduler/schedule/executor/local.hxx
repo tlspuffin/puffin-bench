@@ -59,6 +59,9 @@ private:
   uint64_t nbChild_;
   uint16_t cachePort_;
 
+  pid_t RunShutdown(ns_Schedule::Step& step, LocalData* localData);
+  void EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores);
+
   std::vector<uint64_t> AssignCores(uint64_t nbCores);
   void ReAssignCores(std::vector<uint64_t>& cores);
   void ReleaseCores(std::vector<uint64_t>& cores);

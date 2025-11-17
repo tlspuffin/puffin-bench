@@ -17,7 +17,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), 
-    message_from_run_(""), state_(State::Pending), end_processed_(false)
+    message_from_run_(""), state_(State::Pending), end_processed_(false),
+    user_run_state_("")
 {
   std::string step_name = ID();
   stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
@@ -45,7 +46,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), message_from_run_(""), 
-    state_(State::Pending), end_processed_(false)
+    state_(State::Pending), end_processed_(false), user_run_state_("")
 {
   ReadFromTaskJSON(configurationStack, configuration);
 
@@ -78,7 +79,7 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     next_(this), previous_(this), dependencies_(), depend_from_(dependFrom), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(), monitor_path_(), message_from_run_(""), 
-    state_(State::Pending), end_processed_(false)
+    state_(State::Pending), end_processed_(false), user_run_state_("")
 {
   ReadFromTaskJSON(configurationStack, configuration);
 
@@ -167,6 +168,8 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   state_ = StateStringToEnum(Get<std::string>(config, "state"));
 
   end_processed_ = Get<bool>(config, "end_processed");
+
+  user_run_state_ = Get<std::string>(config, "user_run_state");
 
   bool hasTimePoints = false;
   if (config.HasMember("time_points_ms") && config["time_points_ms"].IsArray()) {
@@ -326,6 +329,8 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("state", rapidjson::Value(StateEnumToString(state_).c_str(), alloc), alloc);
 
   out.AddMember("end_processed", end_processed_, alloc);
+
+  out.AddMember("user_run_state", rapidjson::Value(user_run_state_.c_str(), alloc), alloc);
 
   rapidjson::Value timepoints(rapidjson::kArrayType);
   timepoints.PushBack(ToMillis(time_points_[0]), alloc);

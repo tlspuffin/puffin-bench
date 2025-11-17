@@ -218,7 +218,7 @@ StopMonitor() {
 }
 
 SetupEnv() {
-  THEJOB_SH_CONFIG_DATA=$( cat ${THEJOB_SH_CONFIG_FILE} )
+  THEJOB_SH_CONFIG_DATA=$( cat "${THEJOB_SH_CONFIG_FILE}" )
   eval ${THEJOB_SH_CONFIG_DATA}
 
   if [ -r "${THEJOB_ENV_PATH}" ]; then

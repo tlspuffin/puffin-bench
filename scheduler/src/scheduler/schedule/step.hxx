@@ -83,6 +83,8 @@ public:
   void GatherFilesToLocal();
   struct ArchiveJob FinalizeAndArchive(std::filesystem::path const& savePath);
 
+  void SetUserRunState(std::string const& state);
+
   void ToJSON(rapidjson::Value& out, 
       rapidjson::Document::AllocatorType& alloc, 
       bool exportTask) const;
@@ -133,6 +135,7 @@ private:
   State state_;
   bool end_processed_;
   std::chrono::time_point<std::chrono::system_clock> time_points_[2];
+  std::string user_run_state_;
 
   Step(Step const& src);
 
@@ -255,6 +258,10 @@ inline struct ArchiveJob Step::FinalizeAndArchive(std::filesystem::path const& s
     return task_->FinalizeAndArchive(savePath);
   }
   return ArchiveJob();
+}
+
+inline void Step::SetUserRunState(std::string const& state) {
+  user_run_state_ = state;
 }
 
 inline std::string Step::ID() const {

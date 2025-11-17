@@ -1,6 +1,7 @@
 #include "local.hxx"
 #include "../step.hxx"
 #include "../../../utils/rapidjson.hxx"
+#include "../../../utils/logs.hxx"
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -202,7 +203,8 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_PARAMETERS_PATH=\"" << stepParametersPath << "\"\n"
         << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
         << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
-        << "THEJOB_CACHE_PORT=\"" << cachePort_ << "\"\n";
+        << "THEJOB_CACHE_PORT=\"" << cachePort_ << "\"\n"
+        << "THEJOB_USER_STATE_FILE=\"" << localData->run_path_.string() + "-userstate" << "\"\n";
     if (step.monitor_) {
       stepLauncher << "THEJOB_MONITOR_PARAMETERS_PATH=\"" << step.monitor_->ToArgs() << 
         " " << step.monitor_path_.string() << "\"\n";
@@ -312,11 +314,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
         while(waitpid(-childPID, nullptr, 0) > 0);
         step->MarkDone(WEXITSTATUS(status));
       }
-      ReleaseCores(localData->cores_);
-      SaveArtefacts(*step);
-      std::filesystem::remove_all(localData->run_path_, ec);
-      std::filesystem::remove(localData->run_path_.string() + "-parameters");
-      std::filesystem::remove(localData->run_path_.string() + "-launcher");
+      EndRun(*step, localData, true);
       result.push_back(step);
     }
   }
@@ -333,11 +331,14 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
   kill(-localData->pid_, SIGKILL);
   while(waitpid(-localData->pid_, nullptr, 0) > 0);
 
-  ReleaseCores(localData->cores_);
+  pid_t pid = RunShutdown(step, localData);
+  if (pid <= 0) {
+    throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
+        std::to_string(step.TaskID()) + ":" + step.ID());
+  }
+  while(waitpid(-pid, nullptr, 0) > 0);
 
-  SaveArtefacts(step);
-  std::error_code ec;
-  std::filesystem::remove_all(localData->run_path_, ec);
+  EndRun(step, localData, true);
 }
 
 void ns_Executor::Local::GatherFilesToLocal(ns_Schedule::Step& step) {
@@ -383,8 +384,7 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
   } else if (status == ns_Schedule::Step::exitCode_Lost_) {
   } else {
     step.MarkDone(status);
-    SaveArtefacts(step);
-    std::filesystem::remove_all(localData->run_path_, ec);
+    EndRun(step, localData, false);
     return;
   }
 
@@ -453,6 +453,118 @@ ns_Executor::ExecutorTaskData* ns_Executor::Local::CreateLocalTaskData(
 ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
     rapidjson::Value const& config) const {
   return new LocalData(config);
+}
+
+pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localData) {
+  int outhandler = open(step.stdout_.c_str(), O_APPEND | O_WRONLY, 00660);
+  if (outhandler == -1) {
+    throw std::runtime_error(
+        std::string("open stdout failed for: ") + step.stdout_.string() + std::string(" : errno=") +
+        std::to_string(errno) +
+        " (" + std::strerror(errno) + ")"
+    );
+  }
+  int errhandler = open(step.stderr_.c_str(), O_APPEND | O_WRONLY, 00660);
+  if (errhandler == -1) {
+    close(outhandler);
+    throw std::runtime_error(
+        std::string("open stderr failed for: ") + step.stderr_.string() + std::string(" : errno=") +
+        std::to_string(errno) +
+        " (" + std::strerror(errno) + ")"
+    );
+  }
+
+  pid_t pid = fork();
+
+  if (pid == 0) {
+    pid_t localPID = getpid();
+
+    pid_t spid = setsid();
+    if (spid == -1) {
+      std::cerr << "setsid failed" << std::endl;
+      exit(-1);
+    }
+    if (chdir(localData->run_path_.c_str()) != 0) {
+      std::cerr << "chdir failed" << std::endl;
+      exit(-1);
+    }
+
+    std::ofstream stepLauncher = std::ofstream(
+        localData->run_path_.string() + "-launcher", std::ios::app);
+    stepLauncher << "THEJOB_SHUTDOWN=1\n";
+    stepLauncher.close();
+
+    std::vector<std::string> args_strings = BuildExecutorArgs(step);
+    if (args_strings.empty()) {
+      std::cerr << "Can not build args for process" << std::endl;
+      exit(-1);
+    }
+    std::vector<char*> args_chars;
+    for(std::string const& arg: args_strings) {
+      args_chars.push_back(strdup(arg.c_str()));
+    }
+    args_chars.push_back(nullptr);
+
+    {
+      std::stringstream oss;
+      oss << "Step running shutdown: " << step.task_->id_ << " / " << step.ID()  << \
+          " uuid: " << step.uuid_ << " with pid: " << spid << std::endl;
+      std::cerr << oss.str();
+    }
+
+    if (!RedirectOutput(outhandler, errhandler)) {
+      std::cerr << "RedirectOutput failed" << std::endl;
+      exit(-1);
+    }
+
+    close_range(3, ~0U, 0);
+
+    std::filesystem::path script = config_.scriptPath_ / "executor.sh";
+    int retval = execv(script.c_str(), args_chars.data());
+
+    std::cerr << "Unable to excecute " << script << " : " 
+        << strerror(errno) << std::endl;
+
+    std::ofstream fatalErrorProf(localData->fatalerror_path_, std::ios::app);
+    fatalErrorProf << "0";
+    fatalErrorProf.close();
+    sync();
+
+    exit(-1);
+  }
+
+  close(errhandler);
+  close(outhandler);
+
+  if (pid == -1) {
+    throw std::runtime_error("Local Executor failed to fork " + 
+        std::to_string(step.step_id_) + " : " + std::strerror(errno));
+  }
+
+  return pid;
+}
+
+void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores) {
+  std::string userStateFile = localData->run_path_.string() + "-userstate";
+  std::ifstream ifs(userStateFile);
+  if (ifs.is_open()) {
+    std::stringstream oss;
+    oss << ifs.rdbuf();
+    step.SetUserRunState(oss.str());
+  } else {
+    LOGI("Unable to open user state: " + userStateFile);
+  }
+
+  if (releaseCores) {
+    ReleaseCores(localData->cores_);
+  }
+
+  SaveArtefacts(step);
+
+  std::error_code ec;
+  std::filesystem::remove_all(localData->run_path_, ec);
+  std::filesystem::remove(localData->run_path_.string() + "-parameters");
+  std::filesystem::remove(localData->run_path_.string() + "-launcher");
 }
 
 std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
