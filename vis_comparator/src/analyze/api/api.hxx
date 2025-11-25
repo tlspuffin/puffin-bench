@@ -1,0 +1,73 @@
+#pragma once
+
+#include "../analyze/config.hxx"
+#include "../analyze/data_manager.hxx"
+#include "../analyze/statistics.hxx"
+#include <memory>
+#include <unordered_set>
+
+namespace ns_API {
+
+class AnalyzeAPI {
+public:
+  AnalyzeAPI(ns_Analyze::Config const& config) 
+      : dataManager_(config.dataPath_)
+  {}
+
+  std::vector<std::string> GetCommits(std::string const& type) {
+    return dataManager_.Commits(type);
+  }
+
+  std::vector<std::pair<std::string, uint64_t>> 
+      GetCommitSubjects(std::string const& type, std::string const& commitID) {
+    return dataManager_.CommitSubjects(type, commitID);
+  }
+
+  struct ns_Analyze::DataManager::SMetricsSummaries GetCommitMetrics(
+      std::string const& type, std::string const& commitID, 
+      std::string const& subject) {
+    return dataManager_.CommitMetrics(type, commitID, subject);
+  }
+
+  std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> GetCommitValues(
+      std::string const& type, std::string const& commitID, 
+      std::string const& subject, uint64_t min, uint64_t max, 
+      uint64_t step, std::vector<uint64_t> const& runs,
+      std::vector<uint64_t> const& clients,
+      std::vector<std::string>& metrics, std::string const& aggregate) {
+    std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> data = dataManager_.CommitValues(
+        type, commitID, subject, min, max, step, runs, clients, metrics, aggregate);
+    if (aggregate.empty() || (runs.size() == 1)) {
+      return data;
+    }
+
+    uint64_t resultOffset = 0;
+    std::vector<uint64_t> indexes(runs.size());
+     std::vector<std::string> metricsRequired = metrics;
+    for(std::string const& metric: metricsRequired) {
+      if (metric.find("global.") == 0) {
+        resultOffset += runs.size();
+        continue;
+      }
+      std::pair<std::vector<std::string>, std::vector<std::vector<double>>> stats = 
+        ns_Analyze::Statistics::ComputeStats(metric, data, resultOffset, runs.size());
+      data.insert(data.end(), stats.second.begin(), stats.second.begin() + stats.second.size());
+      metrics.insert(metrics.end(), stats.first.begin(), stats.first.begin() + stats.first.size());
+      resultOffset += runs.size();
+    }
+
+    return data;
+  }
+
+private:
+  ns_Analyze::DataManager dataManager_;
+};
+
+struct APIS {
+  ns_API::AnalyzeAPI analyzeAPI_;
+
+  APIS(ns_Analyze::Config const& configAnalyze)
+      : analyzeAPI_(configAnalyze) {}
+};
+
+};

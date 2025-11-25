@@ -1,0 +1,4 @@
+CMakeLists.conf
+.vscode/
+build/
+**/embeded/
