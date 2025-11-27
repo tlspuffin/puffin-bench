@@ -35,7 +35,7 @@ set(ANALYZE_SRC
   src/analyze/main.cxx
   src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/file_tgz.cxx src/utils/file_tar_zst.cxx src/utils/compress_tar_zst.cxx
   src/analyze/server/config.cxx src/analyze/server/server.cxx src/analyze/server/parts_handler.cxx src/analyze/server/request_handler.cxx 
-  src/analyze/analyze/data_manager.cxx src/analyze/analyze/data.cxx src/analyze/analyze/statistics.cxx
+  src/analyze/analyze/data_manager.cxx src/analyze/analyze/statistics.cxx
 )
 
 add_executable(analyze ${ANALYZE_SRC})

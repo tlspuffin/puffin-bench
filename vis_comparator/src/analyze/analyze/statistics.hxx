@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data_manager.hxx"
 #include <vector>
 #include <string>
 #include <variant>
@@ -9,10 +10,10 @@ namespace ns_Analyze {
 
 class Statistics {
 public:
-  static std::pair<std::vector<std::string>, std::vector<std::vector<double>>>
-  ComputeStats(std::string const& metricName,
-      std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>>& data,
-      size_t startIdx, size_t count);
+  static std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>>
+      ComputeStats(std::string const& metricName, 
+      std::vector<struct ns_Analyze::DataManager::SMetricValues>& values, 
+      std::vector<uint64_t>* runs);
 
 private:
   struct StatsSeries {
@@ -20,6 +21,11 @@ private:
     std::vector<double> ciLower;
     std::vector<double> ciUpper;
   };
+
+  static std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> 
+      ComputeStats(std::string const& metricName, 
+      std::vector<struct ns_Analyze::DataManager::SMetricValues>& values, 
+      std::vector<uint64_t> const& indexes, uint64_t* id);
 
   static StatsSeries ComputeStats(std::vector<std::vector<double>> const& series, 
       double confidence =0.0);

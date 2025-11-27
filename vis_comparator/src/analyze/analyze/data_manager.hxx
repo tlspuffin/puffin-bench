@@ -1,6 +1,5 @@
 #pragma once
 
-#include "data.hxx"
 #include "../../utils/file_tar_zst.hxx"
 #include <string>
 #include <filesystem>
@@ -32,6 +31,11 @@ public:
     uint64_t nbRun_;
     std::vector<struct SMetricsSummary> runSummary_;
   };
+  struct SMetricValues {
+    uint64_t runID_;
+    uint64_t clientID_;
+    std::variant<std::vector<uint64_t>, std::vector<double>> values_;
+  };
 
   DataManager(std::string const& rootpath);
   std::vector<std::string> Commits(std::string const& type);
@@ -40,7 +44,7 @@ public:
   struct ns_Analyze::DataManager::SMetricsSummaries CommitMetrics(
       std::string const& type, std::string const& commitID, 
       std::string const& subject);
-  std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> CommitValues(
+  std::unordered_map<std::string, std::vector<struct SMetricValues>> CommitValues(
       std::string const& type, std::string const& commitID, 
       std::string const& subject, uint64_t min, uint64_t max, 
       uint64_t step, std::vector<uint64_t>& runs,

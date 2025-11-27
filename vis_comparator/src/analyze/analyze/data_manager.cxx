@@ -1,5 +1,4 @@
 #include "data_manager.hxx"
-#include "data.hxx"
 #include "../../utils/file_tgz.hxx"
 #include "../../utils/compress_tar_zst.hxx"
 #include "../../utils/rapidjson.hxx"
@@ -306,14 +305,14 @@ ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string cons
   return result;
 }
 
-std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> 
+std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> 
 ns_Analyze::DataManager::CommitValues(
     std::string const& type, std::string const& commitID, 
     std::string const& subject, uint64_t min, uint64_t max, 
     uint64_t step, std::vector<uint64_t>& runs,
     std::vector<uint64_t> const& clients,
     std::vector<std::string> const& metrics, std::string const& aggregate) {
-  std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>>  result;
+  std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> result;
 
   struct ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = CommitMetrics(type, commitID, subject);
 
@@ -370,6 +369,7 @@ ns_Analyze::DataManager::CommitValues(
   }
 
   for(std::string metric: metrics) {
+    std::string metricFullname = metric;
     bool clientsMetric = false;
     bool allClients = false;
     std::vector<uint64_t> indexes;
@@ -393,11 +393,11 @@ ns_Analyze::DataManager::CommitValues(
       bool doAggregate = (!aggregate.empty()) && clientsMetric;
       uint64_t runIndex = runsIDMap[runID];
       if (runIndex == ~0) {
-        throw std::runtime_error("Unknown run ID: "+runID);
+        throw std::runtime_error("Unknown run ID: " + std::to_string(runID));
       }
-      auto const& itRunFolder = runsFolders.find(runIndex);
+      auto const& itRunFolder = runsFolders.find(runID);
       if (itRunFolder == runsFolders.end()) {
-        throw std::runtime_error("No folder for run ID: "+runID);
+        throw std::runtime_error("No folder for run ID: "+ std::to_string(runID));
       }
 
       if (clientsMetric) {
@@ -442,7 +442,8 @@ ns_Analyze::DataManager::CommitValues(
                 sum[i] += data[i];
               }
             } else {
-              result.push_back(ExtractData<uint64_t>(archive, filename, timestamps[runID][index]));
+              result[metricFullname].push_back(
+                  {runID, index, { ExtractData<uint64_t>(archive, filename, timestamps[runID][index]) }});
             }
             break;
           case DataType::DOUBLE:
@@ -453,7 +454,8 @@ ns_Analyze::DataManager::CommitValues(
                 sum[i] += data[i];
               }
             } else {
-              result.push_back(ExtractData<double>(archive, filename, timestamps[runID][index]));
+              result[metricFullname].push_back(
+                  {runID, index, { ExtractData<double>(archive, filename, timestamps[runID][index]) }});
             }
             break;
           default:
@@ -466,12 +468,12 @@ ns_Analyze::DataManager::CommitValues(
         switch(dataType) {
           case DataType::UINT64: {
               uint64_t* sum = (uint64_t*)sumValues.data();
-              result.push_back(std::vector<uint64_t>(sum, sum + nbElement));
+              result[metricFullname].push_back({runID, 0, { std::vector<uint64_t>(sum, sum + nbElement) }});
             }
             break;
           case DataType::DOUBLE: {
               double* sum = (double*)sumValues.data();
-              result.push_back(std::vector<double>(sum, sum + nbElement));
+              result[metricFullname].push_back({runID, 0, { std::vector<double>(sum, sum + nbElement) }});
             }
             break;
           default:

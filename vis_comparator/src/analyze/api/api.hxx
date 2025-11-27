@@ -29,29 +29,27 @@ public:
     return dataManager_.CommitMetrics(type, commitID, subject);
   }
 
-  std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> GetCommitValues(
+  std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> GetCommitValues(
       std::string const& type, std::string const& commitID, 
       std::string const& subject, uint64_t min, uint64_t max, 
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
-      std::vector<std::string>& metrics, std::string const& aggregate) {
-    std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> data = dataManager_.CommitValues(
+      std::vector<std::string> const& metrics, std::string const& aggregate) {
+    std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> data = dataManager_.CommitValues(
         type, commitID, subject, min, max, step, runs, clients, metrics, aggregate);
-    if (aggregate.empty() || (runs.size() == 1)) {
-      return data;
-    }
-
     uint64_t resultOffset = 0;
     std::vector<uint64_t> indexes(runs.size());
      std::vector<std::string> metricsRequired = metrics;
     for(std::string const& metric: metricsRequired) {
-      std::pair<std::vector<std::string>, std::vector<std::vector<double>>> stats = 
-        ns_Analyze::Statistics::ComputeStats(metric, data, resultOffset, runs.size());
-      data.insert(data.end(), stats.second.begin(), stats.second.begin() + stats.second.size());
-      metrics.insert(metrics.end(), stats.first.begin(), stats.first.begin() + stats.first.size());
-      resultOffset += runs.size();
-    }
+      bool acrossRun = metric.find("global.") == 0;
+      if (acrossRun && (runs.size() < 2)) {
+        continue;
+      } else {
+        acrossRun = data[metric].size() == (runs.size());
+      }
 
+      data.merge(ns_Analyze::Statistics::ComputeStats(metric, data[metric], acrossRun ? nullptr : &runs));
+    }
     return data;
   }
 

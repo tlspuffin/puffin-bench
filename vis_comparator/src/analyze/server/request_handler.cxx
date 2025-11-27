@@ -337,10 +337,9 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     return;
   }
 
-  uint64_t nbMetrics = metrics.size();
-  std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> values = 
+  std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values = 
       apis_->analyzeAPI_.GetCommitValues(type, commitID, subject, min, max, step,
-        runs, clients, metrics, aggregate);
+          runs, clients, metrics, aggregate);
 
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
@@ -365,19 +364,13 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   doc.AddMember("clients", clientsArray, allocator);
 
   rapidjson::Value metricsArray(rapidjson::kArrayType);
-  metricsArray.Reserve(static_cast<rapidjson::SizeType>(metrics.size()), allocator);
-  for (size_t i = 0; i < metrics.size(); ++i) {
+  metricsArray.Reserve(static_cast<rapidjson::SizeType>(values.size()), allocator);
+  for(auto const& [name, series]: values) {
     rapidjson::Value metricObj(rapidjson::kObjectType);
-    metricObj.AddMember("name", rapidjson::Value(metrics[i].c_str(), allocator), allocator);
-    char const* typeStr = std::holds_alternative<std::vector<uint64_t>>(values[i]) ? "uint64" : "double";
+    metricObj.AddMember("name", rapidjson::Value(name.c_str(), allocator), allocator);
+    char const* typeStr = std::holds_alternative<std::vector<uint64_t>>(series[0].values_) ? "uint64" : "double";
     metricObj.AddMember("type", rapidjson::Value(typeStr, allocator), allocator);
-    if (i < nbMetrics) {
-      metricObj.AddMember("count", 1, allocator);
-    } else if ((!aggregate.empty()) && (runs.size() > 1)) {
-      metricObj.AddMember("count", runs.size(), allocator);
-    } else {
-      metricObj.AddMember("count", runs.size() * clients.size(), allocator);
-    }
+    metricObj.AddMember("count", series.size(), allocator);
     metricsArray.PushBack(metricObj, allocator);
   }
   doc.AddMember("metrics", metricsArray, allocator);
@@ -399,11 +392,13 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   uint64_t dataSize = 8 + jsonHeader.size();
 
-  for (const auto& series : values) {
-    if (std::holds_alternative<std::vector<uint64_t>>(series)) {
-      dataSize += std::get<std::vector<uint64_t>>(series).size() * sizeof(uint64_t);
-    } else {
-      dataSize += std::get<std::vector<double>>(series).size() * sizeof(double);
+  for (const auto& [name, series]: values) {
+    for (const auto& serie: series) {
+      if (std::holds_alternative<std::vector<uint64_t>>(serie.values_)) {
+        dataSize += std::get<std::vector<uint64_t>>(serie.values_).size() * sizeof(uint64_t);
+      } else {
+        dataSize += std::get<std::vector<double>>(serie.values_).size() * sizeof(double);
+      }
     }
   }
 
@@ -415,13 +410,15 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   ostr.write(reinterpret_cast<const char*>(&jsonSizeLE), sizeof(jsonSizeLE));
   ostr.write(jsonHeader.data(), static_cast<std::streamsize>(jsonHeader.size()));
 
-  for (const auto& series : values) {
-    if (std::holds_alternative<std::vector<uint64_t>>(series)) {
-      std::vector<uint64_t> const& data = std::get<std::vector<uint64_t>>(series);
-      ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint64_t));
-    } else {
-      std::vector<double> const& data = std::get<std::vector<double>>(series);
-      ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
+  for (const auto& [name, series]: values) {
+    for (const auto& serie: series) {
+      if (std::holds_alternative<std::vector<uint64_t>>(serie.values_)) {
+        std::vector<uint64_t> const& data = std::get<std::vector<uint64_t>>(serie.values_);
+        ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint64_t));
+      } else {
+        std::vector<double> const& data = std::get<std::vector<double>>(serie.values_);
+        ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
+      }
     }
   }
   ostr.flush();

@@ -1,6 +1,5 @@
 #include "server/server.hxx"
 #include "api/api.hxx"
-#include "analyze/data.hxx"
 #include "../utils/file_tar_zst.hxx"
 
 #include <iostream>
