@@ -43,7 +43,7 @@ public:
   std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> CommitValues(
       std::string const& type, std::string const& commitID, 
       std::string const& subject, uint64_t min, uint64_t max, 
-      uint64_t step, std::vector<uint64_t> const& runs,
+      uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
       std::vector<std::string> const& metrics, std::string const& aggregate);
 

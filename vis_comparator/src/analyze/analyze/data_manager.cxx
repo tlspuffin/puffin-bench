@@ -65,7 +65,7 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
   rapidjson::Document doc;
   doc.Parse(metadataJSON.c_str());
   if (doc.HasParseError()) {
-    throw std::runtime_error("Wrongly formated JSON: " + metadataJSON);
+    throw std::runtime_error("Wrongly formatted JSON: " + metadataJSON);
   }
 
   results.id_ = id;
@@ -98,7 +98,7 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
 
         size_t prefixPos = fullName.find('.');
         if (prefixPos == std::string::npos) {
-          throw std::runtime_error("Wrongly formated name (no prefix): " + fullName);
+          throw std::runtime_error("Wrongly formatted name (no prefix): " + fullName);
         }
         std::string prefix = fullName.substr(0, prefixPos);
         std::string suffix = fullName.substr(prefixPos + 1);
@@ -107,11 +107,11 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
           static std::regex reClientID("client_([0-9]+)");
           std::smatch match;
           if (!std::regex_match(prefix, match, reClientID)) {
-            throw std::runtime_error("Wrongly formated name (no index): " + fullName);
+            throw std::runtime_error("Wrongly formatted name (no index): " + fullName);
           }
           index = std::strtol(match[1].str().c_str(), nullptr, 10);
           if (index >= results.summary_.size()) {
-            throw std::runtime_error("Wrongly formated name (index invalid): " + fullName);
+            throw std::runtime_error("Wrongly formatted name (index invalid): " + fullName);
           }
         }
         results.summary_[index].emplace(suffix, infos);
@@ -261,12 +261,12 @@ std::vector<std::pair<std::string, uint64_t>>
   std::vector<char> buffer;
   archive.ExtractFile("metadata.json", buffer);
   if (buffer.empty()) {
-    throw std::runtime_error("");
+    throw std::runtime_error("metadata.json is empty");
   }
   rapidjson::Document doc;
   doc.Parse(buffer.data());
   if (doc.HasParseError()) {
-    throw std::runtime_error("");
+    throw std::runtime_error("metadata.json is mal formatted");
   }
   for(auto val=doc.MemberBegin(); val!=doc.MemberEnd(); ++val) {
     result.push_back({val->name.GetString(), val->value.GetInt64()});
@@ -310,22 +310,32 @@ std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>>
 ns_Analyze::DataManager::CommitValues(
     std::string const& type, std::string const& commitID, 
     std::string const& subject, uint64_t min, uint64_t max, 
-    uint64_t step, std::vector<uint64_t> const& runs,
+    uint64_t step, std::vector<uint64_t>& runs,
     std::vector<uint64_t> const& clients,
     std::vector<std::string> const& metrics, std::string const& aggregate) {
   std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>>  result;
 
   struct ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = CommitMetrics(type, commitID, subject);
+
   std::unordered_map<uint64_t, uint64_t> runsIDMap;
-  for(uint64_t runID: runs) {
-    uint64_t runIndex = ~0;
-    for(uint64_t i=0; i<metricsSummaries.nbRun_; ++i) {
-      if (metricsSummaries.runSummary_[i].id_ == runID) {
-        runIndex = i;
-        break;
+  bool findRun = !runs.empty();
+  for(uint64_t i=0; i<metricsSummaries.nbRun_; ++i) {
+    uint64_t runID = metricsSummaries.runSummary_[i].id_;
+    if (findRun) {
+      bool notfound = true;
+      for(uint64_t wantedRunID: runs) {
+        if (wantedRunID == runID) {
+          notfound = false;
+          break;
+        }
       }
+      if (notfound) {
+        continue;
+      }
+    } else {
+      runs.push_back(runID);
     }
-    runsIDMap.emplace(runID, runIndex);
+    runsIDMap.emplace(runID, i);
   }
 
   std::string binFilename = rootpath_ / (runsResults_[type][commitID].string() + ".tar.zst");
@@ -361,36 +371,52 @@ ns_Analyze::DataManager::CommitValues(
 
   for(std::string metric: metrics) {
     bool clientsMetric = false;
+    bool allClients = false;
     std::vector<uint64_t> indexes;
     if (metric.find("global.") == 0) {
       indexes.push_back(0);
       metric = metric.substr(7);
     } else {
       clientsMetric = true;
-      indexes = clients;
+      allClients = clients.size() == 0;
+      if (!allClients) {
+        indexes = clients;
+      }
       size_t suffixPos = metric.find(".");
       if (suffixPos == std::string::npos) {
-        LOGW("Mal formatted metric name: "+ metric);
-        continue;
+        throw std::runtime_error("Mal formatted metric name: "+ metric);
       }
       metric = metric.substr(suffixPos+1);
     }
+    std::vector<uint64_t> savedIndexes = indexes;
     for (uint64_t runID: runs) {
       bool doAggregate = (!aggregate.empty()) && clientsMetric;
       uint64_t runIndex = runsIDMap[runID];
       if (runIndex == ~0) {
-        for(uint64_t i=0; i<(doAggregate ? 1 : clients.size()); ++i) {
-          result.push_back({});
-        }
-        continue;
+        throw std::runtime_error("Unknown run ID: "+runID);
       }
       auto const& itRunFolder = runsFolders.find(runIndex);
       if (itRunFolder == runsFolders.end()) {
-        for(uint64_t i=0; i<(doAggregate ? 1 : clients.size()); ++i) {
-          result.push_back({});
-        }
-        continue;
+        throw std::runtime_error("No folder for run ID: "+runID);
       }
+
+      if (clientsMetric) {
+        uint64_t nbClients = metricsSummaries.runSummary_[runIndex].nbClient_;
+        if (allClients) {
+          indexes.resize(nbClients);
+          for(int i=1; i<=nbClients; ++i) {
+            indexes[i-1] = i;
+          }
+        } else {
+          indexes.resize(0);
+          for(uint64_t index: savedIndexes) {
+            if (index <= nbClients) {
+              indexes.push_back(index);
+            }
+          }
+        }
+      }
+
       std::filesystem::path const& runFolder = itRunFolder->second;
       if (doAggregate) {
         memset(sumValues.data(), 0, sumValues.size());

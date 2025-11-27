@@ -236,7 +236,7 @@ void ns_Analyze::Data::Constructor(std::filesystem::path baseDir, std::string co
         if (fullName.find("client_") == 0) {
           size_t dotPos = fullName.find('.');
           if (dotPos == std::string::npos) {
-            throw std::runtime_error("Wrongly formated name: " + fullName);
+            throw std::runtime_error("Wrongly formatted name: " + fullName);
           }
           fullName = "client" + fullName.substr(dotPos);
         }

@@ -138,9 +138,10 @@ void FileTARZST::ExtractFile(std::string const& filename, std::vector<char>& buf
   if (it == index_.end()) {
     throw std::runtime_error("File not found: "+filename);
   }
-  buffer.resize(it->second.first);
-  size_t ret = ZSTD_seekable_decompress(zstdStream_, buffer.data(), buffer.size(), it->second.second);
+  buffer.resize(it->second.first + 1);
+  size_t ret = ZSTD_seekable_decompress(zstdStream_, buffer.data(), buffer.size() - 1, it->second.second);
   if (ZSTD_isError(ret)) {
     throw std::runtime_error("ZSTD_seekable_decompress failed: " + std::string(ZSTD_getErrorName(ret)));
   }
+  buffer[buffer.size() - 1] = 0;
 }

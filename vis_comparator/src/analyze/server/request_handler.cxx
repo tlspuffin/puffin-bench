@@ -133,6 +133,7 @@ static void SendJSONResponse(Poco::Net::HTTPServerResponse& response, rapidjson:
   response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
   std::ostream& out = response.send();
   out << buffer.GetString();
+  out.flush();
 }
 
 static void SendErrorResponse(Poco::Net::HTTPServerResponse& response,
@@ -215,12 +216,15 @@ void ns_Server::RequestHandlerAPIGetCommitMetrics::handleRequest(
     runObj.AddMember("nbClient", rapidjson::Value(runSummary.nbClient_), allocator);
     runObj.AddMember("runTime", rapidjson::Value(runSummary.runTime_), allocator);
 
+    std::unordered_set<std::string> uniqueMetrics;
     rapidjson::Value metricsArray(rapidjson::kArrayType);
     for (size_t i=0; i<runSummary.summary_.size(); ++i) {
-    //for (auto const& metricsMap : runSummary.summary_) {
       for (auto const& [metricName, _] : runSummary.summary_[i]) {
-        metricsArray.PushBack(
-            rapidjson::Value(((i == 0 ? "global." : "client.") + metricName).c_str(), allocator), allocator);
+        std::string name = (i == 0 ? "global." : "client.") + metricName;
+        if (uniqueMetrics.count(name) == 0) {
+          metricsArray.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
+          uniqueMetrics.insert(name);
+        }
       }
     }
     runObj.AddMember("metrics", metricsArray, allocator);
@@ -318,7 +322,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   bool error;
   std::vector<uint64_t> runs = ExtractJSONArray<uint64_t>(doc, "runs", error);
-  if (runs.empty() || error) {
+  if (error) {
     SendErrorResponse(response, 400, "Invalid json in request body");
     return;
   }
@@ -420,7 +424,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
       ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
     }
   }
-  response.send().flush();
+  ostr.flush();
 }
 
 // POST /api/refresh

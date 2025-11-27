@@ -32,7 +32,7 @@ public:
   std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> GetCommitValues(
       std::string const& type, std::string const& commitID, 
       std::string const& subject, uint64_t min, uint64_t max, 
-      uint64_t step, std::vector<uint64_t> const& runs,
+      uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
       std::vector<std::string>& metrics, std::string const& aggregate) {
     std::vector<std::variant<std::vector<uint64_t>, std::vector<double>>> data = dataManager_.CommitValues(
@@ -45,10 +45,6 @@ public:
     std::vector<uint64_t> indexes(runs.size());
      std::vector<std::string> metricsRequired = metrics;
     for(std::string const& metric: metricsRequired) {
-      if (metric.find("global.") == 0) {
-        resultOffset += runs.size();
-        continue;
-      }
       std::pair<std::vector<std::string>, std::vector<std::vector<double>>> stats = 
         ns_Analyze::Statistics::ComputeStats(metric, data, resultOffset, runs.size());
       data.insert(data.end(), stats.second.begin(), stats.second.begin() + stats.second.size());

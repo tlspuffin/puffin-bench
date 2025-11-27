@@ -49,14 +49,14 @@ ZSTDCompress::ZSTDCompress(std::string const& outFile, unsigned int maxFrameSize
   zc_ = ZSTD_seekable_createCStream();
   if (!zc_) { 
     fprintf(stderr, "ZSTD_seekable_createCStream failed\n"); 
-    throw std::runtime_error("");
+    throw std::runtime_error("ZSTD_seekable_createCStream failed");
   }
 
   ZSTD_seekable_initCStream(zc_, compressionLevel, /*checksumFlag*/1, maxFrameSize);
 
   fout_ = fopen(outFile.c_str(), "wb");
   if (!fout_) { 
-    throw std::runtime_error("");
+    throw std::runtime_error("ZSTDCompress unable to create " + outFile);
   }
 
   outbuf_.dst = outChunk_.data();
