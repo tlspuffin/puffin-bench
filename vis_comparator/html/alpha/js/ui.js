@@ -23,7 +23,7 @@ class UI {
   CreateSelect(configOptions, options) {
     const select = document.createElement('select');
     this.#ApplyOptions(select, options);
-    for (let configOption of configOptions) {
+    for (const configOption of configOptions) {
       const option = document.createElement('option');
       option.value = configOption.value;
       option.defaultSelected = configOption?.selected ?? false;
@@ -141,6 +141,29 @@ class UI {
     });
 
     return container;
+  }
+
+  CreateCommits(commits, selectedCommits, options) {
+    const container = document.createElement('div');
+    this.#ApplyOptions(container, options?.container);
+
+    commits.forEach(function(commit) {
+        const checked = selectedCommits.has(commit) ? "checked" : "";
+        const label = document.createElement('label');
+        label.className = 'checkbox-label-inline';
+        label.innerHTML = `
+            <input type="checkbox" class="commit-checkbox" value="${commit}" ${checked}>
+            <span>${commit}</span>
+        `;
+        container.appendChild(label);
+    });
+
+    const checkboxes = container.querySelectorAll('.commit-checkbox');
+    checkboxes.forEach(cb => {
+        cb.onchange = options.callback;
+    });
+
+    return container
   }
 
   static DisableElement(element) {

@@ -17,39 +17,9 @@ const state = {
   subjects: [],
   metrics: [],
   title: 'No Title',
-  graphManager: new GraphManager(),
+  graphSettings: new Map(),
+  linkedCommits: new Set(),
 };
-
-function BuildGraphContainer(id) {
-  const container = document.createElement('div');
-  container.id = 'graph_container_'+id;
-  container.className = 'graph_container';
-  container.style.width = '100%';
-
-  const ui = document.createElement('div');
-  ui.id = 'graph_ui_'+id;
-  ui.style.backgroundColor = 'yellow';
-
-  const eltDelete = document.createElement('span');
-  eltDelete.className = 'graph_ui_icons';
-  eltDelete.id = 'graph_ui_delete_'+id;
-  eltDelete.innerText = '➖';
-  //eltDelete.onclick = DeleteGraphique.bind(null, container);
-  ui.appendChild(eltDelete);
-  const eltConfig = document.createElement('span');
-  eltConfig.className = 'graph_ui_icons';
-  eltConfig.id = 'graph_ui_config_'+id;
-  eltConfig.innerText = '🧾';
-  ui.appendChild(eltConfig);
-  container.appendChild(ui);
-
-  const graphArea = document.createElement('div');
-  graphArea.id = 'graph_area_'+id;
-  graphArea.style.width = '100%';
-  graphArea.style.height = '400px';
-  container.appendChild(graphArea);
-  return { container, graphArea };
-}
 
 function SetBaseInformations(newState) {
   Object.assign(state, newState);
@@ -174,7 +144,6 @@ function ConfigBaseInformations(oldState) {
     }
     currentState.commit = '';
     currentState.subject = '';
-    currentState.commits = [];
     currentState.subjects = [];
     if (event.target.value == '') {
       UI.EnableElement(selectType);
@@ -267,25 +236,29 @@ function AddGrahique(currentState) {
           .then(function(data) {
             if (data == null) {
               modalpage.style.visibility = 'collapse';
+              UI.EnableElement(mainUI);
               return;
             }
             const { header, series } = data;
-            const graphID = currentState.graphManager.AddGraph({
-                type: currentState.type, commit: currentState.commit, subject: currentState.subject, min, max, step
-            }, selectedMetrics, header, series);
-            const { container: graphContainer, graphArea } = BuildGraphContainer(graphID);
-            currentState.graphManager.DrawGraph(graphID, graphArea);
-            main.insertBefore(graphContainer, mainUI);
-            modalpage.style.visibility = 'collapse';
+
+            const graphSetting = { metrics: selectedMetrics, type: currentState.type, 
+                commit: currentState.commit, subject: currentState.subject, min, max, step };
+            graphManager.AddGraph(graphSetting, header, series).then(function(id) {
+                currentState.graphSettings.set(id, graphSetting);
+                modalpage.style.visibility = 'collapse';
+                UI.EnableElement(mainUI);
+            });
           });
           return;
         }
         modalpage.style.visibility = 'collapse';
+        UI.EnableElement(mainUI);
       }
     },
     cancel: {
       callback: function(event) {
         modalpage.style.visibility = 'collapse';
+        UI.EnableElement(mainUI);
       }
     }
   });
@@ -297,12 +270,58 @@ function AddGrahique(currentState) {
   modalpage.style.visibility = 'visible';
 }
 
-const errorManager = new ErrorManager();
-const apirest = new ApiREST(config.apiBase, errorManager);
-const ui = new UI();
+function LinkCommits(currentState) {
+  const selectedCommits = currentState.linkedCommits;
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+
+  const container = document.createElement('div');
+
+  ui.Reset();
+
+  container.appendChild(ui.CreateTitle("Select commit(s)", 'h3'));
+
+  const commitsSet = new Set(currentState.commits).difference(new Set(currentState.commit));
+  const commitsUI = ui.CreateCommits(Array.from(commitsSet), currentState.linkedCommits, {
+    callback: function(event) {
+      if (event.target.checked) {
+        selectedCommits.add(event.target.value);
+      } else {
+        selectedCommits.delete(event.target.value);
+      }
+    }
+  });
+  container.appendChild(commitsUI);
+
+  const actions = ui.CreateActions(true, {
+    ok: {
+      callback: function(event) {
+        currentState.linkedCommits = selectedCommits;
+        graphManager.LinkCommits(selectedCommits);
+        modalpage.style.visibility = 'collapse';
+        UI.EnableElement(mainUI);
+      }
+    },
+    cancel: {
+      callback: function(event) {
+        modalpage.style.visibility = 'collapse';
+        UI.EnableElement(mainUI);
+      }
+    }
+  });
+  container.appendChild(actions);
+
+  modalpage.appendChild(container);
+  modalpage.style.visibility = 'visible';
+}
 
 const header = document.getElementById('header');
 const main = document.getElementById('main');
+
+const errorManager = new ErrorManager();
+const apirest = new ApiREST(config.apiBase, errorManager);
+const ui = new UI();
+const graphManager = new GraphManager(main, apirest);
 
 const mainUI = document.createElement('div');
 mainUI.id = 'ui_icons';
@@ -310,10 +329,26 @@ const uiAddGraph = document.createElement('span');
 uiAddGraph.className = 'ui_icons';
 uiAddGraph.innerText = '➕';
 uiAddGraph.onclick = function(event) {
+  UI.DisableElement(mainUI);
   AddGrahique(state);
 }
-UI.DisableElement(mainUI);
 mainUI.appendChild(uiAddGraph);
+const uiManageCommits = document.createElement('span');
+uiManageCommits.className = 'ui_icons';
+uiManageCommits.innerText = '📌';
+uiManageCommits.onclick = function(event) {
+  UI.DisableElement(mainUI);
+  LinkCommits(state);
+}
+mainUI.appendChild(uiManageCommits);
+const uiSaveView = document.createElement('span');
+uiSaveView.className = 'ui_icons';
+uiSaveView.innerText = '💾';
+uiSaveView.onclick = function(event) {
+  UI.DisableElement(mainUI);
+}
+mainUI.appendChild(uiSaveView);
+UI.DisableElement(mainUI);
 main.appendChild(mainUI);
 
 ConfigBaseInformations();
