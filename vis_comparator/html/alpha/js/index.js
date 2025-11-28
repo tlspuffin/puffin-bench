@@ -16,27 +16,51 @@ const state = {
   commits: [],
   subjects: [],
   metrics: [],
-  title: 'No Title',
+  title: 'No Title_' + Date.now(),
   graphSettings: new Map(),
   linkedCommits: new Set(),
 };
 
-function SetBaseInformations(newState) {
+async function ResetState(state, newState) {
+  graphManager.DelAllGraph();
+
+  state.type = newState?.type ?? '';
+  state.commit = newState?.commit ?? '';
+  state.subject = newState?.subject ?? '';
+  state.commits = newState?.commits ?? [];
+  state.subjects = newState?.subjects ?? [];
+  state.metrics = newState?.metrics ?? [];
+  state.title = newState?.title ?? 'No Title_' + Date.now();
+  state.graphSettings = newState?.graphSettings ?? new Map();
+  state.linkedCommits = newState?.linkedCommits ?? new Set();
+
+  const graphSettings = new Map();
+  for(const [id, config] of state.graphSettings) {
+    const data = await apirest.LoadCommitMetricsValues(
+        config.type, config.commit, config.subject, config.min, config.max, config.step, config.metrics);
+    if (data == null) {
+      continue;
+    }
+    const { header, series } = data;
+    const id = await graphManager.AddGraph(config, header, series);
+    graphSettings.set(id, config);
+  }
+  state.graphSettings = graphSettings;
+  await graphManager.LinkCommits(state.linkedCommits);
+
+  header.innerText = `${state.type} (${state.commit}) : ${state.title}`;
+}
+
+function SetBaseInformations(state, newState) {
   Object.assign(state, newState);
   header.innerText = `${state.type} (${state.commit}) : ${state.title}`;
-  UI.EnableElement(mainUI);
+  EnableMainUI(true);
   console.log(state);
 }
 
 function ConfigBaseInformations(oldState) {
-  const currentState = oldState ?? {
-    type: '',
-    commit: '',
-    subject: '',
-    commits: [],
-    subjects: [],
-    metrics: [],
-  };
+  const currentState = {};
+  ResetState(currentState, oldState);
   currentState.metrics = [];
 
   const modalpage = document.getElementById('modalpage');
@@ -91,7 +115,7 @@ function ConfigBaseInformations(oldState) {
         apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject).then(function(metrics) { 
             currentState.metrics = metrics;
             modalpage.style.visibility = 'collapse';
-            SetBaseInformations(currentState);
+            SetBaseInformations(state, currentState);
         });
       }
     }
@@ -236,7 +260,7 @@ function AddGrahique(currentState) {
           .then(function(data) {
             if (data == null) {
               modalpage.style.visibility = 'collapse';
-              UI.EnableElement(mainUI);
+              EnableMainUI(true);
               return;
             }
             const { header, series } = data;
@@ -246,19 +270,19 @@ function AddGrahique(currentState) {
             graphManager.AddGraph(graphSetting, header, series).then(function(id) {
                 currentState.graphSettings.set(id, graphSetting);
                 modalpage.style.visibility = 'collapse';
-                UI.EnableElement(mainUI);
+                EnableMainUI(true);
             });
           });
           return;
         }
         modalpage.style.visibility = 'collapse';
-        UI.EnableElement(mainUI);
+        EnableMainUI(true);
       }
     },
     cancel: {
       callback: function(event) {
         modalpage.style.visibility = 'collapse';
-        UI.EnableElement(mainUI);
+        EnableMainUI(true);
       }
     }
   });
@@ -281,7 +305,8 @@ function LinkCommits(currentState) {
 
   container.appendChild(ui.CreateTitle("Select commit(s)", 'h3'));
 
-  const commitsSet = new Set(currentState.commits).difference(new Set(currentState.commit));
+  const commitsSet = new Set(currentState.commits);
+  commitsSet.delete(currentState.commit);
   const commitsUI = ui.CreateCommits(Array.from(commitsSet), currentState.linkedCommits, {
     callback: function(event) {
       if (event.target.checked) {
@@ -299,13 +324,13 @@ function LinkCommits(currentState) {
         currentState.linkedCommits = selectedCommits;
         graphManager.LinkCommits(selectedCommits);
         modalpage.style.visibility = 'collapse';
-        UI.EnableElement(mainUI);
+        EnableMainUI(true);
       }
     },
     cancel: {
       callback: function(event) {
         modalpage.style.visibility = 'collapse';
-        UI.EnableElement(mainUI);
+        EnableMainUI(true);
       }
     }
   });
@@ -315,42 +340,131 @@ function LinkCommits(currentState) {
   modalpage.style.visibility = 'visible';
 }
 
+function NewGraph() {
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+
+  const container = document.createElement('div');
+  
+  ui.Reset();
+  container.appendChild(ui.CreateTitle("Create / Load graph", 'h3'));
+  const listFiles = ui.CreateListFiles(null, {
+    callback: function(event) {
+      apirest.LoadPage(event.target.innerText).then(function(newstate) {
+        ResetState(state, newstate).then(function() {
+          modalpage.style.visibility = 'collapse';
+          EnableMainUI(true);
+        });
+      });
+    }
+  });
+  container.appendChild(listFiles);
+  const btOkID = 'ui_' + ui.ID();
+  container.appendChild(ui.CreateActions(true, {
+    ok: {
+      text: 'New',
+      callback: function(event) {
+        ResetState(state, null).then(function() {
+          modalpage.style.visibility = 'collapse';
+          ConfigBaseInformations();
+        });
+      }
+    },
+    cancel: {
+      callback: function(event) {
+        modalpage.style.visibility = 'collapse';
+        if (state.commit == '') {
+          UI.EnableElement(uiLoadView)
+        } else {
+          EnableMainUI(true);
+        }
+      }
+    }
+  }));
+
+  apirest.ListPages().then(function(answer) {
+    ui.UpdateListFiles(listFiles, answer.files);
+  });
+
+  modalpage.appendChild(container);
+  modalpage.style.visibility = 'visible';
+}
+
+function Save(state) {
+  apirest.SavePage(state.title, state).then(function() {
+      EnableMainUI(true);
+  });
+}
+
+function EnableMainUI(state) {
+  UIElt.forEach(function(element) {
+    if (state) {
+      UI.EnableElement(element);
+    } else {
+      UI.DisableElement(element);
+    }
+  });
+}
+
 const header = document.getElementById('header');
 const main = document.getElementById('main');
 
 const errorManager = new ErrorManager();
 const apirest = new ApiREST(config.apiBase, errorManager);
 const ui = new UI();
-const graphManager = new GraphManager(main, apirest);
+const graphManager = new GraphManager(main, apirest, {
+  delete: function(id) {
+    state.graphSettings.delete(id);
+  }
+});
 
+const UIElt = [];
 const mainUI = document.createElement('div');
 mainUI.id = 'ui_icons';
 const uiAddGraph = document.createElement('span');
 uiAddGraph.className = 'ui_icons';
 uiAddGraph.innerText = '➕';
 uiAddGraph.onclick = function(event) {
-  UI.DisableElement(mainUI);
+  EnableMainUI(false);
   AddGrahique(state);
 }
-mainUI.appendChild(uiAddGraph);
+UIElt.push(uiAddGraph);
 const uiManageCommits = document.createElement('span');
 uiManageCommits.className = 'ui_icons';
 uiManageCommits.innerText = '📌';
 uiManageCommits.onclick = function(event) {
-  UI.DisableElement(mainUI);
+  EnableMainUI(false);
   LinkCommits(state);
 }
-mainUI.appendChild(uiManageCommits);
+UIElt.push(uiManageCommits);
 const uiSaveView = document.createElement('span');
 uiSaveView.className = 'ui_icons';
 uiSaveView.innerText = '💾';
 uiSaveView.onclick = function(event) {
-  UI.DisableElement(mainUI);
+  EnableMainUI(false);
+  Save(state);
 }
-mainUI.appendChild(uiSaveView);
-UI.DisableElement(mainUI);
+UIElt.push(uiSaveView);
+
+UIElt.forEach(function(element) {
+  UI.DisableElement(element);
+});
+
+const uiLoadView = document.createElement('span');
+uiLoadView.className = 'ui_icons';
+uiLoadView.innerText = '📋';
+uiLoadView.onclick = function(event) {
+  EnableMainUI(false);
+  NewGraph();
+}
+UIElt.push(uiLoadView);
+
+UIElt.forEach(function(element) {
+  mainUI.appendChild(element);
+});
+
 main.appendChild(mainUI);
 
-ConfigBaseInformations();
+//ConfigBaseInformations();
 
 console.log('done');

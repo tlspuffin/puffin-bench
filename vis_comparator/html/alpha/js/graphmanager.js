@@ -1,15 +1,19 @@
+import { ApiREST } from "./apirest.js";
+
 class GraphManager {
   #configs;
   #document;
   #apirest;
   #commits;
+  #callbacks;
   static #nextid = 0;
 
-  constructor(document, apirest) {
+  constructor(document, apirest, callbacks) {
     this.#configs = new Map();
     this.#document = document;
     this.#apirest = apirest;
     this.#commits = new Map();
+    this.#callbacks = callbacks;
   }
 
   async AddGraph(config, header, series) {
@@ -39,6 +43,14 @@ class GraphManager {
     }.bind(this));
 
     this.#configs.delete(id);
+
+    this.#callbacks?.delete?.(id);
+  }
+
+  DelAllGraph() {
+    this.#configs.forEach(function(config, id) {
+        DelGraph(id);
+    })
   }
 
   async LinkCommits(commits) {

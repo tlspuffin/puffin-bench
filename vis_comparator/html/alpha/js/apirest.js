@@ -1,3 +1,5 @@
+import { JSONHelp } from './jsonhelp.js';
+
 class ApiREST {
   #apiURI;
   #errorManager;
@@ -7,6 +9,60 @@ class ApiREST {
     this.#errorManager = errorManager;
   }
   
+  async SavePage(name, data) {
+    try {
+      const encodedName = encodeURIComponent(name);
+      const response = await fetch(`${this.#apiURI}/userdata/${encodedName}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSONHelp.Stringify(data)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return true;
+    } catch (error) {
+      this.#errorManager.Error('Failed to save data: ' + error.message);
+    }
+    return false;
+  }
+
+  async LoadPage(name) {
+    try {
+      const encodedName = encodeURIComponent(name);
+      const response = await fetch(`${this.#apiURI}/userdata/${encodedName}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.text();
+      return JSONHelp.Parse(data);
+    } catch (error) {
+      this.#errorManager.Error('Failed to load data: ' + error.message);
+    }
+    return null;
+  }
+
+  async ListPages() {
+    try {
+      const response = await fetch(`${this.#apiURI}/userdata`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      this.#errorManager.Error('Failed to load data: ' + error.message);
+    }
+    return null;
+  }
+
   async LoadCommits(commitType) {
     const commitID = [];
     try {

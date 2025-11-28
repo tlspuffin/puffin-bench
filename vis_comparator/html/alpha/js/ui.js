@@ -51,7 +51,7 @@ class UI {
 
     const btOK = document.createElement('button');
     this.#ApplyOptions(btOK, options?.ok);
-    btOK.innerText = 'Ok';
+    btOK.innerText = options?.ok?.text ?? 'Ok';
     btOK.onclick = options?.ok?.callback ?? null;
     container.appendChild(btOK);
 
@@ -163,7 +163,35 @@ class UI {
         cb.onchange = options.callback;
     });
 
-    return container
+    return container;
+  }
+
+  CreateListFiles(files, options) {
+    const container = document.createElement('div');
+    container.__callback = options?.callback;
+    this.#ApplyOptions(container, options?.container);
+    if (files != null) {
+      this.UpdateListFiles(container, files);
+      return container;
+    }
+
+    const waitSpan = document.createElement('span');
+    waitSpan.innerText = '🕛';
+    waitSpan.className = 'modal_wait';
+    container.append(waitSpan);
+
+    return container;
+  }
+
+  UpdateListFiles(container, files) {
+    container.innerHTML = '';
+    files.forEach(function(file) {
+      const button = document.createElement('button');
+      button.innerText = file;
+      button.className = 'checkbox-label-inline';
+      button.onclick = container.__callback;
+      container.appendChild(button);
+    });
   }
 
   static DisableElement(element) {

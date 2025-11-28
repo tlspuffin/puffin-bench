@@ -424,6 +424,87 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   ostr.flush();
 }
 
+void ns_Server::RequestHandlerAPISaveUserData::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& name =  config_->userdata_ / (std::get<0>(args_) + ".dat");
+  std::istream& stream = request.stream();
+
+  std::ofstream ofs(name, std::ios::binary);
+  if (!ofs.is_open()) {
+    SendErrorResponse(response, 400, "Unable to create file " + name);
+    return;
+  }
+  ofs << stream.rdbuf();
+  ofs.close();
+
+  rapidjson::Document doc;
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPILoadUserData::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& name = config_->userdata_ / (std::get<0>(args_) + ".dat");
+
+  rapidjson::Document doc;
+  try {
+    ReadJSONFile(name, doc);
+  } catch(...) {
+    SendErrorResponse(response, 400, "Unable to read " + name);
+    return;
+  }
+
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIListUserData::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& path = config_->userdata_;
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  auto& allocator = doc.GetAllocator();
+
+  try {
+    rapidjson::Value files(rapidjson::kArrayType);
+
+    if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
+      SendErrorResponse(response, 500, "Userdata directory not found");
+      return;
+    }
+
+    for (auto const& entry : std::filesystem::directory_iterator(path)) {
+      if (entry.is_regular_file()) {
+        if (entry.path().extension().string() != ".dat") {
+          continue;
+        }
+        std::string filename = entry.path().stem().string();
+        rapidjson::Value filenameVal;
+        filenameVal.SetString(filename.c_str(), filename.length(), allocator);
+        files.PushBack(filenameVal, allocator);
+      }
+    }
+
+    doc.AddMember("files", files, allocator);
+  } catch(...) {
+    SendErrorResponse(response, 400, "Unable to list userdata");
+    return;
+  }
+
+  SendJSONResponse(response, doc);
+}
+
 // POST /api/refresh
 /*void ns_Server::RequestHandlerAPIRefresh::handleRequest(
     Poco::Net::HTTPServerRequest& request,

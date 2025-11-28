@@ -56,6 +56,7 @@ int main(int argc, char *argv[]) {
   config.Validate();*/
 
   config.server_.html_ = "../html";
+  config.server_.userdata_ = "../userdata";
   std::cout << "Initializing dataset manager with path: "
       << config.analyze_.dataPath_ << std::endl;
 

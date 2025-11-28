@@ -13,6 +13,7 @@ struct Config {
   std::filesystem::path cert_;
   std::filesystem::path CA_;
   std::filesystem::path html_;
+  std::filesystem::path userdata_;
 
   Config();
   void Load(std::string const& name, rapidjson::Value& doc);
