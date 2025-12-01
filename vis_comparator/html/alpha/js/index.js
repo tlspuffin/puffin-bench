@@ -35,7 +35,7 @@ async function ResetState(state, newState) {
   state.linkedCommits = newState?.linkedCommits ?? new Set();
 
   const graphSettings = new Map();
-  for(const [id, config] of state.graphSettings) {
+  for(const [_, config] of state.graphSettings) {
     const data = await apirest.LoadCommitMetricsValues(
         config.type, config.commit, config.subject, config.min, config.max, config.step, config.metrics);
     if (data == null) {
@@ -55,12 +55,11 @@ function SetBaseInformations(state, newState) {
   Object.assign(state, newState);
   header.innerText = `${state.type} (${state.commit}) : ${state.title}`;
   EnableMainUI(true);
-  console.log(state);
 }
 
-function ConfigBaseInformations(oldState) {
+async function ConfigBaseInformations(oldState) {
   const currentState = {};
-  ResetState(currentState, oldState);
+  await ResetState(currentState, oldState);
   currentState.metrics = [];
 
   const modalpage = document.getElementById('modalpage');
@@ -114,7 +113,7 @@ function ConfigBaseInformations(oldState) {
       callback: function(event) {
         apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject).then(function(metrics) { 
             currentState.metrics = metrics;
-            modalpage.style.visibility = 'collapse';
+            modalpage.classList.remove('modalpage_visible');
             SetBaseInformations(state, currentState);
         });
       }
@@ -210,7 +209,7 @@ function ConfigBaseInformations(oldState) {
   };
 
   modalpage.appendChild(container);
-  modalpage.style.visibility = 'visible';
+  modalpage.classList.add('modalpage_visible');
 }
 
 function AddGrahique(currentState) {
@@ -228,6 +227,7 @@ function AddGrahique(currentState) {
   container.appendChild(time);
 
   container.appendChild(ui.CreateTitle("Select metric(s)", 'h3'));
+  const timeID = ui.ID();
   const metricsUI = ui.CreateMetrics(currentState.metrics, {
     callback: function(event) {
       let anyChecked = true;
@@ -252,14 +252,14 @@ function AddGrahique(currentState) {
     ok: {
       callback: function(event) {
         if (selectedMetrics.length != 0) {
-          const min = document.getElementById('time_start_1').value;
-          const max = document.getElementById('time_end_1').value;
-          const step = document.getElementById('time_step_1').value;
+          const min = document.getElementById('time_start_' + timeID).value;
+          const max = document.getElementById('time_end_' + timeID).value;
+          const step = document.getElementById('time_step_' + timeID).value;
           apirest.LoadCommitMetricsValues(
               currentState.type, currentState.commit, currentState.subject, min, max, step, selectedMetrics)
           .then(function(data) {
             if (data == null) {
-              modalpage.style.visibility = 'collapse';
+              modalpage.classList.remove('modalpage_visible');
               EnableMainUI(true);
               return;
             }
@@ -269,19 +269,19 @@ function AddGrahique(currentState) {
                 commit: currentState.commit, subject: currentState.subject, min, max, step };
             graphManager.AddGraph(graphSetting, header, series).then(function(id) {
                 currentState.graphSettings.set(id, graphSetting);
-                modalpage.style.visibility = 'collapse';
+                modalpage.classList.remove('modalpage_visible');
                 EnableMainUI(true);
             });
           });
           return;
         }
-        modalpage.style.visibility = 'collapse';
+        modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
     },
     cancel: {
       callback: function(event) {
-        modalpage.style.visibility = 'collapse';
+        modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
     }
@@ -291,7 +291,7 @@ function AddGrahique(currentState) {
   modalpage.appendChild(container);
   const btOk = document.getElementById(btOkID);
   UI.DisableElement(btOk);
-  modalpage.style.visibility = 'visible';
+  modalpage.classList.add('modalpage_visible');
 }
 
 function LinkCommits(currentState) {
@@ -323,13 +323,13 @@ function LinkCommits(currentState) {
       callback: function(event) {
         currentState.linkedCommits = selectedCommits;
         graphManager.LinkCommits(selectedCommits);
-        modalpage.style.visibility = 'collapse';
+        modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
     },
     cancel: {
       callback: function(event) {
-        modalpage.style.visibility = 'collapse';
+        modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
     }
@@ -337,7 +337,7 @@ function LinkCommits(currentState) {
   container.appendChild(actions);
 
   modalpage.appendChild(container);
-  modalpage.style.visibility = 'visible';
+  modalpage.classList.add('modalpage_visible');
 }
 
 function NewGraph() {
@@ -352,7 +352,7 @@ function NewGraph() {
     callback: function(event) {
       apirest.LoadPage(event.target.innerText).then(function(newstate) {
         ResetState(state, newstate).then(function() {
-          modalpage.style.visibility = 'collapse';
+          modalpage.classList.remove('modalpage_visible');
           EnableMainUI(true);
         });
       });
@@ -365,14 +365,14 @@ function NewGraph() {
       text: 'New',
       callback: function(event) {
         ResetState(state, null).then(function() {
-          modalpage.style.visibility = 'collapse';
+          modalpage.classList.remove('modalpage_visible');
           ConfigBaseInformations();
         });
       }
     },
     cancel: {
       callback: function(event) {
-        modalpage.style.visibility = 'collapse';
+        modalpage.classList.remove('modalpage_visible');
         if (state.commit == '') {
           UI.EnableElement(uiLoadView)
         } else {
@@ -387,7 +387,7 @@ function NewGraph() {
   });
 
   modalpage.appendChild(container);
-  modalpage.style.visibility = 'visible';
+  modalpage.classList.add('modalpage_visible');
 }
 
 function Save(state) {
@@ -457,6 +457,7 @@ uiLoadView.onclick = function(event) {
   EnableMainUI(false);
   NewGraph();
 }
+UI.EnableElement(uiLoadView);
 UIElt.push(uiLoadView);
 
 UIElt.forEach(function(element) {
@@ -464,7 +465,5 @@ UIElt.forEach(function(element) {
 });
 
 main.appendChild(mainUI);
-
-//ConfigBaseInformations();
 
 console.log('done');

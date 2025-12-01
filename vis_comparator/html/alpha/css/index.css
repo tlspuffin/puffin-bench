@@ -43,6 +43,7 @@ body {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
+  padding-bottom: 60px;
 }
 
 /* =================================================================
@@ -102,9 +103,9 @@ body {
 }
 
 /* Graph UI Bar (top bar with controls) */
-#ui_icons div[id^="graph_ui_"] {
+div[id^="graph_ui_"] {
   background: linear-gradient(90deg, #ffd89b 0%, #19547b 100%);
-  padding: 12px 20px;
+  padding: 8px 8px;
   display: flex;
   align-items: center;
   gap: 15px;
@@ -166,17 +167,16 @@ div[id^="graph_area_"] {
   height: 100%;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  visibility: hidden;
   opacity: 0;
-  transition: opacity 0.3s ease, visibility 0.3s ease;
+  transition: opacity 0.3s ease, display 0.3s ease;
 }
 
-.modalpage[style*="visibility: visible"] {
-  visibility: visible;
+.modalpage_visible {
+  display: flex;
   opacity: 1;
 }
 
@@ -245,7 +245,7 @@ select:focus {
 }
 
 /* Time selection inputs - horizontal layout */
-.modal_div:has(input[type="text"]) {
+.modal_div:has(input[type="number"]) {
   display: flex;
   gap: 15px;
   align-items: center;
@@ -253,7 +253,7 @@ select:focus {
   flex-wrap: wrap;
 }
 
-.modal_div:has(input[type="text"]) label {
+.modal_div:has(input[type="number"]) label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -267,7 +267,7 @@ select:focus {
   white-space: nowrap;
 }
 
-.modal_div input[type="text"] {
+.modal_div input[type="number"] {
   flex: 1;
   padding: 10px 14px;
   font-size: 1rem;
@@ -277,11 +277,11 @@ select:focus {
   min-width: 80px;
 }
 
-.modal_div input[type="text"]:hover {
+.modal_div input[type="number"]:hover {
   border-color: #667eea;
 }
 
-.modal_div input[type="text"]:focus {
+.modal_div input[type="number"]:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -462,6 +462,7 @@ button:disabled,
 
   .main {
     padding: 15px;
+    padding-bottom: 60px;
   }
 
   #ui_icons {

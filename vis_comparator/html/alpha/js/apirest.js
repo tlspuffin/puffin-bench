@@ -19,7 +19,6 @@ class ApiREST {
           },
           body: JSONHelp.Stringify(data)
       });
-
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -35,7 +34,6 @@ class ApiREST {
     try {
       const encodedName = encodeURIComponent(name);
       const response = await fetch(`${this.#apiURI}/userdata/${encodedName}`);
-
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -51,7 +49,6 @@ class ApiREST {
   async ListPages() {
     try {
       const response = await fetch(`${this.#apiURI}/userdata`);
-
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -67,6 +64,10 @@ class ApiREST {
     const commitID = [];
     try {
       const response = await fetch(`${this.#apiURI}/commits/${commitType}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const data = await response.json();
       
       data.commits.forEach(commit => {
@@ -82,8 +83,11 @@ class ApiREST {
     const subjects = [];
     try {
       const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const data = await response.json();
-      
       Object.entries(data).forEach(([subject, count]) => {
         subjects.push({value: subject, text:`${subject} (${count} runs)`});
       });
@@ -98,12 +102,13 @@ class ApiREST {
       const response = await fetch(
         `${this.#apiURI}/metrics/${commitType}/${commitID}/${commitSubject}`
       );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const data = await response.json();
-      
       const metrics = new Map();
-      
       data.runs.forEach(run => {
-        console.log(run);
         run.metrics.forEach(m => {
           metrics.set(m, (metrics.get(m) ?? 0) + 1);
         });
@@ -155,13 +160,11 @@ class ApiREST {
           aggregate: 'sum'
         })
       });
-        
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
         
       const { header, series } = await this.#ParseBinaryResponse(response);
-      console.log(header);
       return { header, series };
     } catch (error) {
       this.#errorManager.Error('Failed to load metrics: ' + error.message);

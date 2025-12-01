@@ -49,8 +49,8 @@ class GraphManager {
 
   DelAllGraph() {
     this.#configs.forEach(function(config, id) {
-        DelGraph(id);
-    })
+        this.DelGraph(id);
+    }.bind(this));
   }
 
   async LinkCommits(commits) {

@@ -1,7 +1,7 @@
 class ErrorManager {
 
   Error(message) {
-
+    console.error(message);
   }
 
 };

@@ -79,7 +79,7 @@ class UI {
         const label = document.createElement('label');
         label.innerHTML = `
             <span>${data.label}</span>
-            <input type="text" size="10" class="" value="${data.value}" id="time_${data.label.toLocaleLowerCase()}_${id}">
+            <input type="number" size="10" class="" value="${data.value}" id="time_${data.label.toLocaleLowerCase()}_${id}">
         `;
         container.appendChild(label);
     });
