@@ -1,5 +1,6 @@
 #include "publish_action.hxx"
 #include "publish_action_perf.hxx"
+#include "publish_action_perf_summary.hxx"
 #include "publish_action_vuln.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/time.hxx"
@@ -15,8 +16,8 @@ ns_Publish::PublishAction::PublishAction(std::string const& name, std::string co
     : name_(name), filesFilter_(filesFilter) {
 }
 
-ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperiments(std::string const& jsonTaskFile) {
-  TaskAnalysis result;
+ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromFile(
+    std::string const& jsonTaskFile) {
 
   std::ifstream ifs(jsonTaskFile);
   if (!ifs.is_open()) {
@@ -24,14 +25,27 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
     throw std::runtime_error("Cannot open JSON file");
   }
 
-  rapidjson::IStreamWrapper is(ifs);
-
-  rapidjson::Document doc;
-  doc.ParseStream(is);
+  std::ostringstream oss;
+  oss << ifs.rdbuf();
   ifs.close();
 
+  try {
+    return ExtractExperimentsFromBuffer(oss.str());
+  } catch (std::runtime_error const& e) {
+    oss.str("");
+    oss << e.what() << " in file " << jsonTaskFile;
+    throw std::runtime_error(oss.str());
+  }
+}
+
+ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromBuffer(
+    std::string const& jsonTaskBuffer) {
+  TaskAnalysis result;
+
+  rapidjson::Document doc;
+  doc.Parse(jsonTaskBuffer.c_str());
+
   if (doc.HasParseError()) {
-    LOGE("JSON parse error in file: " << jsonTaskFile);
     throw std::runtime_error("Invalid JSON format");
   }
 
@@ -87,6 +101,8 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
           ? step["attempt_id"].GetInt() : -1;
       exp.exit_code = step.HasMember("exit_code") && step["exit_code"].IsInt()
           ? step["exit_code"].GetInt() : -1;
+      exp.monitor = step.HasMember("message_from_run") && step["message_from_run"].IsString()
+          ? step["message_from_run"].GetString() : "";
 
       exp.duration_ms = 0;
       if (step.HasMember("time_points_ms") && step["time_points_ms"].IsArray()) {
@@ -107,10 +123,12 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
 
 ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& action, 
     std::string const& name, std::string const& filesFilter) {
-  if(action == "GenerateReportPerf") {
+  if (action == "GenerateReportPerf") {
     return new PublishActionPerf(name, filesFilter);
   } else if (action == "GenerateReportVuln") {
     return new PublishActionVuln(name, filesFilter);
+  } else if (action == "GenerateReportPerfFromSummary") {
+    return new PublishActionPerfUseSummary(name, filesFilter);
   }
   return nullptr;
 }

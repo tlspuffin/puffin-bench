@@ -62,6 +62,14 @@ template<typename T> inline T Get(rapidjson::Value const& obj,
       if (value.IsDouble()) return static_cast<T>(value.GetDouble());
     } else if constexpr (std::is_same_v<T, std::string>) {
       if (value.IsString()) return std::string(value.GetString());
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::Object>) {
+      if (value.IsObject()) return value.GetObj();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstObject>) {
+      if (value.IsObject()) return value.GetObj();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::Array>) {
+      if (value.IsArray()) return value.GetArray();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstArray>) {
+      if (value.IsArray()) return value.GetArray();
     }
   }
   throw std::runtime_error(std::string("Missing field ") + name + " in JSON data");

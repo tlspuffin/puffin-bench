@@ -14,6 +14,7 @@ public:
   struct ExperimentResult {
     std::string id;
     std::string state;
+    std::string monitor;
     uint64_t duration_ms;
     uint64_t attempt;
     uint64_t exit_code;
@@ -39,7 +40,8 @@ public:
   PublishAction(std::string const& name, std::string const& filesFilter);
   virtual ~PublishAction();
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
-  TaskAnalysis ExtractExperiments(std::string const& jsonTaskFile);
+  TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile);
+  TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer);
   virtual bool Run(std::filesystem::path const& inputPath, std::filesystem::path const& outputPath) = 0;
   static PublishAction* Build(std::string const& action, std::string const& name, std::string const& onFiles);
 protected:

@@ -1,6 +1,8 @@
 var allCommits = [];
 var currentFilter = 'all';
-var dataType = 'Perf';
+var selectedTypes = new Set(['Perf', 'Vuln']); // Types currently visible
+var availableTypes = ['Perf', 'Vuln']; // Default types to load
+var showAllCommits = false; // Show all commits regardless of type results
 
 const config = {
   location: window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1),
@@ -61,10 +63,18 @@ function formatDurationsList(durations) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  dataType = new URLSearchParams(window.location.search)?.get('type') ?? 'Perf';
-  document.getElementById('header-title').textContent = `${dataType} Results`;
+  // Parse types from query params if provided
+  const urlParams = new URLSearchParams(window.location.search);
+  const typesParam = urlParams.get('types');
+  if (typesParam) {
+    availableTypes = typesParam.split(',').map(t => t.trim());
+    selectedTypes = new Set(availableTypes);
+  }
+
+  document.getElementById('header-title').textContent = `Results`;
   loadData();
   setupFilters();
+  setupTypeFilters();
   setupSearch();
 });
 
@@ -99,22 +109,38 @@ async function loadCommits(commitsInfos) {
   for (let i = 0; i < commitIds.length; i += batchSize) {
     const batch = commitIds.slice(i, i + batchSize);
 
-    const promises = batch.map(commitId => 
-      fetch(`${config.location}/JSON/${dataType}/${commitId}.json`)
-        .then(r => r.ok ? r.json() : { commit_id: commitId, global_status: 'no run' })
-        .catch(() => ({ commit_id: commitId, global_status: 'no run' }))
-    );
+    // For each commit, fetch all types in parallel
+    const commitPromises = batch.map(async commitId => {
+      const commitData = {
+        commit_id: commitId,
+        types: {}
+      };
 
-    const results = await Promise.all(promises);
+      // Fetch all types for this commit
+      const typePromises = availableTypes.map(type =>
+        fetch(`${config.location}/JSON/${type}/${commitId}.json`)
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+          .then(data => ({ type, data }))
+      );
+
+      const typeResults = await Promise.all(typePromises);
+
+      // Store results by type
+      typeResults.forEach(({ type, data }) => {
+        if (data) {
+          commitData.types[type] = data;
+        }
+      });
+
+      return commitData;
+    });
+
+    const results = await Promise.all(commitPromises);
 
     results.forEach(commitData => {
       allCommits.push(commitData);
-
-      if (commitData.global_status === 'no run' && !commitData.libs) {
-        renderNoRunCommit(commitData.commit_id, commitsInfos[commitData.commit_id], container);
-      } else {
-        renderCommit(commitData, commitsInfos[commitData.commit_id], container);
-      }
+      renderCommit(commitData, commitsInfos[commitData.commit_id], container);
     });
   }
 
@@ -123,119 +149,245 @@ async function loadCommits(commitsInfos) {
 
 function renderCommit(commit, commitInfos, container) {
   const commitDiv = document.createElement('div');
-  commitDiv.className = `commit commit-${commit.global_status}`;
+  commitDiv.className = 'commit';
   commitDiv.dataset.commitId = commit.commit_id;
-  commitDiv.dataset.status = commit.global_status;
 
+  // Store all statuses for filtering (including "no run" for missing types)
+  const statuses = [];
+
+  for (const type of availableTypes) {
+    if (commit.types[type]) {
+      statuses.push(commit.types[type].global_status);
+    } else {
+      statuses.push('no run');
+    }
+  }
+  commitDiv.dataset.statuses = JSON.stringify(statuses);
+
+  // Create header with pastilles
   const header = document.createElement('div');
   header.className = 'commit-header';
-  header.innerHTML = `
-    <span class="pastille ${getPastilleClass(commit.global_status)}">
-      ${getPastilleIcon(commit.global_status)}
-    </span>
+
+  // Create pastilles container
+  const pastillesDiv = document.createElement('div');
+  pastillesDiv.className = 'pastilles';
+
+  for (const type of availableTypes) {
+    const typeData = commit.types[type];
+    if (typeData) {
+      const pastille = document.createElement('div');
+      pastille.className = 'pastille-item';
+      pastille.innerHTML = `
+        <span class="pastille ${getPastilleClass(typeData.global_status)}">
+          ${getPastilleIcon(typeData.global_status)}
+        </span>
+        <span class="pastille-label">${type}</span>
+      `;
+      pastillesDiv.appendChild(pastille);
+    }
+  }
+
+  header.appendChild(pastillesDiv);
+
+  // Add commit info
+  const commitInfo = document.createElement('div');
+  commitInfo.className = 'commit-info';
+
+  const commentText = commitInfos?.comment ? `<span class="commit-comment">${commitInfos.comment}</span>` : '';
+
+  commitInfo.innerHTML = `
     <span class="commit-id">
       <a href="https://github.com/tlspuffin/tlspuffin/commit/${commit.commit_id}"
         target="_blank" rel="noopener noreferrer">
         ${commit.commit_id}
       </a>
     </span>
-    <span class="date">${commitInfos?.date || 'no date'}</span>
+    <div class="commit-meta">
+      ${commentText}
+      <span class="date">${commitInfos?.date || 'no date'}</span>
+    </div>
   `;
+  header.appendChild(commitInfo);
+
   commitDiv.appendChild(header);
 
-  if (commitInfos?.comment) {
-    const commentEl = document.createElement('div');
-    commentEl.className = 'commit-comment';
-    commentEl.textContent = commitInfos.comment;
-    commitDiv.appendChild(commentEl);
+  // Render sections for each type (or show "no results" if none)
+  let hasSections = false;
+  for (const type of availableTypes) {
+    const typeData = commit.types[type];
+    if (typeData) {
+      const typeSection = renderTypeSection(type, typeData);
+      typeSection.dataset.type = type;
+      commitDiv.appendChild(typeSection);
+      hasSections = true;
+    }
   }
 
-  if (commit.libs && Object.keys(commit.libs).length > 0) {
+  // If no sections at all, show "No results" message
+  if (!hasSections) {
+    const noResultsDiv = document.createElement('div');
+    noResultsDiv.className = 'no-run';
+    noResultsDiv.textContent = 'No results available for this commit';
+    commitDiv.appendChild(noResultsDiv);
+  }
+
+  container.appendChild(commitDiv);
+}
+
+function renderTypeSection(type, typeData) {
+  const section = document.createElement('div');
+  section.className = 'type-section';
+
+  const typeHeader = document.createElement('div');
+  typeHeader.className = 'type-header';
+  typeHeader.innerHTML = `<h3>${type}</h3>`;
+  section.appendChild(typeHeader);
+
+  if (typeData.libs && Object.keys(typeData.libs).length > 0) {
     const libsDiv = document.createElement('div');
     libsDiv.className = 'libs-summary';
 
-    for (const [libName, libData] of 
-        Object.entries(commit.libs).sort((a,b)=> a[0].localeCompare(b[0]))) {
+    const noStatsFields = typeData.no_stats || [];
+
+    for (const [libName, libData] of Object.entries(typeData.libs).sort((a,b)=> a[0].localeCompare(b[0]))) {
       const libItem = document.createElement('div');
       libItem.className = 'lib-item';
 
-      const successDurations = libData.success_durations_ms || [];
-      const successDurationsFormatted = successDurations.length > 0 ? 
-          '✓ ' + successDurations.map(d => formatDuration(d)).join(', ') : '';
+      // Prepare display data with stats
+      const displayData = prepareLibDisplay(libData, noStatsFields);
 
-      const failDurations = libData.fail_durations_ms || [];
-      const failDurationsFormatted = failDurations.length > 0 ?
-          '✗ ' + failDurations.map(d => formatDuration(d)).join(', ') : '';
+      // Count success/fail if available
+      const successCount = libData.success_count ?? '?';
+      const totalRuns = libData.total_runs ?? '?';
+      const icon = getLibIcon(successCount, totalRuns);
 
-      const successStats = calculateStats(successDurations);
-      const failStats = calculateStats(failDurations);
+      // Check for warning
+      const warnUser = libData.warn_user;
+      const warningIcon = warnUser ? getWarningIcon(warnUser) : '';
 
-      const icon = getLibIcon(libData.success_count, libData.total_runs);
+      // Add lib name, stats, icon directly to libItem
       libItem.innerHTML = `
-        <span class="lib-name">${libName}</span>
-        <span class="lib-stats">${libData.success_count}/${libData.total_runs}</span>
         <span class="lib-icon">${icon}</span>
-        <div class="lib-durations">
-          <span >
-            <span class="duration-success">${successDurationsFormatted}</span>
-            <span class="duration-fail">${failDurationsFormatted}</span>
-          </span>
-          ${successStats ? `<div class="duration-success">${formatStats(successStats, '✓')}</div>` : ''}
-          ${failStats ? `<div class="duration-fail">${formatStats(failStats, '✗')}</div>` : ''}
-        </div>
+        <span class="lib-name">${libName}${warningIcon}</span>
+        <span class="lib-stats">${successCount}/${totalRuns}</span>
       `;
+
+      // Add compact stats display inline
+      if (Object.keys(displayData.withStats).length > 0) {
+        for (const [field, data] of Object.entries(displayData.withStats)) {
+          const statEl = document.createElement('div');
+          statEl.className = 'stat-item';
+          statEl.innerHTML = `
+            <span class="stat-field">${field}:</span>
+            <span class="stat-value">${formatStatsCompact(data.stats)}</span>
+          `;
+
+          // Add hover tooltip
+          const tooltip = createStatsTooltip(field, data, displayData.withoutStats);
+          statEl.appendChild(tooltip);
+          statEl.addEventListener('mouseenter', () => tooltip.classList.add('visible'));
+          statEl.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
+
+          libItem.appendChild(statEl);
+        }
+      }
 
       libsDiv.appendChild(libItem);
     }
 
-    commitDiv.appendChild(libsDiv);
+    section.appendChild(libsDiv);
   }
 
+  // Add actions for this type
   const actions = document.createElement('div');
   actions.className = 'actions';
   actions.innerHTML = `
-    <button onclick="showDetails('${commit.commit_id}', '${commit.task_id}')">📊 Details</button>
-    <button onclick="downloadResults('${commit.commit_id}', ${commit.task_id})">⬇️ Download</button>
+    <button onclick="showDetails('${typeData.commit_id}', '${typeData.task_id}', '${type}')">📊 Details</button>
+    <button onclick="downloadResults('${typeData.commit_id}', ${typeData.task_id}, '${type}')">⬇️ Download</button>
   `;
-  commitDiv.appendChild(actions);
+  section.appendChild(actions);
 
-  container.appendChild(commitDiv);
+  return section;
 }
 
-function renderNoRunCommit(commitId, commitInfos, container) {
-  const commitDiv = document.createElement('div');
-  commitDiv.className = 'commit commit-no-run';
-  commitDiv.dataset.commitId = commitId;
-  commitDiv.dataset.status = 'no run';
+function prepareLibDisplay(libData, noStatsFields = []) {
+  const display = {
+    withStats: {},
+    withoutStats: {},
+    hidden: []
+  };
 
-  const header = document.createElement('div');
-  header.className = 'commit-header';
-  header.innerHTML = `
-    <span class="pastille pastille-gray">⚪</span>
-    <span class="commit-id">
-      <a href="https://github.com/tlspuffin/tlspuffin/commit/${commitId}"
-        target="_blank" rel="noopener noreferrer">
-        ${commitId}
-      </a>
-    </span>
-    <span class="date">${commitInfos?.date || 'no date'}</span>
-  `;
-  commitDiv.appendChild(header);
+  for (const [key, value] of Object.entries(libData)) {
+    // Skip non-array or empty arrays
+    if (!Array.isArray(value) || value.length === 0) {
+      display.hidden.push(key);
+      continue;
+    }
 
-  if (commitInfos?.comment) {
-    const commentEl = document.createElement('div');
-    commentEl.className = 'commit-comment';
-    commentEl.textContent = commitInfos.comment;
-    commitDiv.appendChild(commentEl);
+    // Skip non-numeric arrays
+    if (typeof value[0] !== 'number') {
+      display.hidden.push(key);
+      continue;
+    }
+
+    // Categorize based on no_stats
+    if (noStatsFields.includes(key)) {
+      display.withoutStats[key] = { values: value };
+    } else {
+      display.withStats[key] = {
+        values: value,
+        stats: calculateStats(value)
+      };
+    }
   }
 
-  const noRun = document.createElement('div');
-  noRun.className = 'no-run';
-  noRun.textContent = 'No resultats';
-  commitDiv.appendChild(noRun);
-
-  container.appendChild(commitDiv);
+  return display;
 }
+
+function formatStatsCompact(stats) {
+  if (!stats) return '-';
+  const meanStr = stats.mean.toFixed(2);
+  const stddevStr = stats.stddev.toFixed(2);
+  return `μ:${meanStr}(±${stddevStr})`;
+}
+
+function createStatsTooltip(field, withStatsData, withoutStatsData) {
+  const tooltip = document.createElement('div');
+  tooltip.className = 'stats-tooltip';
+
+  let content = `<div class="tooltip-title">${field}</div>`;
+
+  // Show full stats
+  if (withStatsData.stats) {
+    const s = withStatsData.stats;
+    content += `
+      <div class="tooltip-section">
+        <div>Values: ${withStatsData.values.join(', ')}</div>
+        <div>Range: [${s.min}–${s.max}]</div>
+        <div>Median: ${s.median}</div>
+        <div>Mean: ${s.mean.toFixed(2)} (±${s.stddev.toFixed(2)})</div>
+      </div>
+    `;
+  }
+
+  // Show no_stats fields
+  if (Object.keys(withoutStatsData).length > 0) {
+    content += '<div class="tooltip-section">';
+    for (const [noStatField, data] of Object.entries(withoutStatsData)) {
+      content += `
+        <div class="tooltip-nostats">
+          <strong>${noStatField}</strong> (no statistics)
+          <div>Values: ${data.values.join(', ')}</div>
+        </div>
+      `;
+    }
+    content += '</div>';
+  }
+
+  tooltip.innerHTML = content;
+  return tooltip;
+}
+
 
 function getPastilleClass(status) {
   const mapping = {
@@ -258,9 +410,42 @@ function getPastilleIcon(status) {
 }
 
 function getLibIcon(success, total) {
-  if (success === total) return '✓';
+  if (success === total) return '✅';
   if (success > 0) return '⚠️';
-  return '❌';
+  return '⛔';
+}
+
+function getWarningIcon(warnUser) {
+  if (!warnUser || !Array.isArray(warnUser) || warnUser.length === 0) return '';
+
+  // warnUser is an array of numbers
+  // Array length determines warning level
+  // Hover shows the array values
+
+  const warnLevel = warnUser.length;
+
+  let icon = '';
+  let title = '';
+  let cssClass = 'warn-icon';
+
+  // Format the array values for display
+  const valuesStr = warnUser.join(', ');
+
+  if (warnLevel <= 2) {
+    icon = '🚨';
+    title = `Warning (${warnLevel}): [${valuesStr}]`;
+    cssClass += ' warn-low';
+  } else if (warnLevel <= 5) {
+    icon = '🚨🚨';
+    title = `Warning (${warnLevel}): [${valuesStr}]`;
+    cssClass += ' warn-medium';
+  } else {
+    icon = '🚨🚨🚨';
+    title = `Critical Warning (${warnLevel}): [${valuesStr}]`;
+    cssClass += ' warn-high';
+  }
+
+  return ` <span class="${cssClass}" title="${title}">${icon}</span>`;
 }
 
 function setupFilters() {
@@ -282,18 +467,88 @@ function applyFilters() {
   const searchTerm = document.getElementById('search-input').value.toLowerCase();
   const commits = document.querySelectorAll('.commit');
   let visibleCount = 0;
+  const statusCounts = { success: 0, mixed: 0, fail: 0, 'no run': 0 };
 
   commits.forEach(commit => {
     const commitId = commit.dataset.commitId.toLowerCase();
-    const status = commit.dataset.status;
+    const statuses = JSON.parse(commit.dataset.statuses || '[]');
 
-    let statusMatch;
-    if (currentFilter === 'all') {
+    // Check if commit has "no results" message (no sections at all)
+    const noRunMessage = commit.querySelector('.no-run');
+    const isEmptyCommit = !!noRunMessage;
+
+    // STEP 1: Filter by "Show types" (which commits to consider)
+    // With the new logic: selecting types means "I want to see the state of these types"
+    // So we show ALL commits (to display their state for selected types)
+    let typeFilterMatch = false;
+
+    if (showAllCommits) {
+      // If "All" is checked, all commits pass the type filter
+      typeFilterMatch = true;
+    } else if (selectedTypes.size === 0) {
+      // No types selected = hide all commits
+      typeFilterMatch = false;
+    } else {
+      // At least one type is selected = show all commits
+      // (we want to see their state for the selected types, even if "no run")
+      typeFilterMatch = true;
+    }
+
+    // If type filter doesn't match, hide and skip
+    if (!typeFilterMatch) {
+      commit.classList.add('hidden');
+      return;
+    }
+
+    // Update sections and pastilles visibility based on selected types
+    const typeSections = commit.querySelectorAll('.type-section');
+    typeSections.forEach(section => {
+      const type = section.dataset.type;
+      if (showAllCommits || selectedTypes.has(type)) {
+        section.style.display = '';
+      } else {
+        section.style.display = 'none';
+      }
+    });
+
+    const pastilles = commit.querySelectorAll('.pastille-item');
+    pastilles.forEach((pastille, idx) => {
+      const type = availableTypes[idx];
+      if (type && (showAllCommits || selectedTypes.has(type))) {
+        pastille.style.display = '';
+      } else {
+        pastille.style.display = 'none';
+      }
+    });
+
+    // STEP 2: Filter by status (among the candidates from step 1)
+    let statusMatch = false;
+
+    if (isEmptyCommit) {
+      // Empty commits match "all" and "no run"
+      statusMatch = (currentFilter === 'all' || currentFilter === 'no run');
+    } else if (currentFilter === 'all') {
       statusMatch = true;
     } else if (currentFilter === 'with-results') {
-      statusMatch = status !== 'no run';
+      // At least one visible type must have actual results (not "no run")
+      let typeIdx = 0;
+      for (const type of availableTypes) {
+        if ((showAllCommits || selectedTypes.has(type)) && statuses[typeIdx] && statuses[typeIdx] !== 'no run') {
+          statusMatch = true;
+          break;
+        }
+        typeIdx++;
+      }
     } else {
-      statusMatch = status === currentFilter;
+      // At least one visible type must match the filter status (OR logic)
+      let typeIdx = 0;
+      for (const type of availableTypes) {
+        if ((showAllCommits || selectedTypes.has(type)) && statuses[typeIdx] === currentFilter) {
+          statusMatch = true;
+          break;
+        }
+        typeIdx++;
+      }
     }
 
     const searchMatch = commitId.includes(searchTerm);
@@ -301,10 +556,28 @@ function applyFilters() {
     if (statusMatch && searchMatch) {
       commit.classList.remove('hidden');
       visibleCount++;
+
+      // Count statuses for visible types only
+      if (isEmptyCommit) {
+        statusCounts['no run']++;
+      } else {
+        let typeIdx = 0;
+        for (const type of availableTypes) {
+          if ((showAllCommits || selectedTypes.has(type)) && statuses[typeIdx]) {
+            const status = statuses[typeIdx];
+            if (statusCounts.hasOwnProperty(status)) {
+              statusCounts[status]++;
+            }
+          }
+          typeIdx++;
+        }
+      }
     } else {
       commit.classList.add('hidden');
     }
   });
+
+  updateCounter(visibleCount, statusCounts);
 
   const noResults = document.getElementById('no-results');
   if (visibleCount === 0 && commits.length > 0) {
@@ -322,12 +595,74 @@ function setupSearch() {
   });
 }
 
-function showDetails(commitId, taskId) {
-  window.open(`${window.location.origin}${config.detailURI}?data=${config.location}/PR/${commitId}/${dataType}/${taskId}.json`);
+function setupTypeFilters() {
+  const typeFiltersContainer = document.getElementById('type-filters');
+  if (!typeFiltersContainer) return;
+
+  typeFiltersContainer.innerHTML = '';
+
+  // Add "All" checkbox first
+  const allLabel = document.createElement('label');
+  allLabel.className = 'type-filter-label';
+  allLabel.style.fontWeight = '600';
+
+  const allCheckbox = document.createElement('input');
+  allCheckbox.type = 'checkbox';
+  allCheckbox.value = 'all';
+  allCheckbox.checked = showAllCommits;
+  allCheckbox.addEventListener('change', (e) => {
+    showAllCommits = e.target.checked;
+    applyFilters();
+  });
+
+  allLabel.appendChild(allCheckbox);
+  allLabel.appendChild(document.createTextNode(' All'));
+  typeFiltersContainer.appendChild(allLabel);
+
+  // Add type checkboxes
+  availableTypes.forEach(type => {
+    const label = document.createElement('label');
+    label.className = 'type-filter-label';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = type;
+    checkbox.checked = selectedTypes.has(type);
+    checkbox.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        selectedTypes.add(type);
+      } else {
+        selectedTypes.delete(type);
+      }
+      applyFilters();
+    });
+
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(` ${type}`));
+    typeFiltersContainer.appendChild(label);
+  });
 }
 
-function downloadResults(commitId, taskId) {
-  window.location.href = `${config.location}/PR/${commitId}/${dataType}/${taskId}.tgz`;
+function updateCounter(visibleCount, statusCounts) {
+  const counterEl = document.getElementById('total-commits');
+  if (!counterEl) return;
+
+  const parts = [];
+  if (statusCounts.success > 0) parts.push(`Success: ${statusCounts.success}`);
+  if (statusCounts.mixed > 0) parts.push(`Mixed: ${statusCounts.mixed}`);
+  if (statusCounts.fail > 0) parts.push(`Fail: ${statusCounts.fail}`);
+  if (statusCounts['no run'] > 0) parts.push(`No run: ${statusCounts['no run']}`);
+
+  const summary = parts.length > 0 ? parts.join(', ') : 'No commits';
+  counterEl.textContent = `Displaying ${visibleCount} commits: ${summary}`;
+}
+
+function showDetails(commitId, taskId, type) {
+  window.open(`${window.location.origin}${config.detailURI}?data=${config.location}/PR/${commitId}/${type}/${taskId}.json`);
+}
+
+function downloadResults(commitId, taskId, type) {
+  window.location.href = `${config.location}/PR/${commitId}/${type}/${taskId}.tgz`;
 }
 
 function refreshData() {
@@ -341,7 +676,7 @@ function refreshData() {
   document.getElementById('search-input').value = '';
 
   const container = document.getElementById('commits-list');
-  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Chargement des commits...</p></div>';
+  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading commits...</p></div>';
 
   loadData();
 }

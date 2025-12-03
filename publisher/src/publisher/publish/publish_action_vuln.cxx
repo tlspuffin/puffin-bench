@@ -6,7 +6,7 @@
 #include <rapidjson/writer.h>
 
 ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionVuln::Analyze(std::string jsonTaskFile) {
-  TaskAnalysis experiments = ExtractExperiments(jsonTaskFile);
+  TaskAnalysis experiments = ExtractExperimentsFromFile(jsonTaskFile);
   LOGI("Found " << experiments.experiments.size() << " Experiment steps");
   std::unordered_set<std::string> libs;
   bool haveSuccess = false;
