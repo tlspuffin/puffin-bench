@@ -1,0 +1,55 @@
+{
+  "publish": {
+    "server": "default",
+    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin4/PR/${COMMIT_ID}/Vuln/",
+    "goal": "Vuln PR/Commit ${COMMIT_ID}"
+    },
+  "configurations": {
+    "HEAP": {
+      "args": {
+      "experiment": "HEAP",
+        "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
+      }
+    }
+  },
+  "name" : "HEAP search - ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init"
+    },
+    {
+      "step": "ForcedBuild",
+      "run": [
+        "HEAP"
+      ]
+    },
+    {
+      "step": "ExperimentWithCargo",
+      "run": [
+        "HEAP"
+      ],
+      "configuration": {
+        "nb_cores": 4,
+        "timeout": "20m",
+        "nb_retry": 5
+      },
+      "monitor": {
+        "entry_point": "CheckObjectif",
+        "delay_start": "10s",
+        "interval": "60s"
+      }
+    },
+    {
+      "step": "ManageResults",
+      "configuration": {
+        "args": {
+          "vulnerabilities": "HEAP",
+          "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
+        }
+      }
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}

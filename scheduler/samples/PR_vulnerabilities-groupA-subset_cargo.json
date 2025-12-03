@@ -1,0 +1,72 @@
+{
+  "publish": {
+    "server": "default",
+    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin3/PR/${COMMIT_ID}/Vuln/",
+    "goal": "Vuln PR/Commit ${COMMIT_ID}"
+    },
+  "configurations": {
+    "SDOS2": {
+      "args": {
+        "experiment": "SDOS2",
+        "features": "'wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173'",
+        "extra_flags": "'--put-use-clear'"
+      }
+    },
+    "HEAP": {
+      "args": {
+      "experiment": "HEAP",
+        "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
+      }
+    },
+    "SKIP": {
+      "args": {
+      "experiment": "SKIP",
+        "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"
+      }
+    }
+  },
+  "name" : "Vulnerabilities (subset group A) search - ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init"
+    },
+    {
+      "step": "ForcedBuild",
+      "run": [
+        "SDOS2",
+        "HEAP",
+        "SKIP"
+      ]
+    },
+    {
+      "step": "ExperimentWithCargo",
+      "run": [
+        "SDOS2",
+        "HEAP",
+        "SKIP"
+      ],
+      "configuration": {
+        "nb_cores": 4,
+        "timeout": "20m",
+        "nb_retry": 5
+      },
+      "monitor": {
+        "entry_point": "CheckObjectif",
+        "delay_start": "10s",
+        "interval": "60s"
+      }
+    },
+    {
+      "step": "ManageResults",
+      "configuration": {
+        "args": {
+          "vulnerabilities": "SDOS2 HEAP SKIP",
+          "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
+        }
+      }
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}
