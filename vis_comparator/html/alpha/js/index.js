@@ -222,12 +222,12 @@ function AddGrahique(currentState) {
   ui.Reset();
 
   container.appendChild(ui.CreateTitle("Set time span (μs)", 'h3'));
+  const timeID = ui.ID();
   const time = ui.CreateTimeSelection(
       0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / 20_000));
   container.appendChild(time);
 
   container.appendChild(ui.CreateTitle("Select metric(s)", 'h3'));
-  const timeID = ui.ID();
   const metricsUI = ui.CreateMetrics(currentState.metrics, {
     callback: function(event) {
       let anyChecked = true;

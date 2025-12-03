@@ -30,11 +30,11 @@ size_t DataTypeToDataSize(ns_Analyze::DataManager::DataType type) {
       return sizeof(int32_t);
     case ns_Analyze::DataManager::DataType::UINT32:
       return sizeof(uint32_t);
-    case ns_Analyze::DataManager::DataType::INT64:      
+    case ns_Analyze::DataManager::DataType::INT64:
       return sizeof(int64_t);
-    case ns_Analyze::DataManager::DataType::UINT64:      
+    case ns_Analyze::DataManager::DataType::UINT64:
       return sizeof(uint64_t);
-    case ns_Analyze::DataManager::DataType::DOUBLE:      
+    case ns_Analyze::DataManager::DataType::DOUBLE:
       return sizeof(double);
     default:
       throw std::runtime_error("Unknown DataType");
@@ -47,11 +47,11 @@ std::string DataTypeToString(ns_Analyze::DataManager::DataType type) {
       return "INT32";
     case ns_Analyze::DataManager::DataType::UINT32:
       return "UINT32";
-    case ns_Analyze::DataManager::DataType::INT64:      
+    case ns_Analyze::DataManager::DataType::INT64:
       return "INT64";
-    case ns_Analyze::DataManager::DataType::UINT64:      
+    case ns_Analyze::DataManager::DataType::UINT64:
       return "UINT64";
-    case ns_Analyze::DataManager::DataType::DOUBLE:      
+    case ns_Analyze::DataManager::DataType::DOUBLE:
       return "DOUBLE";
     default:
       throw std::runtime_error("Unknown DataType");
@@ -77,7 +77,7 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
     throw std::runtime_error("JSON data missing series array");
   }
   std::stack<std::pair<const rapidjson::Value*, std::string>> stack;
-  rapidjson::Value& value = doc["series"].GetObj();
+  rapidjson::Value const& value = doc["series"].GetObj();
   stack.push({&value, ""});
   while(!stack.empty()) {
     auto [current, path] = stack.top();
@@ -138,7 +138,7 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
 }
 
 
-ns_Analyze::DataManager::DataManager(std::string const& rootpath) : rootpath_(rootpath)
+ns_Analyze::DataManager::DataManager(Config const& config) : config_(config), rootpath_(config.dataPath_)
 {
   std::vector<std::string> commits;
   for (auto const& entry : std::filesystem::recursive_directory_iterator(rootpath_)) {
@@ -207,8 +207,9 @@ ns_Analyze::DataManager::DataManager(std::string const& rootpath) : rootpath_(ro
 
         tgz.ExtractFile(file, uncompressedFile);
 
-        std::string command = "/home/olivier/Desktop/restsrv_analyse.only/build/analyze_results --path " + artefactTempPath;
-        system(command.c_str());  
+        //std::string command = "/home/olivier/Desktop/restsrv_analyse.only/build/analyze_results --path " + artefactTempPath;
+        std::string command = config_.analyzeTools_.string() + " --path " + artefactTempPath;
+        system(command.c_str());
         std::filesystem::remove(uncompressedFile);
       }
       tgz.StopExtractFileData();
@@ -222,7 +223,7 @@ ns_Analyze::DataManager::DataManager(std::string const& rootpath) : rootpath_(ro
       for (auto const& [ name, count] : details) {
         if (notFirst)  {
           ofs << ",\n";
-        } 
+        }
         notFirst = true;
         ofs << "\"" << name << "\":" << count;
       }
@@ -285,7 +286,7 @@ ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string cons
   FileTARZST archive(binFilename);
   std::vector<std::pair<std::string, uint64_t>> metadatasFilename = 
       archive.ListFiles(std::regex("^/*artefacts/"+subject+"/[^/]+/metadata.json$"));
-  
+
   for(auto const& metadataFilename : metadatasFilename) {
     static std::regex reRunID(".*/([0-9]+)-stats.json.bin/.*");
     std::smatch match;
@@ -342,7 +343,7 @@ ns_Analyze::DataManager::CommitValues(
 
   std::vector<std::pair<std::string, uint64_t>> metadatasFilename = 
       archive.ListFiles(std::regex("^/*artefacts/"+subject+"/[0-9]+-stats.json.bin/$"));
-  
+
   std::unordered_map<uint64_t, std::filesystem::path> runsFolders;
   for(auto const& metadataFilename : metadatasFilename) {
     static std::regex reRunID(".*/([0-9]+)-stats.json.bin/");
@@ -546,7 +547,7 @@ ns_Analyze::DataManager::ExtractDataTS(FileTARZST& archive, std::filesystem::pat
   uint64_t nbElementToRead = values.size();
   int64_t nbElementRead = archive.ExtractFileData(filename, nbElementToRead * sizeof(uint64_t), 
     fileOffset * sizeof(uint64_t), (char*)values.data(), nullptr) / sizeof(uint64_t);
-  fileOffset += nbElementRead; 
+  fileOffset += nbElementRead;
   if (nbElementRead != nbElementToRead) {
     values.resize(nbElementRead);
   }

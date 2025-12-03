@@ -10,8 +10,8 @@ namespace ns_API {
 
 class AnalyzeAPI {
 public:
-  AnalyzeAPI(ns_Analyze::Config const& config) 
-      : dataManager_(config.dataPath_)
+  AnalyzeAPI(ns_Analyze::Config const& config)
+      : dataManager_(config)
   {}
 
   std::vector<std::string> GetCommits(std::string const& type) {

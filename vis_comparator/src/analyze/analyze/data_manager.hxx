@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.hxx"
 #include "../../utils/file_tar_zst.hxx"
 #include <string>
 #include <filesystem>
@@ -37,7 +38,7 @@ public:
     std::variant<std::vector<uint64_t>, std::vector<double>> values_;
   };
 
-  DataManager(std::string const& rootpath);
+  DataManager(Config const& config);
   std::vector<std::string> Commits(std::string const& type);
   std::vector<std::pair<std::string, uint64_t>> 
       CommitSubjects(std::string const& type, std::string const& commitID);
@@ -56,6 +57,7 @@ private:
     std::pair<double, double> ratios;
     std::pair<uint64_t, uint64_t> offsets;
   };
+  Config const& config_;
   std::filesystem::path const rootpath_;
   std::unordered_map<std::string, 
       std::unordered_map<std::string, std::filesystem::path>> runsResults_;
@@ -77,7 +79,7 @@ inline std::vector<T> DataManager::ExtractData(FileTARZST& archive,
   result.reserve(dataPoints.size());
 
   std::vector<T> values(4*1024*1024);
-  uint64_t fileOffset = 0; 
+  uint64_t fileOffset = 0;
   uint64_t nbElementRead = 0;
   uint64_t lastElement = 0;
 
@@ -102,7 +104,7 @@ inline std::vector<T> DataManager::ExtractData(FileTARZST& archive,
           uint64_t nbMissingElement = result.capacity() - result.size();
           result.insert(result.end(), nbMissingElement, T(0));
           return result;
-        }          
+        }
         if (nbElementRead != values.size()) {
           values.resize(nbElementRead);
         }
