@@ -48,7 +48,7 @@
       "step": "Init"
     },
     {
-      "step": "ForcedBuild",
+      "step": "Build",
       "run": [
         "SDOS2",
         "HEAP",
@@ -58,7 +58,7 @@
       ]
     },
     {
-      "step": "ExperimentWithCargo",
+      "step": "Experiment",
       "run": [
         "SDOS2",
         "HEAP",
@@ -87,7 +87,7 @@
       }
     },
     {
-      "step": "CleanAllRepo"
+      "step": "Clean"
     }
   ]
 }

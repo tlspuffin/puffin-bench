@@ -9,7 +9,7 @@ ExperimentCheckAllThreadsRunning() {
     (( i < nb_clients )) && { (( ++problems )); continue; }
     problems=0;
     nb_clients=$i;
-  done < <(tail -c 1M "${stats}" | sed 's/}{/}\n{/g' | grep ^'{"type":"global"' | sed 's/.*"clients":\([0-9][0-9]*\),.*/\1/')
+  done < <(tail -c 1M "${stats}" | sed 's/}{/}\n{/g' | grep ^'{"type":"global".*}' | sed 's/.*"clients":\([0-9][0-9]*\),.*/\1/')
   (( problems >= 10 )) && return 1;
   echo "${nb_clients}";
   return 0;
@@ -26,7 +26,7 @@ function ExperimentCheckRun() {
     (( nb_clients < THEJOB_NB_CORES )) && (( ++problems )) || problems=0;
     (( problems > 10 )) && break;
     sleep 30;
-    echo "nb_clients: ${nb_clients}, problems: ${problems}"
+    (( problems > 0 )) && echo "nb_clients: ${nb_clients}, problems: ${problems}"
   done
   EndDirectChild "${tlspuffin_pid}"
 }
@@ -58,7 +58,7 @@ ComputeBuildRuntimeInfo() {
     echo "Missing features parameter"
     return 1;
   fi
-  declare -n features=$1;
+  declare -n ref_features=$1;
 
   shift;
   if [ -z "$1" ]; then
@@ -70,25 +70,28 @@ ComputeBuildRuntimeInfo() {
 
   refcputs=false;
 
-  if [ -n "${vendor}" ] && [ -e "./tools/mk_vendor" ]; then
+  if [ -n "${vendor}" ] && [ -e "${THEJOB_OUT_PATH}/repo/tools/mk_vendor" ]; then
     local version=$( echo "${vendor}" | cut -f 2 -d ':' )
     local library=$( echo "${vendor}" | cut -f 1 -d ':' )
+    echo "version= ${version} library= ${library}";
     if [ -e "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/${library}/presets.toml" ]; then
       grep -F -q "[${version}]" "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/${library}/presets.toml" && 
           grep -E -q "^[[:space:]]*cputs[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/tlspuffin/Cargo.toml" && {
             refcputs=true;
-            features='cputs';
+            ref_features='cputs';
           }
     fi
   fi
   if ! ${refcputs}; then
-    for i in $( echo "${features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
+    for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
       grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/tlspuffin/Cargo.toml" || {
         echo "Unsupported feature $i";
         return 1;
       }
     done
   fi
+
+  echo "cputs= ${refcputs} features= ${ref_features} vendor= ${vendor}";
 
   return 0;
 }
@@ -168,6 +171,12 @@ ExperimentSetupForCargo() {
 
   # disable this if preload is set to load asan and faketime
   [ ! -z "${PREFIX_FAKETIME}" ] && echo "${features}" | grep -qi asan && PREFIX_FAKETIME="" && echo "Disable faketime, asan used"
+
+  local cputs=false
+  ComputeBuildRuntimeInfo "${vendor}" features cputs || {
+      echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
+      return 1;
+  }
 
   cp -apr "${THEJOB_OUT_PATH}/repo-${THEJOB_STEP_ID}/." . || return 1
   rm -rf target/ # at some point puffin-build use absolute path, preventing pre-build of binaries
@@ -443,7 +452,7 @@ Build() {
   fi
 
   local cputs=false
-  ComputeBuildRuntimeInfo "${vendor}" feature cputs || {
+  ComputeBuildRuntimeInfo "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }
@@ -485,7 +494,7 @@ ForcedBuild() {
   fi
 
   local cputs=false
-  ComputeBuildRuntimeInfo "${vendor}" feature cputs || {
+  ComputeBuildRuntimeInfo "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }

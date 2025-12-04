@@ -132,7 +132,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         " (" + ec.message() + ")"
     );
   }
-  int outhandler = open(step.stdout_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 00660);
+  int outhandler = open(step.stdout_.c_str(), O_CREAT | O_APPEND | O_WRONLY, 00660);
   if (outhandler == -1) {
     throw std::runtime_error(
         std::string("open stdout failed for: ") + step.stdout_.string() + std::string(" : errno=") +
@@ -140,11 +140,28 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         " (" + std::strerror(errno) + ")"
     );
   }
-  int errhandler = open(step.stderr_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 00660);
+  if (ftruncate(outhandler, 0) == -1) {
+    close(outhandler);
+    throw std::runtime_error(
+        std::string("truncate stdout failed for: ") + step.stdout_.string() + std::string(" : errno=") +
+        std::to_string(errno) +
+        " (" + std::strerror(errno) + ")"
+    );
+  }
+  int errhandler = open(step.stderr_.c_str(), O_CREAT | O_APPEND | O_WRONLY, 00660);
   if (errhandler == -1) {
     close(outhandler);
     throw std::runtime_error(
         std::string("open stderr failed for: ") + step.stderr_.string() + std::string(" : errno=") +
+        std::to_string(errno) +
+        " (" + std::strerror(errno) + ")"
+    );
+  }
+  if (ftruncate(errhandler, 0) == -1) {
+    close(outhandler);
+    close(errhandler);
+    throw std::runtime_error(
+        std::string("truncate stderr failed for: ") + step.stdout_.string() + std::string(" : errno=") +
         std::to_string(errno) +
         " (" + std::strerror(errno) + ")"
     );
@@ -331,12 +348,12 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
   kill(-localData->pid_, SIGKILL);
   while(waitpid(-localData->pid_, nullptr, 0) > 0);
 
-  pid_t pid = RunShutdown(step, localData);
+  /*pid_t pid = RunShutdown(step, localData);
   if (pid <= 0) {
     throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
         std::to_string(step.TaskID()) + ":" + step.ID());
   }
-  while(waitpid(-pid, nullptr, 0) > 0);
+  while(waitpid(-pid, nullptr, 0) > 0);*/
 
   EndRun(step, localData, true);
 }

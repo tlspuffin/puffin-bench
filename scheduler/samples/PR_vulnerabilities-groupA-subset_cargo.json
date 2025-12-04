@@ -8,20 +8,23 @@
     "SDOS2": {
       "args": {
         "experiment": "SDOS2",
-        "features": "'wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173'",
-        "extra_flags": "'--put-use-clear'"
+        "features": "wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173",
+        "extra_flags": "'--put-use-clear'",
+        "vendor": "wolfssl:wolfssl540-sdos2"
       }
     },
     "HEAP": {
       "args": {
       "experiment": "HEAP",
-        "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
+        "features": "wolfssl540,asan,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl540-heap"
       }
     },
     "SKIP": {
       "args": {
       "experiment": "SKIP",
-        "features": "'wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173'"
+        "features": "wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl510-skip"
       }
     }
   },

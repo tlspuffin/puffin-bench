@@ -1,5 +1,6 @@
 CheckObjectif() {
   local tlspuffin_pid="$1"; shift;
+  local stats="$1"; shift;
 
   local nb_clients=0;
   local problems=0;
@@ -33,7 +34,7 @@ Experiment () {
   local nb_clients=0;
   local problems=0;
   if ((tlspuffin_killed == 0)); then
-    tlspuffin_killed=$( CheckObjectif "${tlspuffin_pid}" );
+    tlspuffin_killed=$( CheckObjectif "${tlspuffin_pid}" "${stats}" );
   fi
   wait "${tlspuffin_pid}" 2>/dev/null
   local status=$?
@@ -54,7 +55,7 @@ ExperimentWithCargo () {
   local nb_clients=0;
   local problems=0;
   if ((tlspuffin_killed == 0)); then
-    tlspuffin_killed=$( CheckObjectif "${tlspuffin_pid}" );
+    tlspuffin_killed=$( CheckObjectif "${tlspuffin_pid}" "${stats}" );
   fi
   wait "${tlspuffin_pid}" 2>/dev/null
   local status=$?

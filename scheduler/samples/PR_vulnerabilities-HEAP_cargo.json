@@ -8,7 +8,8 @@
     "HEAP": {
       "args": {
       "experiment": "HEAP",
-        "features": "'wolfssl540,asan,fix-CVE-2022-39173'"
+        "features": "wolfssl540,asan,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl540-heap"
       }
     }
   },

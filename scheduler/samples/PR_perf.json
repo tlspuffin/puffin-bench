@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin4/PR/${COMMIT_ID}/Perf/",
+    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin3/PR/${COMMIT_ID}/Perf/",
     "goal": "Perf PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
@@ -38,7 +38,7 @@
       "step": "Init"
     },
     {
-      "step": "ForcedBuild",
+      "step": "Build",
       "run": [
         "LibreSSL",
         "BoringSSL",
@@ -47,7 +47,7 @@
       ]
     },
     {
-      "step": "ExperimentWithCargo",
+      "step": "Experiment",
       "run": [
         "LibreSSL",
         "BoringSSL",
@@ -69,7 +69,7 @@
       "step": "SummaryRun"
     },
     {
-      "step": "CleanAllRepo"
+      "step": "Clean"
     }
   ]
 }
