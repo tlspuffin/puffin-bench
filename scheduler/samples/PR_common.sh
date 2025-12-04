@@ -177,6 +177,11 @@ ExperimentSetupForCargo() {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }
+  if ${cputs}; then
+    echo "{ \"cputs\": true, \"features\": ${vendor} }" > "${THEJOB_USER_STATE_FILE}";
+  else
+    echo "{ \"cputs\": false, \"features\": ${features} }" > "${THEJOB_USER_STATE_FILE}";
+  fi
 
   cp -apr "${THEJOB_OUT_PATH}/repo-${THEJOB_STEP_ID}/." . || return 1
   rm -rf target/ # at some point puffin-build use absolute path, preventing pre-build of binaries
