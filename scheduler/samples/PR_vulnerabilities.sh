@@ -29,7 +29,7 @@ Experiment () {
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
-  ExperimentRun tlspuffin_pid tlspuffin_killed stats "${@}" || return 1;
+  ExperimentRun tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
 
   local nb_clients=0;
   local problems=0;
@@ -50,7 +50,7 @@ ExperimentWithCargo () {
   local tlspuffin_pid;
   local tlspuffin_killed;
   local stats="";
-  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats "${@}" || return 1;
+  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
 
   local nb_clients=0;
   local problems=0;

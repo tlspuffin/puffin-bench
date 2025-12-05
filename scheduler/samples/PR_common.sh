@@ -178,9 +178,9 @@ ExperimentSetupForCargo() {
       return 1;
   }
   if ${cputs}; then
-    echo "{ \"cputs\": true, \"features\": ${vendor} }" > "${THEJOB_USER_STATE_FILE}";
+    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
   else
-    echo "{ \"cputs\": false, \"features\": ${features} }" > "${THEJOB_USER_STATE_FILE}";
+    echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "${THEJOB_USER_STATE_FILE}";
   fi
 
   cp -apr "${THEJOB_OUT_PATH}/repo-${THEJOB_STEP_ID}/." . || return 1
@@ -207,6 +207,12 @@ ExperimentPostLaunchSetup() {
   fi
   local tlspuffin_pid="$1"
   shift
+  if [ -z "$1" ]; then
+    echo "Missing parameter to tell to save objectif or not"
+    return 1
+  fi
+  local saveObjectif="$1"
+  shift;
 
   if [ -z "$1" ]; then
     echo 'Missing parameter features' > /dev/stderr;
@@ -278,6 +284,10 @@ ExperimentPostLaunchSetup() {
 
   StartMonitor
 
+  if (( saveObjectif == 1 )); then
+    CreateArtefact "${experiment_base}/objective" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-objective" "commit_id:${COMMIT_ID}" "features:${features}"
+  fi
+
   return 0;
 }
 
@@ -331,6 +341,13 @@ ExperimentRun() {
   fi
   declare -n ref_stats=$1;
   shift;
+  if [ -z "$1" ]; then
+    echo "Missing parameter to tell to save objectif or not"
+    return 1
+  fi
+  local saveObjectif="$1"
+  shift;
+
 
   if [ -z "${features}" ]; then
     echo "Missing required global variable: features"
@@ -349,7 +366,7 @@ ExperimentRun() {
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
-  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${features}"; then
+  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveObjectif}" "${features}"; then
     kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
     ref_tlspuffin_killed=1
   fi
@@ -376,6 +393,12 @@ ExperimentRunWithCargo() {
   fi
   declare -n ref_stats=$1;
   shift;
+  if [ -z "$1" ]; then
+    echo "Missing parameter to tell to save objectif or not"
+    return 1
+  fi
+  local saveObjectif="$1"
+  shift;
 
   if [ -z "${features}" ]; then
     echo "Missing required global variable: features"
@@ -390,12 +413,12 @@ ExperimentRunWithCargo() {
   ExperimentSetupForCargo last_core "${features}" || return 1;
 
   nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --release -p tlspuffin --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
-  tlspuffin_pid=$!
+  ref_tlspuffin_pid=$!
 
-  tlspuffin_killed=0
-  if ! ExperimentPostLaunchSetup ref_stats "${tlspuffin_pid}" "${features}"; then
-    kill -9 "${tlspuffin_pid}" 2>/dev/null;
-    tlspuffin_killed=1
+  ref_tlspuffin_killed=0
+  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveObjectif}" "${features}"; then
+    kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
+    ref_tlspuffin_killed=1
   fi
 
   return 0;
