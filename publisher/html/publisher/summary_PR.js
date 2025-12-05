@@ -11,7 +11,12 @@ const config = {
 
 function calculateStats(durations) {
   if (!durations || durations.length === 0) return null;
-  if (durations.length === 1) return null;
+
+  // Special case: single value - return it as stats with zero variance
+  if (durations.length === 1) {
+    const value = durations[0];
+    return { min: value, max: value, median: value, mean: value, stddev: 0, singleValue: true };
+  }
 
   const sorted = [...durations].sort((a, b) => a - b);
   const n = sorted.length;
@@ -265,15 +270,21 @@ function renderTypeSection(type, typeData) {
       const warnUser = libData.warn_user;
       const warningIcon = warnUser ? getWarningIcon(warnUser) : '';
 
+      const libItemHeader = document.createElement('div');
+      libItemHeader.className = 'lib-item-header';
       // Add lib name, stats, icon directly to libItem
-      libItem.innerHTML = `
+      libItemHeader.innerHTML = `
         <span class="lib-icon">${icon}</span>
+        <span class="lib-harnesskind">${libData.cputs == 1 ? '⚙C' : libData.cputs == -1 ? '🦀' : '❓'}</span>
         <span class="lib-name">${libName}${warningIcon}</span>
         <span class="lib-stats">${successCount}/${totalRuns}</span>
       `;
+      libItem.appendChild(libItemHeader);
 
       // Add compact stats display inline
       if (Object.keys(displayData.withStats).length > 0) {
+        const libItemStats = document.createElement('div');
+        libItemStats.className = 'lib-item-stats';
         for (const [field, data] of Object.entries(displayData.withStats)) {
           const statEl = document.createElement('div');
           statEl.className = 'stat-item';
@@ -282,14 +293,20 @@ function renderTypeSection(type, typeData) {
             <span class="stat-value">${formatStatsCompact(data.stats)}</span>
           `;
 
-          // Add hover tooltip
-          const tooltip = createStatsTooltip(field, data, displayData.withoutStats);
-          statEl.appendChild(tooltip);
-          statEl.addEventListener('mouseenter', () => tooltip.classList.add('visible'));
-          statEl.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
+          // Add hover tooltip only if not a single value
+          if (!data.stats || !data.stats.singleValue) {
+            const tooltip = createStatsTooltip(field, data, displayData.withoutStats);
+            statEl.appendChild(tooltip);
+            statEl.addEventListener('mouseenter', () => tooltip.classList.add('visible'));
+            statEl.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
+            statEl.style.cursor = 'help';
+          } else {
+            statEl.style.cursor = 'default';
+          }
 
-          libItem.appendChild(statEl);
+          libItemStats.appendChild(statEl);
         }
+        libItem.appendChild(libItemStats);
       }
 
       libsDiv.appendChild(libItem);
@@ -333,7 +350,7 @@ function prepareLibDisplay(libData, noStatsFields = []) {
     // Categorize based on no_stats
     if (noStatsFields.includes(key)) {
       display.withoutStats[key] = { values: value };
-    } else {
+    } else if (key != 'warn_user') {
       display.withStats[key] = {
         values: value,
         stats: calculateStats(value)
@@ -346,6 +363,12 @@ function prepareLibDisplay(libData, noStatsFields = []) {
 
 function formatStatsCompact(stats) {
   if (!stats) return '-';
+
+  // Special case: single value
+  if (stats.singleValue) {
+    return `${stats.mean.toFixed(2)}`;
+  }
+
   const meanStr = stats.mean.toFixed(2);
   const stddevStr = stats.stddev.toFixed(2);
   return `μ:${meanStr}(±${stddevStr})`;
@@ -431,17 +454,17 @@ function getWarningIcon(warnUser) {
   // Format the array values for display
   const valuesStr = warnUser.join(', ');
 
-  if (warnLevel <= 2) {
+  if (warnLevel < 2) {
     icon = '🚨';
-    title = `Warning (${warnLevel}): [${valuesStr}]`;
+    title = `Objectif found in run: [${valuesStr}]`;
     cssClass += ' warn-low';
-  } else if (warnLevel <= 5) {
+  } else if (warnLevel <= 4) {
     icon = '🚨🚨';
-    title = `Warning (${warnLevel}): [${valuesStr}]`;
+    title = `Objectif found in runs: [${valuesStr}]`;
     cssClass += ' warn-medium';
   } else {
     icon = '🚨🚨🚨';
-    title = `Critical Warning (${warnLevel}): [${valuesStr}]`;
+    title = `Objectif found in runs: [${valuesStr}]`;
     cssClass += ' warn-high';
   }
 
@@ -593,6 +616,12 @@ function setupSearch() {
   searchInput.addEventListener('input', () => {
     applyFilters();
   });
+}
+
+function clearSearch() {
+  const searchInput = document.getElementById('search-input');
+  searchInput.value = '';
+  applyFilters();
 }
 
 function setupTypeFilters() {

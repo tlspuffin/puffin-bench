@@ -14,16 +14,18 @@ public:
   struct ExperimentResult {
     std::string id;
     std::string state;
-    std::string monitor;
+    std::string user_run_state;
     uint64_t duration_ms;
     uint64_t attempt;
     uint64_t exit_code;
   };
   struct LibSummary {
+    int cputs;
     int success_count;
     int total_runs;
     std::vector<uint64_t> success_durations_ms;
     std::vector<uint64_t> fail_durations_ms;
+    LibSummary() : cputs(0), success_count(0), total_runs(0) {}
   };
   struct TaskAnalysis {
     std::string commit_id;

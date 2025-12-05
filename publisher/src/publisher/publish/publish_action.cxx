@@ -2,6 +2,7 @@
 #include "publish_action_perf.hxx"
 #include "publish_action_perf_summary.hxx"
 #include "publish_action_vuln.hxx"
+#include "publish_action_vuln2.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/time.hxx"
 #include <fstream>
@@ -101,8 +102,8 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
           ? step["attempt_id"].GetInt() : -1;
       exp.exit_code = step.HasMember("exit_code") && step["exit_code"].IsInt()
           ? step["exit_code"].GetInt() : -1;
-      exp.monitor = step.HasMember("message_from_run") && step["message_from_run"].IsString()
-          ? step["message_from_run"].GetString() : "";
+      exp.user_run_state = step.HasMember("user_run_state") && step["user_run_state"].IsString()
+          ? step["user_run_state"].GetString() : "";
 
       exp.duration_ms = 0;
       if (step.HasMember("time_points_ms") && step["time_points_ms"].IsArray()) {
@@ -129,6 +130,8 @@ ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& a
     return new PublishActionVuln(name, filesFilter);
   } else if (action == "GenerateReportPerfFromSummary") {
     return new PublishActionPerfUseSummary(name, filesFilter);
+  } else if (action == "GenerateReportVuln2") {
+    return new PublishActionVuln2(name, filesFilter);
   }
   return nullptr;
 }

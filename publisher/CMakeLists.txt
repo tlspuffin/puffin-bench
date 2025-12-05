@@ -104,7 +104,8 @@ set(PUBLISHER_SRC
   src/publisher/server/config.cxx src/publisher/server/server.cxx 
   src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
   src/publisher/publish/config.cxx src/publisher/publish/publish.cxx 
-  src/publisher/publish/publish_action.cxx src/publisher/publish/publish_action_perf.cxx src/publisher/publish/publish_action_vuln.cxx src/publisher/publish/publish_action_perf_summary.cxx
+  src/publisher/publish/publish_action.cxx src/publisher/publish/publish_action_perf.cxx src/publisher/publish/publish_action_vuln.cxx 
+  src/publisher/publish/publish_action_perf_summary.cxx src/publisher/publish/publish_action_vuln2.cxx
   #src/embeded/publisher/index_html.h src/embeded/publisher/index_css.h src/embeded/publisher/index_js.h
 )
 

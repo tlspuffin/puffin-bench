@@ -128,10 +128,13 @@ header {
 
 .search-group {
   margin-top: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 #search-input {
-  width: 100%;
+  flex: 1;
   max-width: 400px;
   padding: 10px 15px;
   border: 2px solid var(--color-border);
@@ -144,6 +147,28 @@ header {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.clear-search-btn {
+  padding: 10px 15px;
+  /*border: 2px solid var(--color-border);*/
+  border: 0px;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 18px;
+  transition: var(--transition);
+  line-height: 1;
+}
+
+.clear-search-btn:hover {
+  border-color: var(--color-primary);
+  background: #f0f8ff;
+  transform: translateY(-1px);
+}
+
+.clear-search-btn:active {
+  transform: translateY(0);
 }
 
 /* Loading */
@@ -355,7 +380,7 @@ header {
 .lib-item {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  /*flex-wrap: wrap;*/
   align-items: baseline;
   gap: 12px;
   padding: 12px;
@@ -368,6 +393,21 @@ header {
 .lib-item:hover {
   background: #f8f9fa;
   border-color: var(--color-primary);
+}
+
+.lib-item-header {
+  display: flex;
+  flex-basis: content;
+  flex-shrink: 0;
+  gap: 5px;
+}
+
+.lib-item-stats {
+  flex-grow: 1;
+  flex-shrink: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
 }
 
 .stat-item {
