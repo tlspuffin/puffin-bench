@@ -285,6 +285,12 @@ function renderTypeSection(type, typeData) {
       if (Object.keys(displayData.withStats).length > 0) {
         const libItemStats = document.createElement('div');
         libItemStats.className = 'lib-item-stats';
+
+        const libItemStatsSuccess = document.createElement('div');
+        libItemStatsSuccess.className = 'lib-item-stats';
+        const libItemStatsFail = document.createElement('div');
+        libItemStatsFail.className = 'lib-item-stats lib-item-stats-fail';
+
         for (const [field, data] of Object.entries(displayData.withStats)) {
           const statEl = document.createElement('div');
           statEl.className = 'stat-item';
@@ -304,8 +310,14 @@ function renderTypeSection(type, typeData) {
             statEl.style.cursor = 'default';
           }
 
-          libItemStats.appendChild(statEl);
+          if (field.startsWith('fail_')) {
+            libItemStatsFail.appendChild(statEl);
+          } else {
+            libItemStatsSuccess.appendChild(statEl);
+          }
         }
+        libItemStats.appendChild(libItemStatsSuccess);
+        libItemStats.appendChild(libItemStatsFail);
         libItem.appendChild(libItemStats);
       }
 
@@ -364,17 +376,21 @@ function prepareLibDisplay(libData, noStatsFields = []) {
 function formatStatsCompact(stats) {
   if (!stats) return '-';
 
+  const formatNum = (num) => num < 10000 ? num.toFixed(2) : num.toExponential(2);
+
   // Special case: single value
   if (stats.singleValue) {
-    return `${stats.mean.toFixed(2)}`;
+    return `${formatNum(stats.mean)}`;
   }
 
-  const meanStr = stats.mean.toFixed(2);
-  const stddevStr = stats.stddev.toFixed(2);
+  const meanStr = formatNum(stats.mean);
+  const stddevStr = formatNum(stats.stddev);
   return `μ:${meanStr}(±${stddevStr})`;
 }
 
 function createStatsTooltip(field, withStatsData, withoutStatsData) {
+  const formatNum = (num) => num < 10000 ? num.toFixed(2) : num.toExponential(2);
+
   const tooltip = document.createElement('div');
   tooltip.className = 'stats-tooltip';
 
@@ -385,10 +401,10 @@ function createStatsTooltip(field, withStatsData, withoutStatsData) {
     const s = withStatsData.stats;
     content += `
       <div class="tooltip-section">
-        <div>Values: ${withStatsData.values.join(', ')}</div>
-        <div>Range: [${s.min}–${s.max}]</div>
-        <div>Median: ${s.median}</div>
-        <div>Mean: ${s.mean.toFixed(2)} (±${s.stddev.toFixed(2)})</div>
+        <div>Values: ${withStatsData.values.map(v => formatNum(v)).join(', ')}</div>
+        <div>Range: [${formatNum(s.min)}–${formatNum(s.max)}]</div>
+        <div>Median: ${formatNum(s.median)}</div>
+        <div>Mean: ${formatNum(s.mean)} (±${formatNum(s.stddev)})</div>
       </div>
     `;
   }

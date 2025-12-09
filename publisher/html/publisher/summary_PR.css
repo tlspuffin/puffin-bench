@@ -408,6 +408,11 @@ header {
   display: flex;
   flex-wrap: wrap;
   justify-content: end;
+  color: var(--color-text);
+}
+
+.lib-item-stats-fail {
+  color: red;
 }
 
 .stat-item {
@@ -428,7 +433,6 @@ header {
 
 .stat-field {
   font-weight: 600;
-  color: var(--color-text);
 }
 
 .stat-value {

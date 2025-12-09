@@ -95,16 +95,6 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     return false;
   }
 
-  if (analysis.experiments.size() == 0) {
-    analysis.global_status = "no run";
-  } else if (nbTimeout == analysis.experiments.size()) {
-    analysis.global_status = "success";
-  } else if (nbTimeout == 0) {
-    analysis.global_status = "fail";
-  } else {
-    analysis.global_status = "mixed";
-  }
-
   std::vector<std::pair<std::string, uint64_t>> summaryInfo = filetgz.ListFiles(std::regex("artefacts/summary.json"));
   if (summaryInfo.size() != 1) {
     return false;
@@ -134,8 +124,16 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
       rapidjson::Value::ConstArray data = Get<rapidjson::Value::ConstArray>(librarie, "data");
       for (const auto& report: data) {
         std::string id = Get<std::string>(report, "id");
-        for (std::string const& field: {"duration", "corpus_size", "total_execs", "coverage", "objective_size"}) {
-          librariesData[name][id][field] = Get<uint64_t>(report, field.c_str());
+        for (auto& [field, value] : report.GetObject()) {
+          std::string fieldname = field.GetString();
+          if (fieldname == "id") {
+            continue;
+          }
+          if (value.IsUint64()) {
+            librariesData[name][id][fieldname] = value.GetUint64();
+          } else {
+            throw std::runtime_error("Unexpected type for field " + fieldname);
+          }
         }
       }
     }
@@ -158,29 +156,56 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   doc.AddMember("task_id", analysis.task_id, allocator);
   doc.AddMember("task_name",
     rapidjson::Value(analysis.task_name.c_str(), allocator), allocator);
-  doc.AddMember("global_status",
-    rapidjson::Value(analysis.global_status.c_str(), allocator), allocator);
   doc.AddMember("no_stats", rapidjson::kArrayType, allocator);
 
+  int nbFail = 0;
   rapidjson::Value libsObj(rapidjson::kObjectType);
   for (auto const& [libName, state]: states) {
     rapidjson::Value libData(rapidjson::kObjectType);
-    rapidjson::Value failDuration(rapidjson::kArrayType);
-    rapidjson::Value corpusSize(rapidjson::kArrayType);
-    rapidjson::Value totalExecs(rapidjson::kArrayType);
-    rapidjson::Value coverage(rapidjson::kArrayType);
+    std::unordered_map<std::string, rapidjson::Value> datas;
     rapidjson::Value haveObjectif(rapidjson::kArrayType);
     int nbSucess = 0;
     int trustObjectif = strcasecmp(libName.c_str(), "wolfssl") != 0 ? 1 : 
         (((!state.libraryVersion.empty()) && (std::stoull(state.libraryVersion))) > 540 ? 1 : -1);
     for (auto const& [attempt, success]: state.runs) {
-      if (success) {
+      bool successFinal = success;
+      if (successFinal) {
+        uint64_t experimentDuration = -1;
+        for(auto const& experiment: analysis.experiments) {
+          if ((experiment.id == libName) && (experiment.attempt == attempt)) {
+            experimentDuration = experiment.duration_ms / 1000.0;
+          }
+        }
+        uint64_t clientsDuration = std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["client_average_duration_s"]);
+        uint64_t duration = std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["duration"]);
+        successFinal = (duration > (experimentDuration - 700)) && (clientsDuration > (duration - 400));
+      }
+      std::string attemptString = std::to_string(attempt);
+      if (successFinal) {
         ++nbSucess;
-        corpusSize.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["corpus_size"]), allocator);
-        totalExecs.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["total_execs"]), allocator);
-        coverage.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["coverage"]), allocator);
+
+        for (auto const& [key, value]: librariesData[libName][attemptString]) {
+          if (key == "duration") {
+            continue;
+          }
+          rapidjson::Value& array = datas[key];
+          if (!array.IsArray())  {
+            array.SetArray();
+          }
+          array.PushBack(std::get<uint64_t>(value), allocator);
+        }
       } else {
-        failDuration.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["duration"]), allocator);
+        ++nbFail;
+        rapidjson::Value& arrayDuration = datas["fail_duration_s"];
+        if (!arrayDuration.IsArray())  {
+          arrayDuration.SetArray();
+        }
+        arrayDuration.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["duration"]), allocator);
+        rapidjson::Value& arrayClientsDuration = datas["fail_client_average_duration_s"];
+        if (!arrayClientsDuration.IsArray())  {
+          arrayClientsDuration.SetArray();
+        }
+        arrayClientsDuration.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["client_average_duration_s"]), allocator);
       }
       if ((std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["objective_size"]) > 0) && (trustObjectif == 1)) {
         haveObjectif.PushBack(attempt, allocator);
@@ -189,10 +214,9 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     libData.AddMember("cputs", state.cputs, allocator);
     libData.AddMember("total_runs", state.runs.size(), allocator);
     libData.AddMember("success_count", nbSucess, allocator);
-    libData.AddMember("fail_duration_s", failDuration, allocator);
-    libData.AddMember("corpus_size", corpusSize, allocator);
-    libData.AddMember("total_execs", totalExecs, allocator);
-    libData.AddMember("coverage", coverage, allocator);
+    for(auto& [key, value]: datas) {
+      libData.AddMember(rapidjson::Value(key.c_str(), allocator), value, allocator);
+    }
     if (!haveObjectif.Empty()) {
       libData.AddMember("warn_user", haveObjectif, allocator);
     }
@@ -200,6 +224,18 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
       rapidjson::Value(libName.c_str(), allocator), libData, allocator);
   }
   doc.AddMember("libs", libsObj, allocator);
+
+  if (analysis.experiments.size() == 0) {
+    analysis.global_status = "no run";
+  } else if (nbFail == 0) {
+    analysis.global_status = "success";
+  } else if (nbFail == analysis.experiments.size()) {
+    analysis.global_status = "fail";
+  } else {
+    analysis.global_status = "mixed";
+  }
+  doc.AddMember("global_status",
+    rapidjson::Value(analysis.global_status.c_str(), allocator), allocator);
 
   std::ofstream ofs(jsonPath);
   if (!ofs.is_open()) {
