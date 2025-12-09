@@ -1,17 +1,37 @@
 #### HELPER START ####
 
 ExperimentCheckAllThreadsRunning() {
+  local -n ref_lastcheck=$1; shift;
   local stats="$1"; shift;
-  local nb_clients="$2"; shift
+  local nb_clients="$1"; shift;
 
-  local problems=0
-  while read -r i; do
-    (( i < nb_clients )) && { (( ++problems )); continue; }
-    problems=0;
-    nb_clients=$i;
-  done < <(tail -c 1M "${stats}" | sed 's/}{/}\n{/g' | grep ^'{"type":"global".*}' | sed 's/.*"clients":\([0-9][0-9]*\),.*/\1/')
-  (( problems >= 10 )) && return 1;
-  echo "${nb_clients}";
+  local lastTS=$( tail -c 64K "${stats}" | sed 's/}{/}\n{/g' | head -n -1 | tail -1 | jq -r '.time.secs_since_epoch' );
+  if (( ref_lastcheck != 0)); then
+    local diffTS=$(( lastTS - ref_lastcheck ));
+    (( diffTS > 300 )) && return 1;
+  fi
+
+  local now=$( date +%s )
+
+  local -a clients;
+  local i=0;
+  for ((i=0; i<nb_clients; i++)); do
+    clients[$i]=864000;
+  done
+  while read -r line; do
+    echo "$line" | jq -e >/dev/null 2>&1 || continue;
+    local id=-1
+    local ts=0
+    read id ts < <( echo "$line" | jq -r '[.id,.time.secs_since_epoch] | @tsv' );
+    clients[${id}]=$(( now - ts ))
+  done < <(tail -c 10M "${stats}" | sed 's/}{/}\n{/g' | grep '^{"type":"client"' )
+
+  local problems=''
+  for ((i=0; i<nb_clients; i++)); do
+    (( clients[i] >= 864000 )) && problems+=" ${i} ";
+  fi
+  [ -n "${lastTS}" ] && ref_lastcheck="${lastTS}" || problems+=" -1 ";
+  echo "${problems}";
   return 0;
 }
 
@@ -19,14 +39,23 @@ function ExperimentCheckRun() {
   local tlspuffin_pid="$1"; shift;
   local stats="$1"; shift;
 
-  local nb_clients=0;
-  local problems=0;
+  local lastcheck=0;
+  local nbissues=0;
+  local problems='';
   while true; do
-    nb_clients=$( ExperimentCheckAllThreadsRunning "${stats}" "$nb_clients" ) || break;
-    (( nb_clients < THEJOB_NB_CORES )) && (( ++problems )) || problems=0;
-    (( problems > 10 )) && break;
-    sleep 30;
-    (( problems > 0 )) && echo "nb_clients: ${nb_clients}, problems: ${problems}"
+    local currentProblems='';
+    currentProblems=$( ExperimentCheckAllThreadsRunning lastcheck "${stats}" "${THEJOB_NB_CORES}" ) || break;
+    local haveissue=0;
+    local i='';
+    for i in ${currentProblems}; do
+      echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
+    done;
+    problems="${currentProblems}";
+    (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
+
+    (( nbissues > 15 )) && break;
+    sleep 60;
+    (( nbissues > 0 )) && echo "nbissues: ${nbissues}, problems: ${problems}"
   done
   EndDirectChild "${tlspuffin_pid}"
 }
@@ -58,14 +87,14 @@ ComputeBuildRuntimeInfo() {
     echo "Missing features parameter"
     return 1;
   fi
-  declare -n ref_features=$1;
-
+  local -n ref_features=$1;
   shift;
+
   if [ -z "$1" ]; then
     echo "Missing cputs parameter"
     return 1;
   fi
-  declare -n refcputs=$1;
+  local -n refcputs=$1;
   shift;
 
   refcputs=false;
@@ -103,13 +132,13 @@ ExperimentSetup() {
     echo "Missing reference parameter binary"
     return 1
   fi
-  declare -n ref_binary=$1;
+  local -n ref_binary=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing reference parameter for last_core"
     return 1
   fi
-  declare -n ref_last_core=$1;
+  local -n ref_last_core=$1;
   shift
   if [ -z "$1" ]; then
     echo "Missing parameter feature"
@@ -157,7 +186,7 @@ ExperimentSetupForCargo() {
     echo "Missing reference parameter for last_core"
     return 1
   fi
-  declare -n ref_last_core=$1;
+  local -n ref_last_core=$1;
   shift
   if [ -z "$1" ]; then
     echo "Missing parameter feature"
@@ -198,7 +227,7 @@ ExperimentPostLaunchSetup() {
     echo 'Missing reference parameter for statsJSON' > /dev/stderr;
     return 1
   fi
-  declare -n ref_statsJSON=$1;
+  local -n ref_statsJSON=$1;
   shift;
 
   if [ -z "$1" ]; then
@@ -327,19 +356,19 @@ ExperimentRun() {
     echo "Missing reference parameter tlspuffin_pid"
     return 1;
   fi
-  declare -n ref_tlspuffin_pid=$1;
+  local -n ref_tlspuffin_pid=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing reference parameter tlspuffin_killed"
     return 1;
   fi
-  declare -n ref_tlspuffin_killed=$1;
+  local -n ref_tlspuffin_killed=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing reference parameter for stats"
     return 1
   fi
-  declare -n ref_stats=$1;
+  local -n ref_stats=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing parameter to tell to save objectif or not"
@@ -379,19 +408,19 @@ ExperimentRunWithCargo() {
     echo "Missing reference parameter tlspuffin_pid"
     return 1;
   fi
-  declare -n ref_tlspuffin_pid=$1;
+  local -n ref_tlspuffin_pid=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing reference parameter tlspuffin_killed"
     return 1;
   fi
-  declare -n ref_tlspuffin_killed=$1;
+  local -n ref_tlspuffin_killed=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing reference parameter for stats"
     return 1
   fi
-  declare -n ref_stats=$1;
+  local -n ref_stats=$1;
   shift;
   if [ -z "$1" ]; then
     echo "Missing parameter to tell to save objectif or not"
