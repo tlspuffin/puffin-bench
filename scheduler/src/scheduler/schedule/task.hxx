@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <iostream>
 #include <list>
+#include <map>
 #include <unordered_map>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +53,8 @@ public:
 
   Publish publish_;
 
+  std::map<std::string, std::string> md5_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 
@@ -63,6 +66,7 @@ public:
       std::filesystem::path const& monitorsRootPath, 
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
       std::unordered_map<std::string, std::string>& args, 
+      std::map<std::string, std::string> md5, 
       ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 

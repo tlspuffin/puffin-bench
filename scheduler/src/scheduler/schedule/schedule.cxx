@@ -43,18 +43,19 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cach
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
 
-  auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
+  // Disable LoadStatus, step group not managed by Executor::Local reload system
+  /*auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
   steps_.insert(steps_.end(), pendingsSteps.begin(), pendingsSteps.end());
   stepsRunning_.insert(stepsRunning_.end(), stepsRunning.begin(), stepsRunning.end());
-  stepsDone_.insert(stepsDone_.end(), stepsDone.begin(), stepsDone.end());
+  stepsDone_.insert(stepsDone_.end(), stepsDone.begin(), stepsDone.end());*/
 
-  if (steps_.empty()) {
+  //if (steps_.empty()) {
     ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
-  } else {
+  /*} else {
     monitor_.Add(stepsRunning_);
     threadRunning_ = true;
     thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
-  }
+  }*/
 }
 
 ns_Schedule::Schedule::~Schedule() {

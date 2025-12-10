@@ -8,6 +8,18 @@
 
 namespace ns_Schedule {
 
+class GroupStepConfigurations {
+public:
+  GroupStepConfigurations() : GroupStepConfigurations(1) {};
+  GroupStepConfigurations(uint32_t nb_retry) : nb_retry_({{"", nb_retry}}) {};
+  void ReadFromTaskJSON(rapidjson::Value const& entry);
+
+  uint32_t NbRetry(std::string const& configName) const;
+
+private:
+  std::unordered_map<std::string, uint32_t> nb_retry_;
+};
+
 class StepConfigurations {
 public:
   struct Configuration {

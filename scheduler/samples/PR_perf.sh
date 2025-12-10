@@ -4,14 +4,14 @@ Experiment () {
   local stats="";
   ExperimentRun tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
 
-  (( tlspuffin_killed == 0 )) && ExperimentCheckRun "${tlspuffin_pid}" "${stats}" && tlspuffin_killed=1;
-
-  wait "${tlspuffin_pid}" 2>/dev/null
-  local status=$?
+  local status=1
+  (( tlspuffin_killed == 0 )) && {
+    status=$( ExperimentCheckRun "${tlspuffin_pid}" "${stats}" )
+  }
 
   ExperimentEnd
 
-  (( tlspuffin_killed == 1 )) && return 1 || return ${status}
+  return ${status}
 }
 
 ExperimentWithCargo () {
@@ -20,14 +20,13 @@ ExperimentWithCargo () {
   local stats="";
   ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
 
-  (( tlspuffin_killed == 0 )) && ExperimentCheckRun "${tlspuffin_pid}" "${stats}" && tlspuffin_killed=1;
-
-  wait "${tlspuffin_pid}" 2>/dev/null
-  local status=$?
+  local status=1
+  (( tlspuffin_killed == 0 )) && {
+    status=$( ExperimentCheckRun "${tlspuffin_pid}" "${stats}" )
+  }
 
   ExperimentEnd
 
-  (( tlspuffin_killed == 1 )) && return 1;
   return ${status}
 }
 
@@ -70,7 +69,7 @@ SummaryRun () {
       local hitCount=0
       local avgDuration=0
       local endClientsInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"client".*}$' );
-      for (( client=0; client<nbClients; client++ )); do
+      for (( client=1; client<nbClients; ++client )); do
 
         local startClientInfos=$( head -c 2M "${i}" | sed 's/}{/}\n{/g' | grep "\"id\":${client}" | head -1 );
         local clientStartTime=$( echo "$startClientInfos" | jq -r '.time.secs_since_epoch' )
@@ -94,7 +93,7 @@ SummaryRun () {
         }
       done
       (( hitCount > 0)) && hit=$(( hit / hitCount )) || hit='"NA"';
-      (( nbDuration > 0)) && avgDuration=$(( avgDuration / nbClients )) || avgDuration='"NA"';
+      (( nbDuration > 0)) && avgDuration=$(( avgDuration / ( nbClients - 1 ) )) || avgDuration='"NA"';
 
       if (( ! firstRun )); then
         json+=","

@@ -27,6 +27,11 @@ public:
   static uint16_t constexpr exitCode_LaunchError_ = 0x0800;
   static uint16_t constexpr exitCode_Lost_ = 0x1000;
 
+  static uint16_t constexpr stepsGroup_None_ = 0x0000;
+  static uint16_t constexpr stepsGroup_In_ = 0x0001;
+  static uint16_t constexpr stepsGroup_Begin_ = 0x0003;
+  static uint16_t constexpr stepsGroup_End_ = 0x0005;
+
   struct UUIDDependencies {
     uint64_t next;
     uint64_t previous;
@@ -40,14 +45,16 @@ public:
 
   Step(Step const& source, uint64_t run_id, uint64_t attempt_id);
   Step(Step const& source, uint64_t run_id, 
-      uint64_t rank_id, uint64_t attempt_id, 
+      uint64_t rank_id, uint64_t attempt_id, uint64_t group_id, 
       ns_Executor::ExecutorsProvider const& executorsProvider,
       std::vector<rapidjson::Value const*> configurationStack, 
+      GroupStepConfigurations const& groupConfigurations, 
       rapidjson::Value const* configuration);
   Step(ns_Schedule::Task* task, std::string const& name, 
-    uint64_t run_id, uint64_t step_id, 
+    uint64_t run_id, uint64_t step_id, uint64_t group_id, uint16_t group_status, 
     std::list<ns_Schedule::Step*> dependFrom, 
     ns_Executor::ExecutorsProvider const& executorsProvider,
+    GroupStepConfigurations const& groupConfigurations, 
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration,
     rapidjson::Value const* monitorJSON);
@@ -58,6 +65,7 @@ public:
 
   void ReadFromTaskJSON(
       std::vector<rapidjson::Value const*> configurationStack, 
+      GroupStepConfigurations const& groupConfigurations, 
       rapidjson::Value const* configuration);
 
   uint64_t TaskID() const;
@@ -90,11 +98,13 @@ public:
       bool exportTask) const;
 
   std::string ID() const;
+  std::string GID() const;
 
   ns_Schedule::Task* task_;
   std::string name_;
   std::string id_;
   uint64_t uuid_;
+  uint64_t group_id_;
   uint64_t step_id_;
   uint64_t rank_id_;
   uint64_t attempt_id_;
@@ -121,6 +131,8 @@ public:
   std::shared_ptr<ns_Monitor::Task> monitor_;
   std::filesystem::path monitor_path_;
   std::string message_from_run_;
+
+  uint16_t group_status_;
 
 private:
   enum class State { 
@@ -266,6 +278,12 @@ inline void Step::SetUserRunState(std::string const& state) {
 
 inline std::string Step::ID() const {
   return std::to_string(step_id_) + '-' +
+    std::to_string(rank_id_) + '-' +
+    std::to_string(attempt_id_);
+}
+
+inline std::string Step::GID() const {
+  return std::to_string(group_id_ - 1) + '-' +
     std::to_string(rank_id_) + '-' +
     std::to_string(attempt_id_);
 }

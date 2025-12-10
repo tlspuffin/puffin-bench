@@ -40,11 +40,16 @@ ns_Executor::LocalData::LocalData(rapidjson::Value const& config)
     cores_.push_back(coresArray[i].GetUint64());
   }
   run_path_ = Get<std::string>(config, "run_path");
-  artefacts_path_ = run_path_.string() + "-artefacts.json";
   pid_ = Get<uint64_t>(config, "pid");
+
+  artefacts_path_ = Get<std::string>(config, "artefacts_path");
 
   fatalerror_path_ = Get<std::string>(config, "fatalerror_path");
   done_path_ = Get<std::string>(config, "done_path");
+
+  launcher_file_ = Get<std::string>(config, "launcher_file");
+  user_state_file_ = Get<std::string>(config, "user_state_file");
+  step_parameters_file_ = Get<std::string>(config, "step_parameters_file");
 }
 
 void ns_Executor::LocalData::ToJSON(rapidjson::Value& out, 
@@ -57,8 +62,14 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
   out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
   out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
 
+  out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
+
   out.AddMember("fatalerror_path", rapidjson::Value(fatalerror_path_.c_str(), alloc), alloc);
   out.AddMember("done_path", rapidjson::Value(done_path_.c_str(), alloc), alloc);
+
+  out.AddMember("launcher_file", rapidjson::Value(launcher_file_.c_str(), alloc), alloc);
+  out.AddMember("user_state_file", rapidjson::Value(user_state_file_.c_str(), alloc), alloc);
+  out.AddMember("step_parameters_file", rapidjson::Value(step_parameters_file_.c_str(), alloc), alloc);
 }
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
@@ -118,19 +129,33 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 
   LocalData* localData = new LocalData();
   localData->cores_ = AssignCores(step.nb_cores_);
-  localData->run_path_ = step.task_->run_root_path_ / "executor" / step.ID();
+  if (step.group_id_ == 0) {
+    localData->run_path_ = step.task_->run_root_path_ / "executor" / step.ID();
+  } else {
+    localData->run_path_ = step.task_->run_root_path_ / "executor" / step.GID();
+  }
   localData->artefacts_path_ = step.task_->run_root_path_ / "executor" / (step.ID() + "-artefacts.json");
   localData->fatalerror_path_ = step.task_->run_root_path_ / "executor" / ("fe-" + step.ID());
-  localData->done_path_ = localData->run_path_ / ".done";
+  localData->done_path_ = localData->run_path_ / (".done-" + step.ID());
+
+  std::string baseRunPath = step.task_->run_root_path_ / "executor"; 
+  localData->launcher_file_ = baseRunPath + "-" + step.ID() + "-launcher";
+  localData->user_state_file_ = baseRunPath + "-" + step.ID() + "-userstate";
+  localData->step_parameters_file_ = baseRunPath + "-" + step.ID() + "-parameters";
+
   step.executor_data_ = localData;
 
   std::error_code ec;
   if (!std::filesystem::create_directories(localData->run_path_, ec)) {
-    throw std::runtime_error(
-        std::string("create dir ") + localData->run_path_.string() + 
-        std::string(" failed: errno=") + std::to_string(ec.value()) +
-        " (" + ec.message() + ")"
-    );
+    if ((step.group_status_ == ns_Schedule::Step::stepsGroup_None_) || 
+        (step.group_status_ == ns_Schedule::Step::stepsGroup_Begin_) || 
+        (ec.value() != 0)) {
+      throw std::runtime_error(
+          std::string("create dir ") + localData->run_path_.string() + 
+          std::string(" failed: errno=") + std::to_string(ec.value()) +
+          " (" + ec.message() + ")"
+      );
+    }
   }
   int outhandler = open(step.stdout_.c_str(), O_CREAT | O_APPEND | O_WRONLY, 00660);
   if (outhandler == -1) {
@@ -186,8 +211,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       exit(-1);
     }
 
-    std::filesystem::path stepParametersPath = localData->run_path_.string() + "-parameters";
-    std::ofstream stepParameters = std::ofstream(stepParametersPath, std::ios::trunc);
+    std::ofstream stepParameters = std::ofstream(localData->step_parameters_file_, std::ios::trunc);
     for(auto const& [ key, value ]: step.args_) {
       stepParameters << key << "=\"" << value << "\" ";
     }
@@ -198,8 +222,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       cores += std::to_string(core) + ',';
     }
     cores.pop_back();
-    std::ofstream stepLauncher = std::ofstream(
-        localData->run_path_.string() + "-launcher", std::ios::trunc);
+    std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::trunc);
     stepLauncher << "THEJOB_ROOT_PATH=\"" << localData->run_path_ << "\"\n"
         << "THEJOB_FUNCTIONS_PATH=\"" << step.task_->functions_path_ << "\"\n"
         << "THEJOB_ENV_PATH=\"" << step.task_->env_path_ << "\"\n"
@@ -217,14 +240,17 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_RUN_ID=" << step.run_id_ << "\n"
         << "THEJOB_CORES=\"" << cores << "\"\n"
         << "THEJOB_ENTRYPOINT=\"" << step.function_ << "\"\n"
-        << "THEJOB_PARAMETERS_PATH=\"" << stepParametersPath << "\"\n"
+        << "THEJOB_PARAMETERS_PATH=\"" << localData->step_parameters_file_ << "\"\n"
         << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
         << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
         << "THEJOB_CACHE_PORT=\"" << cachePort_ << "\"\n"
-        << "THEJOB_USER_STATE_FILE=\"" << localData->run_path_.string() + "-userstate" << "\"\n";
+        << "THEJOB_USER_STATE_FILE=\"" << localData->user_state_file_ << "\"\n";
     if (step.monitor_) {
       stepLauncher << "THEJOB_MONITOR_PARAMETERS_PATH=\"" << step.monitor_->ToArgs() << 
         " " << step.monitor_path_.string() << "\"\n";
+    }
+    if (step.group_status_ != ns_Schedule::Step::stepsGroup_None_) {
+      stepLauncher << "THEJOB_STEP_GROUP_ID=\"" << step.group_id_ << "\"\n";
     }
     stepLauncher.close();
 
@@ -506,8 +532,7 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
       exit(-1);
     }
 
-    std::ofstream stepLauncher = std::ofstream(
-        localData->run_path_.string() + "-launcher", std::ios::app);
+    std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::app);
     stepLauncher << "THEJOB_SHUTDOWN=1\n";
     stepLauncher.close();
 
@@ -562,7 +587,7 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
 }
 
 void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores) {
-  std::string userStateFile = localData->run_path_.string() + "-userstate";
+  std::string userStateFile = localData->user_state_file_;
   std::ifstream ifs(userStateFile);
   if (ifs.is_open()) {
     std::stringstream oss;
@@ -579,9 +604,11 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
   SaveArtefacts(step);
 
   std::error_code ec;
-  std::filesystem::remove_all(localData->run_path_, ec);
-  std::filesystem::remove(localData->run_path_.string() + "-parameters");
-  std::filesystem::remove(localData->run_path_.string() + "-launcher");
+  if (step.group_status_ == ns_Schedule::Step::stepsGroup_End_) {
+    std::filesystem::remove_all(localData->run_path_, ec);
+  }
+  std::filesystem::remove(localData->step_parameters_file_);
+  std::filesystem::remove(localData->launcher_file_);
 }
 
 std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
@@ -635,7 +662,7 @@ std::vector<std::string> ns_Executor::Local::BuildExecutorArgs(
 
   std::vector<std::string> arg_strings;
   arg_strings.push_back("task");
-  arg_strings.push_back(localData->run_path_.string() + "-launcher");
+  arg_strings.push_back(localData->launcher_file_);
   arg_strings.push_back("---");
 
   return arg_strings;

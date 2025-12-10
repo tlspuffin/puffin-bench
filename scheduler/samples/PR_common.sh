@@ -1,6 +1,7 @@
 #### HELPER START ####
 
 ExperimentCheckAllThreadsRunning() {
+  local -n ref_oldfilesize=$1; shift;
   local -n ref_lastcheck=$1; shift;
   local stats="$1"; shift;
   local nb_clients="$1"; shift;
@@ -9,6 +10,11 @@ ExperimentCheckAllThreadsRunning() {
   if (( ref_lastcheck != 0)); then
     local diffTS=$(( lastTS - ref_lastcheck ));
     (( diffTS > 300 )) && return 1;
+  else
+    [ -z "${lastTS}" ] && {
+      echo " -1 ";
+      return 0;
+    }
   fi
 
   local now=$( date +%s )
@@ -16,21 +22,24 @@ ExperimentCheckAllThreadsRunning() {
   local -a clients;
   local i=0;
   for ((i=0; i<nb_clients; i++)); do
-    clients[$i]=864000;
+    clients[$i]=-1;
   done
+  local filesize=$( stat --format=%s "${stats}" )
+  local newdatasize=$(( filesize - ref_oldfilesize ))
+  ref_oldfilesize="${filesize}"
   while read -r line; do
     echo "$line" | jq -e >/dev/null 2>&1 || continue;
     local id=-1
     local ts=0
-    read id ts < <( echo "$line" | jq -r '[.id,.time.secs_since_epoch] | @tsv' );
+    read id ts < <( echo "$line" | jq -r '[.id,.time.secs_since_epoch] | @tsv' ) || continue;
     clients[${id}]=$(( now - ts ))
-  done < <(tail -c 10M "${stats}" | sed 's/}{/}\n{/g' | grep '^{"type":"client"' )
+  done < <(tail -c "${newdatasize}" "${stats}" | sed 's/}{/}\n{/g' | grep '^{"type":"client"' )
 
   local problems=''
-  for ((i=0; i<nb_clients; i++)); do
-    (( clients[i] >= 864000 )) && problems+=" ${i} ";
-  fi
-  [ -n "${lastTS}" ] && ref_lastcheck="${lastTS}" || problems+=" -1 ";
+  for ((i=1; i<nb_clients; i++)); do
+    (( clients[i] == -1 )) && problems+=" ${i} ";
+  done
+  ref_lastcheck="${lastTS}";
   echo "${problems}";
   return 0;
 }
@@ -39,12 +48,13 @@ function ExperimentCheckRun() {
   local tlspuffin_pid="$1"; shift;
   local stats="$1"; shift;
 
+  local statssize=0;
   local lastcheck=0;
   local nbissues=0;
   local problems='';
   while true; do
     local currentProblems='';
-    currentProblems=$( ExperimentCheckAllThreadsRunning lastcheck "${stats}" "${THEJOB_NB_CORES}" ) || break;
+    currentProblems=$( ExperimentCheckAllThreadsRunning statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" ) || break;
     local haveissue=0;
     local i='';
     for i in ${currentProblems}; do
@@ -53,11 +63,16 @@ function ExperimentCheckRun() {
     problems="${currentProblems}";
     (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
 
-    (( nbissues > 15 )) && break;
+    (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
+    (( nbissues > 3 )) && break;
     sleep 60;
-    (( nbissues > 0 )) && echo "nbissues: ${nbissues}, problems: ${problems}"
   done
-  EndDirectChild "${tlspuffin_pid}"
+  echo "Issues detected, killing process ${tlspuffin_pid} ..." >&2
+  local status;
+  status=$( EndDirectChild "${tlspuffin_pid}" );
+  local code=$?
+  echo "Issues detected, killed process" >&2
+  return $code
 }
 
 FindFile() {

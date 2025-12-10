@@ -25,6 +25,10 @@ public:
   std::filesystem::path artefacts_path_;
   pid_t pid_;
 
+  std::string launcher_file_;
+  std::string user_state_file_;
+  std::string step_parameters_file_;
+
   EProcessStatus process_status_;
   std::filesystem::path fatalerror_path_;
   std::filesystem::path done_path_;

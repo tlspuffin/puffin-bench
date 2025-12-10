@@ -1,6 +1,29 @@
 #include "step_configurations.hxx"
 #include "../../utils/rapidjson.hxx"
 
+void ns_Schedule::GroupStepConfigurations::ReadFromTaskJSON(rapidjson::Value const& entry) {
+  if (!entry.IsObject()) {
+    throw std::runtime_error("`configurations` must be an object");
+  }
+  nb_retry_[""] = GetOrDefault<uint32_t>(entry, "nb_retry", nb_retry_[""]);
+
+  rapidjson::Value emptyObject(rapidjson::kObjectType);
+  rapidjson::Value::Object customConfig = 
+      GetOrDefault<rapidjson::Value::Object>(entry, "custom", emptyObject.GetObj());
+  for (auto const& config: customConfig) {
+    nb_retry_[config.name.GetString()] = GetOrDefault<uint32_t>(config.value, "nb_retry", nb_retry_[""]);
+  }
+}
+
+uint32_t ns_Schedule::GroupStepConfigurations::NbRetry(std::string const& configName) const {
+  auto const& it = nb_retry_.find(configName);
+  if (it != nb_retry_.end()) {
+    return it->second;
+  } else {
+    return nb_retry_.at("");
+  }
+}
+
 ns_Schedule::StepConfigurations::Configuration::Configuration() : 
     executor_name_(""), nb_cores_(1), nb_retry_(1), 
     timeout_(0), args_{} {

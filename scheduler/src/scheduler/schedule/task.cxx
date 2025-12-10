@@ -20,6 +20,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::filesystem::path const& monitorsRootPath,
     std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     std::unordered_map<std::string, std::string>& args, 
+    std::map<std::string, std::string> md5, 
     ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
@@ -33,7 +34,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     args_(args), configurations_(), 
     root_steps_(), executors_(), 
     steps_file_(), request_cancel_(false), 
-    publish_()
+    publish_(), md5_(std::move(md5))
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
@@ -186,6 +187,14 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
 
   if (config.HasMember("publish")) {
     publish_.ReadJSON(publishersConfig, config["publish"]);
+  }
+
+  rapidjson::Value::ConstObject md5Object = Get<rapidjson::Value::ConstObject>(config, "md5");
+  for(auto const& md5: md5Object) {
+    if ((!md5.name.IsString()) || (!md5.value.IsString())) {
+      throw std::runtime_error("Task have malformated md5 informations");
+    }
+    md5_[md5.name.GetString()] = md5.value.GetString();
   }
 }
 
@@ -368,6 +377,13 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   rapidjson::Value publishObject(rapidjson::kObjectType);
   publish_.ToJSON(publishObject, alloc);
   out.AddMember("publish", publishObject, alloc);
+
+  rapidjson::Value md5Object(rapidjson::kObjectType);
+  for (auto const& [file, md5]: md5_) {
+    md5Object.AddMember(
+        rapidjson::Value(file.c_str(), alloc), rapidjson::Value(md5.c_str(), alloc), alloc);
+  }
+  out.AddMember("md5", md5Object, alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {
@@ -404,47 +420,97 @@ void ns_Schedule::Task::CreateStepsFromJson(
   rapidjson::Value const& flow = configJSON["flow"];
 
   for (rapidjson::SizeType i = 0; i < flow.Size(); ++i) {
-    rapidjson::Value const& stepJSON = flow[i];
     uint64_t run_id = 0;
+    rapidjson::Value const& flowElement = flow[i];
 
-    if (!stepJSON.HasMember("step") || !stepJSON["step"].IsString()) {
+    GroupStepConfigurations groupConfigurations;
+    std::queue<rapidjson::Value const*> flowElements;
+    if (flowElement.IsObject()) {
+      flowElements.push(&flowElement);
+    } else if (flowElement.IsArray()) {
+      for(auto const& element: flowElement.GetArray()) {
+        if (!element.IsObject()) {
+          continue;
+        }
+        if ((!element.HasMember("step")) && element.HasMember("configuration") && 
+            element["configuration"].IsObject()) {
+          groupConfigurations.ReadFromTaskJSON(element["configuration"]);
+        } else if (element.HasMember("step")) {
+          flowElements.push(&element);
+        }
+      }
+    } else {
       continue;
     }
 
-    current_stack.clear();
+    uint64_t group_id = flowElements.size() == 1 ? 0 : (step_id + 1);
+    bool stepsGroupStart = group_id != 0;
+    do {
+      rapidjson::Value const& stepJSON = *(flowElements.front());
+      flowElements.pop();
 
-    std::string const& step_name = stepJSON["step"].GetString();
+      if (!stepJSON.HasMember("step") || !stepJSON["step"].IsString()) {
+        continue;
+      }
 
-    rapidjson::Value const* monitorJSON = nullptr;
-    if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
-      monitorJSON = &(stepJSON["monitor"]);
-    }
-
-    std::vector<rapidjson::Value const*> configurationsStack;
-    if (stepJSON.HasMember("configuration")) {
-      configurationsStack.push_back(&stepJSON["configuration"]);
-    }
-
-    rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
-    ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
-        run_id++, step_id, parent_stack, executorsProvider, 
-        configurationsStack, runConfiguration, monitorJSON);
-    configurationsStack.push_back(runConfiguration);
-
-    ns_Schedule::Step* first_step = step;
-    if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
-      rapidjson::Value const& run_array = stepJSON["run"];
-
-      for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-        rapidjson::Value const& run = run_array[j];
-        if (j != 0) {
-          step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, 
-              executorsProvider, configurationsStack, &run);
-          step = step->next_;
+      uint16_t stepsGroupStatus = Step::stepsGroup_None_;
+      if (group_id != 0) {
+        if (stepsGroupStart) {
+          stepsGroupStatus = Step::stepsGroup_Begin_;
+        } else if (flowElements.empty()) {
+          stepsGroupStatus = Step::stepsGroup_End_;
         } else {
-          step->ReadFromTaskJSON(configurationsStack, &run);
+          stepsGroupStatus = Step::stepsGroup_In_;
         }
+      }
 
+      current_stack.clear();
+
+      std::string const& step_name = stepJSON["step"].GetString();
+
+      rapidjson::Value const* monitorJSON = nullptr;
+      if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
+        monitorJSON = &(stepJSON["monitor"]);
+      }
+
+      std::vector<rapidjson::Value const*> configurationsStack;
+      if (stepJSON.HasMember("configuration")) {
+        configurationsStack.push_back(&stepJSON["configuration"]);
+      }
+
+      rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
+      ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
+          run_id++, step_id, group_id, stepsGroupStatus, parent_stack, 
+          executorsProvider, groupConfigurations, configurationsStack, 
+          runConfiguration, monitorJSON);
+      configurationsStack.push_back(runConfiguration);
+
+      ns_Schedule::Step* first_step = step;
+      if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
+        rapidjson::Value const& run_array = stepJSON["run"];
+
+        for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+          rapidjson::Value const& run = run_array[j];
+          if (j != 0) {
+            step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, group_id, 
+                executorsProvider, configurationsStack, groupConfigurations, &run);
+            step = step->next_;
+          } else {
+            step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
+          }
+
+          current_stack.push_back(step);
+          steps_.push_front(step);
+          ns_Schedule::Step* attemptStep = step;
+          for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
+            attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt);
+            attemptStep = attemptStep->next_;
+            current_stack.push_back(attemptStep);
+            steps_.push_front(attemptStep);
+          }
+          step = attemptStep;
+        }
+      } else {
         current_stack.push_back(step);
         steps_.push_front(step);
         ns_Schedule::Step* attemptStep = step;
@@ -454,37 +520,27 @@ void ns_Schedule::Task::CreateStepsFromJson(
           current_stack.push_back(attemptStep);
           steps_.push_front(attemptStep);
         }
-        step = attemptStep;
       }
-    } else {
-      current_stack.push_back(step);
-      steps_.push_front(step);
-      ns_Schedule::Step* attemptStep = step;
-      for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
-        attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt);
-        attemptStep = attemptStep->next_;
-        current_stack.push_back(attemptStep);
-        steps_.push_front(attemptStep);
+      first_step->previous_ = current_stack.back();
+      first_step->previous_->next_ = first_step;
+
+      for(auto& parent : parent_stack) {
+        parent->dependencies_.insert(
+            parent->dependencies_.end(),
+            current_stack.rbegin(), current_stack.rend()
+        );
       }
-    }
-    first_step->previous_ = current_stack.back();
-    first_step->previous_->next_ = first_step;
 
-    for(auto& parent : parent_stack) {
-      parent->dependencies_.insert(
-          parent->dependencies_.end(),
-          current_stack.rbegin(), current_stack.rend()
-      );
-    }
+      if (is_root_steps) {
+        root_steps_ = current_stack;
+        is_root_steps = false;
+      }
 
-    if (is_root_steps) {
-      root_steps_ = current_stack;
-      is_root_steps = false;
-    }
+      parent_stack = current_stack;
 
-    parent_stack = current_stack;
-
-    step_id++;
+      step_id++;
+      stepsGroupStart = false;
+    } while (!flowElements.empty());
   }
 }
 

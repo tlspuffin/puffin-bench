@@ -1,6 +1,7 @@
 #include "tasksmanager.hxx"
 #include "schedule.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/md5_poco.hxx"
 #include <unordered_set>
 #include <stack>
 #include <fstream>
@@ -47,6 +48,8 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   }
   ofs << functions;
   ofs.close();
+  std::map<std::string, std::string> md5;
+  md5["."] = MD5(functions);
 
   for(auto const& file: files) {
     std::filesystem::path filename = inDataPath / file.first;
@@ -57,11 +60,18 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
     }
     ofs.write(reinterpret_cast<const char*>(file.second.data()), file.second.size());
     ofs.close();
+    md5["." + file.first] = MD5(reinterpret_cast<const char*>(file.second.data()), file.second.size());
   }
+
+  std::string idMD5;
+  for(auto const& [key, value]: md5) {
+    idMD5 += key + ":" + value + "\n";
+  }
+  md5["#"] = MD5(idMD5);
 
   ns_Schedule::Task* task = new ns_Schedule::Task(
     task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
-    config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, schedule);
+    config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, md5, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);

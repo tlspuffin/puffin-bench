@@ -118,17 +118,20 @@ CreateArtefact() {
 EndDirectChild() {
   local pid=$1;
   if [ -z "${pid}" ]; then
+    echo "EndDirectChild require a pid as parameter"
     echo "EndDirectChild require a pid as parameter" >&2
-    return 0;
+    return 1;
   fi
   if ! kill -0 ${pid} 2>/dev/null; then
+    echo "EndDirectChild: ${pid} is not running"
     echo "EndDirectChild: ${pid} is not running" >&2
-    return 0;
+    return 1;
   fi
   local ppid=$( ps -o ppid= -p ${pid} 2>/dev/null | tr -d ' ' )
   if [ "${ppid}" != "$$" ]; then
+    echo "EndDirectChild: running ${pid} is not a direct child of $$"
     echo "EndDirectChild: running ${pid} is not a direct child of $$" >&2
-    return 0;
+    return 1;
   fi
   local sleepTime=0.5
   local maxAttempt=8
@@ -139,13 +142,15 @@ EndDirectChild() {
       sleep ${sleepTime}
       if ! kill -0 ${pid} 2>/dev/null; then
         wait ${pid} 2>/dev/null
+        echo "$?"
         return 0;
       fi
       attempt=$(( $attempt + 1))
     done
   done
+  echo "EndDirectChild: Failed to kill process ${pid} after all attempts"
   echo "EndDirectChild: Failed to kill process ${pid} after all attempts" >&2
-  return 0;
+  return 1;
 }
 
 StartMonitor() {
