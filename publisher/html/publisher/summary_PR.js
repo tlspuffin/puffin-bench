@@ -1,8 +1,19 @@
+import { displayGraph, closeGraphModal, updateMetricsList, renderGraph } from './summary_PR_perf.js';
+
 var allCommits = [];
 var currentFilter = 'all';
 var selectedTypes = new Set(['Perf', 'Vuln']); // Types currently visible
 var availableTypes = ['Perf', 'Vuln']; // Default types to load
 var showAllCommits = false; // Show all commits regardless of type results
+
+// Export variables for use in other modules
+export { allCommits, availableTypes };
+
+// Expose graph functions to global scope for onclick handlers
+window.displayGraph = displayGraph;
+window.closeGraphModal = closeGraphModal;
+window.updateMetricsList = updateMetricsList;
+window.renderGraph = renderGraph;
 
 const config = {
   location: window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1),
@@ -725,3 +736,8 @@ function refreshData() {
 
   loadData();
 }
+
+// Expose functions on the global window for inline HTML onclick handlers
+window.showDetails = showDetails;
+window.downloadResults = downloadResults;
+window.clearSearch = clearSearch;

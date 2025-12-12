@@ -16,6 +16,7 @@
         </div>
       </div>
       <div class="header-right">
+        <button class="refresh-btn" onclick="displayGraph()">📈 Graphs</button>
         <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
       </div>
     </header>
@@ -53,7 +54,39 @@
       No commit match filters
     </div>
   </div>
-  
-  <script src="/html/publisher/summary_PR.js"></script>
+  <div id="graph-modal" class="modal">
+    <div class="modal-overlay" onclick="closeGraphModal()"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📈 Metrics Evolution</h2>
+        <button class="modal-close" onclick="closeGraphModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="graph-controls">
+          <div class="control-group">
+            <label for="type-select">Type:</label>
+            <select id="type-select" onchange="updateMetricsList()">
+              <option value="">Select type...</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="library-select">Library:</label>
+            <select id="library-select" onchange="updateMetricsList()">
+              <option value="">Select library...</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="metric-select">Metric:</label>
+            <select id="metric-select" onchange="renderGraph()">
+              <option value="">Select metric...</option>
+            </select>
+          </div>
+        </div>
+        <div id="graph-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/html/publisher/summary_PR.js"></script>
 </body>
 </html>
