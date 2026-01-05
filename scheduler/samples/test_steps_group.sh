@@ -55,8 +55,12 @@ Build() {
   echo "Build finished at: ${end_time}" >> "${build_file}"
   echo "Build duration: $((end_time - start_time))s" >> "${build_file}"
 
-  # Créer un artefact
-  CreateArtefact "./${build_file}" "build/${config_name}" \
+  # Créer une copie pour l'artefact (CreateArtefact fait un move, pas une copie)
+  # Le fichier original reste dans le répertoire pour les steps suivants du groupe
+  local artefact_file="${build_file}.artefact"
+  cp "${build_file}" "${artefact_file}"
+
+  CreateArtefact "./${artefact_file}" "build/${config_name}" \
     "config:${config_name}" \
     "rank:${THEJOB_STEP_RANK_ID}" \
     "start:${start_time}" \
@@ -123,8 +127,12 @@ Test() {
   echo "Test duration: $((end_time - start_time))s" >> "${test_file}"
   echo "Test result: PASSED" >> "${test_file}"
 
-  # Créer un artefact
-  CreateArtefact "./${test_file}" "test/${config_name}" \
+  # Créer une copie pour l'artefact (CreateArtefact fait un move, pas une copie)
+  # Le fichier original reste dans le répertoire pour les steps suivants du groupe
+  local artefact_file="${test_file}.artefact"
+  cp "${test_file}" "${artefact_file}"
+
+  CreateArtefact "./${artefact_file}" "test/${config_name}" \
     "config:${config_name}" \
     "rank:${THEJOB_STEP_RANK_ID}" \
     "result:PASSED"
@@ -224,8 +232,11 @@ Verify() {
   # Afficher le rapport
   cat "${verify_file}" 1>&2
 
-  # Créer un artefact
-  CreateArtefact "./${verify_file}" "verify/${config_name}" \
+  # Créer une copie pour l'artefact (CreateArtefact fait un move, pas une copie)
+  local artefact_file="${verify_file}.artefact"
+  cp "${verify_file}" "${artefact_file}"
+
+  CreateArtefact "./${artefact_file}" "verify/${config_name}" \
     "config:${config_name}" \
     "result:$([ "${all_valid}" = true ] && echo "PASSED" || echo "FAILED")"
 

@@ -423,6 +423,8 @@ void ns_Schedule::Task::CreateStepsFromJson(
     uint64_t run_id = 0;
     rapidjson::Value const& flowElement = flow[i];
 
+    std::vector<rapidjson::Value const*> runList;
+
     GroupStepConfigurations groupConfigurations;
     std::queue<rapidjson::Value const*> flowElements;
     if (flowElement.IsObject()) {
@@ -432,9 +434,16 @@ void ns_Schedule::Task::CreateStepsFromJson(
         if (!element.IsObject()) {
           continue;
         }
-        if ((!element.HasMember("step")) && element.HasMember("configuration") && 
-            element["configuration"].IsObject()) {
-          groupConfigurations.ReadFromTaskJSON(element["configuration"]);
+        if (!element.HasMember("step")) {
+          if (element.HasMember("configuration") && element["configuration"].IsObject()) {
+            groupConfigurations.ReadFromTaskJSON(element["configuration"]);
+          }
+          if (element.HasMember("run") && element["run"].IsArray()) {
+            rapidjson::Value const& run_array = element["run"];
+            for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+              runList.push_back(&(run_array[j]));
+            }
+          }
         } else if (element.HasMember("step")) {
           flowElements.push(&element);
         }
@@ -487,13 +496,21 @@ void ns_Schedule::Task::CreateStepsFromJson(
 
       ns_Schedule::Step* first_step = step;
       if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
+        if (stepsGroupStatus != Step::stepsGroup_None_) {
+          throw std::runtime_error("step inside a group can not have a run field");
+        }
         rapidjson::Value const& run_array = stepJSON["run"];
-
         for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-          rapidjson::Value const& run = run_array[j];
+          runList.push_back(&(run_array[j]));
+        }
+      }
+      if (!runList.empty()) {
+        for(size_t j=0; j<runList.size(); ++j) {
+          rapidjson::Value const& run = *(runList[j]);
           if (j != 0) {
             step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, group_id, 
-                executorsProvider, configurationsStack, groupConfigurations, &run);
+                executorsProvider, parent_stack, configurationsStack, groupConfigurations, 
+                &run);
             step = step->next_;
           } else {
             step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
@@ -503,7 +520,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
           steps_.push_front(step);
           ns_Schedule::Step* attemptStep = step;
           for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
-            attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt);
+            attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt, parent_stack);
             attemptStep = attemptStep->next_;
             current_stack.push_back(attemptStep);
             steps_.push_front(attemptStep);
@@ -515,7 +532,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
         steps_.push_front(step);
         ns_Schedule::Step* attemptStep = step;
         for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
-          attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt);
+          attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt, parent_stack);
           attemptStep = attemptStep->next_;
           current_stack.push_back(attemptStep);
           steps_.push_front(attemptStep);
@@ -524,11 +541,24 @@ void ns_Schedule::Task::CreateStepsFromJson(
       first_step->previous_ = current_stack.back();
       first_step->previous_->next_ = first_step;
 
-      for(auto& parent : parent_stack) {
-        parent->dependencies_.insert(
-            parent->dependencies_.end(),
-            current_stack.rbegin(), current_stack.rend()
-        );
+      if (!parent_stack.empty()) {
+        if ((parent_stack.front()->group_status_ == Step::stepsGroup_None_) || 
+            (parent_stack.front()->group_status_ == Step::stepsGroup_End_)) {
+          for(auto& parent : parent_stack) {
+            parent->dependencies_.insert(
+                parent->dependencies_.end(),
+                current_stack.rbegin(), current_stack.rend()
+            );
+          }
+        } else {
+          for(auto& parent : parent_stack) {
+            for(auto& step : current_stack) {
+              if ((parent->rank_id_ == step->rank_id_) && (parent->attempt_id_ == step->attempt_id_)) {
+                parent->dependencies_.push_back(step);
+              }
+            }
+          }
+        }
       }
 
       if (is_root_steps) {

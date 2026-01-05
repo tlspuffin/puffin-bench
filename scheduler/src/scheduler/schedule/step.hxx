@@ -43,10 +43,12 @@ public:
     }
   };
 
-  Step(Step const& source, uint64_t run_id, uint64_t attempt_id);
+  Step(Step const& source, uint64_t run_id, uint64_t attempt_id, 
+      std::list<ns_Schedule::Step*> dependFrom);
   Step(Step const& source, uint64_t run_id, 
       uint64_t rank_id, uint64_t attempt_id, uint64_t group_id, 
       ns_Executor::ExecutorsProvider const& executorsProvider,
+      std::list<ns_Schedule::Step*> dependFrom, 
       std::vector<rapidjson::Value const*> configurationStack, 
       GroupStepConfigurations const& groupConfigurations, 
       rapidjson::Value const* configuration);

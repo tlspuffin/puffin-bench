@@ -36,35 +36,30 @@
   "flow" : [
     {
       "step": "Init"
-    },
-    {
-      "step": "ForcedBuild",
-      "run": [
-        "LibreSSL",
-        "BoringSSL",
-        "OpenSSL",
-        "WolfSSL"
-      ]
-    },
-    {
-      "step": "ExperimentWithCargo",
-      "run": [
-        "LibreSSL",
-        "BoringSSL",
-        "OpenSSL",
-        "WolfSSL"
-      ],
-      "configuration": {
-        "nb_cores": 3,
-        "timeout": "1h",
-        "nb_retry": 5
+    }, 
+    [
+      {
+        "run": [ "LibreSSL", "BoringSSL", "OpenSSL", "WolfSSL" ],
+        "configuration": {
+          "nb_retry": 5
+        }
       },
-      "monitor": {
-        "entry_point": "CheckObjectif",
-        "delay_start": "10s",
-        "interval": "60s"
+      {
+        "step": "ForcedBuild"
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "nb_cores": 3,
+          "timeout": "1h"
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
       }
-    },
+    ],
     {
       "step": "SummaryRun"
     },

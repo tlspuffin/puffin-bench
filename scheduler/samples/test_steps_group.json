@@ -9,6 +9,7 @@
     },
     [
       {
+        "run": ["Conf_A", "Conf_B", "Conf_C"],
         "configuration": {
           "nb_retry": 2,
           "custom": {
@@ -17,19 +18,16 @@
         }
       },
       {
-        "step": "Build",
-        "run": ["Conf_A", "Conf_B", "Conf_C"]
+        "step": "Build"
       },
       {
         "step": "Test",
-        "run": ["Conf_A", "Conf_B", "Conf_C"],
         "configuration": {
           "timeout": "2m"
         }
       },
       {
-        "step": "Verify",
-        "run": ["Conf_A", "Conf_B", "Conf_C"]
+        "step": "Verify"
       }
     ],
     {

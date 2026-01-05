@@ -1,46 +1,96 @@
 #### HELPER START ####
 
+SaveSummary() {
+  local oldfilesize=$1; shift;
+  local stats="$1"; shift;
+  local output="$1"; shift;
+
+  local old_summary=""
+  [ -f "${output}" ] && old_summary=$( cat "${output}" )
+
+  (( oldfilesize > 1024 )) && (( oldfilesize -= 1024 ))
+  local summary=$( dd bs=10M iflag=skip_bytes if="${stats}" skip="${oldfilesize}" status=none | 
+    awk 'BEGIN{ RS="}{"; nb=0; } {
+      line = $0
+      if (line !~ /^{/) line = "{" line
+      if (line !~ /}$/) line = line "}"
+
+      if (line ~ /"type":"global"/) {
+        global_0 = global_1
+        global_1 = line
+      } else if (line ~ /"type":"client"/) {
+        if (match(line, /"id": *[0-9]+/)) {
+          id = substr(line, RSTART, RLENGTH)
+          gsub(/[^0-9]/, "", id); if (id > nb) { nb = id };
+          clients_0[id] = clients_1[id]
+          clients_1[id] = line
+        }
+      }
+    }
+    END {
+      if (global_1) print global_1
+      if (global_0) print global_0
+
+      for (id = 1; id <= nb; id++) {
+        if (clients_1[id]) print clients_1[id]
+        if (clients_0[id]) print clients_0[id]
+      }
+    }' | jq -c '.' 2>/dev/null | jq -s 'group_by(.type, .id // 0) | map(first) | .[]' )
+
+  local merged=$( {
+    echo "$summary"
+    echo "$old_summary"
+  } | jq -c '.' 2>/dev/null | jq -s 'group_by(.type, .id // 0) | map(first) | .[]' )
+
+  echo "${merged}" | jq -c '.' > "${output}"
+}
+
 ExperimentCheckAllThreadsRunning() {
+  local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
   local -n ref_lastcheck=$1; shift;
   local stats="$1"; shift;
   local nb_clients="$1"; shift;
+  local -n ref_problems=$1; shift;
 
-  local lastTS=$( tail -c 64K "${stats}" | sed 's/}{/}\n{/g' | head -n -1 | tail -1 | jq -r '.time.secs_since_epoch' );
-  if (( ref_lastcheck != 0)); then
+  echo "StartCheck ${ref_oldfilesize} ${ref_lastcheck} $( date )" >&2
+
+  if ! kill -0 ${tlspuffin_pid} 2>/dev/null; then
+    echo "process ${tlspuffin_pid} dead, exit" >&2
+    return 1;
+  fi
+
+  local lastTS=$( tail -c 64K "${stats}" | sed 's/}{/}\n{/g' 2>/dev/null | head -n -1 | tail -1 | jq -r '.time.secs_since_epoch' );
+  if (( ref_lastcheck != 0 )); then
     local diffTS=$(( lastTS - ref_lastcheck ));
-    (( diffTS > 300 )) && return 1;
+    echo "global ${lastTS} - ${ref_lastcheck} = ${diffTS}" >&2
+    (( diffTS > 300 )) && {
+      echo "global diffTS > 300, exit" >&2
+      return 1;
+    }
   else
+    echo "${ref_lastcheck} == 0" >&2
     [ -z "${lastTS}" ] && {
-      echo " -1 ";
+      echo "no ${stats} no lastTS, end check" >&2
+      ref_problems=" -1 ";
       return 0;
     }
   fi
 
-  local now=$( date +%s )
-
-  local -a clients;
-  local i=0;
-  for ((i=0; i<nb_clients; i++)); do
-    clients[$i]=-1;
-  done
   local filesize=$( stat --format=%s "${stats}" )
   local newdatasize=$(( filesize - ref_oldfilesize ))
-  ref_oldfilesize="${filesize}"
-  while read -r line; do
-    echo "$line" | jq -e >/dev/null 2>&1 || continue;
-    local id=-1
-    local ts=0
-    read id ts < <( echo "$line" | jq -r '[.id,.time.secs_since_epoch] | @tsv' ) || continue;
-    clients[${id}]=$(( now - ts ))
-  done < <(tail -c "${newdatasize}" "${stats}" | sed 's/}{/}\n{/g' | grep '^{"type":"client"' )
+  echo "filesize= ${filesize} newdatasize= ${newdatasize}" >&2
 
-  local problems=''
-  for ((i=1; i<nb_clients; i++)); do
-    (( clients[i] == -1 )) && problems+=" ${i} ";
+  local found_ids=$( dd bs=10M iflag=skip_bytes if="${stats}" skip="${ref_oldfilesize}" status=none | awk 'BEGIN{RS="}{"} { if (match($0, /"id": *[0-9]+/)) { id = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", id); print id } }' | sort -u );
+  ref_oldfilesize="${filesize}"
+  ref_problems=''
+  local i=1
+  for ((i=1; i<=nb_clients; i++)); do
+    echo "${found_ids}" | grep -q "^${i}$" || ref_problems+=" ${i} ";
   done
+
+  echo "problems= ${ref_problems} end check" >&2
   ref_lastcheck="${lastTS}";
-  echo "${problems}";
   return 0;
 }
 
@@ -53,8 +103,9 @@ function ExperimentCheckRun() {
   local nbissues=0;
   local problems='';
   while true; do
+    echo "ExperimentCheckRun..." >&2
     local currentProblems='';
-    currentProblems=$( ExperimentCheckAllThreadsRunning statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" ) || break;
+    ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
     local haveissue=0;
     local i='';
     for i in ${currentProblems}; do
@@ -64,13 +115,16 @@ function ExperimentCheckRun() {
     (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
 
     (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
-    (( nbissues > 3 )) && break;
+    (( nbissues > 4 )) && break;
+
+    echo "ExperimentCheckRun sleep" >&2
     sleep 60;
   done
   echo "Issues detected, killing process ${tlspuffin_pid} ..." >&2
   local status;
   status=$( EndDirectChild "${tlspuffin_pid}" );
   local code=$?
+  (( code == 0 )) && code=$status
   echo "Issues detected, killed process" >&2
   return $code
 }
@@ -227,13 +281,6 @@ ExperimentSetupForCargo() {
     echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "${THEJOB_USER_STATE_FILE}";
   fi
 
-  cp -apr "${THEJOB_OUT_PATH}/repo-${THEJOB_STEP_ID}/." . || return 1
-  rm -rf target/ # at some point puffin-build use absolute path, preventing pre-build of binaries
-
-  nix-shell --run "cargo run --release -p tlspuffin --features=${features} -- seed" || return 1;
-
-  rm -rf ./experiments
-
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
 }
 
@@ -297,7 +344,7 @@ ExperimentPostLaunchSetup() {
     };
 
     if ref_statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-      CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+      (( saveObjectif == 0 )) && CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
       break;
     fi
 
@@ -321,7 +368,12 @@ ExperimentPostLaunchSetup() {
     echo 'No tlspuffin.out found, will not be archived' > /dev/stderr
   fi
   if [ -d './log' ]; then
-    CreateArtefact "./log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log" "commit_id:${COMMIT_ID}" "features:${features}"
+    CreateArtefact "./log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log_root" "commit_id:${COMMIT_ID}" "features:${features}"
+  else
+    echo 'No root log directory found, will not be archived' > tee /dev/stderr
+  fi
+  if [ -d "./${experiment_base}/log" ]; then
+    CreateArtefact "./${experiment_base}/log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log_root" "commit_id:${COMMIT_ID}" "features:${features}"
   else
     echo 'No log directory found, will not be archived' > tee /dev/stderr
   fi
@@ -347,8 +399,8 @@ ExperimentReport() {
     local objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
     # Display the following if obejctive_count is greater than 0
     if [ "$objective_count" -gt 0 ]; then
-      local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr | head -n1 | cut -d' ' -f2-)
-      local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr | head -n1 | cut -d. -f1)
+      local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
+      local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       local now=$(date +%s)
       local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
       echo "🎉 Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> "${THEJOB_USER_STATE_FILE}"
@@ -455,12 +507,12 @@ ExperimentRunWithCargo() {
 
   local last_core=0;
   ExperimentSetupForCargo last_core "${features}" || return 1;
-
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --release -p tlspuffin --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
   if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveObjectif}" "${features}"; then
+    echo "KILLING tlspuffin, experiment post launch setup failed" >&2
     kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
     ref_tlspuffin_killed=1
   fi
@@ -544,7 +596,7 @@ Build() {
     if ${cputs}; then
       nix-shell --run "./tools/mk_vendor make '${vendor}'"
     fi
-    nix-shell --run "cargo build --bin tlspuffin --release --features=${features}" || return 1
+    nix-shell --run "cargo build --bin tlspuffin --release --features=${features} -j ${THEJOB_NB_CORES}" || return 1
     binary=$( realpath ./target/release/tlspuffin )
     SetCache "${cache_id}" "${binary}"
   else
@@ -571,16 +623,17 @@ ForcedBuild() {
       return 1;
   }
 
-  cp -apr "${THEJOB_OUT_PATH}/repo/" . || return 1;
-  cd repo || return 1;
+  cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
   if ${cputs}; then
     nix-shell --run "./tools/mk_vendor make '${vendor}'"
   fi
-  nix-shell --run "cargo build --bin tlspuffin --release --features=${features}" || return 1
 
-  cd ..
-  cp -apr repo "${THEJOB_OUT_PATH}/repo-${THEJOB_STEP_ID}" || return 1
+  rm -rf seeds
+  nix-shell --run "cargo run --release -p tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
+  nix-shell --run "cargo run --bin tlspuffin --release --features=${features} -j ${THEJOB_NB_CORES} -- help" || return 1
+
+  rm -rf ./experiments
 }
 
 Clean() {
@@ -591,8 +644,7 @@ CleanAllRepo() {
   rm -rf "${THEJOB_OUT_PATH}/repo*"
 }
 
-
-CheckObjectif () {
+MonitorExperiment() {
   local outfile="$1";
   if [ -z "${outfile}" ]; then
     echo "Missing outfile"
@@ -650,8 +702,8 @@ CheckObjectif () {
     local corpus_dir="$exp/corpus"
     if [ -d "$corpus_dir" ]; then
       local corpus_count=$(find "$corpus_dir" -type f -name "*.trace" | wc -l)
-      local last_corpus=$(find "$corpus_dir" -type f -name "*.trace" -printf "%T@ %Tc\n" | sort -nr | head -n1 | cut -d' ' -f2-)
-      local last_corpus_time=$(find "$corpus_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr | head -n1 | cut -d. -f1)
+      local last_corpus=$(find "$corpus_dir" -type f -name "*.trace" -printf "%T@ %Tc\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
+      local last_corpus_time=$(find "$corpus_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       now=$(date +%s)
       local last_corpus_elapsed=$(( (now - last_corpus_time) / 60 ))
       echo "  Corpus: $corpus_count file(s), last modified: $last_corpus_elapsed minutes ago - $last_corpus" >> ${outfile}
@@ -687,8 +739,8 @@ CheckObjectif () {
       local objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
       # Display the following if obejctive_count is greater than 0
       if [ "$objective_count" -gt 0 ]; then
-        local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr | head -n1 | cut -d' ' -f2-)
-        local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr | head -n1 | cut -d. -f1)
+        local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
+        local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
         local now=$(date +%s)
         local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
         echo "    ==> 🎉 Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> ${outfile}

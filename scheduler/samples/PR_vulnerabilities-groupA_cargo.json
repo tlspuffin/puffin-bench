@@ -72,7 +72,7 @@
         "nb_retry": 5
       },
       "monitor": {
-        "entry_point": "CheckObjectif",
+        "entry_point": "MonitorExperiment",
         "delay_start": "10s",
         "interval": "60s"
       }

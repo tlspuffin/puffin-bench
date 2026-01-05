@@ -7,9 +7,9 @@ void ns_Schedule::GroupStepConfigurations::ReadFromTaskJSON(rapidjson::Value con
   }
   nb_retry_[""] = GetOrDefault<uint32_t>(entry, "nb_retry", nb_retry_[""]);
 
-  rapidjson::Value emptyObject(rapidjson::kObjectType);
-  rapidjson::Value::Object customConfig = 
-      GetOrDefault<rapidjson::Value::Object>(entry, "custom", emptyObject.GetObj());
+  rapidjson::Value const emptyObject(rapidjson::kObjectType);
+  rapidjson::Value::ConstObject customConfig = 
+      GetOrDefault<rapidjson::Value::ConstObject>(entry, "custom", emptyObject.GetObj());
   for (auto const& config: customConfig) {
     nb_retry_[config.name.GetString()] = GetOrDefault<uint32_t>(config.value, "nb_retry", nb_retry_[""]);
   }
@@ -111,7 +111,7 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     }
   }
   if (id.empty()) {
-    id = ".";
+    id = name.empty() ? "." : name;
   }
   return ns_Schedule::StepConfigurations::Configuration
       (id, executor_name, nb_cores, nb_retry, timeout, args);

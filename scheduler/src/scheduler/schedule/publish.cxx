@@ -63,7 +63,7 @@ void ns_Schedule::Publish::PublishResults(
     std::filesystem::create_directories(finalStoragePath);
 
     std::filesystem::copy_options copyOptions = 
-        std::filesystem::copy_options::update_existing |
+        std::filesystem::copy_options::overwrite_existing |
         std::filesystem::copy_options::recursive;
     for(auto const& file: data) {
       std::filesystem::copy(file, finalStoragePath, copyOptions);

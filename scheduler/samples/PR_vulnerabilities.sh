@@ -1,27 +1,61 @@
 CheckObjectif() {
+  local -n ref_status=$1; shift
   local tlspuffin_pid="$1"; shift;
   local stats="$1"; shift;
+  local -n ref_goal_success=$1; shift
 
-  local nb_clients=0;
-  local problems=0;
-  local goal_success=0
+  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+
+  local statssize=0;
+  local lastcheck=0;
+  local nbissues=0;
+  local problems='';
   while true; do
-    sleep 10
-    kill -0 ${tlspuffin_pid} 2>/dev/null || break;
-
     local obj_count=$( find experiments/*/objective -maxdepth 1 -type f -name '*.trace' 2>/dev/null | wc -l )
     if (( ${obj_count} > 0 )); then
-      goal_success=1
+      echo "FOUND OBJECTIF, END PROCESS" >&2
+      ref_goal_success=1
       break;
     fi
 
-    nb_clients=$( ExperimentCheckAllThreadsRunning "${stats}" "$nb_clients" ) || break;
-    (( nb_clients < THEJOB_NB_CORES )) && (( ++problems )) || problems=0;
-    (( problems > 10 )) && { tlspuffin_killed=1; break };
-  done
-  EndDirectChild "${tlspuffin_pid}"
+    local currentStatSize="${statssize}";
+    local currentProblems='';
+    ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
+    local haveissue=0;
+    local i='';
+    for i in ${currentProblems}; do
+      echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
+    done;
+    problems="${currentProblems}";
+    (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
+    (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
 
-  echo "${tlspuffin_killed}";
+    echo "${statssize}" > ./.xp_state_file_size
+    SaveSummary "${currentStatSize}" "${stats}" "summary.json"
+
+    if (( statssize > 1073741824 )); then
+      local purgeRetries=0
+      while (( statssize > 1073741824 )); do
+        truncate -s 0 "${stats}";
+        sleep 0.5;
+        statssize=$( stat --format=%s "${stats}" )
+        (( purgeRetries++ ))
+        (( purgeRetries > 10 )) && { echo "Fail to purge ${stats}" >&2; break; };
+      done;
+      (( purgeRetries <= 10 )) && statssize=0;
+    fi;
+
+    (( nbissues > 4 )) && { echo "TOO MUCH ISSUES, END PROCESS" >&2 ; break; }
+
+    sleep 60;
+  done
+  echo "END EXPERIMENT ${tlspuffin_pid} ..." >&2
+  ref_status=$( EndDirectChild "${tlspuffin_pid}" );
+  local code=$?
+  (( code != 0 )) && ref_status=1
+  echo "END EXPERIMENT ${tlspuffin_pid}" >&2
+
+  echo "${ref_goal_success}";
   return 0;
 }
 
@@ -30,20 +64,24 @@ Experiment () {
   local tlspuffin_killed=0;
   local stats="";
   ExperimentRun tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
-  local nb_clients=0;
-  local problems=0;
+  local goal_success=0
+  local status=1
   if ((tlspuffin_killed == 0)); then
-    tlspuffin_killed=$( CheckObjectif "${tlspuffin_pid}" "${stats}" );
+    echo "CheckObjectif status ${tlspuffin_pid} ${stats} goal_success" >&2
+    echo "${stats}" > ./.xp_state_file
+    CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success
   fi
-  wait "${tlspuffin_pid}" 2>/dev/null
-  local status=$?
 
   ExperimentEnd
 
-  (( tlspuffin_killed == 1 )) && return 1;
   (( goal_success == 1 )) && return 0;
   return "${status}"
+}
+
+Experiment__Shutdown () {
+  Shutdown
 }
 
 ExperimentWithCargo () {
@@ -51,20 +89,36 @@ ExperimentWithCargo () {
   local tlspuffin_killed;
   local stats="";
   ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
-  local nb_clients=0;
-  local problems=0;
+  local goal_success=0
+  local status=1
   if ((tlspuffin_killed == 0)); then
-    tlspuffin_killed=$( CheckObjectif "${tlspuffin_pid}" "${stats}" );
+    echo "CheckObjectif status ${tlspuffin_pid} ${stats} goal_success" >&2
+    echo "${stats}" > ./.xp_state_file
+    CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success;
   fi
-  wait "${tlspuffin_pid}" 2>/dev/null
-  local status=$?
 
   ExperimentEnd
 
-  (( tlspuffin_killed == 1 )) && return 1;
   (( goal_success == 1 )) && return 0;
   return "${status}"
+}
+
+ExperimentWithCargo__Shutdown () {
+  Shutdown
+}
+
+Shutdown() {
+  [ ! -f './.xp_state_file' ] && return;
+  local stats=$( cat './.xp_state_file' )
+  [ ! -f "${stats}" ] && return;
+
+  [ ! -f './.xp_state_file_size' ] && return;
+  local statSize=$( cat './.xp_state_file_size' )
+  [[ ! "${statSize}" =~ ^[0-9]+$ ]] && return;
+
+  SaveSummary "${statSize}" "${stats}" "summary.json"
 }
 
 ManageResults () {

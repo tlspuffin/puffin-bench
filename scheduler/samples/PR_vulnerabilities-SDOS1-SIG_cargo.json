@@ -1,0 +1,64 @@
+{
+  "publish": {
+    "server": "default",
+    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin4/PR/${COMMIT_ID}/VulnB/",
+    "goal": "Vuln PR/Commit ${COMMIT_ID}"
+    },
+  "configurations": {
+    "SDOS1": {
+      "args": {
+      "experiment": "SDOS1",
+        "features": "openssl111j",
+        "vendor": "openssl:openssl111j"
+      }
+    },
+    "SIG": {
+      "args": {
+      "experiment": "SIG",
+        "features": "wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl510-sig"
+      }
+    }
+  },
+  "name" : "SDOS1 / SIG search - ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init"
+    }, 
+    [
+      {
+        "run": [ "SDOS1", "SIG" ],
+        "configuration": {
+          "nb_retry": 4
+        }
+      },
+      {
+        "step": "ForcedBuild"
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "nb_cores": 1,
+          "timeout": "48h"
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
+      }
+    ],
+    {
+      "step": "ManageResults",
+      "configuration": {
+        "args": {
+          "vulnerabilities": "SDOS1 SIG",
+          "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
+        }
+      }
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}

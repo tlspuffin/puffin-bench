@@ -6,7 +6,7 @@
 std::atomic<uint64_t> ns_Schedule::Step::next_uuid_ = 0;
 
 ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
-    uint64_t attempt_id) 
+    uint64_t attempt_id, std::list<ns_Schedule::Step*> dependFrom) 
     : task_(source.task_), name_(source.name_), id_(source.id_), uuid_(++next_uuid_),
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(source.rank_id_), 
     attempt_id_(attempt_id), run_id_(run_id), executor_name_(source.executor_name_), 
@@ -21,6 +21,14 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     message_from_run_(""), state_(State::Pending), end_processed_(false),
     user_run_state_(""), group_status_(source.group_status_)
 {
+  if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
+    depend_from_.clear();
+    for(Step* step: dependFrom) {
+      if ((step->rank_id_ == rank_id_) && (step->attempt_id_ == attempt_id_)) {
+        depend_from_.push_back(step);
+      }
+    }
+  }
   std::string step_name = ID();
   stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
   stderr_ = source.task_->logs_path_ / ("stderr." + step_name + ".txt");
@@ -35,6 +43,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
 ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
     uint64_t rank_id, uint64_t attempt_id, uint64_t group_id, 
     ns_Executor::ExecutorsProvider const& executorsProvider,
+    std::list<ns_Schedule::Step*> dependFrom, 
     std::vector<rapidjson::Value const*> configurationStack, 
     GroupStepConfigurations const& groupConfigurations, 
     rapidjson::Value const* configuration) 
@@ -52,6 +61,14 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     state_(State::Pending), end_processed_(false), user_run_state_(""), 
     group_status_(source.group_status_)
 {
+  if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
+    depend_from_.clear();
+    for(Step* step: dependFrom) {
+      if ((step->rank_id_ == rank_id_) && (step->attempt_id_ == attempt_id_)) {
+        depend_from_.push_back(step);
+      }
+    }
+  }
   ReadFromTaskJSON(configurationStack, groupConfigurations, configuration);
 
   if (executor_name_.compare(source.executor_name_) != 0) {
@@ -87,6 +104,14 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     state_(State::Pending), end_processed_(false), user_run_state_(""), 
     group_status_(group_status)
 {
+  if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
+    depend_from_.clear();
+    for(Step* step: dependFrom) {
+      if ((step->rank_id_ == rank_id_) && (step->attempt_id_ == attempt_id_)) {
+        depend_from_.push_back(step);
+      }
+    }
+  }
   ReadFromTaskJSON(configurationStack, groupConfigurations, configuration);
 
   executor_ = executorsProvider.GetExecutor(executor_name_);
@@ -122,7 +147,7 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   name_ = Get<std::string>(config, "name");
   id_ = Get<std::string>(config, "id");
   uuid_ = Get<uint64_t>(config, "uuid");
-  group_id_ = Get<uint64_t>(config, "group_id_");
+  group_id_ = Get<uint64_t>(config, "group_id");
   step_id_ = Get<uint64_t>(config, "step_id");
   rank_id_ = Get<uint64_t>(config, "rank_id");
   attempt_id_ = Get<uint64_t>(config, "attempt_id");
@@ -292,7 +317,7 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("name", rapidjson::Value(name_.c_str(), alloc), alloc);
   out.AddMember("id", rapidjson::Value(id_.c_str(), alloc), alloc);
   out.AddMember("uuid", uuid_, alloc);
-  out.AddMember("group_id_", group_id_, alloc);
+  out.AddMember("group_id", group_id_, alloc);
   out.AddMember("step_id", step_id_, alloc);
   out.AddMember("rank_id", rank_id_, alloc);
   out.AddMember("attempt_id", attempt_id_, alloc);

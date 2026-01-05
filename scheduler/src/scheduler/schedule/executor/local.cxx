@@ -374,12 +374,12 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
   kill(-localData->pid_, SIGKILL);
   while(waitpid(-localData->pid_, nullptr, 0) > 0);
 
-  /*pid_t pid = RunShutdown(step, localData);
+  pid_t pid = RunShutdown(step, localData);
   if (pid <= 0) {
     throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
         std::to_string(step.TaskID()) + ":" + step.ID());
   }
-  while(waitpid(-pid, nullptr, 0) > 0);*/
+  while(waitpid(-pid, nullptr, 0) > 0);
 
   EndRun(step, localData, true);
 }
@@ -604,7 +604,8 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
   SaveArtefacts(step);
 
   std::error_code ec;
-  if (step.group_status_ == ns_Schedule::Step::stepsGroup_End_) {
+  if ((step.group_status_ == ns_Schedule::Step::stepsGroup_None_) || 
+      (step.group_status_ == ns_Schedule::Step::stepsGroup_End_)) {
     std::filesystem::remove_all(localData->run_path_, ec);
   }
   std::filesystem::remove(localData->step_parameters_file_);
@@ -825,11 +826,17 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
       continue;
     }
 
-    metadata.PushBack(rapidjson::Value(doc, metadataAlloc), metadataAlloc);
-
     std::string srcPath = doc["path"].GetString();
-    std::string destName;
 
+    struct stat srcStat;
+    if ((!std::filesystem::exists(srcPath)) || 
+        (stat(srcPath.c_str(), &srcStat) != 0)) {
+      std::cerr << "Failed to move artefact: " << srcPath << 
+          " (does not exist))" << std::endl;
+      continue;
+    }
+
+    std::string destName;
     if (doc.HasMember("name") && doc["name"].IsString()) {
       destName = doc["name"].GetString();
     } else {
@@ -837,16 +844,28 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
     }
 
     std::filesystem::path destPath = finalDir / destName;
-
     std::filesystem::path destDir = destPath.parent_path();
     std::filesystem::create_directories(destDir);
+    struct stat dstStat;
+    if (stat(destDir.c_str(), &dstStat) != 0) {
+      std::cerr << "Failed to move artefact: " << srcPath << " -> " << destPath
+          << " (error while creating destination)" << std::endl;
+      continue;
+    }
+    bool canMove = srcStat.st_dev == dstStat.st_dev;
 
     try {
-      std::filesystem::copy_options copyOptions = 
-          std::filesystem::copy_options::update_existing |
-          std::filesystem::copy_options::recursive;
-          std::filesystem::copy(srcPath, destPath, copyOptions);
+      if (canMove) {
+        std::filesystem::rename(srcPath, destPath);
+      } else {
+        std::filesystem::copy_options copyOptions = 
+            std::filesystem::copy_options::overwrite_existing |
+            std::filesystem::copy_options::recursive;
+            std::filesystem::copy(srcPath, destPath, copyOptions);
+      }
       std::cout << "Saved artefact to: " << destPath << std::endl;
+
+      metadata.PushBack(rapidjson::Value(doc, metadataAlloc), metadataAlloc);
     } catch (const std::exception& ex) {
       std::cerr << "Failed to move artefact: " << srcPath << " -> " << destPath
           << " (" << ex.what() << ")" << std::endl;
