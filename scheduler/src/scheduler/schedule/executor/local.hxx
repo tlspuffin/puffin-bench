@@ -63,6 +63,9 @@ private:
   uint64_t nbChild_;
   uint16_t cachePort_;
 
+  void WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);
+  void KillSession(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);
+
   pid_t RunShutdown(ns_Schedule::Step& step, LocalData* localData);
   void EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores);
 

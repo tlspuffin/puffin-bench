@@ -344,17 +344,8 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
         step->MarkLaunchError();
       } else {
         if (localData->process_status_ != ns_Executor::LocalData::External) {
-          kill(-childPID, SIGHUP);
-          std::this_thread::sleep_for(std::chrono::seconds(1));
-          for(int sig: std::vector<int>{SIGTERM, SIGKILL}) {
-            if (kill(-childPID, 0) != 0) {
-              break;
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(4));
-            kill(-childPID, sig);
-          }
+          KillSession(childPID, step, "Step run");
         }
-        while(waitpid(-childPID, nullptr, 0) > 0);
         step->MarkDone(WEXITSTATUS(status));
       }
       EndRun(*step, localData, true);
@@ -371,15 +362,19 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
     throw std::runtime_error("ExecutorData are not of type LocalData");
   }
 
-  kill(-localData->pid_, SIGKILL);
-  while(waitpid(-localData->pid_, nullptr, 0) > 0);
+  KillSession(localData->pid_, &step, "Step timeout run");
 
-  pid_t pid = RunShutdown(step, localData);
-  if (pid <= 0) {
-    throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
-        std::to_string(step.TaskID()) + ":" + step.ID());
+  if (!std::filesystem::exists(localData->fatalerror_path_)) {
+    pid_t pid = RunShutdown(step, localData);
+    if (pid <= 0) {
+      throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
+          std::to_string(step.TaskID()) + ":" + step.ID());
+    }
+    LOGE("Step shutdown final pid: " << pid);
+    pid_t retval = waitpid(pid, nullptr, 0);
+    LOGE("Step shutdown final pid: " << pid << " wait return: " << retval << " errno: " << errno);
+    KillSession(pid, &step, "Step shutdown final");
   }
-  while(waitpid(-pid, nullptr, 0) > 0);
 
   EndRun(step, localData, true);
 }
@@ -496,6 +491,30 @@ ns_Executor::ExecutorTaskData* ns_Executor::Local::CreateLocalTaskData(
 ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
     rapidjson::Value const& config) const {
   return new LocalData(config);
+}
+
+void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {
+  pid_t killedPID = 0;
+  while((killedPID = waitpid(-sessionID, nullptr, 0)) > 0) {
+    std::stringstream oss;
+    oss << label << " cleanup: " << step->task_->id_ << " / " << step->ID()  << 
+      " uuid: " << step->uuid_ << " session: " << sessionID << 
+      " cleaned_pid: " << killedPID << std::endl;
+    std::cerr << oss.str();
+  }
+  std::cerr << label << " done: " << step->ID() << 
+      " session: " << sessionID << " errno: " << errno << std::endl;
+}
+
+void ns_Executor::Local::KillSession(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {
+  for(int sig: std::vector<int>{SIGTERM, SIGKILL}) {
+    if (kill(-sessionID, 0) != 0) {
+      break;
+    }
+    kill(-sessionID, sig);
+    std::this_thread::sleep_for(std::chrono::seconds(4));
+  }
+  WaitSessionEnd(sessionID, step, label);
 }
 
 pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localData) {

@@ -1,0 +1,8 @@
+set(POCO_PATH "/home/olivier/Desktop/poco/cinstall")
+#set(POCO_PATH "/home/olivier/Desktop/Libs/install/poco-1.14.2")
+#set(POCO_PATH "/home/olivier/Desktop/Dependencies/install/Poco-1.14.2")
+set(RAPIDJSON_PATH "/home/olivier/Desktop/rapidjson/include")
+#set(RAPIDJSON_PATH "/home/olivier/Desktop/Libs/install/rapidjson-1.1.0/include")
+#set(RAPIDJSON_PATH "/home/olivier/Desktop/Dependencies/install/Rapidjson-1.1.0/include")
+
+set(LIBARCHIVE_PATH "/home/olivier/Desktop/libarchive-3.8.4/install")

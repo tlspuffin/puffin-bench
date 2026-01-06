@@ -344,7 +344,7 @@ ExperimentPostLaunchSetup() {
     };
 
     if ref_statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-      (( saveObjectif == 0 )) && CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+      (( saveObjectif == 1 )) && CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
       break;
     fi
 

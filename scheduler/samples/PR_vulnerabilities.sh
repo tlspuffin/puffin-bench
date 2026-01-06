@@ -33,9 +33,9 @@ CheckObjectif() {
     echo "${statssize}" > ./.xp_state_file_size
     SaveSummary "${currentStatSize}" "${stats}" "summary.json"
 
-    if (( statssize > 1073741824 )); then
+    if (( statssize > 268435456 )); then
       local purgeRetries=0
-      while (( statssize > 1073741824 )); do
+      while (( statssize > 268435456 )); do
         truncate -s 0 "${stats}";
         sleep 0.5;
         statssize=$( stat --format=%s "${stats}" )
