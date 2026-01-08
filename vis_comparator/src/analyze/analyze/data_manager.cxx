@@ -7,6 +7,13 @@
 #include <fstream>
 #include <regex>
 #include "rapidjson/document.h"
+#include "rapidjson/istreamwrapper.h"
+
+static std::regex const reIsNumber("^[0-9]+$");
+static std::regex const reRunKeyFiles("^(?:.*/)?(logs/.+|artefacts/(?:[^/]+/)*[0-9]+-(?:stats\\.json|README\\.md))$");
+static std::regex const reStats("^((?:.*/)?(artefacts/(?:[^/]+/)*([0-9]+))-stats\\.json)$");
+static std::regex const reTypePerf("^Perf.*$");
+static std::regex const reTypeVuln("^Vuln.*$");
 
 ns_Analyze::DataManager::DataType StringToDataType(std::string const& type) {
   if (type == "int32") {
@@ -127,9 +134,9 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
           found = false;
           break;
         }
-        if (found) {
-          clientsCommonData_.insert(name);
-        }
+      }
+      if (found) {
+        clientsCommonData_.insert(name);
       }
     }
   }*/
@@ -142,16 +149,13 @@ ns_Analyze::DataManager::DataManager(Config const& config) : config_(config), ro
 {
   std::vector<std::string> commits;
   for (auto const& entry : std::filesystem::recursive_directory_iterator(rootpath_)) {
-    if ((!entry.is_regular_file()) || (entry.path().extension() != ".json")) {
+    std::filesystem::path const& path = entry.path();
+    std::string const taskID = path.stem();
+    if ((!entry.is_regular_file()) || (path.extension() != ".json") ||
+        (!std::regex_match(taskID, reIsNumber))) {
       continue;
     }
 
-    std::filesystem::path const& path = entry.path();
-    if (std::distance(path.begin(), path.end()) < 3) {
-        continue;
-    }
-
-    std::string const taskID = path.stem();
     std::filesystem::path relativePath = std::filesystem::relative(path, rootpath_);
     relativePath = relativePath.parent_path() / relativePath.stem();
     std::string const type = path.parent_path().stem();
@@ -163,74 +167,16 @@ ns_Analyze::DataManager::DataManager(Config const& config) : config_(config), ro
     runsResults_[type].emplace(commitID, std::move(relativePath));
   }
 
-  static std::regex reLogs("^.*/*(logs/.+)$");
-  static std::regex reStats("^.*/*(artefacts/.+[0-9]+-stats.json)$");
-  static std::regex reReadme("^.*/*(artefacts/.+[0-9]+-README.md)$");
   std::smatch reMatches;
 
   std::vector<char> buffer(102400);
   for(auto const& [ type, commits ]: runsResults_) {
     for(auto const& [ commitID, taskPath ]: commits) {
-    //for(auto const& [ commitID, taskPath ]: runsResults_["Perf"]) {
-      std::unordered_map<std::string, uint64_t> details;
-      std::filesystem::path workingDir = taskPath.parent_path();
-      std::string const& fileStem = taskPath.stem();
-
-      std::string filebin = rootpath_ / workingDir / (fileStem + ".tar.zst");
-      if (std::filesystem::exists(filebin)) {
-        continue;
+      if (std::regex_match(type, reTypePerf)) {
+        SummaryRunPerf(taskPath);
+      } else if (std::regex_match(type, reTypeVuln)) {
+        SummaryRunVuln(taskPath);
       }
-
-      std::string tempDir = rootpath_ / workingDir / "TMP";
-      std::filesystem::create_directory(tempDir);
-
-      std::string filetgz = rootpath_ / workingDir / (fileStem + ".tgz");
-      FileTGZ tgz(filetgz);
-      std::filesystem::path artefactsPath = "artefacts";
-      auto const files = tgz.ListFiles();
-      for(auto const& [ file, _ ] : files) {
-
-        if (std::regex_match (file, reMatches, reLogs) || std::regex_match (file, reMatches, reReadme)) {
-          std::filesystem::path dstFile(reMatches[1]);
-          std::filesystem::create_directories(tempDir / dstFile.parent_path());
-          tgz.ExtractFile(file, tempDir / dstFile);
-          continue;
-        } else if (!std::regex_match (file, reMatches, reStats)) {
-          continue;
-        }
-
-        std::filesystem::path artefactRelativePath(reMatches[1]);
-        ++details[artefactRelativePath.parent_path().filename()];
-        std::string artefactTempPath = tempDir / artefactRelativePath.parent_path();
-        std::filesystem::create_directories(artefactTempPath);
-        std::string uncompressedFile = tempDir / artefactRelativePath;
-
-        tgz.ExtractFile(file, uncompressedFile);
-
-        //std::string command = "/home/olivier/Desktop/restsrv_analyse.only/build/analyze_results --path " + artefactTempPath;
-        std::string command = config_.analyzeTools_.string() + " --path " + artefactTempPath;
-        system(command.c_str());
-        std::filesystem::remove(uncompressedFile);
-      }
-      tgz.StopExtractFileData();
-
-      std::ofstream ofs(tempDir+"/metadata.json");
-      if (!ofs.is_open()) {
-        throw std::runtime_error("Unable to create file " + tempDir + "/metadata.json");
-      }
-      ofs << "{\n";
-      bool notFirst = false;
-      for (auto const& [ name, count] : details) {
-        if (notFirst)  {
-          ofs << ",\n";
-        }
-        notFirst = true;
-        ofs << "\"" << name << "\":" << count;
-      }
-      ofs << "\n}";
-      ofs.close();
-      CompressTARZSTD(tempDir, filebin, true, 4*1024*1024, 10);
-      std::filesystem::remove_all(tempDir);
     }
   }
 }
@@ -487,6 +433,163 @@ ns_Analyze::DataManager::CommitValues(
   }
 
   return result;
+}
+
+void ns_Analyze::DataManager::SummaryRunPerf(std::filesystem::path const& taskPath) {
+  std::unordered_map<std::string, uint64_t> details;
+  std::filesystem::path workingDir = taskPath.parent_path();
+  std::string const& fileStem = taskPath.stem();
+
+  std::string filebin = rootpath_ / workingDir / (fileStem + ".tar.zst");
+  if (std::filesystem::exists(filebin)) {
+    return;
+  }
+
+  std::string tempDir = rootpath_ / workingDir / "TMP";
+  std::filesystem::create_directory(tempDir);
+
+  std::string filetgz = rootpath_ / workingDir / (fileStem + ".tgz");
+  FileTGZ tgz(filetgz);
+  std::filesystem::path artefactsPath = "artefacts";
+  std::smatch reMatches;
+  auto const files = tgz.ListFiles(&reRunKeyFiles);
+  for(auto const& [ file, _ ] : files) {
+    std::regex_match(file, reMatches, reRunKeyFiles);
+    std::filesystem::path dstFile(reMatches[1]);
+    std::string uncompressedFilePath = tempDir / dstFile.parent_path();
+    std::filesystem::create_directories(uncompressedFilePath);
+    std::string uncompressedFile = tempDir / dstFile;
+    tgz.ExtractFile(file, uncompressedFile);
+    if (!std::regex_match(file, reMatches, reStats)) {
+      continue;
+    }
+
+    ++details[dstFile.parent_path().filename()];
+
+    //std::string command = "/home/olivier/Desktop/restsrv_analyse.only/build/analyze_results --path " + artefactTempPath;
+    std::string command = config_.analyzeTools_.string() + " --path " + uncompressedFilePath;
+    system(command.c_str());
+    std::filesystem::remove(uncompressedFile);
+  }
+  tgz.StopExtractFileData();
+
+  std::ofstream ofs(tempDir+"/metadata.json");
+  if (!ofs.is_open()) {
+    throw std::runtime_error("Unable to create file " + tempDir + "/metadata.json");
+  }
+  ofs << "{\n";
+  bool notFirst = false;
+  for (auto const& [ name, count ] : details) {
+    if (notFirst)  {
+      ofs << ",\n";
+    }
+    notFirst = true;
+    ofs << "\"" << name << "\":" << count;
+  }
+  ofs << "\n}";
+  ofs.close();
+  try {
+    CompressTARZSTD(tempDir, filebin, true, 4*1024*1024, 10);
+  } catch(std::exception const& e) {
+    LOGE("Failed to compress " << filebin << ": " << e.what());
+    std::error_code ec;
+    std::filesystem::remove(filebin, ec);
+  } catch(...) {
+    LOGE("Failed to compress " << filebin << ": unknown error");
+    std::error_code ec;
+    std::filesystem::remove(filebin, ec);
+  }
+
+  std::filesystem::remove_all(tempDir);
+}
+
+void ns_Analyze::DataManager::SummaryRunVuln(std::filesystem::path const& taskPath) {
+  std::unordered_map<std::string, uint64_t> details;
+  std::filesystem::path workingDir = taskPath.parent_path();
+  std::string const& fileStem = taskPath.stem();
+
+  std::string filebin = rootpath_ / workingDir / (fileStem + ".tar.zst");
+  if (std::filesystem::exists(filebin)) {
+    return;
+  }
+
+  std::string tempDir = rootpath_ / workingDir / "TMP";
+  std::filesystem::create_directory(tempDir);
+
+  std::string filetgz = rootpath_ / workingDir / (fileStem + ".tgz");
+  FileTGZ tgz(filetgz);
+
+  std::filesystem::path artefactsPath = "artefacts";
+  auto const files = tgz.ListFiles(&reRunKeyFiles);
+  std::smatch reMatches;
+  for(auto const& [ file, _ ] : files) {
+    std::regex_match(file, reMatches, reRunKeyFiles);
+    std::filesystem::path dstFile(reMatches[1]);
+    std::filesystem::create_directories(tempDir / dstFile.parent_path());
+    std::string uncompressedFile = tempDir / dstFile;
+    tgz.ExtractFile(file, uncompressedFile);
+    if (!std::regex_match(file, reMatches, reStats)) {
+      continue;
+    }
+
+    ++details[dstFile.parent_path().filename()];
+
+    std::ifstream jsonFile(uncompressedFile);
+    if (!jsonFile.is_open()) {
+      LOGE("Can not open " << uncompressedFile);
+    }
+    std::cout << "Parsing " << uncompressedFile << std::endl;
+    rapidjson::IStreamWrapper isw(jsonFile);
+    while (true) {
+      rapidjson::Document doc;
+      doc.ParseStream<rapidjson::kParseStopWhenDoneFlag>(isw);
+      if (doc.HasParseError()) {
+        LOGE("json parse error in " << uncompressedFile);
+        break;
+      }
+      std::string type = Get<std::string>(doc, "type");
+      if (type != "global") {
+        continue;
+      }
+      uint64_t objectifSize = Get<uint64_t>(doc, "objective_size");
+      if (objectifSize > 0) {
+        continue;
+      }
+      std::filesystem::path errorFile = std::filesystem::path(reMatches[2].str() + "-log") / "error.log";
+      uncompressedFile = std::filesystem::path(tempDir) / (reMatches[3].str() + "-error.log");
+      tgz.ExtractFile(errorFile, uncompressedFile);
+      break;
+    }
+  }
+  tgz.StopExtractFileData();
+
+  std::ofstream ofs(tempDir+"/metadata.json");
+  if (!ofs.is_open()) {
+    throw std::runtime_error("Unable to create file " + tempDir + "/metadata.json");
+  }
+  ofs << "{\n";
+  bool notFirst = false;
+  for (auto const& [ name, count ] : details) {
+    if (notFirst)  {
+      ofs << ",\n";
+    }
+    notFirst = true;
+    ofs << "\"" << name << "\":" << count;
+  }
+  ofs << "\n}";
+  ofs.close();
+  try {
+    CompressTARZSTD(tempDir, filebin, true, 4*1024*1024, 10);
+  } catch(std::exception const& e) {
+    LOGE("Failed to compress " << filebin << ": " << e.what());
+    std::error_code ec;
+    std::filesystem::remove(filebin, ec);
+  } catch(...) {
+    LOGE("Failed to compress " << filebin << ": unknown error");
+    std::error_code ec;
+    std::filesystem::remove(filebin, ec);
+  }
+  std::filesystem::remove_all(tempDir);
 }
 
 std::vector<struct ns_Analyze::DataManager::SInterpolations> 

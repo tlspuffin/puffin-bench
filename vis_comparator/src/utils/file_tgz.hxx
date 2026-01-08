@@ -3,13 +3,14 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <regex>
 #include <archive.h>
 
 class FileTGZ {
 public:
   FileTGZ(std::string const& filename);
   ~FileTGZ();
-  std::vector<std::pair<std::string, uint64_t>> ListFiles(std::string const& beginWith ="");
+  std::vector<std::pair<std::string, uint64_t>> ListFiles(std::regex const* pattern =nullptr);
   int64_t ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize);
   void StopExtractFileData();
   void ExtractFile(std::string const& srcfile, std::string const& dstFile);

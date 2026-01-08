@@ -5,7 +5,7 @@
 
 void ReadJSONFile(std::string const& file, rapidjson::Document& doc);
 
-template<typename T> T GetOrDefault(rapidjson::Value const& obj,
+template<typename T> T const GetOrDefault(rapidjson::Value const& obj,
     char const* name, T const defaultValue);
 std::filesystem::path GetOrDefaultPath(
     rapidjson::Value const& obj, char const* name,
@@ -18,7 +18,7 @@ std::filesystem::path GetPath(rapidjson::Value const& obj,
 uint64_t ParseDurationToSeconds(const std::string& str);
 uint64_t ParseDurationToMilliSeconds(const std::string& str);
 
-template<typename T> inline T GetOrDefault(rapidjson::Value const& obj,
+template<typename T> inline T const GetOrDefault(rapidjson::Value const& obj,
     char const* name, T const defaultValue) {
   auto it = obj.FindMember(name);
   if (it != obj.MemberEnd()) {
@@ -34,6 +34,10 @@ template<typename T> inline T GetOrDefault(rapidjson::Value const& obj,
       if (value.IsDouble()) return static_cast<T>(value.GetDouble());
     } else if constexpr (std::is_same_v<T, std::string>) {
       if (value.IsString()) return std::string(value.GetString());
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstObject>) {
+      if (value.IsObject()) return value.GetObj();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstArray>) {
+      if (value.IsArray()) return value.GetArray();
     }
   }
   return defaultValue;
@@ -62,6 +66,10 @@ template<typename T> inline T Get(rapidjson::Value const& obj,
       if (value.IsDouble()) return static_cast<T>(value.GetDouble());
     } else if constexpr (std::is_same_v<T, std::string>) {
       if (value.IsString()) return std::string(value.GetString());
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstObject>) {
+      if (value.IsObject()) return value.GetObj();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstArray>) {
+      if (value.IsArray()) return value.GetArray();
     }
   }
   throw std::runtime_error(std::string("Missing field ") + name + " in JSON data");

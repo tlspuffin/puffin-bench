@@ -88,7 +88,7 @@ void CompressTARZSTD(std::string const& srcDir, std::string const& outFile, bool
 
     if (relativePath) {
       std::string finalPath = std::filesystem::relative(path, srcDir);
-      LOGE(path << " = " << finalPath);
+      //LOGI(path << " = " << finalPath);
       if (finalPath == ".") {
         continue;
       }

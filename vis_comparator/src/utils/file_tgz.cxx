@@ -12,7 +12,7 @@ FileTGZ::~FileTGZ() {
   StopExtractFileData();
 }
 
-std::vector<std::pair<std::string, uint64_t>> FileTGZ::ListFiles(std::string const& beginWith) {
+std::vector<std::pair<std::string, uint64_t>> FileTGZ::ListFiles(std::regex const* pattern) {
   struct archive* archive = archive_read_new();
   archive_read_support_format_tar(archive);
   archive_read_support_filter_gzip(archive);
@@ -25,7 +25,7 @@ std::vector<std::pair<std::string, uint64_t>> FileTGZ::ListFiles(std::string con
   struct archive_entry* entry;
   while (archive_read_next_header(archive, &entry) == ARCHIVE_OK) {
     std::string name = archive_entry_pathname(entry);
-    if (beginWith.empty() || (name.find(beginWith) == 0)) {
+    if ((pattern == nullptr) || (std::regex_match(name, *pattern))) {
       results.push_back({name, archive_entry_size(entry)});
     }
     archive_read_data_skip(archive);
