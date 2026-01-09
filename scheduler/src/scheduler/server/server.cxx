@@ -26,6 +26,7 @@ int ns_Server::MyServerApp::main(const std::vector<std::string>& args) {
       *serverSocket, new Poco::Net::HTTPServerParams);
 
   server.start();
+  std::cout << "Version: " << __DATE__ << " " << __TIME__ << std::endl;
   std::cout << "Server started on port " << config_.port_ << "..." << std::endl;
   waitForTerminationRequest();
   server.stop();

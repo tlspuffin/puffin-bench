@@ -321,7 +321,11 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     int status = 0;
     pid_t childPID = 0;
     if (localData->process_status_ == ns_Executor::LocalData::Internal) {
-      childPID = waitpid(localData->pid_, &status, WNOHANG);
+      while((childPID = waitpid(-localData->pid_, &status, WNOHANG)) > 0) {
+        if (childPID == localData->pid_) {
+          break;
+        }
+      }
     } else {
       std::stringstream log;
       status = CheckExternalProcessIsRunning(localData->pid_, localData->arguments_, 
