@@ -67,6 +67,7 @@ SummaryRun () {
 
       local hit=0
       local hitCount=0
+      local nbDuration=0
       local avgDuration=0
       local endClientsInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"client".*}$' );
       for (( client=1; client<nbClients; ++client )); do
@@ -90,10 +91,11 @@ SummaryRun () {
         [ -n "${clientStartTime}" ] && [ -n "${clientEndTime}" ] && clientDuration=$(( clientEndTime - clientStartTime  ))
         [ -n "${clientDuration}" ] && {
           (( avgDuration += clientDuration ));
+          (( ++nbDuration ));
         }
       done
       (( hitCount > 0)) && hit=$(( hit / hitCount )) || hit='"NA"';
-      (( nbDuration > 0)) && avgDuration=$(( avgDuration / ( nbClients - 1 ) )) || avgDuration='"NA"';
+      (( nbDuration > 0)) && avgDuration=$(( avgDuration / nbDuration )) || avgDuration='"NA"';
 
       if (( ! firstRun )); then
         json+=","

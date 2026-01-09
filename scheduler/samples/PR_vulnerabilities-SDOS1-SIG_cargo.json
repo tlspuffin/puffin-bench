@@ -49,6 +49,9 @@
       }
     ],
     {
+      "step": "SummaryRun"
+    },
+    {
       "step": "ManageResults",
       "configuration": {
         "args": {

@@ -136,3 +136,47 @@ ManageResults () {
   CreateArtefact "./out/report" "report" "commit_id:${COMMIT_ID}"
   return 0
 }
+
+SummaryRun () {
+  [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
+
+  echo -n '{ "type": "vuln", "libraries": [ ' > .summary.json.tmp
+  local firstlib=1;
+  while read -r libresults; do
+    local lib=${libresults#"${THEJOB_ARTEFACTS_PATH}/"}
+    if (( ! firstlib )); then
+      echo -n "," >> .summary.json.tmp
+    fi
+    firstlib=0
+    echo -n " { \"name\": \"${lib}\", \"data\": [ " >> .summary.json.tmp
+    local firstRun=1;
+    while read -r i; do
+      local statsFile="${i#"${THEJOB_ARTEFACTS_PATH}/${lib}/"}";
+      local runID="${statsFile%'-stats.json'}"
+      local readmeFile="${THEJOB_ARTEFACTS_PATH}/${lib}/${runID}-README.md"
+      [ ! -r "${readmeFile}" ] && { 
+        echo -n " { \"id\": \"${runID}\", \"duration\": 0, \"objective_size\": ${objectiveSize}, \"valid\": false }" >> .summary.json.tmp
+        echo "Missing required file ${readmeFile}" >&2; 
+        continue;
+      }
+      startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
+      local endTime=$( jq -n '[inputs.time.secs_since_epoch] | max' "${i}" )
+      local runTime=$(( endTime - startTime ))
+
+      local objectiveSize=$( jq -n '[inputs.objective_size] | max' "${i}" );
+      [ -z "${objectiveSize}" ] && objectiveSize=0;
+
+      if (( ! firstRun )); then
+        echo -n "," >> .summary.json.tmp
+      fi
+      firstRun=0;
+      echo -n " { \"id\": \"${runID}\", \"duration\": ${runTime}, \"objective_size\": ${objectiveSize}, \"valid\": true }" >> .summary.json.tmp
+
+    done < <( find "${libresults}" -name "*-stats.json" | sort -n )
+    echo -n " ] }" >> .summary.json.tmp
+  done < <( find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -n )
+  echo " ] }" >> .summary.json.tmp
+  mv .summary.json.tmp summary.json;
+  CreateArtefact "./summary.json" "run-ummary.json" "commit_id:${COMMIT_ID}"
+  return 0;
+}
