@@ -3,6 +3,7 @@ const Plotly = window.Plotly;
 import { allCommits, availableTypes } from './summary_PR.js';
 
 var metricsData = {};  // Structure: { type: { library: { metric: [{ commit_id, values, success }] } } }
+var commitNames = {};
 
 const metricStatusSuccess = '#27ae60';
 const metricStatusFail =  '#e74c3c';
@@ -11,6 +12,7 @@ const metricStatusMixed = '#f1c40f';
 // Build metrics index from loaded commits
 function buildMetricsIndex() {
   metricsData = {};
+  commitNames = {};
 
   // Build timeline from allCommits (already ordered from git_history)
   allCommits.forEach(commit => {
@@ -18,6 +20,10 @@ function buildMetricsIndex() {
     // Process each type (Perf, Vuln, etc.)
     for (const type of availableTypes) {
       if (type != 'Perf') continue;
+
+      if (!commitNames[commit.commit_id]) {
+        commitNames[commit.commit_id] = {};
+      }
 
       const typeData = commit.types[type];
       if (!typeData || !typeData.libs) continue;
@@ -31,6 +37,8 @@ function buildMetricsIndex() {
         const status = (typeData.global_status === 'success' ? 
             metricStatusSuccess : (typeData.global_status === 'fail' ? metricStatusFail : metricStatusMixed));
         const cputs = libData?.cputs == 1 ? '⚙C' : (libData?.cputs == -1 ? '🦀' : '❓');
+
+        commitNames[commit.commit_id][libName] = cputs;
 
         // Process each metric (numeric arrays only, excluding non-success runs)
         for (const [metricName, metricValues] of Object.entries(libData)) {
@@ -203,14 +211,14 @@ export function renderGraph() {
 
   metricDataPoints.forEach(dataPoint => {
     const trace = {
-      y: dataPoint.values,
-      type: 'box',
-      name: dataPoint.commit_id.substring(0, 7) + ' ' + dataPoint.cputs,
-      boxmean: 'sd',  // Show mean and standard deviation
-      marker: {
-        color: dataPoint.status
-      },
-      hoverinfo: 'y'
+        x: dataPoint.values.map(() => dataPoint.commit_id),
+        y: dataPoint.values,
+        type: 'box',
+        boxmean: 'sd',  // Show mean and standard deviation
+        marker: {
+          color: dataPoint.status
+        },
+        hoverinfo: 'y'
     };
     traces.push(trace);
   });
@@ -222,7 +230,14 @@ export function renderGraph() {
     },
     xaxis: {
       title: 'Commits (oldest → newest)',
-      tickangle: -45
+      tickangle: -75,
+      type: 'category',
+      categoryorder: 'array',
+      categoryarray: allCommits.map(c => c.commit_id),
+      tickvals: allCommits.map(c => c.commit_id),
+      ticktext: allCommits.map(c => 
+        c.commit_id + ' ' + (commitNames[c.commit_id]?.[selectedLibrary] ?? '')),
+      range: [-0.5, allCommits.length + 0.5],
     },
     yaxis: {
       title: selectedMetric
