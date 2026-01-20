@@ -8,26 +8,61 @@ SaveSummary() {
   local old_summary=""
   [ -f "${output}" ] && old_summary=$( cat "${output}" )
 
-  (( oldfilesize > 1024 )) && (( oldfilesize -= 1024 ))
+  (( oldfilesize > 10240 )) && (( oldfilesize -= 10240 ))
   local summary=$( dd bs=10M iflag=skip_bytes if="${stats}" skip="${oldfilesize}" status=none | 
-    awk 'BEGIN{ RS="}{"; nb=0; } {
-      line = $0
-      if (line !~ /^{/) line = "{" line
-      if (line !~ /}$/) line = line "}"
+    awk '
+    function Validate(line, is_first,         opens, closes, i, c) {
+      if (is_first) {
+        if (line !~ /^\{/) return ""
+        line = substr(line, 2)
+      } else {
+        if (line !~ /\}$/) return ""
+        line = substr(line, 1, length(line) - 1)
+      }
 
+      opens = 0
+      closes = 0
+      for (i = 1; i <= length(line); i++) {
+        c = substr(line, i, 1)
+        if (c == "{") opens++
+        else if (c == "}") closes++
+      }
+      if (opens != closes) return ""
+      return line
+    }
+    function ProcessLine(line) {
+      line = "{" line "}" 
       if (line ~ /"type":"global"/) {
         global_0 = global_1
         global_1 = line
       } else if (line ~ /"type":"client"/) {
         if (match(line, /"id": *[0-9]+/)) {
           id = substr(line, RSTART, RLENGTH)
-          gsub(/[^0-9]/, "", id); if (id > nb) { nb = id };
+          gsub(/[^0-9]/, "", id)
+          if (id > nb) { nb = id }
           clients_0[id] = clients_1[id]
           clients_1[id] = line
         }
       }
     }
+    BEGIN{ RS="}{"; nb = 0; buffer = "" }
+    {
+      line = buffer
+      if (NR == 1) {
+        buffer = Validate($0, 1)
+      } else {
+        buffer = $0
+      }
+      if (line != "") {
+        ProcessLine(line)
+      }
+    }
     END {
+      line = Validate(buffer, 0)
+      if (line != "") {
+        ProcessLine(line)
+      }
+
       if (global_1) print global_1
       if (global_0) print global_0
 
@@ -315,7 +350,7 @@ ExperimentPostLaunchSetup() {
   local tlspuffin_outpath=""
   local experiment_base=""
   let count=0
-  while (( count++ < 30 )); do
+  while (( count++ < 100 )); do
     kill -0 ${tlspuffin_pid} 2>/dev/null || {
       echo 'FATAL: process dead while looking for README.md' > /dev/stderr;
       return 1
@@ -373,7 +408,7 @@ ExperimentPostLaunchSetup() {
     echo 'No root log directory found, will not be archived' > tee /dev/stderr
   fi
   if [ -d "./${experiment_base}/log" ]; then
-    CreateArtefact "./${experiment_base}/log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log_root" "commit_id:${COMMIT_ID}" "features:${features}"
+    CreateArtefact "./${experiment_base}/log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log" "commit_id:${COMMIT_ID}" "features:${features}"
   else
     echo 'No log directory found, will not be archived' > tee /dev/stderr
   fi
@@ -509,6 +544,7 @@ ExperimentRunWithCargo() {
   ExperimentSetupForCargo last_core "${features}" || return 1;
   nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
+  echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
   ref_tlspuffin_killed=0
   if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveObjectif}" "${features}"; then
@@ -641,6 +677,7 @@ Clean() {
 }
 
 CleanAllRepo() {
+  ipcrm --all
   rm -rf "${THEJOB_OUT_PATH}/repo*"
 }
 

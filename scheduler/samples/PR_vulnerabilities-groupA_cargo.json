@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin/PR/${COMMIT_ID}/Vuln/",
+    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin4/PR/${COMMIT_ID}/VulnA/",
     "goal": "Vuln PR/Commit ${COMMIT_ID}"
     },
   "configurations": {
@@ -47,36 +47,29 @@
     {
       "step": "Init"
     },
-    {
-      "step": "ForcedBuild",
-      "run": [
-        "SDOS2",
-        "HEAP",
-        "CDOS",
-        "SKIP",
-        "BUF"
-      ]
-    },
-    {
-      "step": "ExperimentWithCargo",
-      "run": [
-        "SDOS2",
-        "HEAP",
-        "CDOS",
-        "SKIP",
-        "BUF"
-      ],
-      "configuration": {
-        "nb_cores": 4,
-        "timeout": "3h",
-        "nb_retry": 5
+    [
+      {
+        "run": [ "SDOS2", "HEAP", "CDOS", "SKIP", "BUF" ],
+        "configuration": {
+          "nb_retry": 5
+        }
       },
-      "monitor": {
-        "entry_point": "MonitorExperiment",
-        "delay_start": "10s",
-        "interval": "60s"
+      {
+        "step": "ForcedBuild"
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "nb_cores": 4,
+          "timeout": "190m"
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
       }
-    },
+    ],
     {
       "step": "SummaryRun"
     },

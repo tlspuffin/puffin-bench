@@ -74,6 +74,8 @@ Experiment () {
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success
   fi
 
+  Shutdown
+
   ExperimentEnd
 
   (( goal_success == 1 )) && return 0;
@@ -98,6 +100,8 @@ ExperimentWithCargo () {
     echo "${stats}" > ./.xp_state_file
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success;
   fi
+
+  Shutdown
 
   ExperimentEnd
 
@@ -140,22 +144,22 @@ ManageResults () {
 SummaryRun () {
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
 
-  echo -n '{ "type": "vuln", "libraries": [ ' > .summary.json.tmp
+  echo -n '{ "type": "vuln", "libraries": [ ' > .run-summary.json.tmp
   local firstlib=1;
   while read -r libresults; do
     local lib=${libresults#"${THEJOB_ARTEFACTS_PATH}/"}
     if (( ! firstlib )); then
-      echo -n "," >> .summary.json.tmp
+      echo -n "," >> .run-summary.json.tmp
     fi
     firstlib=0
-    echo -n " { \"name\": \"${lib}\", \"data\": [ " >> .summary.json.tmp
+    echo -n " { \"name\": \"${lib}\", \"data\": [ " >> .run-summary.json.tmp
     local firstRun=1;
     while read -r i; do
       local statsFile="${i#"${THEJOB_ARTEFACTS_PATH}/${lib}/"}";
       local runID="${statsFile%'-stats.json'}"
       local readmeFile="${THEJOB_ARTEFACTS_PATH}/${lib}/${runID}-README.md"
       [ ! -r "${readmeFile}" ] && { 
-        echo -n " { \"id\": \"${runID}\", \"duration\": 0, \"objective_size\": ${objectiveSize}, \"valid\": false }" >> .summary.json.tmp
+        echo -n " { \"id\": \"${runID}\", \"duration\": 0, \"objective_size\": ${objectiveSize}, \"valid\": false }" >> .run-summary.json.tmp
         echo "Missing required file ${readmeFile}" >&2; 
         continue;
       }
@@ -167,16 +171,16 @@ SummaryRun () {
       [ -z "${objectiveSize}" ] && objectiveSize=0;
 
       if (( ! firstRun )); then
-        echo -n "," >> .summary.json.tmp
+        echo -n "," >> .run-summary.json.tmp
       fi
       firstRun=0;
-      echo -n " { \"id\": \"${runID}\", \"duration\": ${runTime}, \"objective_size\": ${objectiveSize}, \"valid\": true }" >> .summary.json.tmp
+      echo -n " { \"id\": \"${runID}\", \"duration\": ${runTime}, \"objective_size\": ${objectiveSize}, \"valid\": true }" >> .run-summary.json.tmp
 
     done < <( find "${libresults}" -name "*-stats.json" | sort -n )
-    echo -n " ] }" >> .summary.json.tmp
+    echo -n " ] }" >> .run-summary.json.tmp
   done < <( find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -n )
-  echo " ] }" >> .summary.json.tmp
-  mv .summary.json.tmp summary.json;
-  CreateArtefact "./summary.json" "run-ummary.json" "commit_id:${COMMIT_ID}"
+  echo " ] }" >> .run-summary.json.tmp
+  mv .run-summary.json.tmp run-summary.json;
+  CreateArtefact "./run-summary.json" "run-summary.json" "commit_id:${COMMIT_ID}"
   return 0;
 }
