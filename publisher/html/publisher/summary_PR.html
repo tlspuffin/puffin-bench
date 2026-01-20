@@ -16,7 +16,13 @@
         </div>
       </div>
       <div class="header-right">
-        <button class="refresh-btn" onclick="displayGraph()">📈 Graphs</button>
+        <div class="dropdown">
+          <button class="refresh-btn" onclick="toggleGraphMenu()">📈 Graphs ▼</button>
+          <div id="graph-menu" class="dropdown-menu" style="display: none;">
+            <button onclick="displayOverviewGraph()">📊 Overview</button>
+            <button onclick="displayGraph()">📊 Métriques</button>
+          </div>
+        </div>
         <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
       </div>
     </header>
@@ -83,6 +89,25 @@
           </div>
         </div>
         <div id="graph-container"></div>
+      </div>
+    </div>
+  </div>
+  <div id="overview-modal" class="modal">
+    <div class="modal-overlay" onclick="closeOverviewModal()"></div>
+    <div class="modal-content modal-content-wide">
+      <div class="modal-header">
+        <h2>📊 Performance Overview</h2>
+        <button class="modal-close" onclick="closeOverviewModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="overview-controls">
+          <label class="lib-checkbox">
+            <input type="checkbox" id="lib-all" onchange="toggleAllLibraries()">
+            <strong>All</strong>
+          </label>
+          <div id="lib-checkboxes"></div>
+        </div>
+        <div id="overview-graphs"></div>
       </div>
     </div>
   </div>

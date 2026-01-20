@@ -1,4 +1,5 @@
 import { displayGraph, closeGraphModal, updateMetricsList, renderGraph } from './summary_PR_perf.js';
+import { displayOverviewGraph, closeOverviewModal, toggleAllLibraries } from './summary_PR_overview.js';
 
 var allCommits = [];
 var currentFilter = 'all';
@@ -14,6 +15,9 @@ window.displayGraph = displayGraph;
 window.closeGraphModal = closeGraphModal;
 window.updateMetricsList = updateMetricsList;
 window.renderGraph = renderGraph;
+window.displayOverviewGraph = displayOverviewGraph;
+window.closeOverviewModal = closeOverviewModal;
+window.toggleAllLibraries = toggleAllLibraries;
 
 const config = {
   location: window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1),
@@ -79,6 +83,10 @@ function formatDurationsList(durations) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('.dropdown').addEventListener('mouseleave', () => {
+      document.getElementById('graph-menu').style.display = 'none';
+  });
+
   // Parse types from query params if provided
   const urlParams = new URLSearchParams(window.location.search);
   const typesParam = urlParams.get('types');
@@ -737,7 +745,14 @@ function refreshData() {
   loadData();
 }
 
+function toggleGraphMenu() {
+  const menu = document.getElementById('graph-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
 // Expose functions on the global window for inline HTML onclick handlers
 window.showDetails = showDetails;
 window.downloadResults = downloadResults;
 window.clearSearch = clearSearch;
+window.refreshData = refreshData;
+window.toggleGraphMenu = toggleGraphMenu;

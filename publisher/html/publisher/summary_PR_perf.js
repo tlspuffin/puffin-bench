@@ -184,6 +184,66 @@ export function updateMetricsList() {
   }
 }
 
+function GenerateGraphData(type, library, metric, metricDataPoints) {
+  // Prepare data for Plotly box plot
+  const traces = [];
+
+  metricDataPoints.forEach(dataPoint => {
+    const trace = {
+        x: dataPoint.values.map(() => dataPoint.commit_id),
+        y: dataPoint.values,
+        type: 'box',
+        boxmean: 'sd',  // Show mean and standard deviation
+        marker: {
+          color: dataPoint.status
+        },
+        hoverinfo: 'y'
+    };
+    traces.push(trace);
+  });
+
+  const layout = {
+    title: {
+      text: `${library} - ${metric} (${type})`,
+      font: { size: 18, weight: 600 }
+    },
+    xaxis: {
+      title: 'Commits (oldest → newest)',
+      tickangle: -75,
+      type: 'category',
+      categoryorder: 'array',
+      categoryarray: allCommits.map(c => c.commit_id),
+      tickfont: { family: 'monospace' },
+      tickvals: allCommits.map(c => c.commit_id),
+      ticktext: allCommits.map(c => 
+        (commitNames[c.commit_id]?.[library] ?? '') + ' ' + c.commit_id),
+      range: [-0.5, allCommits.length + 0.5],
+    },
+    yaxis: {
+      title: metric
+    },
+    showlegend: false,
+    hovermode: 'closest',
+    margin: {
+      l: 80,
+      r: 50,
+      t: 80,
+      b: 120
+    },
+    plot_bgcolor: '#f8f9fa',
+    paper_bgcolor: 'white'
+  };
+
+  const config = {
+    responsive: true,
+    displayModeBar: true,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+    displaylogo: false
+  };
+
+  return [ traces, layout, config ];
+}
+
 // Render graph with Plotly
 export function renderGraph() {
   const typeSelect = document.getElementById('type-select');
@@ -206,62 +266,7 @@ export function renderGraph() {
     return;
   }
 
-  // Prepare data for Plotly box plot
-  const traces = [];
-
-  metricDataPoints.forEach(dataPoint => {
-    const trace = {
-        x: dataPoint.values.map(() => dataPoint.commit_id),
-        y: dataPoint.values,
-        type: 'box',
-        boxmean: 'sd',  // Show mean and standard deviation
-        marker: {
-          color: dataPoint.status
-        },
-        hoverinfo: 'y'
-    };
-    traces.push(trace);
-  });
-
-  const layout = {
-    title: {
-      text: `${selectedLibrary} - ${selectedMetric} (${selectedType})`,
-      font: { size: 18, weight: 600 }
-    },
-    xaxis: {
-      title: 'Commits (oldest → newest)',
-      tickangle: -75,
-      type: 'category',
-      categoryorder: 'array',
-      categoryarray: allCommits.map(c => c.commit_id),
-      tickvals: allCommits.map(c => c.commit_id),
-      ticktext: allCommits.map(c => 
-        c.commit_id + ' ' + (commitNames[c.commit_id]?.[selectedLibrary] ?? '')),
-      range: [-0.5, allCommits.length + 0.5],
-    },
-    yaxis: {
-      title: selectedMetric
-    },
-    showlegend: false,
-    hovermode: 'closest',
-    margin: {
-      l: 80,
-      r: 50,
-      t: 80,
-      b: 120
-    },
-    plot_bgcolor: '#f8f9fa',
-    paper_bgcolor: 'white'
-  };
-
-  const config = {
-    responsive: true,
-    displayModeBar: true,
-    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-    displaylogo: false
-  };
-
-  Plotly.newPlot('graph-container', traces, layout, config);
+  Plotly.newPlot('graph-container', ...GenerateGraphData(selectedType, selectedLibrary, selectedMetric, metricDataPoints));
 }
 
 // Close modal on ESC key
@@ -270,3 +275,5 @@ document.addEventListener('keydown', (e) => {
     closeGraphModal();
   }
 });
+
+export { metricsData, buildMetricsIndex, GenerateGraphData };
