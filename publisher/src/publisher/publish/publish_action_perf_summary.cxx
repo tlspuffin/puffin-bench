@@ -111,10 +111,11 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   rapidjson::Document doc;
   doc.Parse(summaryJSON.c_str());
   if (doc.HasParseError()) {
+    LOGE("Parse error in artefacts/summary.json");
     return false;
   }
 
-  std::unordered_map<std::string, std::unordered_map<std::string, std::unordered_map<std::string, std::variant<std::uint64_t, double>>>> librariesData;
+  std::unordered_map<std::string, std::unordered_map<std::string, std::unordered_map<std::string, std::variant<std::uint64_t, double, std::vector<double>>>>> librariesData;
   try {
     std::string type = Get<std::string>(doc, "type");
     rapidjson::Value::ConstArray libraries = 
@@ -131,12 +132,25 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
           }
           if (value.IsUint64()) {
             librariesData[name][id][fieldname] = value.GetUint64();
+          } else if (value.IsArray()) {
+            std::vector<double> values;
+            for (const auto& elem : value.GetArray()) {
+              if (elem.IsDouble()) {
+                values.push_back(elem.GetDouble());
+              } else {
+                throw std::runtime_error("Unexpected type in array of field " + fieldname);
+              }
+            }
+            librariesData[name][id][fieldname] = std::move(values);
           } else {
             throw std::runtime_error("Unexpected type for field " + fieldname);
           }
         }
       }
     }
+  } catch(std::exception const& e) {
+    LOGE("Fatal Error in " << summaryInfo[0].first << ": " << e.what() << ", skip the file");
+    return false;
   } catch(...) {
     LOGE("Fatal Error in " << summaryInfo[0].first << " skip it");
     return false;
@@ -192,7 +206,15 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
           if (!array.IsArray())  {
             array.SetArray();
           }
-          array.PushBack(std::get<uint64_t>(value), allocator);
+          if (std::holds_alternative<std::uint64_t>(value)) {
+            array.PushBack(std::get<uint64_t>(value), allocator);
+          } else if (std::holds_alternative<double>(value)) {
+            array.PushBack(std::get<double>(value), allocator);
+          } else if (std::holds_alternative<std::vector<double>>(value)) {
+            for (double element : std::get<std::vector<double>>(value)) {
+              array.PushBack(element, allocator);
+            }
+          }
         }
       } else {
         ++nbFail;
@@ -200,14 +222,14 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
         if (!arrayDuration.IsArray())  {
           arrayDuration.SetArray();
         }
-        arrayDuration.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["duration"]), allocator);
+        arrayDuration.PushBack(std::get<uint64_t>(librariesData[libName][attemptString]["duration"]), allocator);
         rapidjson::Value& arrayClientsDuration = datas["fail_client_average_duration_s"];
         if (!arrayClientsDuration.IsArray())  {
           arrayClientsDuration.SetArray();
         }
-        arrayClientsDuration.PushBack(std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["client_average_duration_s"]), allocator);
+        arrayClientsDuration.PushBack(std::get<uint64_t>(librariesData[libName][attemptString]["client_average_duration_s"]), allocator);
       }
-      if ((std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["objective_size"]) > 0) && (trustObjectif == 1)) {
+      if ((std::get<uint64_t>(librariesData[libName][attemptString]["objective_size"]) > 0) && (trustObjectif == 1)) {
         haveObjectif.PushBack(attempt, allocator);
       }
     }

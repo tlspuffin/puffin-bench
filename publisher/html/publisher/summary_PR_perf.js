@@ -194,6 +194,7 @@ function GenerateGraphData(type, library, metric, metricDataPoints) {
         y: dataPoint.values,
         type: 'box',
         boxmean: 'sd',  // Show mean and standard deviation
+        boxpoints: false,
         marker: {
           color: dataPoint.status
         },
@@ -220,7 +221,8 @@ function GenerateGraphData(type, library, metric, metricDataPoints) {
       range: [-0.5, allCommits.length + 0.5],
     },
     yaxis: {
-      title: metric
+      title: metric,
+      rangemode: 'tozero'
     },
     showlegend: false,
     hovermode: 'closest',
