@@ -4,7 +4,7 @@ CheckObjectif() {
   local stats="$1"; shift;
   local -n ref_goal_success=$1; shift
 
-  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
 
   local statssize=0;
   local lastcheck=0;
@@ -15,6 +15,9 @@ CheckObjectif() {
     if (( ${obj_count} > 0 )); then
       echo "FOUND OBJECTIF, END PROCESS" >&2
       ref_goal_success=1
+
+      echo "${statssize}" > ./.xp_state_file_size
+      SaveSummary "${statssize}" "${stats}" "summary.json"
       break;
     fi
 
@@ -30,10 +33,13 @@ CheckObjectif() {
     (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
     (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
 
-    echo "${statssize}" > ./.xp_state_file_size
+    echo "${currentStatSize}" > ./.xp_state_file_size
     SaveSummary "${currentStatSize}" "${stats}" "summary.json"
 
+    (( nbissues > 4 )) && { echo "TOO MUCH ISSUES, END PROCESS" >&2 ; break; }
+
     if (( statssize > 268435456 )); then
+      echo "Try purge ${stats}";
       local purgeRetries=0
       while (( statssize > 268435456 )); do
         truncate -s 0 "${stats}";
@@ -44,8 +50,6 @@ CheckObjectif() {
       done;
       (( purgeRetries <= 10 )) && statssize=0;
     fi;
-
-    (( nbissues > 4 )) && { echo "TOO MUCH ISSUES, END PROCESS" >&2 ; break; }
 
     sleep 60;
   done
@@ -74,8 +78,6 @@ Experiment () {
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success
   fi
 
-  Shutdown
-
   ExperimentEnd
 
   (( goal_success == 1 )) && return 0;
@@ -101,8 +103,6 @@ ExperimentWithCargo () {
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success;
   fi
 
-  Shutdown
-
   ExperimentEnd
 
   (( goal_success == 1 )) && return 0;
@@ -122,6 +122,8 @@ Shutdown() {
   local statSize=$( cat './.xp_state_file_size' )
   [[ ! "${statSize}" =~ ^[0-9]+$ ]] && return;
 
+  echo "SaveSummary ${statSize} ${stats} summary.json"
+  echo "SaveSummary ${statSize} ${stats} summary.json" >&2
   SaveSummary "${statSize}" "${stats}" "summary.json"
 }
 
@@ -156,29 +158,32 @@ SummaryRun () {
     local firstRun=1;
     while read -r i; do
       local statsFile="${i#"${THEJOB_ARTEFACTS_PATH}/${lib}/"}";
-      local runID="${statsFile%'-stats.json'}"
+      local runID="${statsFile%'-summary-stats.json'}"
       local readmeFile="${THEJOB_ARTEFACTS_PATH}/${lib}/${runID}-README.md"
+      local jsonEntry='';
       [ ! -r "${readmeFile}" ] && { 
-        echo -n " { \"id\": \"${runID}\", \"duration\": 0, \"objective_size\": ${objectiveSize}, \"valid\": false }" >> .run-summary.json.tmp
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
         echo "Missing required file ${readmeFile}" >&2; 
-        continue;
+      } else {
+        local startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
+        local endTime=$( jq -n '[inputs.time.secs_since_epoch] | max' "${i}" )
+        local runTime=$(( endTime - startTime ))
+
+        local objectiveSize=$( jq -n '[inputs.objective_size] | max' "${i}" );
+        [ -z "${objectiveSize}" ] && objectiveSize=0;
+        local totalExecs=$( jq 'select(.type == "global") | .total_execs' "${i}" );
+        [ -z "${totalExecs}" ] && totalExecs=0;
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}, \"objective_size\": ${objectiveSize}, \"valid\": true }";
       }
-      startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
-      local endTime=$( jq -n '[inputs.time.secs_since_epoch] | max' "${i}" )
-      local runTime=$(( endTime - startTime ))
-
-      local objectiveSize=$( jq -n '[inputs.objective_size] | max' "${i}" );
-      [ -z "${objectiveSize}" ] && objectiveSize=0;
-
       if (( ! firstRun )); then
         echo -n "," >> .run-summary.json.tmp
       fi
       firstRun=0;
-      echo -n " { \"id\": \"${runID}\", \"duration\": ${runTime}, \"objective_size\": ${objectiveSize}, \"valid\": true }" >> .run-summary.json.tmp
+      echo -n  "${jsonEntry}" >> .run-summary.json.tmp
 
-    done < <( find "${libresults}" -name "*-stats.json" | sort -n )
+    done < <( find "${libresults}" -name "*-summary-stats.json" | sort -n )
     echo -n " ] }" >> .run-summary.json.tmp
-  done < <( find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -n )
+  done < <( find "${THEJOB_ARTEFACTS_PATH}" -maxdepth 1 -mindepth 1 -type d | sort -n )
   echo " ] }" >> .run-summary.json.tmp
   mv .run-summary.json.tmp run-summary.json;
   CreateArtefact "./run-summary.json" "run-summary.json" "commit_id:${COMMIT_ID}"

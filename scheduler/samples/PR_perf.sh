@@ -65,8 +65,7 @@ SummaryRun () {
       local objectiveSize=$( echo "${endGlobalInfos}" | jq -r '.objective_size' )
       [ -z "${objectiveSize}" ] && objectiveSize=0;
 
-      local hit=0
-      local hitCount=0
+      local coverages=''
       local nbDuration=0
       local avgDuration=0
       local endClientsInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"client".*}$' );
@@ -78,12 +77,18 @@ SummaryRun () {
         local endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -1 );
         echo "${endClientInfos}" | jq  >/dev/null 2>&1 || endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -2 | head -1 );
 
-        local clientHit;
-        clientHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit' ) || clientHit=$(echo "$endClientInfos" | jq -r '.coverage.discovered' )
+        local clientCovHit=''
+        clientCovHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit' ) || clientCovHit=$(echo "$endClientInfos" | jq -e -r '.coverage.discovered' ) || clientCovHit='';
+        local clientCovMax=''
+        clientCovMax=$( echo "$endClientInfos" | jq -e -r '.coverage.max' ) || clientCovMax='';
+        local clientCoverage=0
 
-        [ -n "${clientHit}" ] && {
-          (( ++hitCount ));
-          hit=$(( hit + clientHit ));
+        [ -n "${clientCovHit}" ] && {
+          [ -n "${clientCovMax}" ] && {
+            clientCoverage=$( echo "scale=8; ( ${clientCovHit} / ${clientCovMax} ) * 100" | bc | LC_ALL=C xargs printf "%.6f\n" )
+            [ -n "${coverages}" ] && coverages+=","
+            coverages+="${clientCoverage}"
+          }
         }
 
         local clientEndTime=$( echo "$endClientInfos" | jq -r '.time.secs_since_epoch' )
@@ -94,14 +99,14 @@ SummaryRun () {
           (( ++nbDuration ));
         }
       done
-      (( hitCount > 0)) && hit=$(( hit / hitCount )) || hit='"NA"';
+      [ -z "${coverages}" ] && coverages=''
       (( nbDuration > 0)) && avgDuration=$(( avgDuration / nbDuration )) || avgDuration='"NA"';
 
       if (( ! firstRun )); then
         json+=","
       fi
       firstRun=0;
-      json+=" { \"id\": \"${idRun}\", \"duration\": ${runTime}, \"corpus_size\": ${corpus}, \"total_execs\": ${execs}, \"coverage\": ${hit}, \"objective_size\": ${objectiveSize},  \"client_average_duration_s\": ${avgDuration} }";
+      json+=" { \"id\": \"${idRun}\", \"duration\": ${runTime}, \"corpus_size\": ${corpus}, \"total_execs\": ${execs}, \"coverage\": [ ${coverages} ], \"objective_size\": ${objectiveSize}, \"client_average_duration_s\": ${avgDuration} }";
 
     done < <(find "${libresults}" -name "*.json" | sort -n)
     json+=" ] }";

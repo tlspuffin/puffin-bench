@@ -426,7 +426,20 @@ ExperimentReport() {
   local tlspuffin_outpath=$( ls experiments/ )
   local experiment_base="./experiments/${tlspuffin_outpath}"
   if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-    echo "${THEJOB_NB_CORES} $( tail -c 8192 "${statsJSON}" | sed 's/}{/\n/g' | grep '"type":"global"' | sed 's/,/\n/g' | awk -F: ' $1 ~ /clients/ { clients=$2+0 } $1 ~ /exec_per_sec/ { exec=$2+0 } END { print clients, exec }' )" > "${THEJOB_USER_STATE_FILE}"
+    read nbClients execPerSec <<< "$(
+        tail -c 8192 "${statsJSON}" |\
+        sed 's/}{/\n/g' |\
+        grep '"type":"global"' |\
+        sed 's/,/\n/g' |\
+        awk -F: '
+          $1 ~ /clients/      { clients=$2+0 }
+          $1 ~ /exec_per_sec/ { exec=$2+0 }
+          END { print clients, exec }
+        '
+    )"
+    [[ "$nbClients" =~ ^[0-9]+$ ]] || nbClients=0;
+    [[ "$execPerSec" =~ ^[0-9]+$ ]] || execPerSec=0;
+    echo "{\"nb_cores\": ${THEJOB_NB_CORES}, \"nb_clients\": ${nbClients}, \"exec_per_sec\": ${execPerSec}}" >> "${THEJOB_USER_STATE_FILE}"
   fi
 
   local objective_dir="${experiment_base}/objective"
@@ -438,12 +451,12 @@ ExperimentReport() {
       local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       local now=$(date +%s)
       local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-      echo "🎉 Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> "${THEJOB_USER_STATE_FILE}"
+      echo "{\"objective_count\": ${objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
     else
-      echo "No objective yet ✓" >> "${THEJOB_USER_STATE_FILE}"
+      echo "{\"objective_count\": 0}" >> "${THEJOB_USER_STATE_FILE}"
     fi
   else
-    echo "Objective: Directory ${objective_dir} not found" >> "${THEJOB_USER_STATE_FILE}"
+    echo "{\"objective_error\": \"Directory ${objective_dir} not found\"}" >> "${THEJOB_USER_STATE_FILE}"
   fi
 }
 
