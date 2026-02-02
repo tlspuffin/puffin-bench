@@ -136,13 +136,13 @@ async function loadCommits(commitsInfos) {
     // For each commit, fetch all types in parallel
     const commitPromises = batch.map(async commitId => {
       const commitData = {
-        commit_id: commitId,
+        commit_id: commitId.id,
         types: {}
       };
 
       // Fetch all types for this commit
       const typePromises = availableTypes.map(type =>
-        fetch(`${config.location}/JSON/${type}/${commitId}.json`)
+        fetch(`${config.location}/JSON/${type}/${commitId.id}.json`)
           .then(r => r.ok ? r.json() : null)
           .catch(() => null)
           .then(data => ({ type, data }))
@@ -164,7 +164,7 @@ async function loadCommits(commitsInfos) {
 
     results.forEach(commitData => {
       allCommits.push(commitData);
-      renderCommit(commitData, commitsInfos[commitData.commit_id], container);
+      renderCommit(commitData, commitsInfos.commits.find(commit => commit.id === commitData.commit_id), container);
     });
   }
 
@@ -220,12 +220,15 @@ function renderCommit(commit, commitInfos, container) {
   const commentText = commitInfos?.comment ? `<span class="commit-comment">${commitInfos.comment}</span>` : '';
 
   commitInfo.innerHTML = `
+    <div class="commit-id-row">
     <span class="commit-id">
       <a href="https://github.com/tlspuffin/tlspuffin/commit/${commit.commit_id}"
         target="_blank" rel="noopener noreferrer">
         ${commit.commit_id}
       </a>
     </span>
+    <span class="branch-name">🌿 ${commitInfos?.branch ?? 'main'}</span>
+    </div>
     <div class="commit-meta">
       ${commentText}
       <span class="date">${commitInfos?.date || 'no date'}</span>

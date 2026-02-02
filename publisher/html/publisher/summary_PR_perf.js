@@ -203,6 +203,7 @@ function GenerateGraphData(type, library, metric, metricDataPoints) {
     traces.push(trace);
   });
 
+  const commitsTimeline = allCommits.reverse();
   const layout = {
     title: {
       text: `${library} - ${metric} (${type})`,
@@ -213,12 +214,12 @@ function GenerateGraphData(type, library, metric, metricDataPoints) {
       tickangle: -75,
       type: 'category',
       categoryorder: 'array',
-      categoryarray: allCommits.map(c => c.commit_id),
+      categoryarray: commitsTimeline.map(c => c.commit_id),
       tickfont: { family: 'monospace' },
-      tickvals: allCommits.map(c => c.commit_id),
-      ticktext: allCommits.map(c => 
+      tickvals: commitsTimeline.map(c => c.commit_id),
+      ticktext: commitsTimeline.map(c => 
         (commitNames[c.commit_id]?.[library] ?? '') + ' ' + c.commit_id),
-      range: [-0.5, allCommits.length + 0.5],
+      range: [-0.5, commitsTimeline.length + 0.5],
     },
     yaxis: {
       title: metric,

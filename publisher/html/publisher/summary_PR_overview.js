@@ -1,6 +1,5 @@
 import './plotly-3.3.0.min.js';
 const Plotly = window.Plotly;
-import { allCommits } from './summary_PR.js';
 import { metricsData, buildMetricsIndex, GenerateGraphData } from './summary_PR_perf.js';
 
 const overviewMetrics = ['corpus_size', 'coverage', 'total_execs'];
