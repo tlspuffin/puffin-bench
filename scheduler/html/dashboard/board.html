@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Experiment Scheduler Dashboard</title>
+   <link rel="stylesheet" href="board.css">
+</head>
+<body>
+   <div class="header">
+       <h1>Experiment Scheduler Dashboard</h1>
+       <div class="stats-bar">
+           <div class="stat">
+               <span class="stat-label">Running</span>
+               <span class="stat-value running" id="running-count">0</span>
+           </div>
+           <div class="stat">
+               <span class="stat-label">Queued</span>
+               <span class="stat-value queued" id="queued-count">0</span>
+           </div>
+           <div class="stat">
+               <span class="stat-label">Cores Used</span>
+               <span class="stat-value cores" id="cores-usage">0/64</span>
+           </div>
+       </div>
+   </div>
+
+   <div class="container">
+       <div class="main-content">
+           <div class="section">
+               <div class="section-header">
+                   <span class="section-title">Running Tasks</span>
+                   <button class="refresh-btn" onclick="refreshTasks()">Refresh</button>
+               </div>
+               <div class="task-list" id="running-tasks">
+                   <!-- Task groups will be populated by JavaScript -->
+               </div>
+           </div>
+       </div>
+
+       <div class="sidebar">
+           <div class="section">
+               <div class="section-header">
+                   <span class="section-title">Queue</span>
+               </div>
+               <div id="queue-list">
+                   <!-- Queue items will be populated by JavaScript -->
+               </div>
+           </div>
+
+           <div class="section">
+               <div class="section-header">
+                   <span class="section-title">CPU Usage</span>
+               </div>
+               <div class="cores-visualization">
+                   <div id="cores-summary">0 cores used / 64 available (0%)</div>
+                   <div class="legend">
+                       <div class="legend-item">
+                           <div class="legend-dot free"></div>
+                           <span id="cores-free">64 cores free</span>
+                       </div>
+                       <div class="legend-item">
+                           <div class="legend-dot used"></div>
+                           <span id="cores-used">0 cores used</span>
+                       </div>
+                   </div>
+               </div>
+           </div>
+       </div>
+   </div>
+
+   <script src="board.js"></script>
+</body>
+</html>
