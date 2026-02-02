@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Experiment Manager</title>
+  <link rel="stylesheet" href="board.css">
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <h1>Experiment Scheduler Dashboard</h1>
+      <div>
+        <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
+        <a style="color: white" href="http://pesto-calc:10082/files/tlspuffin4/summary_PR.html">All Results</a>
+      </div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-label">Done</span>
+        <span class="stat-value done" id="done-count">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Running</span>
+        <span class="stat-value running" id="running-count">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Queued</span>
+        <span class="stat-value queued" id="queued-count">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Last update</span>
+        <span class="stat-value lastupdate" id="last-update">N/A</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="container-running-steps" class="container-running-steps"></div>
+
+  <div class="modal-overlay" id="logs-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Step Logs - <span id="step-name"></span></h3>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="logs-tabs">
+          <button class="tab-btn active" id="log-stdout">STDOUT</button>
+          <button class="tab-btn" id="log-stderr">STDERR</button>
+        </div>
+        <div class="logs-content">
+          <div class="logs-container active" id="stdout-container">
+            <div class="logs-scroll-overlay" id="stdout-scroll-overlay"></div>
+            <pre id="stdout-content"></pre>
+          </div>
+          <div class="logs-container" id="stderr-container">
+            <div class="logs-scroll-overlay" id="stderr-scroll-overlay"></div>
+            <pre id="stderr-content"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="board.js"></script>
+</body>
+</html>
