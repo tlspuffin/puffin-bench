@@ -500,14 +500,20 @@ ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
 void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {
   pid_t killedPID = 0;
   while((killedPID = waitpid(-sessionID, nullptr, 0)) > 0) {
-    std::stringstream oss;
+    /*std::stringstream oss;
     oss << label << " cleanup: " << step->task_->id_ << " / " << step->ID()  << 
       " uuid: " << step->uuid_ << " session: " << sessionID << 
       " cleaned_pid: " << killedPID << std::endl;
-    std::cerr << oss.str();
+    std::cerr << oss.str();*/
+    LOGE(label << " cleanup: " << step->task_->id_ << " / " << step->ID()  << 
+        " uuid: " << step->uuid_ << " session: " << sessionID << 
+        " cleaned_pid: " << killedPID);
   }
-  std::cerr << label << " done: " << step->ID() << 
-      " session: " << sessionID << " errno: " << errno << std::endl;
+  LOGE(label << " done: " << step->ID() << " session: " << sessionID << " errno: " << errno);
+
+  if (kill(-sessionID, 0) == 0) {
+    LOGE("WaitSessionEnd done, but session" << sessionID << " seems to still have process");
+  }
 }
 
 void ns_Executor::Local::KillSession(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {
