@@ -6,6 +6,7 @@ CheckObjectif() {
 
   CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
 
+  local statsmaxsize=$(( 16*1024*1024 ));
   local statssize=0;
   local lastcheck=0;
   local nbissues=0;
@@ -38,10 +39,10 @@ CheckObjectif() {
 
     (( nbissues > 4 )) && { echo "TOO MUCH ISSUES, END PROCESS" >&2 ; break; }
 
-    if (( statssize > 268435456 )); then
+    if (( statssize > ${statsmaxsize} )); then
       echo "Try purge ${stats}";
       local purgeRetries=0
-      while (( statssize > 268435456 )); do
+      while (( statssize > ${statsmaxsize} )); do
         truncate -s 0 "${stats}";
         sleep 0.5;
         statssize=$( stat --format=%s "${stats}" )
