@@ -1,4 +1,5 @@
 #include "local.hxx"
+#include "linux_process.hxx"
 #include "../step.hxx"
 #include "../../../utils/rapidjson.hxx"
 #include "../../../utils/logs.hxx"
@@ -75,7 +76,7 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
     uint16_t cachePort)
     : Executor(name), config_(config), coresMonitor_(15), nbCoresFree_(config_.nbCores_), 
-      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort)
+      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), filesRing_(config_.logsSize_)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -157,40 +158,42 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       );
     }
   }
-  int outhandler = open(step.stdout_.c_str(), O_CREAT | O_APPEND | O_WRONLY, 00660);
-  if (outhandler == -1) {
+
+  if (pipe(localData->pipeFDOut) != 0) {
     throw std::runtime_error(
-        std::string("open stdout failed for: ") + step.stdout_.string() + std::string(" : errno=") +
-        std::to_string(errno) +
+        std::string("creation of pipe for stdout failed: ") + std::to_string(errno) +
         " (" + std::strerror(errno) + ")"
     );
   }
-  if (ftruncate(outhandler, 0) == -1) {
-    close(outhandler);
+  if (pipe(localData->pipeFDErr) != 0) {
+    close(localData->pipeFDOut[0]);
+    close(localData->pipeFDOut[1]);
     throw std::runtime_error(
-        std::string("truncate stdout failed for: ") + step.stdout_.string() + std::string(" : errno=") +
-        std::to_string(errno) +
+        std::string("creation of pipe for stderr failed: ") + std::to_string(errno) +
         " (" + std::strerror(errno) + ")"
     );
   }
-  int errhandler = open(step.stderr_.c_str(), O_CREAT | O_APPEND | O_WRONLY, 00660);
-  if (errhandler == -1) {
-    close(outhandler);
+  if (!filesRing_.AddFD(localData->pipeFDOut[0], step.stdout_)) {
+    close(localData->pipeFDOut[0]);
+    close(localData->pipeFDOut[1]);
+    close(localData->pipeFDErr[0]);
+    close(localData->pipeFDErr[1]);
     throw std::runtime_error(
-        std::string("open stderr failed for: ") + step.stderr_.string() + std::string(" : errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
+        std::string("adding rotation log for stdout failed: ") + step.stdout_.c_str()
     );
   }
-  if (ftruncate(errhandler, 0) == -1) {
-    close(outhandler);
-    close(errhandler);
+  if (!filesRing_.AddFD(localData->pipeFDErr[0], step.stderr_)) {
+    close(localData->pipeFDOut[0]);
+    close(localData->pipeFDOut[1]);
+    close(localData->pipeFDErr[0]);
+    close(localData->pipeFDErr[1]);
+    filesRing_.RemoveFD(localData->pipeFDOut[0]);
     throw std::runtime_error(
-        std::string("truncate stderr failed for: ") + step.stdout_.string() + std::string(" : errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
+        std::string("adding rotation log for stderr failed: ") + step.stderr_.c_str()
     );
   }
+  int outhandler = localData->pipeFDOut[1];
+  int errhandler = localData->pipeFDErr[1];
 
   pid_t pid = fork();
 
@@ -294,9 +297,6 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   }
 
   localData->pid_ = pid;
-
-  close(errhandler);
-  close(outhandler);
 
   if (pid == -1) {
     throw std::runtime_error("Local Executor failed to fork " + 
@@ -509,6 +509,12 @@ void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step
         " uuid: " << step->uuid_ << " session: " << sessionID << 
         " cleaned_pid: " << killedPID);
   }
+  std::vector<pid_t> pids = ns_Executor::Process::GetPidsBySid(sessionID);
+  for(pid_t pid: pids) {
+    LOGE("waiting for " << pid);
+    waitpid(pid, nullptr, 0);
+    LOGE("waiting for " << pid << " done");
+  }
   LOGE(label << " done: " << step->ID() << " session: " << sessionID << " errno: " << errno);
 
   if (kill(-sessionID, 0) == 0) {
@@ -528,23 +534,8 @@ void ns_Executor::Local::KillSession(pid_t sessionID, ns_Schedule::Step* step, s
 }
 
 pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localData) {
-  int outhandler = open(step.stdout_.c_str(), O_APPEND | O_WRONLY, 00660);
-  if (outhandler == -1) {
-    throw std::runtime_error(
-        std::string("open stdout failed for: ") + step.stdout_.string() + std::string(" : errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
-    );
-  }
-  int errhandler = open(step.stderr_.c_str(), O_APPEND | O_WRONLY, 00660);
-  if (errhandler == -1) {
-    close(outhandler);
-    throw std::runtime_error(
-        std::string("open stderr failed for: ") + step.stderr_.string() + std::string(" : errno=") +
-        std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
-    );
-  }
+  int outhandler = localData->pipeFDOut[1];
+  int errhandler = localData->pipeFDErr[1];
 
   pid_t pid = fork();
 
@@ -604,9 +595,6 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
     exit(-1);
   }
 
-  close(errhandler);
-  close(outhandler);
-
   if (pid == -1) {
     throw std::runtime_error("Local Executor failed to fork " + 
         std::to_string(step.step_id_) + " : " + std::strerror(errno));
@@ -616,6 +604,15 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
 }
 
 void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores) {
+  filesRing_.RemoveFD(localData->pipeFDOut[0]);
+  filesRing_.RemoveFD(localData->pipeFDErr[0]);
+  close(localData->pipeFDOut[1]);
+  close(localData->pipeFDErr[1]);
+  localData->pipeFDOut[0] = -1;
+  localData->pipeFDOut[1] = -1;
+  localData->pipeFDErr[0] = -1;
+  localData->pipeFDErr[1] = -1;
+
   std::string userStateFile = localData->user_state_file_;
   std::ifstream ifs(userStateFile);
   if (ifs.is_open()) {

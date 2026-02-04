@@ -46,7 +46,7 @@ static ns_Executor::LocalConfig defaultLocalConfig("local");
 
 ns_Executor::LocalConfig::LocalConfig(std::string const& name) 
     : Config(Config::Type::Local, name), nbCores_(1), cores_(), 
-    scriptPath_("scripts")
+    scriptPath_("scripts"), logsSize_(16*1024*1024)
 {
   CoresStats coresStats;
   uint64_t maxNbCores = coresStats.NbCores();
@@ -134,6 +134,7 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
   scriptPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(node, "scriptPath", defaultLocalConfig.scriptPath_))
       .string();
+  logsSize_ = GetOrDefault(node, "logsSize", defaultLocalConfig.logsSize_);
 }
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
@@ -158,4 +159,5 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
   }
   node.AddMember("scriptPath", 
       rapidjson::Value(scriptPath_.c_str(), alloc), alloc);
+  node.AddMember("logsSize", logsSize_, alloc);
 }

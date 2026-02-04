@@ -2,6 +2,7 @@
 
 #include "executor.hxx"
 #include "linux_cores.hxx"
+#include "files_ring.hxx"
 #include <cstdint>
 #include <vector>
 
@@ -33,6 +34,9 @@ public:
   std::filesystem::path fatalerror_path_;
   std::filesystem::path done_path_;
   std::vector<std::string> arguments_;
+
+  int pipeFDOut[2];
+  int pipeFDErr[2];
 };
 
 class Local : public Executor {
@@ -62,6 +66,7 @@ private:
   std::vector<bool> coresFree_;
   uint64_t nbChild_;
   uint16_t cachePort_;
+  FilesRing filesRing_;
 
   void WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);
   void KillSession(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);

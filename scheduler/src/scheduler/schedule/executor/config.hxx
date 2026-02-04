@@ -31,6 +31,7 @@ struct LocalConfig : public Config {
   uint64_t nbCores_;
   std::vector<bool> cores_;
   std::filesystem::path scriptPath_;
+  uint64_t logsSize_;
   void Validate() const;
 
   LocalConfig(std::string const& name);
