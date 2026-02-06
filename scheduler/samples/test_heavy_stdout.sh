@@ -6,6 +6,32 @@ Init() {
   return 0
 }
 
+ProduceOutput() {
+  local nb_lines="$1"; shift;
+  local line_size="$1"; shift;
+  local with_stderr="$1"; shift;
+  local base_pattern="$1"; shift;
+  local start_time="$1"; shift;
+  local -n ref_total_bytes="$1"; shift
+  local iter="$1"; shift;
+
+  # Output sur stdout
+  printf "[%08d] %s\n" "$iter" "${base_pattern:0:$((line_size - 12))}"
+  ref_total_bytes=$((ref_total_bytes + line_size + 1))
+
+  # Optionnel: output sur stderr aussi
+  if [ "$with_stderr" = "true" ] && [ $((iter % 1000)) -eq 0 ]; then
+    echo "Progress: $iter / $nb_lines lines" 1>&2
+  fi
+
+  # Mise à jour du fichier de stats pour le monitoring
+  if [ $((iter % 5000)) -eq 0 ]; then
+    local current_time=$(date +%s.%N)
+    local elapsed=$(echo "$current_time - $start_time" | bc)
+    echo "$iter $ref_total_bytes $elapsed" > stats.txt
+  fi
+}
+
 HeavyOutput() {
   local nb_lines=${nb_lines:-10000}
   local line_size=${line_size:-80}
@@ -22,23 +48,17 @@ HeavyOutput() {
   # Génération d'une ligne de base de la taille demandée
   local base_pattern=$(printf '%*s' "$line_size" '' | tr ' ' 'X')
 
-  for i in $(seq 1 $nb_lines); do
-    # Output sur stdout
-    printf "[%08d] %s\n" "$i" "${base_pattern:0:$((line_size - 12))}"
-    total_bytes=$((total_bytes + line_size + 1))
-
-    # Optionnel: output sur stderr aussi
-    if [ "$with_stderr" = "true" ] && [ $((i % 1000)) -eq 0 ]; then
-      echo "Progress: $i / $nb_lines lines" 1>&2
-    fi
-
-    # Mise à jour du fichier de stats pour le monitoring
-    if [ $((i % 5000)) -eq 0 ]; then
-      local current_time=$(date +%s.%N)
-      local elapsed=$(echo "$current_time - $start_time" | bc)
-      echo "$i $total_bytes $elapsed" > stats.txt
-    fi
-  done
+  if (( nb_lines != 0)); then
+    for i in $(seq 1 $nb_lines); do
+      ProduceOutput "$nb_lines" "$line_size" "$with_stderr" "$base_pattern" "$start_time" total_bytes "$i"
+    done
+  else
+    local i=1
+    while [[ true ]]; do
+      ProduceOutput "$nb_lines" "$line_size" "$with_stderr" "$base_pattern" "$start_time" total_bytes "$i"
+      (( ++i ))
+    done
+  fi
 
   local end_time=$(date +%s.%N)
   local total_time=$(echo "$end_time - $start_time" | bc)

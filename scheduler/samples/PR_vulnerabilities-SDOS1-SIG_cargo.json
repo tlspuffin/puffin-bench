@@ -29,7 +29,7 @@
       {
         "run": [ "SDOS1", "SIG" ],
         "configuration": {
-          "nb_retry": 4
+          "nb_retry": 90
         }
       },
       {
@@ -39,13 +39,16 @@
         "step": "ExperimentWithCargo",
         "configuration": {
           "nb_cores": 1,
-          "timeout": "48h"
+          "timeout": "2890m"
         },
         "monitor": {
           "entry_point": "MonitorExperiment",
           "delay_start": "10s",
           "interval": "60s"
         }
+      },
+      {
+        "step": "ExperimentEnd"
       }
     ],
     {

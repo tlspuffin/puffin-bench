@@ -9,8 +9,6 @@ Experiment () {
     status=$( ExperimentCheckRun "${tlspuffin_pid}" "${stats}" )
   }
 
-  ExperimentEnd
-
   return ${status}
 }
 
@@ -24,8 +22,6 @@ ExperimentWithCargo () {
   (( tlspuffin_killed == 0 )) && {
     status=$( ExperimentCheckRun "${tlspuffin_pid}" "${stats}" )
   }
-
-  ExperimentEnd
 
   return ${status}
 }

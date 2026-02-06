@@ -1,85 +1,5 @@
 #### HELPER START ####
 
-SaveSummary() {
-  local oldfilesize=$1; shift;
-  local stats="$1"; shift;
-  local output="$1"; shift;
-
-  local old_summary=""
-  [ -f "${output}" ] && old_summary=$( cat "${output}" )
-
-  (( oldfilesize > 10240 )) && (( oldfilesize -= 10240 ))
-  local summary=$( dd bs=10M iflag=skip_bytes if="${stats}" skip="${oldfilesize}" status=none | 
-    awk '
-    function Validate(line, is_first,         opens, closes, i, c) {
-      if (is_first) {
-        if (line !~ /^\{/) return ""
-        line = substr(line, 2)
-      } else {
-        if (line !~ /\}$/) return ""
-        line = substr(line, 1, length(line) - 1)
-      }
-
-      opens = 0
-      closes = 0
-      for (i = 1; i <= length(line); i++) {
-        c = substr(line, i, 1)
-        if (c == "{") opens++
-        else if (c == "}") closes++
-      }
-      if (opens != closes) return ""
-      return line
-    }
-    function ProcessLine(line) {
-      line = "{" line "}" 
-      if (line ~ /"type":"global"/) {
-        global_0 = global_1
-        global_1 = line
-      } else if (line ~ /"type":"client"/) {
-        if (match(line, /"id": *[0-9]+/)) {
-          id = substr(line, RSTART, RLENGTH)
-          gsub(/[^0-9]/, "", id)
-          if (id > nb) { nb = id }
-          clients_0[id] = clients_1[id]
-          clients_1[id] = line
-        }
-      }
-    }
-    BEGIN{ RS="}{"; nb = 0; buffer = "" }
-    {
-      line = buffer
-      if (NR == 1) {
-        buffer = Validate($0, 1)
-      } else {
-        buffer = $0
-      }
-      if (line != "") {
-        ProcessLine(line)
-      }
-    }
-    END {
-      line = Validate(buffer, 0)
-      if (line != "") {
-        ProcessLine(line)
-      }
-
-      if (global_1) print global_1
-      if (global_0) print global_0
-
-      for (id = 1; id <= nb; id++) {
-        if (clients_1[id]) print clients_1[id]
-        if (clients_0[id]) print clients_0[id]
-      }
-    }' | jq -c '.' 2>/dev/null | jq -s 'group_by(.type, .id // 0) | map(first) | .[]' )
-
-  local merged=$( {
-    echo "$summary"
-    echo "$old_summary"
-  } | jq -c '.' 2>/dev/null | jq -s 'group_by(.type, .id // 0) | map(first) | .[]' )
-
-  echo "${merged}" | jq -c '.' > "${output}"
-}
-
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
@@ -107,7 +27,7 @@ ExperimentCheckAllThreadsRunning() {
     echo "${ref_lastcheck} == 0" >&2
     [ -z "${lastTS}" ] && {
       echo "no ${stats} no lastTS, end check" >&2
-      ref_problems=" -1 ";
+      ref_problems=' -1 ';
       return 0;
     }
   fi
@@ -281,6 +201,7 @@ ExperimentSetup() {
   rm -rf ./experiments
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
+  echo "${RESERVED_PORT_PID}" > ./.reserved_port.pid
 }
 
 ExperimentSetupForCargo() {
@@ -460,8 +381,8 @@ ExperimentReport() {
   fi
 }
 
-ExperimentEnd() {
-  kill ${RESERVED_PORT_PID}
+ExperimentEndCommon() {
+  [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
   ExperimentReport
 }
@@ -555,7 +476,7 @@ ExperimentRunWithCargo() {
 
   local last_core=0;
   ExperimentSetupForCargo last_core "${features}" || return 1;
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -803,4 +724,3 @@ MonitorExperiment() {
     echo "" >> ${outfile}
   fi
 }
-

@@ -4,8 +4,6 @@ CheckObjectif() {
   local stats="$1"; shift;
   local -n ref_goal_success=$1; shift
 
-  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-
   local statsmaxsize=$(( 16*1024*1024 ));
   local statssize=0;
   local lastcheck=0;
@@ -16,13 +14,9 @@ CheckObjectif() {
     if (( ${obj_count} > 0 )); then
       echo "FOUND OBJECTIF, END PROCESS" >&2
       ref_goal_success=1
-
-      echo "${statssize}" > ./.xp_state_file_size
-      SaveSummary "${statssize}" "${stats}" "summary.json"
       break;
     fi
 
-    local currentStatSize="${statssize}";
     local currentProblems='';
     ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
     local haveissue=0;
@@ -34,15 +28,13 @@ CheckObjectif() {
     (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
     (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
 
-    echo "${currentStatSize}" > ./.xp_state_file_size
-    SaveSummary "${currentStatSize}" "${stats}" "summary.json"
-
     (( nbissues > 4 )) && { echo "TOO MUCH ISSUES, END PROCESS" >&2 ; break; }
 
-    if (( statssize > ${statsmaxsize} )); then
+    if (( statssize > statsmaxsize )); then
       echo "Try purge ${stats}";
+      cp "${stats}" "${stats}.1"
       local purgeRetries=0
-      while (( statssize > ${statsmaxsize} )); do
+      while (( statssize > statsmaxsize )); do
         truncate -s 0 "${stats}";
         sleep 0.5;
         statssize=$( stat --format=%s "${stats}" )
@@ -79,14 +71,8 @@ Experiment () {
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success
   fi
 
-  ExperimentEnd
-
   (( goal_success == 1 )) && return 0;
   return "${status}"
-}
-
-Experiment__Shutdown () {
-  Shutdown
 }
 
 ExperimentWithCargo () {
@@ -104,28 +90,104 @@ ExperimentWithCargo () {
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success;
   fi
 
-  ExperimentEnd
-
   (( goal_success == 1 )) && return 0;
   return "${status}"
 }
 
-ExperimentWithCargo__Shutdown () {
-  Shutdown
+ExperimentEnd() {
+  ExperimentEndCommon
+  SaveSummary
 }
 
-Shutdown() {
-  [ ! -f './.xp_state_file' ] && return;
-  local stats=$( cat './.xp_state_file' )
-  [ ! -f "${stats}" ] && return;
+SaveSummary() {
+  local output="summary.json";
+  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
 
-  [ ! -f './.xp_state_file_size' ] && return;
-  local statSize=$( cat './.xp_state_file_size' )
-  [[ ! "${statSize}" =~ ^[0-9]+$ ]] && return;
+  [ -f "./.xp_state_file" ] || {
+    echo '{"error": "no stats file"}' > "${output}"
+    return 1;
+  }
+  local stats=$( cat "./.xp_state_file" );
 
-  echo "SaveSummary ${statSize} ${stats} summary.json"
-  echo "SaveSummary ${statSize} ${stats} summary.json" >&2
-  SaveSummary "${statSize}" "${stats}" "summary.json"
+  local -a filesLst=("${stats}")
+  [ -f "${stats}.1" ] && filesLst+=("${stats}.1")
+  : > "${output}"
+  for file in "${filesLst[@]}"; do
+    awk '
+      function Validate(line, is_first,       opens, closes, i, c) {
+        if (is_first) {
+          if (line !~ /^\{/) return ""
+          line = substr(line, 2)
+        } else {
+          if (line !~ /\}$/) return ""
+          line = substr(line, 1, length(line) - 1)
+        }
+
+        opens = 0
+        closes = 0
+        for (i = 1; i <= length(line); i++) {
+          c = substr(line, i, 1)
+          if (c == "{") opens++
+          else if (c == "}") closes++
+        }
+        if (opens != closes) return ""
+        return line
+    }
+      BEGIN {
+        RS="}{"; line=""; buffer=""; first_record="";
+      }
+      {
+        sub(/\n$/, "", $0)
+
+        line = buffer
+        if (NR == 1) {
+          first_record=$0;
+          buffer = Validate($0, 1)
+        } else {
+          buffer = $0
+        }
+        if (line != "") {
+          print "{" line "}"
+        }
+      }
+      END {
+        if (NR == 1) {
+          if (buffer !~ /^\{/) buffer = substr(first_record, 2);
+          else buffer = ""
+        }
+        line = Validate(buffer, 0)
+        if (line != "") {
+          print "{" line "}"
+        }
+      }
+    ' "${file}" >> "${output}"
+  done
+
+  local summary=$( awk '
+    BEGIN {
+      nb = 0;
+    }
+    {
+      if ($0 ~ /"type":"global"/) {
+        global = $0
+      } else if ($0 ~ /"type":"client"/) {
+        if (match($0, /"id": *[0-9]+/)) {
+          id = substr($0, RSTART, RLENGTH)
+          gsub(/[^0-9]/, "", id)
+          if (id > nb) { nb = id }
+          clients[id] = $0
+        }
+      }
+    }
+    END {
+      if (global) print global
+
+      for (id = 1; id <= nb; id++) {
+        if (clients[id]) print clients[id]
+      }
+    }' "${output}" | jq -c '.' 2>/dev/null )
+
+  echo "${summary}" > "${output}"
 }
 
 ManageResults () {
@@ -162,10 +224,10 @@ SummaryRun () {
       local runID="${statsFile%'-summary-stats.json'}"
       local readmeFile="${THEJOB_ARTEFACTS_PATH}/${lib}/${runID}-README.md"
       local jsonEntry='';
-      [ ! -r "${readmeFile}" ] && { 
+      if [ ! -r "${readmeFile}" ]; then
         jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
         echo "Missing required file ${readmeFile}" >&2; 
-      } else {
+      else
         local startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
         local endTime=$( jq -n '[inputs.time.secs_since_epoch] | max' "${i}" )
         local runTime=$(( endTime - startTime ))
@@ -175,7 +237,7 @@ SummaryRun () {
         local totalExecs=$( jq 'select(.type == "global") | .total_execs' "${i}" );
         [ -z "${totalExecs}" ] && totalExecs=0;
         jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}, \"objective_size\": ${objectiveSize}, \"valid\": true }";
-      }
+      fi
       if (( ! firstRun )); then
         echo -n "," >> .run-summary.json.tmp
       fi
