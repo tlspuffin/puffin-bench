@@ -104,9 +104,9 @@ SummaryRun () {
       firstRun=0;
       json+=" { \"id\": \"${idRun}\", \"duration\": ${runTime}, \"corpus_size\": ${corpus}, \"total_execs\": ${execs}, \"coverage\": [ ${coverages} ], \"objective_size\": ${objectiveSize}, \"client_average_duration_s\": ${avgDuration} }";
 
-    done < <(find "${libresults}" -name "*.json" | sort -n)
+    done < <(find "${libresults}" -name "*.json" | sort -V)
     json+=" ] }";
-  done < <(find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -n)
+  done < <(find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -V)
   json+=" ] }";
   echo "${json}" > summary.json;
   CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"

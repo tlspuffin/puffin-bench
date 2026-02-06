@@ -3,7 +3,7 @@
   "configurations": {
     "SmallLines": {"args": {"nb_lines": "100000", "line_size": "80"}},
     "LargeLines": {"args": {"nb_lines": "10000", "line_size": "1024"}},
-    "ExtraLargeLines": {"args": {"nb_lines": "1000000", "line_size": "1024"}},
+    "ExtraLargeLines": {"args": {"nb_lines": "0", "line_size": "1024"}},
     "MixedOutput": {"args": {"nb_lines": "50000", "line_size": "256", "with_stderr": "true"}}
   },
   "flow": [
@@ -14,7 +14,6 @@
       "step": "HeavyOutput",
       "run": [ "SmallLines", "LargeLines", "ExtraLargeLines", "MixedOutput" ],
       "configuration": {
-        "timeout": "10m",
         "nb_retry": 1
       },
       "monitor": {

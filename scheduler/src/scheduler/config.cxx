@@ -58,8 +58,8 @@ void Config::Save(std::string const& filepath) const {
   doc.Accept(writer);
 }
 
-void Config::Validate() {
+void Config::Validate(bool forceInstall) {
   server_.Validate();
-  schedule_.Validate();
+  schedule_.Validate(forceInstall);
   cache_.Validate();
 }

@@ -60,14 +60,13 @@ Experiment () {
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
-  ExperimentRun tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  ExperimentRun tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
   echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
   local goal_success=0
   local status=1
   if ((tlspuffin_killed == 0)); then
     echo "CheckObjectif status ${tlspuffin_pid} ${stats} goal_success" >&2
-    echo "${stats}" > ./.xp_state_file
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success
   fi
 
@@ -79,14 +78,13 @@ ExperimentWithCargo () {
   local tlspuffin_pid;
   local tlspuffin_killed;
   local stats="";
-  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
   echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
   local goal_success=0
   local status=1
   if ((tlspuffin_killed == 0)); then
     echo "CheckObjectif status ${tlspuffin_pid} ${stats} goal_success" >&2
-    echo "${stats}" > ./.xp_state_file
     CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success;
   fi
 
@@ -103,14 +101,14 @@ SaveSummary() {
   local output="summary.json";
   CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
 
-  [ -f "./.xp_state_file" ] || {
-    echo '{"error": "no stats file"}' > "${output}"
+  #local stats=$( cat ./.xp_state_file )
+  local stats="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json"
+  [ -f "${stats}" ] || {
+    echo '{"error": "no stats file found"}' > "${output}"
     return 1;
   }
-  local stats=$( cat "./.xp_state_file" );
 
   local -a filesLst=("${stats}")
-  [ -f "${stats}.1" ] && filesLst+=("${stats}.1")
   : > "${output}"
   for file in "${filesLst[@]}"; do
     awk '
@@ -169,13 +167,23 @@ SaveSummary() {
     }
     {
       if ($0 ~ /"type":"global"/) {
-        global = $0
+        if (!global_set) {
+          global = $0
+          if ($0 !~ /"objective_size":0/) {
+            global_set = 1
+          }
+        }
       } else if ($0 ~ /"type":"client"/) {
         if (match($0, /"id": *[0-9]+/)) {
           id = substr($0, RSTART, RLENGTH)
           gsub(/[^0-9]/, "", id)
           if (id > nb) { nb = id }
-          clients[id] = $0
+          if (!clients_set[id]) {
+            clients[id] = $0
+            if ($0 !~ /"objective_size":0/) {
+              clients_set[id] = 1
+            }
+          }
         }
       }
     }
@@ -229,7 +237,7 @@ SummaryRun () {
         echo "Missing required file ${readmeFile}" >&2; 
       else
         local startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
-        local endTime=$( jq -n '[inputs.time.secs_since_epoch] | max' "${i}" )
+        local endTime=$( jq -r 'select(.type=="global") | .time.secs_since_epoch' "${i}" )
         local runTime=$(( endTime - startTime ))
 
         local objectiveSize=$( jq -n '[inputs.objective_size] | max' "${i}" );
@@ -244,9 +252,9 @@ SummaryRun () {
       firstRun=0;
       echo -n  "${jsonEntry}" >> .run-summary.json.tmp
 
-    done < <( find "${libresults}" -name "*-summary-stats.json" | sort -n )
+    done < <( find "${libresults}" -name "*-summary-stats.json" | sort -V )
     echo -n " ] }" >> .run-summary.json.tmp
-  done < <( find "${THEJOB_ARTEFACTS_PATH}" -maxdepth 1 -mindepth 1 -type d | sort -n )
+  done < <( find "${THEJOB_ARTEFACTS_PATH}" -maxdepth 1 -mindepth 1 -type d | sort -V )
   echo " ] }" >> .run-summary.json.tmp
   mv .run-summary.json.tmp run-summary.json;
   CreateArtefact "./run-summary.json" "run-summary.json" "commit_id:${COMMIT_ID}"

@@ -56,7 +56,7 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
   }
 }
 
-void ns_Executor::LocalConfig::Validate() const {
+void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
   CoresStats coresStats;
   uint64_t maxNbCores = coresStats.NbCores();
   if ((cores_.size() > maxNbCores) || ((nbCores_ > maxNbCores))) {
@@ -70,7 +70,7 @@ void ns_Executor::LocalConfig::Validate() const {
     }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(scriptPath_ / file);
-    if (!std::filesystem::exists(filePath)) {
+    if (forceInstall || (!std::filesystem::exists(filePath))) {
       std::cerr << "Creating missing required file " << filePath << std::endl;
       std::ofstream ofs(filePath, std::ios::binary);
       ofs.write(data, size);

@@ -90,7 +90,7 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
-void ns_Schedule::Config::Validate() const {
+void ns_Schedule::Config::Validate(bool forceInstall) const {
   auto discard = std::filesystem::canonical(toolsPath_);
 
   for(auto const& [ file, data, size ] : { 
@@ -114,6 +114,6 @@ void ns_Schedule::Config::Validate() const {
   discard = std::filesystem::canonical(userPath_);
   discard = std::filesystem::canonical(exportPath_);
   for (auto const& [name, executorConfig] : executors_) {
-    executorConfig->Validate();
+    executorConfig->Validate(forceInstall);
   }
 }

@@ -1,4 +1,5 @@
 import { Terminal } from './terminal.js';
+import { Logger } from './logs.js';
 
 const dataSource = {
   mode: 'api',
@@ -341,6 +342,7 @@ function CreateAttemptCard(step, taskName) {
     logsButton.textContent = 'Logs';
     logsButton.onclick = () => {
         StepLogs(step, taskName);
+        //Logger.Show(step, taskName);
     };
     if (dataSource.mode === 'url') {
       logsButton.style.display = 'none';
@@ -581,20 +583,6 @@ function CreateTaksCard(task, steps) {
   document.getElementById('container-running-steps').appendChild(div);
  }
 
-function NormalizeTasksPayload(raw) {
-  if (raw && raw.data && Array.isArray(raw.data.tasks)) {
-    return { success: true, tasks: raw.data.tasks };
-  }
-  if (raw && Array.isArray(raw.tasks)) {
-    return { success: true, tasks: raw.tasks };
-  }
-  if (Array.isArray(raw)) {
-    return { success: true, tasks: raw };
-  }
-  //return { success: false, tasks: [], error: 'Format de JSON non reconnu' };
-  return { success: true, tasks: [raw.task] };
-}
-
 async function GetServerStatus() {
   if (dataSource.mode === 'url' && dataSource.url) {
     const resp = await fetch(dataSource.url, { cache: 'no-store' });
@@ -604,7 +592,6 @@ async function GetServerStatus() {
     return [success, success ? [json.task] : []];
   }
 
-  //var response = await fetch(`http://${window.location.host}/files/board/out.json`);
   var response = await fetch(`http://${window.location.host}/api/tasks/running`);
   if (!response.ok) {
     return [ false, [] ];
@@ -613,8 +600,6 @@ async function GetServerStatus() {
   if (!data.success) {
     return [ data.error === 'Server can\'t read schedule status', [] ];
   }
-  /*data = data.data.running_steps;*/
-  //data = data.tasks;
   data = data.data.tasks;
   return [ true, data ];
 }
