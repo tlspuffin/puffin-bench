@@ -1,10 +1,12 @@
 #include "linux_process.hxx"
+#include "../../../utils/logs.hxx"
 #include <sys/types.h>
 #include <dirent.h>
 #include <string>
 #include <fstream>
 
 std::vector<pid_t> ns_Executor::Process::GetPidsBySid(pid_t sid) {
+  LOGE("Looking for orphans of session " << sid);
   std::vector<pid_t> pids;
 
   DIR* proc_dir = opendir("/proc");
@@ -37,6 +39,8 @@ std::vector<pid_t> ns_Executor::Process::GetPidsBySid(pid_t sid) {
       continue;
     }
     std::string after_comm = line.substr(comm_end + 2);
+
+    LOGE("Checking " << std::string(entry->d_name) << " : " << after_comm);
 
     int field_count = 0;
     pid_t psid = 0;

@@ -143,6 +143,7 @@ EndDirectChild() {
       if ! kill -0 ${pid} 2>/dev/null; then
         wait ${pid} 2>/dev/null
         echo "$?"
+        echo "Killed ${pid}" >&2
         return 0;
       fi
       attempt=$(( $attempt + 1))

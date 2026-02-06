@@ -299,6 +299,9 @@ void ns_Executor::FilesRing::threadMain() {
       } else if (event & (EPOLLIN | EPOLLPRI)) {
         std::lock_guard<std::mutex> lock(lockFDs_);
         auto it = fds_.find(fd);
+        if (it == fds_.end()) {
+          continue;
+        }
         while(true) {
           ssize_t readBytes = read(fd, buffers.data(), buffers.size());
           if (readBytes > 0) {
