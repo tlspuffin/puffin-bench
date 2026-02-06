@@ -4,7 +4,7 @@
 static ns_Publish::Config defaultConfig;
 
 ns_Publish::Config::Config() 
-    : storage_("data"), weboutput_("html"), orphanScanInterval_(3600) {
+    : storage_("data"), weboutput_("html"), orphanScanInterval_(3600), tmpPath_("tmp") {
 }
 
 void ns_Publish::Config::Load(std::string const& name, rapidjson::Value& doc) {
@@ -19,6 +19,8 @@ void ns_Publish::Config::Load(std::string const& name, rapidjson::Value& doc) {
       GetOrDefault<std::string>(*config, "htmlPath", defaultConfig.weboutput_));
   orphanScanInterval_ = 
       GetOrDefault<uint64_t>(*config, "orphanScanInterval", defaultConfig.orphanScanInterval_);
+  tmpPath_ = std::filesystem::weakly_canonical(
+      GetOrDefault<std::string>(*config, "tmpPath", defaultConfig.tmpPath_));
 }
 
 void ns_Publish::Config::Save(std::string const& name, rapidjson::Value& doc, 
@@ -27,10 +29,12 @@ void ns_Publish::Config::Save(std::string const& name, rapidjson::Value& doc,
   node.AddMember("storagePath", rapidjson::Value(storage_.c_str(), alloc), alloc);
   node.AddMember("htmlPath", rapidjson::Value(weboutput_.c_str(), alloc), alloc);
   node.AddMember("orphanScanInterval", orphanScanInterval_, alloc);
+  node.AddMember("tmpPath", rapidjson::Value(tmpPath_.c_str(), alloc), alloc);
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
 void ns_Publish::Config::Validate() const {
   auto discard = std::filesystem::canonical(storage_);
   discard = std::filesystem::canonical(weboutput_);
+  discard = std::filesystem::canonical(tmpPath_);
 };

@@ -44,7 +44,7 @@ void ns_Server::RequestHandlerNotify::handleRequest(Poco::Net::HTTPServerRequest
   std::ostream& out = response.send();
   try {
     std::string error;
-    if (!apis_->publishAPI_.Notify(form.get("path", ""), error)) {
+    if (!apis_->publishAPI_.NotifyFile(form.get("src", ""), form.get("dst", ""), error)) {
       throw std::runtime_error(error);
     }
     out << R"({"success": true})";

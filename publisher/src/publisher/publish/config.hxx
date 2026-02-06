@@ -17,6 +17,7 @@ public:
   std::filesystem::path storage_;
   std::filesystem::path weboutput_;
   uint64_t orphanScanInterval_;
+  std::filesystem::path tmpPath_;
 };
 
 };

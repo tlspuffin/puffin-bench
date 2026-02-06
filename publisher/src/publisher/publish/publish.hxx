@@ -15,6 +15,7 @@ public:
   Publish(Config const& config);
 
   bool Notify(std::string const& newPath, std::string& error) { return true; };
+  bool NotifyFile(std::string const& srcPath, std::string const& dstPath, std::string& error);
 
 private:
   struct Project {
@@ -26,6 +27,7 @@ private:
 
   Config config_;
   std::unordered_set<std::string> indexed_;
+  std::vector<Project> projects_;
 
   std::vector<Project> ScanProjects();
   std::unordered_set<std::string> LoadIndex(std::string const& indexFilename);

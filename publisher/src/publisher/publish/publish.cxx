@@ -5,17 +5,50 @@
 
 ns_Publish::Publish::Publish(Config const& config)
     : config_(config) {
-  std::vector<Project> projects = ScanProjects();
-  for (Project& project: projects) {
-    project.outputPath_ = project.path_ / "JSON";
+  projects_ = ScanProjects();
+  for (Project& project: projects_) {
     std::filesystem::create_directory(project.outputPath_);
     ProjectStorageScan(project);
   }
 }
 
+bool ns_Publish::Publish::NotifyFile(std::string const& srcPath, std::string const& dstPath, 
+    std::string& error) {
+  if (!std::filesystem::exists(srcPath)) {
+    error = "File does not exist";
+    return false;
+  }
+
+  for (Project& project: projects_) {
+    std::filesystem::path parentDirAbs = std::filesystem::canonical(project.path_);
+    std::filesystem::path subDirAbs = std::filesystem::canonical(dstPath);
+    std::filesystem::path::iterator parentIt = parentDirAbs.begin();
+    for(std::filesystem::path::iterator subDirIt = subDirAbs.begin();
+        parentIt != parentDirAbs.end() && subDirIt != subDirAbs.end() &&
+        *parentIt == *subDirIt; ++parentIt, ++ subDirIt);
+    bool isSubDir = parentIt == parentDirAbs.end();
+
+    if (isSubDir) {
+      for(auto& rule: project.rules_) {
+        std::filesystem::path relativePath = std::filesystem::relative(dstPath, project.path_);
+        if (rule->RegisterPath(relativePath, subDirAbs)) {
+          LOGE(project.path_ << " = " << dstPath << " " << rule->Name());
+
+          LOGI("Process " << subDirAbs);
+          if (rule->Run(subDirAbs, project.outputPath_)) {
+            project.indexed_.insert(srcPath);
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
 std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
   std::vector<ns_Publish::Publish::Project> projects;
 
+  LOGI("Publish folder:");
   std::unordered_set<std::string> filtredProjects { ".html", "Z" };
   try {
     for (auto iterator = std::filesystem::recursive_directory_iterator(config_.storage_);
@@ -27,8 +60,10 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
       if (filtredProjects.find(folderName) != filtredProjects.end()) {
         continue;
       }
+      LOGI(" * " << folderName);
       Project project;
       project.path_ = *iterator;
+      project.outputPath_ = project.path_ / "JSON";
       projects.push_back(project);
     }
   } catch (std::filesystem::filesystem_error const& e) {
@@ -36,6 +71,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
   } catch (std::exception const& e) {
     LOGE("Error during projects scan: " << e.what());
   }
+  LOGI("");
 
   for(auto& project : projects) {
     for (auto iterator = std::filesystem::recursive_directory_iterator(project.path_);
@@ -46,6 +82,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
         LOGW("Rules in " << *iterator);
         iterator.disable_recursion_pending();
 
+        LOGI("Looking rules in " << iterator->path());
         rapidjson::Document doc;
         ReadJSONFile(iterator->path() / ".rules", doc);
         for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {

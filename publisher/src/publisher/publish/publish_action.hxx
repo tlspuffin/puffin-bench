@@ -41,6 +41,7 @@ public:
   PublishAction();
   PublishAction(std::string const& name, std::string const& filesFilter);
   virtual ~PublishAction();
+  std::string Name() const;
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
   TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile);
   TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer);
@@ -53,6 +54,10 @@ protected:
 };
 
 inline PublishAction::~PublishAction() {}
+
+inline std::string PublishAction::Name() const {
+  return name_;
+}
 
 inline bool PublishAction::RegisterPath(std::string const& relativePath, std::string const& absolutePath) {
   if (!std::regex_match(relativePath, filesFilter_)) {
