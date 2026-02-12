@@ -5,13 +5,6 @@
     "goal": "Vuln PR/Commit ${COMMIT_ID}"
     },
   "configurations": {
-    "BUF": {
-      "args": {
-        "experiment": "BUF",
-        "features": "wolfssl540,fix-CVE-2022-42905",
-        "vendor": "wolfssl:wolfssl510-buf"
-      }
-    },
     "CDOS": {
       "args": {
         "experiment": "CDOS",
@@ -19,49 +12,28 @@
         "vendor": "wolfssl:wolfssl530-cdos"
       }
     },
-    "HEAP": {
+    "BUF": {
       "args": {
-        "experiment": "HEAP",
-        "features": "wolfssl540,asan,fix-CVE-2022-39173",
-        "vendor": "wolfssl:wolfssl540-heap"
-      }
-    },
-    "SDOS2": {
-      "args": {
-        "experiment": "SDOS2",
-        "features": "wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173",
-        "extra_flags": "'--put-use-clear'",
-        "vendor": "wolfssl:wolfssl540-sdos2"
-      }
-    },
-    "SKIP": {
-      "args": {
-        "experiment": "SKIP",
-        "features": "wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173",
-        "vendor": "wolfssl:wolfssl510-skip"
+        "experiment": "BUF",
+        "features": "wolfssl540,fix-CVE-2022-42905",
+        "vendor": "wolfssl:wolfssl510-buf"
       }
     }
   },
-  "name" : "Vulnerabilities (group A) search - ${COMMIT_ID}",
+  "name" : "Vulnerabilities (subset CDOS, BUF from group A) search - ${COMMIT_ID}",
   "flow" : [
     {
-      "step": "Init",
-      "configuration": {
-          "nb_cores": 4
-        }
-    },
+      "step": "Init"
+    }, 
     [
       {
-        "run": [ "BUF", "CDOS", "HEAP", "SDOS2", "SKIP" ],
+        "run": [ "CDOS", "BUF" ],
         "configuration": {
           "nb_retry": 5
         }
       },
       {
-        "step": "ForcedBuild",
-        "configuration": {
-          "nb_cores": 4
-        }
+        "step": "ForcedBuild"
       },
       {
         "step": "ExperimentWithCargo",
@@ -86,7 +58,7 @@
       "step": "ManageResults",
       "configuration": {
         "args": {
-          "vulnerabilities": "BUF CDOS HEAP SDOS2 SKIP",
+          "vulnerabilities": "CDOS BUF",
           "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
         }
       }

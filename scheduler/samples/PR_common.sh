@@ -86,11 +86,12 @@ function ExperimentCheckRun() {
 
 FindFile() {
   local base_path="$1"
+  [ -n "${base_path}" ] && base_path="${base_path%/}/"
   shift
   local file_patterns=("$@")
 
   for pattern in "${file_patterns[@]}"; do
-    local full_path="${base_path}/${pattern}"
+    local full_path="${base_path}${pattern}"
     if [ -e "${full_path}" ]; then
       echo "${full_path}"
       return 0
@@ -233,8 +234,10 @@ ExperimentSetupForCargo() {
   }
   if ${cputs}; then
     echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
+    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "./.compil_info.json"
   else
     echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "${THEJOB_USER_STATE_FILE}";
+    echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "./.compil_info.json"
   fi
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
@@ -300,7 +303,10 @@ ExperimentPostLaunchSetup() {
     };
 
     if ref_statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-      (( saveObjectif == 1 )) && CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+      if (( saveObjectif == 1 )); then
+        CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+        CreateArtefact "${ref_statsJSON}.1" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json.1" "commit_id:${COMMIT_ID}" "features:${features}"
+      fi
       break;
     fi
 
@@ -326,12 +332,12 @@ ExperimentPostLaunchSetup() {
   if [ -d './log' ]; then
     CreateArtefact "./log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log_root" "commit_id:${COMMIT_ID}" "features:${features}"
   else
-    echo 'No root log directory found, will not be archived' > tee /dev/stderr
+    echo 'No root log directory found, will not be archived' | tee /dev/stderr
   fi
   if [ -d "./${experiment_base}/log" ]; then
     CreateArtefact "./${experiment_base}/log" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log" "commit_id:${COMMIT_ID}" "features:${features}"
   else
-    echo 'No log directory found, will not be archived' > tee /dev/stderr
+    echo 'No log directory found, will not be archived' | tee /dev/stderr
   fi
 
   StartMonitor
@@ -476,6 +482,7 @@ ExperimentRunWithCargo() {
 
   local last_core=0;
   ExperimentSetupForCargo last_core "${features}" || return 1;
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
   nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
@@ -587,19 +594,20 @@ ForcedBuild() {
     return 1
   fi
 
+  cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
+  rm -rf ./seeds
+  nix-shell --run "cargo run --release -p tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+
   local cputs=false
   ComputeBuildRuntimeInfo "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }
 
-  cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
   if ${cputs}; then
+    rm -rf ./vendor
     nix-shell --run "./tools/mk_vendor make '${vendor}'"
   fi
-
-  rm -rf seeds
-  nix-shell --run "cargo run --release -p tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   nix-shell --run "cargo run --bin tlspuffin --release --features=${features} -j ${THEJOB_NB_CORES} -- help" || return 1
 
@@ -649,7 +657,7 @@ MonitorExperiment() {
     fi
     echo -e "\n  Time since last stats.json update: ${elapsed}s" >> ${outfile}
 
-    if [ ! ${old_tlspuffin} ]; then
+    if ! ${old_tlspuffin}; then
       # Default PUT info from log
       local log_file="$exp/log/stats_puffin_main_broker.log"
       if [ -f "$log_file" ]; then
@@ -683,7 +691,7 @@ MonitorExperiment() {
     fi
 
     # Error log
-    if [ ! ${old_tlspuffin} ]; then
+    if ! ${old_tlspuffin}; then
       local log_file="$exp/log/error.log"
       if [ -f "$log_file" ]; then
         if [ -s "$log_file" ]; then

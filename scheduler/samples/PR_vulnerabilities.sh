@@ -61,6 +61,7 @@ Experiment () {
   local tlspuffin_killed=0;
   local stats="";
   ExperimentRun tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
+  echo  "${stats}" > ./.xp_state_file
   echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
   local goal_success=0
@@ -79,6 +80,7 @@ ExperimentWithCargo () {
   local tlspuffin_killed;
   local stats="";
   ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
+  echo  "${stats}" > ./.xp_state_file
   echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
   local goal_success=0
@@ -103,20 +105,22 @@ SaveSummary() {
 
   #local stats=$( cat ./.xp_state_file )
   local stats="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json"
-  [ -f "${stats}" ] || {
-    echo '{"error": "no stats file found"}' > "${output}"
+  [ -r "${stats}" ] || {
+    echo "{\"error\": \"no file ${stats} not found\"}" > "${output}"
     return 1;
   }
 
-  local -a filesLst=("${stats}")
+  local -a filesLst=()
+  [ -r "${stats}.1" ] && filesLst+=("${stats}.1")
+  filesLst+=("${stats}")
   : > "${output}"
   for file in "${filesLst[@]}"; do
     awk '
       function Validate(line, is_first,       opens, closes, i, c) {
-        if (is_first) {
+        if (is_first == 1) {
           if (line !~ /^\{/) return ""
           line = substr(line, 2)
-        } else {
+        } else if (is_first == 0) {
           if (line !~ /\}$/) return ""
           line = substr(line, 1, length(line) - 1)
         }
@@ -145,7 +149,9 @@ SaveSummary() {
           buffer = $0
         }
         if (line != "") {
-          print "{" line "}"
+          if (Validate(line, 2) != "") {
+            print "{" line "}"
+          }
         }
       }
       END {
@@ -196,6 +202,7 @@ SaveSummary() {
     }' "${output}" | jq -c '.' 2>/dev/null )
 
   echo "${summary}" > "${output}"
+  [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&1
 }
 
 ManageResults () {
@@ -227,6 +234,7 @@ SummaryRun () {
     firstlib=0
     echo -n " { \"name\": \"${lib}\", \"data\": [ " >> .run-summary.json.tmp
     local firstRun=1;
+    local cputs="";
     while read -r i; do
       local statsFile="${i#"${THEJOB_ARTEFACTS_PATH}/${lib}/"}";
       local runID="${statsFile%'-summary-stats.json'}"
@@ -245,6 +253,7 @@ SummaryRun () {
         local totalExecs=$( jq 'select(.type == "global") | .total_execs' "${i}" );
         [ -z "${totalExecs}" ] && totalExecs=0;
         jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}, \"objective_size\": ${objectiveSize}, \"valid\": true }";
+        [ -z "${cputs}" ] && cputs=$( jq -r 'select(has("cputs")) | .cputs' "${i}" )
       fi
       if (( ! firstRun )); then
         echo -n "," >> .run-summary.json.tmp
@@ -253,7 +262,7 @@ SummaryRun () {
       echo -n  "${jsonEntry}" >> .run-summary.json.tmp
 
     done < <( find "${libresults}" -name "*-summary-stats.json" | sort -V )
-    echo -n " ] }" >> .run-summary.json.tmp
+    echo -n " ], \"cputs\": \"${cputs}\" }" >> .run-summary.json.tmp
   done < <( find "${THEJOB_ARTEFACTS_PATH}" -maxdepth 1 -mindepth 1 -type d | sort -V )
   echo " ] }" >> .run-summary.json.tmp
   mv .run-summary.json.tmp run-summary.json;
