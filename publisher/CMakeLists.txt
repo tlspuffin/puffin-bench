@@ -43,9 +43,10 @@ set(PUBLISHER_SRC
   src/publisher/config.cxx 
   src/publisher/server/config.cxx src/publisher/server/server.cxx 
   src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
-  src/publisher/publish/config.cxx src/publisher/publish/publish.cxx 
+  src/publisher/publish/config.cxx src/publisher/publish/index.cxx src/publisher/publish/publish.cxx 
   src/publisher/publish/publish_action.cxx src/publisher/publish/publish_action_perf.cxx src/publisher/publish/publish_action_vuln.cxx 
-  src/publisher/publish/publish_action_perf_summary.cxx src/publisher/publish/publish_action_vuln2.cxx
+  src/publisher/publish/publish_action_perf_summary.cxx src/publisher/publish/publish_action_vuln2.cxx 
+  src/publisher/publish/publish_action_vuln3.cxx
   #src/embeded/publisher/index_html.h src/embeded/publisher/index_css.h src/embeded/publisher/index_js.h
 )
 
@@ -57,3 +58,7 @@ add_executable(publisher-static src/publisher/main.cxx ${PUBLISHER_SRC})
 target_link_libraries(publisher-static PRIVATE Poco LibArchive::LibArchive)
 target_include_directories(publisher-static PRIVATE ${RAPIDJSON_PATH})
 target_link_options(publisher-static PRIVATE -static)
+
+add_executable(test00 src/test00.cxx ${PUBLISHER_SRC})
+target_link_libraries(test00 PRIVATE Poco LibArchive::LibArchive)
+target_include_directories(test00 PRIVATE ${RAPIDJSON_PATH})

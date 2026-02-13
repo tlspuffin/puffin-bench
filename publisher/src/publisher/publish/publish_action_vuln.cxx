@@ -5,8 +5,10 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/writer.h>
 
-ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionVuln::Analyze(std::string jsonTaskFile) {
-  TaskAnalysis experiments = ExtractExperimentsFromFile(jsonTaskFile);
+bool ns_Publish::PublishActionVuln::Analyze(std::string jsonTaskFile, 
+    PublishAction::TaskAnalysis& experiments,
+    std::unordered_map<std::string, LibSummary>& libSummaries) {
+  experiments = ExtractExperimentsFromFile(jsonTaskFile);
   LOGI("Found " << experiments.experiments.size() << " Experiment steps");
   std::unordered_set<std::string> libs;
   bool haveSuccess = false;
@@ -19,12 +21,12 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionVuln::Analyze(s
     libs.insert(exp.id);
     if ((exp.exit_code == 0) && (exp.state == "Done")) {
       haveSuccess = true;
-      experiments.libs_summary[exp.id].success_count++;
-      experiments.libs_summary[exp.id].total_runs++;
-      experiments.libs_summary[exp.id].success_durations_ms.push_back(exp.duration_ms);
+      libSummaries[exp.id].success_count++;
+      libSummaries[exp.id].total_runs++;
+      libSummaries[exp.id].success_durations_ms.push_back(exp.duration_ms);
     } else {
-      experiments.libs_summary[exp.id].total_runs++;
-      experiments.libs_summary[exp.id].fail_durations_ms.push_back(exp.duration_ms);
+      libSummaries[exp.id].total_runs++;
+      libSummaries[exp.id].fail_durations_ms.push_back(exp.duration_ms);
       haveFail = true;
       LOGI("  Experiment ID=" << exp.id
           << " attempt=" << exp.attempt
@@ -43,15 +45,18 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishActionVuln::Analyze(s
   } else {
     experiments.global_status = "mixed";
   }
-  return experiments;
+  return true;
 }
 
 bool ns_Publish::PublishActionVuln::GenerateCommitJson(
-    ns_Publish::PublishAction::TaskAnalysis const& analysis,
-    std::filesystem::path const& outputPath) {
+    PublishAction::TaskAnalysis const& analysis,
+    std::unordered_map<std::string, LibSummary> const& libSummaries,
+    std::filesystem::path const& outputPath, std::string& outFile, 
+    std::unordered_set<std::string>& libsManaged) {
 
   std::filesystem::create_directories(outputPath / "Vuln");
-  std::filesystem::path jsonPath = outputPath / "Vuln" / (analysis.commit_id + ".json");
+  std::filesystem::path jsonRelativePath = std::filesystem::path("Vuln") / (analysis.commit_id + ".json");
+  std::filesystem::path jsonPath = outputPath / jsonRelativePath;
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -68,7 +73,7 @@ bool ns_Publish::PublishActionVuln::GenerateCommitJson(
     rapidjson::Value(analysis.global_status.c_str(), allocator), allocator);
 
   rapidjson::Value libsObj(rapidjson::kObjectType);
-  for (auto const& [libName, libSum] : analysis.libs_summary) {
+  for (auto const& [libName, libSum] : libSummaries) {
     rapidjson::Value libData(rapidjson::kObjectType);
     libData.AddMember("success_count", libSum.success_count, allocator);
     libData.AddMember("total_runs", libSum.total_runs, allocator);
@@ -85,11 +90,10 @@ bool ns_Publish::PublishActionVuln::GenerateCommitJson(
     }
     libData.AddMember("fail_durations_ms", failDurations, allocator);
 
-    libsObj.AddMember(
-      rapidjson::Value(libName.c_str(), allocator),
-      libData,
-      allocator
-    );
+    libsObj.AddMember(rapidjson::Value(libName.c_str(), allocator),
+        libData, allocator);
+
+    libsManaged.insert(libName);
   }
   doc.AddMember("libs", libsObj, allocator);
 
@@ -106,5 +110,6 @@ bool ns_Publish::PublishActionVuln::GenerateCommitJson(
   ofs.close();
 
   LOGI("Generated " << jsonPath);
+  outFile = jsonRelativePath;
   return true;
 }

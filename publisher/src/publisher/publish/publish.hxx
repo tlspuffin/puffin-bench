@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.hxx"
+#include "index.hxx"
 #include "publish_action.hxx"
 #include <filesystem>
 #include <unordered_map>
@@ -21,15 +22,17 @@ private:
   struct Project {
     std::filesystem::path path_;
     std::filesystem::path outputPath_;
-    std::unordered_set<std::string> indexed_;
+    Index indexed_;
     std::vector<std::shared_ptr<PublishAction>> rules_;
+
+    Project(std::filesystem::path const& path, std::filesystem::path const& outputPath);
   };
 
   Config config_;
-  std::unordered_set<std::string> indexed_;
   std::vector<Project> projects_;
 
   std::vector<Project> ScanProjects();
+  bool ScanRules(ns_Publish::Publish::Project& project, std::filesystem::path const& directory);
   std::unordered_set<std::string> LoadIndex(std::string const& indexFilename);
   void SaveIndex(std::unordered_set<std::string> indexed, std::string const& indexFilename);
 

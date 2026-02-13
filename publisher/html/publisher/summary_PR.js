@@ -142,7 +142,7 @@ async function loadCommits(commitsInfos) {
 
       // Fetch all types for this commit
       const typePromises = availableTypes.map(type =>
-        fetch(`${config.location}/JSON/${type}/${commitId.id}.json`)
+        fetch(`${config.location}/.JSON/${type}/${commitId.id}.json`)
           .then(r => r.ok ? r.json() : null)
           .catch(() => null)
           .then(data => ({ type, data }))

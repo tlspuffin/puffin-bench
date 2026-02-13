@@ -9,7 +9,8 @@
 #include <rapidjson/writer.h>
 
 bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
-    std::filesystem::path const& inputFile, std::filesystem::path const& outputPath) {
+    std::filesystem::path const& inputFile, std::filesystem::path const& outputPath, 
+    std::string& outFile, std::unordered_set<std::string>& libsManaged) {
   FileTGZ filetgz(inputFile);
 
   std::vector<std::pair<std::string, uint64_t>> taskInfo = filetgz.ListFiles(std::regex("[0-9]+\\.json"));
@@ -157,7 +158,8 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   }
 
   std::filesystem::create_directories(outputPath / "Perf");
-  std::filesystem::path jsonPath = outputPath / "Perf" / (analysis.commit_id + ".json");
+  std::filesystem::path jsonRelativePath = std::filesystem::path("Perf") / (analysis.commit_id + ".json");
+  std::filesystem::path jsonPath = outputPath / relativePath_;
 
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
@@ -178,7 +180,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     rapidjson::Value libData(rapidjson::kObjectType);
     std::unordered_map<std::string, rapidjson::Value> datas;
     rapidjson::Value haveObjectif(rapidjson::kArrayType);
-    int nbSucess = 0;
+    int nbSuccess = 0;
     int trustObjectif = strcasecmp(libName.c_str(), "wolfssl") != 0 ? 1 : 
         (((!state.libraryVersion.empty()) && (std::stoull(state.libraryVersion))) > 540 ? 1 : -1);
     for (auto const& [attempt, success]: state.runs) {
@@ -196,7 +198,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
       }
       std::string attemptString = std::to_string(attempt);
       if (successFinal) {
-        ++nbSucess;
+        ++nbSuccess;
 
         for (auto const& [key, value]: librariesData[libName][attemptString]) {
           if (key == "duration") {
@@ -235,7 +237,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     }
     libData.AddMember("cputs", state.cputs, allocator);
     libData.AddMember("total_runs", state.runs.size(), allocator);
-    libData.AddMember("success_count", nbSucess, allocator);
+    libData.AddMember("success_count", nbSuccess, allocator);
     for(auto& [key, value]: datas) {
       libData.AddMember(rapidjson::Value(key.c_str(), allocator), value, allocator);
     }
@@ -244,6 +246,8 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     }
     libsObj.AddMember(
       rapidjson::Value(libName.c_str(), allocator), libData, allocator);
+
+    libsManaged.insert(libName);
   }
   doc.AddMember("libs", libsObj, allocator);
 
@@ -272,5 +276,6 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   ofs.close();
 
   LOGI("Generated " << jsonPath);
+  outFile = jsonRelativePath;
   return true;
 }

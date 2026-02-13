@@ -3,6 +3,7 @@
 #include "publish_action_perf_summary.hxx"
 #include "publish_action_vuln.hxx"
 #include "publish_action_vuln2.hxx"
+#include "publish_action_vuln3.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/time.hxx"
 #include <fstream>
@@ -13,8 +14,10 @@ ns_Publish::PublishAction::PublishAction()
     : name_("unnamed"), filesFilter_() {
 }
 
-ns_Publish::PublishAction::PublishAction(std::string const& name, std::string const& filesFilter) 
-    : name_(name), filesFilter_(filesFilter) {
+ns_Publish::PublishAction::PublishAction(std::string const& relativePath, std::string const& name, 
+    std::string const& filesFilter) 
+    : name_(name), relativePath_(relativePath != "." ? relativePath : ""), 
+    filesFilter_(filesFilter), debugFilesFilter_(filesFilter) {
 }
 
 ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromFile(
@@ -92,7 +95,7 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
     }
 
     std::string stepName = step["name"].GetString();
-    if (stepName.find("Experiment") != std::string::npos) {
+    if ((stepName.find("Experiment") != std::string::npos) && (stepName != "ExperimentEnd")) {
       ExperimentResult exp;
       exp.state = step.HasMember("state") && step["state"].IsString()
           ? step["state"].GetString() : "Unknown";
@@ -122,16 +125,18 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
   return result;
 }
 
-ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& action, 
-    std::string const& name, std::string const& filesFilter) {
+ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& relativePath, 
+    std::string const& action, std::string const& name, std::string const& filesFilter) {
   if (action == "GenerateReportPerf") {
-    return new PublishActionPerf(name, filesFilter);
+    return new PublishActionPerf(relativePath, name, filesFilter);
   } else if (action == "GenerateReportVuln") {
-    return new PublishActionVuln(name, filesFilter);
+    return new PublishActionVuln(relativePath, name, filesFilter);
   } else if (action == "GenerateReportPerfFromSummary") {
-    return new PublishActionPerfUseSummary(name, filesFilter);
+    return new PublishActionPerfUseSummary(relativePath, name, filesFilter);
   } else if (action == "GenerateReportVuln2") {
-    return new PublishActionVuln2(name, filesFilter);
+    return new PublishActionVuln2(relativePath, name, filesFilter);
+  } else if (action == "GenerateReportVuln3") {
+    return new PublishActionVuln3(relativePath, name, filesFilter);
   }
   return nullptr;
 }

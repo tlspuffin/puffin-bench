@@ -1,7 +1,13 @@
 #include "publish.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/dir.hxx"
 #include <fstream>
+
+ns_Publish::Publish::Project::Project(
+    std::filesystem::path const& path, std::filesystem::path const& outputPath)
+    : path_(path), outputPath_(outputPath), indexed_(), rules_()
+{}
 
 ns_Publish::Publish::Publish(Config const& config)
     : config_(config) {
@@ -22,21 +28,18 @@ bool ns_Publish::Publish::NotifyFile(std::string const& srcPath, std::string con
   for (Project& project: projects_) {
     std::filesystem::path parentDirAbs = std::filesystem::canonical(project.path_);
     std::filesystem::path subDirAbs = std::filesystem::canonical(dstPath);
-    std::filesystem::path::iterator parentIt = parentDirAbs.begin();
-    for(std::filesystem::path::iterator subDirIt = subDirAbs.begin();
-        parentIt != parentDirAbs.end() && subDirIt != subDirAbs.end() &&
-        *parentIt == *subDirIt; ++parentIt, ++ subDirIt);
-    bool isSubDir = parentIt == parentDirAbs.end();
 
-    if (isSubDir) {
+    if (IsSubDir(parentDirAbs, subDirAbs)) {
       for(auto& rule: project.rules_) {
         std::filesystem::path relativePath = std::filesystem::relative(dstPath, project.path_);
         if (rule->RegisterPath(relativePath, subDirAbs)) {
           LOGE(project.path_ << " = " << dstPath << " " << rule->Name());
 
           LOGI("Process " << subDirAbs);
-          if (rule->Run(subDirAbs, project.outputPath_)) {
-            project.indexed_.insert(srcPath);
+          std::string outFile;
+          std::unordered_set<std::string> libsManaged;
+          if (rule->Run(subDirAbs, project.outputPath_, outFile, libsManaged)) {
+            project.indexed_.Add(outFile, srcPath, libsManaged);
           }
         }
       }
@@ -49,7 +52,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
   std::vector<ns_Publish::Publish::Project> projects;
 
   LOGI("Publish folder:");
-  std::unordered_set<std::string> filtredProjects { ".html", "Z" };
+  std::unordered_set<std::string> filtredProjects { ".html", "Z", "tlspuffin", "tests" };
   try {
     for (auto iterator = std::filesystem::recursive_directory_iterator(config_.storage_);
         iterator != std::filesystem::recursive_directory_iterator();
@@ -61,10 +64,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
         continue;
       }
       LOGI(" * " << folderName);
-      Project project;
-      project.path_ = *iterator;
-      project.outputPath_ = project.path_ / "JSON";
-      projects.push_back(project);
+      projects.push_back(Project{ *iterator, iterator->path() / ".JSON" });
     }
   } catch (std::filesystem::filesystem_error const& e) {
     LOGE("Filesystem error during projects scan: " << e.what());
@@ -74,38 +74,50 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
   LOGI("");
 
   for(auto& project : projects) {
+    LOGI("Rules scan " << project.path_);
+    ScanRules(project, project.path_);
     for (auto iterator = std::filesystem::recursive_directory_iterator(project.path_);
         iterator != std::filesystem::recursive_directory_iterator();
         ++iterator) {
-      if (!iterator->is_directory()) continue;
-      if (std::filesystem::exists(iterator->path() / ".rules")) {
-        LOGW("Rules in " << *iterator);
+      if (ScanRules(project, *iterator)) {
         iterator.disable_recursion_pending();
-
-        LOGI("Looking rules in " << iterator->path());
-        rapidjson::Document doc;
-        ReadJSONFile(iterator->path() / ".rules", doc);
-        for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
-          const auto& value = it->value;
-          if (!value.IsObject()) continue;
-
-          const std::string name = it->name.GetString();
-          const std::string action = value["action"].GetString();
-          const std::string onFiles = value["onFiles"].GetString();
-
-          std::shared_ptr<PublishAction> actionPtr = std::shared_ptr<PublishAction>(PublishAction::Build(action, name, onFiles));
-          if (!actionPtr) {
-            LOGE("Unknown action: " << action);
-            continue;
-          }
-          project.rules_.push_back(actionPtr);
-          std::cout << "Add rules de la règle: " << name << " → " << action << " (" << onFiles << ")\n";
-        }
       }
     }
   }
 
   return projects;
+}
+
+bool ns_Publish::Publish::ScanRules(ns_Publish::Publish::Project& project, std::filesystem::path const& directory) {
+  if (!std::filesystem::is_directory(directory)) {
+    return false; // go on with subdir
+  }
+  if (!std::filesystem::exists(directory / ".rules")) {
+    return false; // go on with subdir
+  }
+
+  LOGI("Looking rules in " << directory);
+  rapidjson::Document doc;
+  ReadJSONFile(directory / ".rules", doc);
+  for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
+    const auto& value = it->value;
+    if (!value.IsObject()) {
+      return true; // stop search in subdir
+    }
+
+    const std::string name = it->name.GetString();
+    const std::string action = value["action"].GetString();
+    const std::string onFiles = value["onFiles"].GetString();
+    const std::string relativePath = std::filesystem::relative(directory, project.path_);
+    std::shared_ptr<PublishAction> actionPtr = std::shared_ptr<PublishAction>(PublishAction::Build(relativePath, action, name, onFiles));
+    if (actionPtr) {
+      project.rules_.push_back(actionPtr);
+      std::cout << "Add rules: " << name << " → " << action << " (" << onFiles << ") for: " << relativePath << '\n';
+    } else {
+      LOGE("Unknown action: " << action);
+    }
+  }
+  return true; // stop search in subdir
 }
 
 std::unordered_set<std::string> ns_Publish::Publish::LoadIndex(std::string const& indexFilename) {
@@ -150,31 +162,34 @@ void ns_Publish::Publish::SaveIndex(std::unordered_set<std::string> indexed, std
 }
 
 void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& project) {
-  std::filesystem::path indexPath = project.path_ / ".index";
-  project.indexed_ = LoadIndex(indexPath);
+  std::filesystem::path indexPath = project.path_ / ".index.json";
+  project.indexed_.Load(indexPath);
 
-  int processedCount = 0;
   try {
+    int processedCount = 0;
+    LOGI("Scan " << project.path_);
+
     for (auto const& entry : std::filesystem::recursive_directory_iterator(project.path_)) {
       if (!entry.is_regular_file()) continue;
       std::filesystem::path relativePath = std::filesystem::relative(entry.path(), project.path_);
       std::string relativeStr = relativePath.string();
+      if (relativeStr[0] == '.') continue;
 
       for(auto& rule: project.rules_) {
-        if (rule->RegisterPath(relativeStr, entry.path())) {
-          if (project.indexed_.find(relativeStr) == project.indexed_.end()) {
-            LOGI("Process " << entry);
-            if (rule->Run(entry.path(), project.outputPath_)) {
-              project.indexed_.insert(relativeStr);
-              ++processedCount;
-            }
+        if ((rule->RegisterPath(relativeStr, entry.path())) && (!project.indexed_.Have(project.outputPath_, relativeStr))) {
+          LOGI("Process " << entry << " with " << rule->Name());
+          std::string outFile;
+          std::unordered_set<std::string> libsManaged;
+          if (rule->Run(entry.path(), project.outputPath_, outFile, libsManaged)) {
+            project.indexed_.Add(outFile, relativeStr, libsManaged);
+            ++processedCount;
           }
-          break;
         }
+
       }
     }
     if (processedCount > 0) {
-      SaveIndex(project.indexed_, indexPath);
+      project.indexed_.Save(indexPath);
       LOGI("Processed and indexed " << processedCount << " files");
     }
   } catch (std::filesystem::filesystem_error const& e) {
