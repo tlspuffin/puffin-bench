@@ -22,6 +22,8 @@ public:
     uint64_t exit_code;
   };
   struct TaskAnalysis {
+    std::string task_infos;
+    std::string task_data;
     std::string commit_id;
     std::string task_name;
     uint64_t task_id;
@@ -31,22 +33,25 @@ public:
   };
 
   PublishAction();
-  PublishAction(std::string const& relativePath, std::string const& name, 
+  PublishAction(std::string const& basePath, 
+      std::string const& relativePath, std::string const& name, 
       std::string const& filesFilter);
   virtual ~PublishAction();
   std::string Name() const;
   std::string ProjectRelativePath() const;
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
-  TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile);
-  TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer);
-  virtual bool Run(std::filesystem::path const& inputPath, 
+  TaskAnalysis ExtractExperimentsFromFile(std::vector<std::filesystem::path>& jsonTaskFile);
+  TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer, 
+      std::filesystem::path taskInfos, std::filesystem::path taskData);
+  virtual bool Run(std::vector<std::filesystem::path>& inputFiles, 
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged) = 0;
-  static PublishAction* Build(std::string const& relativePath, std::string const& action, 
-      std::string const& name, std::string const& onFiles);
+  static PublishAction* Build(std::string const& basePath, std::string const& relativePath, 
+      std::string const& action, std::string const& name, std::string const& onFiles);
 
 protected:
   std::string const name_;
+  std::string const basePath_;
   std::string const relativePath_;
   std::regex const filesFilter_;
   std::string const debugFilesFilter_;

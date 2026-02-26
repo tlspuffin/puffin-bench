@@ -23,25 +23,25 @@ private:
 
 public:
   PublishActionVuln3() : PublishAction() {}
-  PublishActionVuln3(
-      std::string const& relativePath, std::string const& name, std::string const& filesFilter) 
-      : PublishAction(relativePath, name, filesFilter) {}
-  bool Analyze(std::string taskResultsFile, PublishAction::TaskAnalysis& analysis, 
+  PublishActionVuln3(std::string const& basePath, std::string const& relativePath, 
+      std::string const& name, std::string const& filesFilter) 
+      : PublishAction(basePath, relativePath, name, filesFilter) {}
+  bool Analyze(std::vector<std::filesystem::path>& inputFiles, PublishAction::TaskAnalysis& analysis, 
       std::unordered_map<std::string, struct LibSummary>& libSummaries);
   bool GenerateCommitJson(PublishAction::TaskAnalysis const& analysis, 
       std::unordered_map<std::string, struct LibSummary> const& libSummaries,
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
-  bool Run(std::filesystem::path const& inputPath, std::filesystem::path const& outputPath, 
+  bool Run(std::vector<std::filesystem::path>& inputFiles, std::filesystem::path const& outputPath, 
       std::string& outFile, std::unordered_set<std::string>& libsManaged) {
     outFile = "";
     libsManaged.clear();
-    if (targets_.find(inputPath) == targets_.end()) {
+    if (targets_.find(inputFiles.back()) == targets_.end()) {
       return false;
     }
     PublishActionVuln3::TaskAnalysis analyze;
     std::unordered_map<std::string, struct LibSummary> libSummaries;
-    if (!Analyze(inputPath, analyze, libSummaries)) {
+    if (!Analyze(inputFiles, analyze, libSummaries)) {
       return false;
     }
     return GenerateCommitJson(analyze, libSummaries, outputPath, outFile, libsManaged);

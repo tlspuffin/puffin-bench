@@ -772,12 +772,62 @@ header {
   transform: translateY(0);
 }
 
-.actions button:last-child {
+.actions button.btn-download {
   background: var(--color-success);
 }
 
-.actions button:last-child:hover {
+.actions button.btn-download:hover {
   background: #229954;
+}
+
+/* Action dropdown */
+.action-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.action-dropdown-menu {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: var(--shadow-md);
+  z-index: 100;
+  min-width: 200px;
+}
+
+.action-dropdown-menu.visible {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.action-dropdown-item {
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+
+.action-dropdown-item:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
+.action-dropdown-item.btn-download:hover {
+  background: var(--color-success);
+  color: white;
 }
 
 .dropdown {

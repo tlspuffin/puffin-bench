@@ -4,9 +4,9 @@
 #include "../../utils/dir.hxx"
 #include <fstream>
 
-ns_Publish::Publish::Project::Project(
+ns_Publish::Publish::Project::Project(std::string const& name, 
     std::filesystem::path const& path, std::filesystem::path const& outputPath)
-    : path_(path), outputPath_(outputPath), indexed_(), rules_()
+    : name_(name), path_(path), outputPath_(outputPath), indexed_(), rules_()
 {}
 
 ns_Publish::Publish::Publish(Config const& config)
@@ -18,11 +18,15 @@ ns_Publish::Publish::Publish(Config const& config)
   }
 }
 
-bool ns_Publish::Publish::NotifyFile(std::string const& srcPath, std::string const& dstPath, 
+bool ns_Publish::Publish::NotifyFile(std::vector<std::string> const& srcFiles, std::string const& dstPath, 
     std::string& error) {
-  if (!std::filesystem::exists(srcPath)) {
-    error = "File does not exist";
-    return false;
+  std::lock_guard<std::mutex> lock(lock_);
+#if 0
+  for(std::string const& file: srcFiles) {
+    if (!std::filesystem::exists(file)) {
+      error = "File does not exist";
+      return false;
+    }
   }
 
   for (Project& project: projects_) {
@@ -39,13 +43,33 @@ bool ns_Publish::Publish::NotifyFile(std::string const& srcPath, std::string con
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
           if (rule->Run(subDirAbs, project.outputPath_, outFile, libsManaged)) {
-            project.indexed_.Add(outFile, srcPath, libsManaged);
+            project.indexed_.Add(outFile, srcFiles, libsManaged);
           }
         }
       }
     }
   }
+#endif
   return true;
+}
+
+std::string ns_Publish::Publish::GetFilePath(std::string const& projectName, std::filesystem::path const& file) {
+  std::lock_guard<std::mutex> lock(lock_);
+  struct Publish::Project const *projectInfo = nullptr;
+  for(auto const& project: projects_) {
+    if (project.name_ == projectName) {
+      projectInfo = &project;
+      break;
+    }
+  }
+  if (projectInfo == nullptr) {
+    return "";
+  }
+  std::string filename = file;
+  if (file.is_relative()) {
+    filename = projectInfo->path_ / file;
+  }
+  return (projectInfo->indexed_.HaveIndexed(projectInfo->path_, file)) ? filename : "";
 }
 
 std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
@@ -64,7 +88,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
         continue;
       }
       LOGI(" * " << folderName);
-      projects.push_back(Project{ *iterator, iterator->path() / ".JSON" });
+      projects.push_back(Project{ folderName, *iterator, iterator->path() / ".JSON" });
     }
   } catch (std::filesystem::filesystem_error const& e) {
     LOGE("Filesystem error during projects scan: " << e.what());
@@ -109,7 +133,8 @@ bool ns_Publish::Publish::ScanRules(ns_Publish::Publish::Project& project, std::
     const std::string action = value["action"].GetString();
     const std::string onFiles = value["onFiles"].GetString();
     const std::string relativePath = std::filesystem::relative(directory, project.path_);
-    std::shared_ptr<PublishAction> actionPtr = std::shared_ptr<PublishAction>(PublishAction::Build(relativePath, action, name, onFiles));
+    std::shared_ptr<PublishAction> actionPtr = 
+        std::shared_ptr<PublishAction>(PublishAction::Build(directory, relativePath, action, name, onFiles));
     if (actionPtr) {
       project.rules_.push_back(actionPtr);
       std::cout << "Add rules: " << name << " → " << action << " (" << onFiles << ") for: " << relativePath << '\n';
@@ -163,7 +188,10 @@ void ns_Publish::Publish::SaveIndex(std::unordered_set<std::string> indexed, std
 
 void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& project) {
   std::filesystem::path indexPath = project.path_ / ".index.json";
-  project.indexed_.Load(indexPath);
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    project.indexed_.Load(indexPath);
+  }
 
   try {
     int processedCount = 0;
@@ -176,12 +204,21 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
       if (relativeStr[0] == '.') continue;
 
       for(auto& rule: project.rules_) {
-        if ((rule->RegisterPath(relativeStr, entry.path())) && (!project.indexed_.Have(project.outputPath_, relativeStr))) {
+        if ((rule->RegisterPath(relativeStr, entry.path())) && (!project.indexed_.HaveCachedJSON(project.outputPath_, relativeStr))) {
           LOGI("Process " << entry << " with " << rule->Name());
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Run(entry.path(), project.outputPath_, outFile, libsManaged)) {
-            project.indexed_.Add(outFile, relativeStr, libsManaged);
+          std::vector<std::filesystem::path> inData { entry };
+          if (rule->Run(inData, project.outputPath_, outFile, libsManaged)) {
+            //relative indata
+            std::vector<std::string> relativeInData;
+            for(std::filesystem::path const& file: inData) {
+              relativeInData.push_back(std::filesystem::relative(file, project.path_));
+            }
+            {
+              std::lock_guard<std::mutex> lock(lock_);
+              project.indexed_.Add(outFile, relativeInData, libsManaged);
+            }
             ++processedCount;
           }
         }

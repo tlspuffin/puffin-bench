@@ -5,10 +5,11 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/writer.h>
 
-bool ns_Publish::PublishActionPerf::Analyze(std::string jsonTaskFile, 
+bool ns_Publish::PublishActionPerf::Analyze(
+    std::vector<std::filesystem::path>& inputFiles, 
     TaskAnalysis& experiments, 
     std::unordered_map<std::string, struct LibSummary>& libSummaries) {
-  experiments = ExtractExperimentsFromFile(jsonTaskFile);
+  experiments = ExtractExperimentsFromFile(inputFiles);
   LOGI("Found " << experiments.experiments.size() << " Experiment steps");
   std::unordered_set<std::string> libs;
   bool haveSuccess = false;

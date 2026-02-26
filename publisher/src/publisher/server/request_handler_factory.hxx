@@ -28,12 +28,19 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest& request) {
 
   RequestHandler* requestHandler = nullptr;
-  if (request.getURI() == "/api/notify") {
-    requestHandler = new RequestHandlerNotify;
-  } else if (request.getURI().find("/files/") == 0) {
-    requestHandler = new RequestHandlerFiles("/files", apis_.publishAPI_.Storage());
-  } else if (request.getURI().find("/html/") == 0) {
-    requestHandler = new RequestHandlerFiles("/html", apis_.publishAPI_.HTMLStorage());
+  std::string uri = request.getURI();
+  if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST) {
+    if (uri == "/api/notify") {
+      requestHandler = new RequestHandlerNotify;
+    }
+   } else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET) {
+    if (uri.find("/api/download?") == 0 || (uri == "/api/download")) {
+      requestHandler = new RequestHandlerDownload();
+    } else if (uri.find("/files/") == 0) {
+      requestHandler = new RequestHandlerFiles("/files", apis_.publishAPI_.Storage());
+    } else if (uri.find("/html/") == 0) {
+      requestHandler = new RequestHandlerFiles("/html", apis_.publishAPI_.HTMLStorage());
+    }
   }
   if (requestHandler != nullptr) {
     requestHandler->Configure(config_, apis_);

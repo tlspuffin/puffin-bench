@@ -19,6 +19,8 @@ window.displayOverviewGraph = displayOverviewGraph;
 window.closeOverviewModal = closeOverviewModal;
 window.toggleAllLibraries = toggleAllLibraries;
 
+const project = window.location.pathname.split('/')[2];
+
 const config = {
   location: window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1),
   detailURI: '/html/board/board.html'
@@ -100,6 +102,13 @@ document.addEventListener('DOMContentLoaded', () => {
   setupFilters();
   setupTypeFilters();
   setupSearch();
+
+  // Close action dropdowns when clicking outside
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.action-dropdown-menu.visible').forEach(m => {
+      m.classList.remove('visible');
+    });
+  });
 });
 
 function loadData() {
@@ -350,12 +359,7 @@ function renderTypeSection(type, typeData) {
   }
 
   // Add actions for this type
-  const actions = document.createElement('div');
-  actions.className = 'actions';
-  actions.innerHTML = `
-    <button onclick="showDetails('${typeData.commit_id}', '${typeData.task_id}', '${type}')">📊 Details</button>
-    <button onclick="downloadResults('${typeData.commit_id}', ${typeData.task_id}, '${type}')">⬇️ Download</button>
-  `;
+  const actions = createActionButtons(typeData, type);
   section.appendChild(actions);
 
   return section;
@@ -724,12 +728,110 @@ function updateCounter(visibleCount, statusCounts) {
   counterEl.textContent = `Displaying ${visibleCount} commits: ${summary}`;
 }
 
-function showDetails(commitId, taskId, type) {
-  window.open(`${window.location.origin}${config.detailURI}?data=${config.location}/PR/${commitId}/${type}/${taskId}.json`);
+function getReferencedTasks(typeData) {
+  if (!typeData.tasks || !typeData.libs) return [];
+
+  // Collect unique details_id from all libs
+  const detailsIds = new Set();
+  for (const libData of Object.values(typeData.libs)) {
+    if (libData.details_id !== undefined) {
+      detailsIds.add(libData.details_id);
+    }
+  }
+
+  // Get unique tasks at those indices, deduplicate by task_id
+  const seen = new Set();
+  const tasks = [];
+  for (const idx of detailsIds) {
+    const task = typeData.tasks[idx];
+    if (task && !seen.has(task.task_id)) {
+      seen.add(task.task_id);
+      tasks.push(task);
+    }
+  }
+  return tasks;
 }
 
-function downloadResults(commitId, taskId, type) {
-  window.location.href = `${config.location}/PR/${commitId}/${type}/${taskId}.tgz`;
+function createActionButtons(typeData, type) {
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+
+  const tasks = getReferencedTasks(typeData);
+
+  // Fallback: no tasks array or single task → direct buttons
+  if (tasks.length <= 1) {
+    const taskInfos = tasks.length === 1 ? tasks[0].task_info : '';
+    const taskData = tasks.length === 1 ? tasks[0].task_data : '';
+    actions.innerHTML = `
+      <button class="btn-details" onclick="showDetails('${taskInfos}')">📊 Details</button>
+      <button class="btn-download" onclick="downloadResults('${taskData}')">⬇️ Download</button>
+    `;
+    return actions;
+  }
+
+  // Build map: task_id → list of lib names
+  const taskLibs = {};
+  for (const [libName, libData] of Object.entries(typeData.libs)) {
+    if (libData.details_id !== undefined) {
+      const task = typeData.tasks[libData.details_id];
+      if (task) {
+        if (!taskLibs[task.task_id]) taskLibs[task.task_id] = [];
+        taskLibs[task.task_id].push(libName);
+      }
+    }
+  }
+
+  // Multiple tasks → dropdown for each button
+  actions.appendChild(createActionDropdown('📊 Details', 'btn-details', tasks, taskLibs, (task) =>
+    `showDetails('${task.task_info}')`
+  ));
+  actions.appendChild(createActionDropdown('⬇️ Download', 'btn-download', tasks, taskLibs, (task) =>
+    `downloadResults('${task.task_data}')`
+  ));
+
+  return actions;
+}
+
+function createActionDropdown(label, btnClass, tasks, taskLibs, onclickBuilder) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'action-dropdown';
+
+  const trigger = document.createElement('button');
+  trigger.textContent = `${label}`;
+  trigger.className = btnClass;
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close any other open dropdown
+    document.querySelectorAll('.action-dropdown-menu.visible').forEach(m => {
+      if (m !== menu) m.classList.remove('visible');
+    });
+    menu.classList.toggle('visible');
+  });
+
+  const menu = document.createElement('div');
+  menu.className = 'action-dropdown-menu';
+
+  for (const task of tasks) {
+    const item = document.createElement('button');
+    item.className = `action-dropdown-item ${btnClass}`;
+    const libs = taskLibs[task.task_id] || [];
+    item.textContent = libs.join(', ');
+    item.setAttribute('onclick', onclickBuilder(task));
+    item.addEventListener('click', () => menu.classList.remove('visible'));
+    menu.appendChild(item);
+  }
+
+  wrapper.appendChild(trigger);
+  wrapper.appendChild(menu);
+  return wrapper;
+}
+
+function showDetails(taskInfos) {
+  window.open(`${window.location.origin}${config.detailURI}?data=${config.location}/${taskInfos}`);
+}
+
+function downloadResults(file) {
+  window.open(`/api/download?project=${encodeURIComponent(project)}&file=${encodeURIComponent(file)}`);
 }
 
 function refreshData() {

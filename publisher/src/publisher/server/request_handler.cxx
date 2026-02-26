@@ -8,6 +8,18 @@
 #include <Poco/StreamCopier.h>
 #include <Poco/URI.h>
 
+static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
+    mimeType {
+        {".html", {"text/html", std::ios_base::in}}, 
+        {".css", {"text/css", std::ios_base::in}},
+        {".json", {"application/json", std::ios_base::in}},
+        {".js", {"text/javascript", std::ios_base::in}}, 
+        {".jpg", {"image/jpeg", std::ios_base::binary}}, 
+        {".jpeg", {"image/jpeg", std::ios_base::binary}}, 
+        {".png", {"image/png", std::ios_base::binary}}, 
+        {".svg", {"image/svg+xml", std::ios_base::in}}, 
+    };
+
 static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.set("Access-Control-Allow-Origin", "*");
@@ -55,6 +67,59 @@ void ns_Server::RequestHandlerNotify::handleRequest(Poco::Net::HTTPServerRequest
   out.flush();
 }
 
+void ns_Server::RequestHandlerDownload::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  response.setChunkedTransferEncoding(true);
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  Poco::URI uri(request.getURI());
+  Poco::URI::QueryParameters params = uri.getQueryParameters();
+
+  std::ostream* out = nullptr;
+  Poco::Net::HTTPResponse::HTTPStatus responseStatus = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
+  try {
+    std::string project;
+    std::string file;
+    for (auto const& param : params) {
+      if (param.first == "project") {
+        project = param.second;
+      } else if (param.first == "file") {
+        file = param.second;
+      }
+    }
+    std::filesystem::path filename = apis_->publishAPI_.GetFilePath(project, file);
+    if (filename.empty()) {
+      responseStatus = Poco::Net::HTTPResponse::HTTP_NOT_FOUND;
+      throw std::runtime_error("File " + file + " not found in project " + project);
+    }
+
+    std::string contentType = "application/octet-stream";
+    std::ios_base::openmode openmode = std::ios_base::in;
+    auto const& mimeTypeIT = mimeType.find(filename.extension());
+    if (mimeTypeIT != mimeType.end()) {
+      contentType = mimeTypeIT->second.first;
+      openmode = mimeTypeIT->second.second;
+    }
+
+    std::ifstream filestream(filename, openmode);
+    if (!filestream.is_open()) {
+      throw std::runtime_error("Unable to read: " + filename.string());
+    }
+    response.set("Content-Disposition", "attachment; filename=\"" + filename.filename().string() + "\"");
+    out = &(response.send());
+    Poco::StreamCopier::copyStream(filestream, *out);
+  } catch (const std::exception& e) {
+    if (out == nullptr) {
+      response.setContentType("application/json");
+      response.setStatus(responseStatus);
+      out = &(response.send());
+      *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    }
+  }
+  out->flush();
+}
+
 void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
 
@@ -94,17 +159,6 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
       return;
     }
 
-    static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
-        mimeType {
-            {".html", {"text/html", std::ios_base::in}}, 
-            {".css", {"text/css", std::ios_base::in}},
-            {".json", {"application/json", std::ios_base::in}},
-            {".js", {"text/javascript", std::ios_base::in}}, 
-            {".jpg", {"image/jpeg", std::ios_base::binary}}, 
-            {".jpeg", {"image/jpeg", std::ios_base::binary}}, 
-            {".png", {"image/png", std::ios_base::binary}}, 
-            {".svg", {"image/svg+xml", std::ios_base::in}}, 
-    };
     std::string extension = filename.extension().string();
 
     std::string contentType = "application/octet-stream";

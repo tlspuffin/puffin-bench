@@ -40,5 +40,6 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
 REQUESTHANDLER(Error);
 REQUESTHANDLER(Notify);
 REQUESTHANDLER(Files, std::string const, std::string const);
+REQUESTHANDLER(Download);
 
 };

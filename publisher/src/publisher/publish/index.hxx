@@ -13,13 +13,14 @@ public:
   bool Load(std::string const& filename);
   bool Save(std::string const& filename) const;
 
-  bool Add(std::string const& key, std::string const& file, 
+  bool Add(std::string const& key, std::vector<std::string> const& file, 
       std::unordered_set<std::string> const& libsManaged);
-  bool Have(std::filesystem::path const& projectPath, std::string const& key) const;
+  bool HaveCachedJSON(std::filesystem::path const& projectPath, std::string const& key) const;
+  bool HaveIndexed(std::filesystem::path const& projectPath, std::string const& key) const;
 
 private:
   struct sEntryInfos {
-    std::string srcFile;
+    std::vector<std::string> srcFiles;
     std::unordered_set<std::string> libsName;
   };
 

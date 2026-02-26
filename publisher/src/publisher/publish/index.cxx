@@ -53,12 +53,17 @@ bool ns_Publish::Index::Load(std::string const& filename) {
     std::vector<struct sEntryInfos> entry;
     for (auto itHistory=it->value.Begin(); itHistory!=it->value.End(); ++itHistory) {
       rapidjson::Value const& historyElt = *itHistory;
-      if ((!historyElt.HasMember("file")) || (!historyElt["file"].IsString()) || 
+      if ((!historyElt.HasMember("files")) || (!historyElt["files"].IsArray()) || 
           (!historyElt.HasMember("libs")) || (!historyElt["libs"].IsArray())) {
         continue;
       }
       struct sEntryInfos infos;
-      infos.srcFile = historyElt["file"].GetString();
+      for (auto itFile=historyElt["files"].Begin(); itFile!=historyElt["files"].End(); ++itFile) {
+        if (!itFile->IsString()) {
+          continue;
+        }
+        infos.srcFiles.push_back(itFile->GetString());
+      }
       for (auto itLib=historyElt["libs"].Begin(); itLib!=historyElt["libs"].End(); ++itLib) {
         if (!itLib->IsString()) {
           continue;
@@ -93,7 +98,12 @@ bool ns_Publish::Index::Save(std::string const& filename) const {
         libs.PushBack(rapidjson::Value(libName.c_str(), alloc), alloc);
       }
       infos.AddMember("libs", libs, alloc);
-      infos.AddMember("file", rapidjson::Value(entry.srcFile.c_str(), alloc), alloc);
+
+      rapidjson::Value files(rapidjson::kArrayType);
+      for(std::string const& file: entry.srcFiles) {
+        files.PushBack(rapidjson::Value(file.c_str(), alloc), alloc);
+      }
+      infos.AddMember("files", files, alloc);
       history.PushBack(infos, alloc);
     }
     doc.AddMember(rapidjson::Value(key.c_str(), alloc), history, alloc);
@@ -102,7 +112,9 @@ bool ns_Publish::Index::Save(std::string const& filename) const {
   rapidjson::OStreamWrapper osw(ofs);
   rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(osw);
   writer.SetIndent(' ', 2);
-  if (doc.Accept(writer)) {
+  bool saveOk = doc.Accept(writer);
+  ofs.close();
+  if (saveOk) {
     std::error_code ec;
     std::filesystem::rename(tmpFilename, filename, ec);
   }
@@ -110,24 +122,37 @@ bool ns_Publish::Index::Save(std::string const& filename) const {
   return true;
 }
 
-bool ns_Publish::Index::Add(std::string const& key, std::string const& file, 
+bool ns_Publish::Index::Add(std::string const& key, std::vector<std::string> const& files, 
     std::unordered_set<std::string> const& libsManaged) {
   auto it = entries_.find(key);
   if (it == entries_.end()) {
-    entries_.emplace(key, std::vector<sEntryInfos>{ { file, libsManaged } } );
+    entries_.emplace(key, std::vector<sEntryInfos>{ { files, libsManaged } } );
   } else {
     std::vector<struct ns_Publish::Index::sEntryInfos>& infos = it->second;
-    infos.push_back({ file, libsManaged });
+    infos.push_back({ files, libsManaged });
   }
   return true;
 }
 
-bool ns_Publish::Index::Have(std::filesystem::path const& projectPath, std::string const& key) const {
-  for(auto const& [commitFile, entries]: entries_) {
+bool ns_Publish::Index::HaveCachedJSON(std::filesystem::path const& projectPath, std::string const& key) const {
+  for(auto const& [commitID, entries]: entries_) {
     for(auto const& entry: entries) {
-      if (entry.srcFile == key) {
-        return std::filesystem::exists(projectPath / commitFile);
-      }
+      for (auto const& file: entry.srcFiles)
+        if (file == key) {
+          return std::filesystem::exists(projectPath / commitID);
+        }
+    }
+  }
+  return false;
+}
+
+bool ns_Publish::Index::HaveIndexed(std::filesystem::path const& projectPath, std::string const& key) const {
+  for(auto const& [_, entries]: entries_) {
+    for(auto const& entry: entries) {
+      for (auto const& file: entry.srcFiles)
+        if (file == key) {
+          return std::filesystem::exists(projectPath / file);
+        }
     }
   }
   return false;

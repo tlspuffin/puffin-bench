@@ -14,18 +14,19 @@ ns_Publish::PublishAction::PublishAction()
     : name_("unnamed"), filesFilter_() {
 }
 
-ns_Publish::PublishAction::PublishAction(std::string const& relativePath, std::string const& name, 
+ns_Publish::PublishAction::PublishAction(std::string const& basePath, 
+    std::string const& relativePath, std::string const& name, 
     std::string const& filesFilter) 
-    : name_(name), relativePath_(relativePath != "." ? relativePath : ""), 
+    : name_(name), basePath_(basePath), relativePath_(relativePath != "." ? relativePath : ""), 
     filesFilter_(filesFilter), debugFilesFilter_(filesFilter) {
 }
 
 ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromFile(
-    std::string const& jsonTaskFile) {
+    std::vector<std::filesystem::path>& jsonTaskFile) {
 
-  std::ifstream ifs(jsonTaskFile);
+  std::ifstream ifs(jsonTaskFile.back());
   if (!ifs.is_open()) {
-    LOGE("Failed to open JSON file: " << jsonTaskFile);
+    LOGE("Failed to open JSON file: " << jsonTaskFile.back());
     throw std::runtime_error("Cannot open JSON file");
   }
 
@@ -33,17 +34,21 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
   oss << ifs.rdbuf();
   ifs.close();
 
+  std::string jsonTaskFileName;
   try {
-    return ExtractExperimentsFromBuffer(oss.str());
+    jsonTaskFileName = jsonTaskFile.back();
+    jsonTaskFile.push_back(jsonTaskFile.back().replace_extension("tgz"));
+    return ExtractExperimentsFromBuffer(oss.str(), jsonTaskFileName, jsonTaskFile.back());
   } catch (std::runtime_error const& e) {
     oss.str("");
-    oss << e.what() << " in file " << jsonTaskFile;
+    oss << e.what() << " in file " << jsonTaskFileName;
     throw std::runtime_error(oss.str());
   }
 }
 
 ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromBuffer(
-    std::string const& jsonTaskBuffer) {
+    std::string const& jsonTaskBuffer, std::filesystem::path taskInfo, 
+    std::filesystem::path taskData) {
   TaskAnalysis result;
 
   rapidjson::Document doc;
@@ -63,6 +68,15 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
     LOGW("No 'steps' object found in task");
     return result;
   }
+
+  if (IsSubDir(basePath_, taskInfo)) {
+    taskInfo = std::filesystem::relative(taskInfo, basePath_);
+  }
+  result.task_infos = taskInfo;
+  if (IsSubDir(basePath_, taskData)) {
+    taskData = std::filesystem::relative(taskData, basePath_);
+  }
+  result.task_data = taskData;
 
   if (task.HasMember("id") && task["id"].IsUint64()) {
     result.task_id = task["id"].GetUint64();
@@ -125,18 +139,19 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
   return result;
 }
 
-ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& relativePath, 
-    std::string const& action, std::string const& name, std::string const& filesFilter) {
+ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& basePath, 
+    std::string const& relativePath, std::string const& action, std::string const& name, 
+    std::string const& filesFilter) {
   if (action == "GenerateReportPerf") {
-    return new PublishActionPerf(relativePath, name, filesFilter);
+    return new PublishActionPerf(basePath, relativePath, name, filesFilter);
   } else if (action == "GenerateReportVuln") {
-    return new PublishActionVuln(relativePath, name, filesFilter);
+    return new PublishActionVuln(basePath, relativePath, name, filesFilter);
   } else if (action == "GenerateReportPerfFromSummary") {
-    return new PublishActionPerfUseSummary(relativePath, name, filesFilter);
+    return new PublishActionPerfUseSummary(basePath, relativePath, name, filesFilter);
   } else if (action == "GenerateReportVuln2") {
-    return new PublishActionVuln2(relativePath, name, filesFilter);
+    return new PublishActionVuln2(basePath, relativePath, name, filesFilter);
   } else if (action == "GenerateReportVuln3") {
-    return new PublishActionVuln3(relativePath, name, filesFilter);
+    return new PublishActionVuln3(basePath, relativePath, name, filesFilter);
   }
   return nullptr;
 }
