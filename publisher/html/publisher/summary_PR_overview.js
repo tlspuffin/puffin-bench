@@ -152,7 +152,7 @@ function renderLibraryMetricGraph(lib, metric, containerId) {
     return;
   }
 
-  const [traces, layout, config] = GenerateGraphData('Perf', lib, metric, dataPoints);  
+  const [traces, layout, config] = GenerateGraphData('Perf', lib, metric, dataPoints);
   layout.title.font.size = 14;
   layout.margin = { l: 50, r: 20, t: 40, b: 90 };
   Plotly.newPlot(containerId, traces, layout, config);

@@ -143,7 +143,7 @@ async function RetrieveStepLogs(logsInfos, size) {
     return [false, 0, null];
   }
 
-  logsInfos[type].state = data.state;  
+  logsInfos[type].state = data.state;
   logsInfos[type].lastoffset += data.size;
 
   return [true, data.state, atob(data.data)];
