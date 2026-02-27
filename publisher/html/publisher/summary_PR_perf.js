@@ -19,7 +19,7 @@ function buildMetricsIndex() {
 
     // Process each type (Perf, Vuln, etc.)
     for (const type of availableTypes) {
-      if (type != 'Perf') continue;
+      //if (type != 'Perf') continue;
 
       if (!commitNames[commit.commit_id]) {
         commitNames[commit.commit_id] = {};
@@ -34,49 +34,97 @@ function buildMetricsIndex() {
       for (const [libName, libData] of Object.entries(typeData.libs)) {
         if (!metricsData[type][libName]) metricsData[type][libName] = {};
 
-        const status = (typeData.global_status === 'success' ? 
-            metricStatusSuccess : (typeData.global_status === 'fail' ? metricStatusFail : metricStatusMixed));
         const cputs = libData?.cputs == 1 ? '⚙C' : (libData?.cputs == -1 ? '🦀' : '❓');
 
         commitNames[commit.commit_id][libName] = cputs;
 
-        // Process each metric (numeric arrays only, excluding non-success runs)
-        for (const [metricName, metricValues] of Object.entries(libData)) {
-          // Skip non-arrays, empty arrays, non-numeric arrays, and metadata fields
-          if (!Array.isArray(metricValues) ||
-              metricValues.length === 0 ||
-              typeof metricValues[0] !== 'number' ||
-              metricName === 'warn_user' ||
-              metricName === 'success_count' ||
-              metricName === 'total_runs' ||
-              metricName === 'cputs') {
-            continue;
-          }
+        if (type == 'Perf') {
+          const status = (typeData.global_status === 'success' ? 
+            metricStatusSuccess : (typeData.global_status === 'fail' ? metricStatusFail : metricStatusMixed));
 
-          // Only include successful runs for non-fail metrics
-          if (metricName.startsWith('fail_')) {
-            const realMetricName = metricName.slice(5);
-            // For fail metrics, include all data
-            if (!metricsData[type][libName][realMetricName]) {
-              metricsData[type][libName][realMetricName] = [];
+          // Process each metric (numeric arrays only, excluding non-success runs)
+          for (const [metricName, metricValues] of Object.entries(libData)) {
+            // Skip non-arrays, empty arrays, non-numeric arrays, and metadata fields
+            if (!Array.isArray(metricValues) ||
+                metricValues.length === 0 ||
+                typeof metricValues[0] !== 'number' ||
+                metricName === 'warn_user' ||
+                metricName === 'success_count' ||
+                metricName === 'total_runs' ||
+                metricName === 'cputs') {
+              continue;
             }
-            metricsData[type][libName][realMetricName].push({
-              commit_id: commit.commit_id,
-              values: metricValues,
-              status: metricStatusFail,
-              cputs
-            });
-          } else {
-            // For success metrics, include all data
-            if (!metricsData[type][libName][metricName]) {
-              metricsData[type][libName][metricName] = [];
+
+            // Only include successful runs for non-fail metrics
+            if (metricName.startsWith('fail_')) {
+              const realMetricName = metricName.slice(5);
+              // For fail metrics, include all data
+              if (!metricsData[type][libName][realMetricName]) {
+                metricsData[type][libName][realMetricName] = [];
+              }
+              metricsData[type][libName][realMetricName].push({
+                commit_id: commit.commit_id,
+                values: metricValues,
+                status: metricStatusFail,
+                cputs
+              });
+            } else {
+              // For success metrics, include all data
+              if (!metricsData[type][libName][metricName]) {
+                metricsData[type][libName][metricName] = [];
+              }
+              metricsData[type][libName][metricName].push({
+                commit_id: commit.commit_id,
+                values: metricValues,
+                status,
+                cputs
+              });
             }
-            metricsData[type][libName][metricName].push({
-              commit_id: commit.commit_id,
-              values: metricValues,
-              status,
-              cputs
-            });
+          }
+        } else if (type == 'Vuln') {
+          const status = libData.success_count == 0 ? metricStatusFail : 
+              (((libData.success_count === libData.total_runs) || ((libData.total_runs > 10) && (libData.success_count > 2))) ? metricStatusSuccess : metricStatusMixed);
+          // Process each metric (numeric arrays only, excluding non-success runs)
+          for (const [metricName, metricValues] of Object.entries(libData)) {
+            // Skip non-arrays, empty arrays, non-numeric arrays, and metadata fields
+            if (!Array.isArray(metricValues) ||
+                metricValues.length === 0 ||
+                typeof metricValues[0] !== 'number' ||
+                metricName === 'warn_user' ||
+                metricName === 'success_count' ||
+                metricName === 'total_runs' ||
+                metricName === 'cputs') {
+              continue;
+            }
+
+            // Only include successful runs for non-fail metrics
+            if (metricName.startsWith('fail_')) {
+              let realMetricName = metricName;
+              if (status === metricStatusFail) {
+                realMetricName = metricName.slice(5);
+              }
+              // For fail metrics, include all data
+              if (!metricsData[type][libName][realMetricName]) {
+                metricsData[type][libName][realMetricName] = [];
+              }
+              metricsData[type][libName][realMetricName].push({
+                commit_id: commit.commit_id,
+                values: metricValues,
+                status: metricStatusFail,
+                cputs
+              });
+            } else {
+              // For success metrics, include all data
+              if (!metricsData[type][libName][metricName]) {
+                metricsData[type][libName][metricName] = [];
+              }
+              metricsData[type][libName][metricName].push({
+                commit_id: commit.commit_id,
+                values: metricValues,
+                status,
+                cputs
+              });
+            }
           }
         }
       }
@@ -102,7 +150,7 @@ export function displayGraph() {
   });
 
   // Reset other dropdowns
-  document.getElementById('library-select').innerHTML = '<option value="">Select library...</option>';
+  document.getElementById('library-select').innerHTML = '<option value="">Select library / vuln...</option>';
   document.getElementById('metric-select').innerHTML = '<option value="">Select metric...</option>';
   document.getElementById('graph-container').innerHTML = '';
 
@@ -128,7 +176,7 @@ export function updateMetricsList() {
   const selectedType = typeSelect.value;
 
   if (!selectedType) {
-    librarySelect.innerHTML = '<option value="">Select library...</option>';
+    librarySelect.innerHTML = '<option value="">Select library / vuln...</option>';
     metricSelect.innerHTML = '<option value="">Select metric...</option>';
     document.getElementById('graph-container').innerHTML = '';
     return;
@@ -137,7 +185,7 @@ export function updateMetricsList() {
   const selectedLibrary = librarySelect.value;
 
   // Populate library dropdown
-  librarySelect.innerHTML = '<option value="">Select library...</option>';
+  librarySelect.innerHTML = '<option value="">Select library / vuln...</option>';
   const libraries = Object.keys(metricsData[selectedType] || {}).sort();
   libraries.forEach(lib => {
     const option = document.createElement('option');
@@ -203,7 +251,7 @@ function GenerateGraphData(type, library, metric, metricDataPoints) {
     traces.push(trace);
   });
 
-  const commitsTimeline = allCommits.reverse();
+  const commitsTimeline = allCommits.toReversed();
   const layout = {
     title: {
       text: `${library} - ${metric} (${type})`,

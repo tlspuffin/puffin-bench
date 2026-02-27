@@ -26,7 +26,7 @@
         <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
       </div>
     </header>
-    
+
     <div class="filters">
       <div class="filter-group">
         <label>Filter by status:</label>
@@ -48,14 +48,14 @@
         <button class="clear-search-btn" onclick="clearSearch()" title="Clear search">🧹</button>
       </div>
     </div>
-    
+
     <div id="commits-list" class="commits-container">
       <div class="loading">
         <div class="spinner"></div>
         <p>Loading commits...</p>
       </div>
     </div>
-    
+
     <div id="no-results" class="no-results" style="display: none;">
       No commit match filters
     </div>
@@ -76,9 +76,9 @@
             </select>
           </div>
           <div class="control-group">
-            <label for="library-select">Library:</label>
+            <label for="library-select">Library / Vuln:</label>
             <select id="library-select" onchange="updateMetricsList()">
-              <option value="">Select library...</option>
+              <option value="">Select library / vuln...</option>
             </select>
           </div>
           <div class="control-group">
