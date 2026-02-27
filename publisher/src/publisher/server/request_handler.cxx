@@ -56,7 +56,14 @@ void ns_Server::RequestHandlerNotify::handleRequest(Poco::Net::HTTPServerRequest
   std::ostream& out = response.send();
   try {
     std::string error;
-    if (!apis_->publishAPI_.NotifyFile(form.get("src", ""), form.get("dst", ""), error)) {
+    std::vector<std::filesystem::path> srcFiles;
+    for (auto it = form.begin(); it != form.end(); ++it) {
+      if (it->first == "src") {
+        srcFiles.push_back(it->second);
+      }
+    }
+    std::filesystem::path dstPath = form.get("dst", "");
+    if (!apis_->publishAPI_.NotifyFiles(srcFiles, dstPath, error)) {
       throw std::runtime_error(error);
     }
     out << R"({"success": true})";

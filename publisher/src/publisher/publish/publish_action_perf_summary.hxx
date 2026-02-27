@@ -10,18 +10,29 @@ public:
       std::string const& relativePath, std::string const& name, 
       std::string const& filesFilter) 
       : PublishAction(basePath, relativePath, name, filesFilter) {}
-  bool GenerateCommitJson(std::vector<std::filesystem::path>& inputFiles, 
+  bool GenerateCommitJson(std::string const& taskDataFile, 
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
-  bool Run(std::vector<std::filesystem::path>& inputFiles, std::filesystem::path const& outputPath, 
-      std::string& outFile, std::unordered_set<std::string>& libsManaged) {
-    outFile = "";
-    libsManaged.clear();
-    if (targets_.find(inputFiles.back()) == targets_.end()) {
-      return false;
-    }
-    return GenerateCommitJson(inputFiles, outputPath, outFile, libsManaged);
-  };
+  bool CheckRule(std::vector<std::filesystem::path>& inputFiles);
+  bool Process(std::vector<std::filesystem::path> const& inputFiles, 
+      std::filesystem::path const& outputPath, std::string& outFile, 
+      std::unordered_set<std::string>& libsManaged);
 };
+
+inline bool PublishActionPerfUseSummary::CheckRule(std::vector<std::filesystem::path>& inputFiles) {
+  return true;
+}
+
+inline bool PublishActionPerfUseSummary::Process(std::vector<std::filesystem::path> const& inputFiles, 
+    std::filesystem::path const& outputPath, std::string& outFile, 
+    std::unordered_set<std::string>& libsManaged) {
+  if (inputFiles.empty()) {
+    return false;
+  }
+  std::filesystem::path taskDataFile = inputFiles.back();
+  return taskDataFile.extension() == ".tgz" && 
+      GenerateCommitJson(taskDataFile, outputPath, outFile, libsManaged);
+
+}
 
 };

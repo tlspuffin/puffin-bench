@@ -22,9 +22,8 @@ ns_Publish::PublishAction::PublishAction(std::string const& basePath,
 }
 
 ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromFile(
-    std::vector<std::filesystem::path>& jsonTaskFile) {
-
-  std::ifstream ifs(jsonTaskFile.back());
+    std::string const& jsonTaskFile, std::string const& taskDataFileName) {
+  std::ifstream ifs(jsonTaskFile);
   if (!ifs.is_open()) {
     LOGE("Failed to open JSON file: " << jsonTaskFile.back());
     throw std::runtime_error("Cannot open JSON file");
@@ -36,9 +35,7 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
 
   std::string jsonTaskFileName;
   try {
-    jsonTaskFileName = jsonTaskFile.back();
-    jsonTaskFile.push_back(jsonTaskFile.back().replace_extension("tgz"));
-    return ExtractExperimentsFromBuffer(oss.str(), jsonTaskFileName, jsonTaskFile.back());
+    return ExtractExperimentsFromBuffer(oss.str(), jsonTaskFileName, taskDataFileName);
   } catch (std::runtime_error const& e) {
     oss.str("");
     oss << e.what() << " in file " << jsonTaskFileName;

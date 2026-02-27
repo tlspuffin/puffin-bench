@@ -9,15 +9,19 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <thread>
+#include <atomic>
+#include <condition_variable>
+#include <queue>
 
 namespace ns_Publish {
 
 class Publish {
 public:
   Publish(Config const& config);
+  ~Publish();
 
-  bool Notify(std::string const& newPath, std::string& error) { return true; };
-  bool NotifyFile(std::vector<std::string> const& srcFiles, std::string const& dstPath, std::string& error);
+  bool NotifyFiles(std::vector<std::filesystem::path>&& srcFiles, std::filesystem::path const& dstPath, std::string& error);
   std::string GetFilePath(std::string const& projectName, std::filesystem::path const& file);
 
 private:
@@ -29,11 +33,20 @@ private:
     std::vector<std::shared_ptr<PublishAction>> rules_;
 
     Project(std::string const& name, std::filesystem::path const& path, std::filesystem::path const& outputPath);
+    bool Save();
+  };
+  struct NotifyFilesRequest {
+    std::vector<std::filesystem::path> srcFiles;
+    std::filesystem::path dstPath;
   };
 
   Config config_;
   std::vector<Project> projects_;
   std::mutex lock_;
+  std::thread thread_;
+  std::atomic_bool running_;
+  std::condition_variable threadWait_;
+  std::queue<struct NotifyFilesRequest> pendingNotifyFiles_;
 
   std::vector<Project> ScanProjects();
   bool ScanRules(ns_Publish::Publish::Project& project, std::filesystem::path const& directory);
@@ -41,6 +54,9 @@ private:
   void SaveIndex(std::unordered_set<std::string> indexed, std::string const& indexFilename);
 
   void ProjectStorageScan(Project& project);
+
+  void Main();
+  void ProcessANotifyFilesRequest(std::unique_lock<std::mutex>& lock);
 };
 
 }

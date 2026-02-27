@@ -7,16 +7,10 @@
 #include <rapidjson/writer.h>
 #include <rapidjson/istreamwrapper.h>
 
-bool ns_Publish::PublishActionVuln3::Analyze(std::vector<std::filesystem::path>& inputFiles, 
-    PublishAction::TaskAnalysis& analysis, 
+bool ns_Publish::PublishActionVuln3::Analyze(std::string const& taskDataFile, 
+    std::string const& taskInfoFile, PublishAction::TaskAnalysis& analysis, 
     std::unordered_map<std::string, struct LibSummary>& libSummaries) {
-  std::string taskDataFile = inputFiles.back();
-  std::filesystem::path outsideJSON = std::filesystem::path(taskDataFile).replace_extension("json");
-  if (!std::filesystem::exists(outsideJSON)) {
-    return false;
-  }
   FileTGZ filetgz(taskDataFile);
-  inputFiles.push_back(outsideJSON);
   std::vector<std::pair<std::string, uint64_t>> fileInfo = filetgz.ListFiles(std::regex("[0-9]+\\.json"));
   if (fileInfo.size() != 1) {
     return false;
@@ -28,7 +22,7 @@ bool ns_Publish::PublishActionVuln3::Analyze(std::vector<std::filesystem::path>&
   if ((readSize != fileInfo[0].second) || (taskJSON.empty())) {
     return false;
   }
-  analysis = ExtractExperimentsFromBuffer(taskJSON, outsideJSON, taskDataFile);
+  analysis = ExtractExperimentsFromBuffer(taskJSON, taskInfoFile, taskDataFile);
   LOGI("  task_id=" << analysis.date
       << "  task_name=" << analysis.task_name
       << "  commit=" << analysis.commit_id
@@ -170,10 +164,11 @@ bool ns_Publish::PublishActionVuln3::GenerateCommitJson(
   taskDetails.AddMember("task_id", analysis.task_id, allocator);
   taskDetails.AddMember("task_name",
     rapidjson::Value(analysis.task_name.c_str(), allocator), allocator);
+  std::filesystem::path relativePath = relativePath_;
   taskDetails.AddMember("task_info",
-    rapidjson::Value(analysis.task_infos.c_str(), allocator), allocator);
+    rapidjson::Value((relativePath / analysis.task_infos).c_str(), allocator), allocator);
   taskDetails.AddMember("task_data",
-    rapidjson::Value(analysis.task_data.c_str(), allocator), allocator);
+    rapidjson::Value((relativePath / analysis.task_data).c_str(), allocator), allocator);
   tasksDetails.PushBack(taskDetails, allocator);
   doc.AddMember("tasks", tasksDetails, allocator);
 

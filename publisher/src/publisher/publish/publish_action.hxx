@@ -40,12 +40,19 @@ public:
   std::string Name() const;
   std::string ProjectRelativePath() const;
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
-  TaskAnalysis ExtractExperimentsFromFile(std::vector<std::filesystem::path>& jsonTaskFile);
+  TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile, 
+      std::string const& taskDataFileName);
   TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer, 
       std::filesystem::path taskInfos, std::filesystem::path taskData);
-  virtual bool Run(std::vector<std::filesystem::path>& inputFiles, 
+
+  virtual bool CheckRule(std::vector<std::filesystem::path>& inputFiles) = 0;
+  virtual bool Process(std::vector<std::filesystem::path> const& inputFiles, 
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged) = 0;
+  bool Run(std::vector<std::filesystem::path>& inputFiles, 
+      std::filesystem::path const& outputPath, std::string& outFile, 
+      std::unordered_set<std::string>& libsManaged);
+
   static PublishAction* Build(std::string const& basePath, std::string const& relativePath, 
       std::string const& action, std::string const& name, std::string const& onFiles);
 
@@ -79,6 +86,15 @@ inline bool PublishAction::RegisterPath(std::string const& projectRelativePath, 
   }
   targets_.insert(absolutePath);
   return true;
+}
+
+inline bool PublishAction::Run(std::vector<std::filesystem::path>& inputFiles, 
+    std::filesystem::path const& outputPath, std::string& outFile, 
+    std::unordered_set<std::string>& libsManaged) {
+  outFile = "";
+  libsManaged.clear();
+  return (targets_.find(inputFiles.back()) != targets_.end()) && 
+      CheckRule(inputFiles) && Process(inputFiles, outputPath, outFile, libsManaged);
 }
 
 };

@@ -26,26 +26,37 @@ public:
   PublishActionVuln3(std::string const& basePath, std::string const& relativePath, 
       std::string const& name, std::string const& filesFilter) 
       : PublishAction(basePath, relativePath, name, filesFilter) {}
-  bool Analyze(std::vector<std::filesystem::path>& inputFiles, PublishAction::TaskAnalysis& analysis, 
+  bool Analyze(std::string const& taskDataFile, std::string const& taskInfoFile, 
+      PublishAction::TaskAnalysis& analysis, 
       std::unordered_map<std::string, struct LibSummary>& libSummaries);
   bool GenerateCommitJson(PublishAction::TaskAnalysis const& analysis, 
       std::unordered_map<std::string, struct LibSummary> const& libSummaries,
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
-  bool Run(std::vector<std::filesystem::path>& inputFiles, std::filesystem::path const& outputPath, 
-      std::string& outFile, std::unordered_set<std::string>& libsManaged) {
-    outFile = "";
-    libsManaged.clear();
-    if (targets_.find(inputFiles.back()) == targets_.end()) {
-      return false;
-    }
-    PublishActionVuln3::TaskAnalysis analyze;
-    std::unordered_map<std::string, struct LibSummary> libSummaries;
-    if (!Analyze(inputFiles, analyze, libSummaries)) {
-      return false;
-    }
-    return GenerateCommitJson(analyze, libSummaries, outputPath, outFile, libsManaged);
-  };
+  bool CheckRule(std::vector<std::filesystem::path>& inputFiles);
+  bool Process(std::vector<std::filesystem::path> const& inputFiles, 
+      std::filesystem::path const& outputPath, std::string& outFile, 
+      std::unordered_set<std::string>& libsManaged);
+};
+
+inline bool PublishActionVuln3::CheckRule(std::vector<std::filesystem::path>& inputFiles) {
+  std::filesystem::path jsonFile = std::filesystem::path(inputFiles.back()).replace_extension("json");
+  return std::filesystem::exists(jsonFile) && (inputFiles.insert(inputFiles.end()-1, jsonFile), true);
+}
+
+inline bool PublishActionVuln3::Process(std::vector<std::filesystem::path> const& inputFiles, 
+    std::filesystem::path const& outputPath, std::string& outFile, 
+    std::unordered_set<std::string>& libsManaged) {
+  if (inputFiles.size() < 2) {
+    return false;
+  }
+  PublishActionVuln3::TaskAnalysis analyze;
+  std::unordered_map<std::string, struct LibSummary> libSummaries;
+  std::filesystem::path taskDataFile = inputFiles.back();
+  std::filesystem::path taskJSONFile = inputFiles[inputFiles.size() - 2];
+  return taskDataFile.extension() == ".tgz" && taskJSONFile.extension() == ".json" &&
+      Analyze(taskDataFile, taskJSONFile, analyze, libSummaries) && 
+      GenerateCommitJson(analyze, libSummaries, outputPath, outFile, libsManaged);
 };
 
 };

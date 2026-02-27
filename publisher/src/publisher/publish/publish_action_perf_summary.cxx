@@ -9,9 +9,9 @@
 #include <rapidjson/writer.h>
 
 bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
-    std::vector<std::filesystem::path>& inputFiles, std::filesystem::path const& outputPath, 
+    std::string const& taskDataFile, std::filesystem::path const& outputPath, 
     std::string& outFile, std::unordered_set<std::string>& libsManaged) {
-  FileTGZ filetgz(inputFiles.back());
+  FileTGZ filetgz(taskDataFile);
 
   std::vector<std::pair<std::string, uint64_t>> taskInfo = filetgz.ListFiles(std::regex("[0-9]+\\.json"));
   if (taskInfo.size() != 1) {
@@ -38,7 +38,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   int nbTimeout = 0;
   TaskAnalysis analysis;
   try {
-    analysis = ExtractExperimentsFromBuffer(taskJSON, "", inputFiles.back());
+    analysis = ExtractExperimentsFromBuffer(taskJSON, "", taskDataFile);
     for (ExperimentResult const& result: analysis.experiments) {
       bool success = (result.exit_code == 512) && (result.state == "TimedOut");
       states[result.id].runs[result.attempt] = success;

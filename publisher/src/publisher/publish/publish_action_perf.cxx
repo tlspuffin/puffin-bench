@@ -6,10 +6,10 @@
 #include <rapidjson/writer.h>
 
 bool ns_Publish::PublishActionPerf::Analyze(
-    std::vector<std::filesystem::path>& inputFiles, 
+    std::string const& jsonTaskFile, std::string const& dataTaskFile, 
     TaskAnalysis& experiments, 
     std::unordered_map<std::string, struct LibSummary>& libSummaries) {
-  experiments = ExtractExperimentsFromFile(inputFiles);
+  experiments = ExtractExperimentsFromFile(jsonTaskFile, dataTaskFile);
   LOGI("Found " << experiments.experiments.size() << " Experiment steps");
   std::unordered_set<std::string> libs;
   bool haveSuccess = false;

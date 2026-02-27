@@ -7,49 +7,66 @@
 ns_Publish::Publish::Project::Project(std::string const& name, 
     std::filesystem::path const& path, std::filesystem::path const& outputPath)
     : name_(name), path_(path), outputPath_(outputPath), indexed_(), rules_()
-{}
-
-ns_Publish::Publish::Publish(Config const& config)
-    : config_(config) {
-  projects_ = ScanProjects();
-  for (Project& project: projects_) {
-    std::filesystem::create_directory(project.outputPath_);
-    ProjectStorageScan(project);
-  }
+{
+  indexed_.Load(path_ / ".index.json");
 }
 
-bool ns_Publish::Publish::NotifyFile(std::vector<std::string> const& srcFiles, std::string const& dstPath, 
+bool ns_Publish::Publish::Project::Save() {
+  return indexed_.Save(path_ / ".index.json");
+}
+
+ns_Publish::Publish::Publish(Config const& config)
+    : config_(config), running_(false)
+{
+  running_ = true;
+  thread_ = std::thread(&ns_Publish::Publish::Main, this);
+}
+
+ns_Publish::Publish::~Publish() {
+  running_ = false;
+  threadWait_.notify_one();
+  thread_.join();
+}
+
+bool ns_Publish::Publish::NotifyFiles(std::vector<std::filesystem::path>&& srcFiles, std::filesystem::path const& dstPath, 
     std::string& error) {
-  std::lock_guard<std::mutex> lock(lock_);
-#if 0
+  if (dstPath.empty()) {
+    error = "No destination path";
+    return false;
+  }
+ if (dstPath.is_absolute()) {
+  error = "Destination should not be absolute";
+  return false;
+ }
+  if (srcFiles.empty()) {
+    error = "No source file";
+    return false;
+  }
   for(std::string const& file: srcFiles) {
     if (!std::filesystem::exists(file)) {
-      error = "File does not exist";
+      error = "File " + file + " does not exist";
       return false;
     }
   }
 
-  for (Project& project: projects_) {
-    std::filesystem::path parentDirAbs = std::filesystem::canonical(project.path_);
-    std::filesystem::path subDirAbs = std::filesystem::canonical(dstPath);
+  std::lock_guard<std::mutex> lock(lock_);
 
-    if (IsSubDir(parentDirAbs, subDirAbs)) {
-      for(auto& rule: project.rules_) {
-        std::filesystem::path relativePath = std::filesystem::relative(dstPath, project.path_);
-        if (rule->RegisterPath(relativePath, subDirAbs)) {
-          LOGE(project.path_ << " = " << dstPath << " " << rule->Name());
-
-          LOGI("Process " << subDirAbs);
-          std::string outFile;
-          std::unordered_set<std::string> libsManaged;
-          if (rule->Run(subDirAbs, project.outputPath_, outFile, libsManaged)) {
-            project.indexed_.Add(outFile, srcFiles, libsManaged);
-          }
-        }
-      }
+  struct Project* targetProject = nullptr;
+  for(auto& project: projects_) {
+    if (*(dstPath.begin()) == project.name_) {
+      targetProject = &project;
+      break;
     }
   }
-#endif
+  std::filesystem::path absoluteDstPath = *(dstPath.begin());
+  if (targetProject == nullptr) {
+      error = "No project name " + absoluteDstPath.string() + " found";
+      return false;
+  }
+  absoluteDstPath = config_.storage_ / dstPath;
+
+  pendingNotifyFiles_.push({std::move(srcFiles), std::move(absoluteDstPath)});
+  threadWait_.notify_one();
   return true;
 }
 
@@ -76,7 +93,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
   std::vector<ns_Publish::Publish::Project> projects;
 
   LOGI("Publish folder:");
-  std::unordered_set<std::string> filtredProjects { ".html", "Z", "tlspuffin", "tests" };
+  std::unordered_set<std::string> filteredProjects { ".html", "Z", "tlspuffin", "tests" };
   try {
     for (auto iterator = std::filesystem::recursive_directory_iterator(config_.storage_);
         iterator != std::filesystem::recursive_directory_iterator();
@@ -84,7 +101,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
       if (!iterator->is_directory()) continue;
       iterator.disable_recursion_pending();
       std::string folderName = std::filesystem::relative(*iterator, config_.storage_);
-      if (filtredProjects.find(folderName) != filtredProjects.end()) {
+      if (filteredProjects.find(folderName) != filteredProjects.end()) {
         continue;
       }
       LOGI(" * " << folderName);
@@ -187,12 +204,6 @@ void ns_Publish::Publish::SaveIndex(std::unordered_set<std::string> indexed, std
 }
 
 void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& project) {
-  std::filesystem::path indexPath = project.path_ / ".index.json";
-  {
-    std::lock_guard<std::mutex> lock(lock_);
-    project.indexed_.Load(indexPath);
-  }
-
   try {
     int processedCount = 0;
     LOGI("Scan " << project.path_);
@@ -210,23 +221,20 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
           std::unordered_set<std::string> libsManaged;
           std::vector<std::filesystem::path> inData { entry };
           if (rule->Run(inData, project.outputPath_, outFile, libsManaged)) {
-            //relative indata
             std::vector<std::string> relativeInData;
             for(std::filesystem::path const& file: inData) {
               relativeInData.push_back(std::filesystem::relative(file, project.path_));
             }
-            {
-              std::lock_guard<std::mutex> lock(lock_);
-              project.indexed_.Add(outFile, relativeInData, libsManaged);
-            }
+            project.indexed_.Add(outFile, relativeInData, libsManaged);
             ++processedCount;
+            break;
           }
         }
 
       }
     }
     if (processedCount > 0) {
-      project.indexed_.Save(indexPath);
+      project.Save();
       LOGI("Processed and indexed " << processedCount << " files");
     }
   } catch (std::filesystem::filesystem_error const& e) {
@@ -234,4 +242,99 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
   } catch (std::exception const& e) {
     LOGE("Error during scan: " << e.what());
   }
+}
+
+void ns_Publish::Publish::Main() {
+  std::unique_lock<std::mutex> lock(lock_);
+  projects_ = ScanProjects();
+  for (Project& project: projects_) {
+    std::filesystem::create_directory(project.outputPath_);
+    ProjectStorageScan(project);
+  }
+  LOGI("Initial scan done");
+
+  while(running_) {
+    threadWait_.wait_for(lock, std::chrono::seconds(1), [&](){ 
+        return !running_ || !pendingNotifyFiles_.empty(); 
+    });
+    while(!pendingNotifyFiles_.empty()) {
+      ProcessANotifyFilesRequest(lock);
+    }
+  }
+}
+
+void ns_Publish::Publish::ProcessANotifyFilesRequest(std::unique_lock<std::mutex>& lock) {
+  struct NotifyFilesRequest request = std::move(pendingNotifyFiles_.front());
+  pendingNotifyFiles_.pop();
+  lock.unlock();
+  std::filesystem::path const& dstPath = request.dstPath;
+
+  std::vector<std::filesystem::path> dstFiles;
+  for(auto& file: request.srcFiles) {
+    dstFiles.push_back(dstPath / file.filename());
+  }
+  int filesStatus = 0;
+  for(auto& file: dstFiles) {
+    filesStatus |= std::filesystem::exists(file) ? 1 : 2;
+    if (filesStatus == 3) {
+      break;
+    }
+  }
+  if (filesStatus == 3) {
+    LOGE("Some files already exist in " << dstPath);
+    lock.lock();
+    return;
+  }
+  if (filesStatus == 2) {
+    for(size_t i=0; i<request.srcFiles.size(); ++i) {
+      std::error_code ec;
+      create_directories(dstFiles[i].parent_path(), ec);
+      if (!ec) {
+        if ((std::filesystem::copy_file(request.srcFiles[i], dstFiles[i], ec)) && (!ec)) {
+          continue;
+        }
+      }
+      for(size_t j=0; j<i; ++j) {
+        if ((!std::filesystem::remove(dstFiles[j], ec)) || ec ) {
+          LOGE("Was unable to delete " << dstFiles[j]);
+        }
+      }
+      lock.lock();
+      return;
+    }
+  }
+
+  struct Project* targetProject = nullptr;
+  for(struct Project& project: projects_) {
+    if (IsSubDir(project.path_, dstPath)) {
+      targetProject = &project;
+      break;
+    }
+  }
+  if (targetProject == nullptr) {
+    lock.lock();
+    return;
+  }
+  for(auto const& entry : dstFiles)  {
+    for (auto const& rule: targetProject->rules_) {
+      std::filesystem::path relativePath = std::filesystem::relative(entry, targetProject->path_);
+      std::string relativeStr = relativePath.string();
+      if (rule->RegisterPath(relativeStr, entry)) {
+        LOGI("Process " << entry << " with " << rule->Name());
+        std::string outFile;
+        std::unordered_set<std::string> libsManaged;
+        if (rule->Process(dstFiles, targetProject->outputPath_, outFile, libsManaged)) {
+          std::vector<std::string> relativeInData;
+          for(std::filesystem::path const& file: dstFiles) {
+            relativeInData.push_back(std::filesystem::relative(file, targetProject->path_));
+          }
+          lock.lock();
+          targetProject->indexed_.Add(outFile, relativeInData, libsManaged);
+          targetProject->Save();
+          return;
+        }
+      }
+    }
+  }
+  lock.lock();
 }
