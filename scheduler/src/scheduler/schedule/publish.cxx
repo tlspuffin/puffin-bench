@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <Poco/URI.h>
+#include <Poco/Net/HTMLForm.h>
 #include <Poco/Net/HTTPClientSession.h>
 #include <Poco/Net/HTTPSClientSession.h>
 #include <Poco/Net/HTTPRequest.h>
@@ -59,7 +60,7 @@ void ns_Schedule::Publish::PublishResults(
   }
 
   std::filesystem::path finalStoragePath = ResolveVariables(storage_, taskVariables);
-  if (!finalStoragePath.empty()) {
+  /*if (!finalStoragePath.empty()) {
     std::filesystem::create_directories(finalStoragePath);
 
     std::filesystem::copy_options copyOptions = 
@@ -69,13 +70,19 @@ void ns_Schedule::Publish::PublishResults(
       std::filesystem::copy(file, finalStoragePath, copyOptions);
     }
     std::filesystem::copy(taskJSONfile, finalStoragePath / taskJSONfile.filename(), copyOptions);
-  }
+  }*/
 
   if (server_.empty()) {
     return;
   }
   try {
-    PublishToServer(finalStoragePath);
+    std::vector<std::string> files;
+    files.reserve(1+data.size());
+    files.push_back(taskJSONfile);
+    for (std::string const& file : data) {
+      files.push_back(file);
+    }
+    PublishToServer(files, finalStoragePath);
   } catch(std::runtime_error const& e) {
     LOGW("Error with publish server " << server_ << "\n\t" << e.what());
   } catch(...) {
@@ -83,7 +90,8 @@ void ns_Schedule::Publish::PublishResults(
   }
 }
 
-void ns_Schedule::Publish::PublishToServer(std::filesystem::path const& archivePath) {
+void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files, 
+    std::string const& archivePath) {
   try {
     Poco::URI uri(server_);
     std::unique_ptr<Poco::Net::HTTPClientSession> session;
@@ -105,14 +113,15 @@ void ns_Schedule::Publish::PublishToServer(std::filesystem::path const& archiveP
     std::string path = uri.getPath().empty() ? "/" : uri.getPath();
     Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_POST, path);
 
-    std::string encodedPath;
-    Poco::URI::encode(archivePath.string(), "", encodedPath);
-    std::string formData = "path=" + encodedPath;
+    Poco::Net::HTMLForm form(Poco::Net::HTMLForm::ENCODING_MULTIPART);
+    for (std::string const& src : files) {
+      form.add("src", src);
+    }
+    form.set("dst", archivePath);
+    form.prepareSubmit(request);
 
-    request.setContentType("application/x-www-form-urlencoded");
-    request.setContentLength(formData.length());
     std::ostream& requestStream = session->sendRequest(request);
-    requestStream << formData;
+    form.write(requestStream);
     requestStream.flush();
 
     Poco::Net::HTTPResponse response;

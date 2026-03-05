@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "${PUBLISHER_STORAGE}/${COMMIT_ID}/Test/${task_id}/",
+    "storage_path": "Y/Tests/${COMMIT_ID}/",
     "goal": "Mesurer PR/Commit ${COMMIT_ID}"
   },
   "name" : "Test Monitor",

@@ -27,7 +27,8 @@ public:
   std::string goal_;
 
 private:
-  void PublishToServer(std::filesystem::path const& archivePath);
+  void PublishToServer(std::vector<std::string> const& files, 
+    std::string const& archivePath);
 };
 
 };
