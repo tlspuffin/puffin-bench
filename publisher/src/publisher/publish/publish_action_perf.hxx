@@ -18,8 +18,8 @@ private:
 public:
   PublishActionPerf() : PublishAction() {}
   PublishActionPerf(std::string const& basePath, std::string const& relativePath, 
-      std::string const& name, std::string const& filesFilter) 
-      : PublishAction(basePath, relativePath, name, filesFilter) {}
+      std::string const& name, std::string const& filesFilter, std::string const& finalTrigger) 
+      : PublishAction(basePath, relativePath, name, filesFilter, finalTrigger) {}
   bool Analyze(std::string const& jsonTaskFile, std::string const& dataTaskFile, 
       PublishAction::TaskAnalysis& experiments, 
       std::unordered_map<std::string, struct LibSummary>& libSummaries);

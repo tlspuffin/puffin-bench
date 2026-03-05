@@ -1,10 +1,10 @@
 #include "config.hxx"
 #include "../../utils/rapidjson.hxx"
 
-static ns_Publish::Config defaultConfig;
+static ns_Publish::Config defaultConfig(false);
 
-ns_Publish::Config::Config() 
-    : storage_("data"), weboutput_("html"), orphanScanInterval_(3600), tmpPath_("tmp") {
+ns_Publish::Config::Config(bool forceInstall) 
+    : storage_("data"), weboutput_("html"), orphanScanInterval_(3600), tmpPath_("tmp"), forceInstall_(forceInstall) {
 }
 
 void ns_Publish::Config::Load(std::string const& name, rapidjson::Value& doc) {

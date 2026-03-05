@@ -24,8 +24,8 @@ private:
 public:
   PublishActionVuln3() : PublishAction() {}
   PublishActionVuln3(std::string const& basePath, std::string const& relativePath, 
-      std::string const& name, std::string const& filesFilter) 
-      : PublishAction(basePath, relativePath, name, filesFilter) {}
+      std::string const& name, std::string const& filesFilter, std::string const& finalTrigger) 
+      : PublishAction(basePath, relativePath, name, filesFilter, finalTrigger) {}
   bool Analyze(std::string const& taskDataFile, std::string const& taskInfoFile, 
       PublishAction::TaskAnalysis& analysis, 
       std::unordered_map<std::string, struct LibSummary>& libSummaries);

@@ -8,8 +8,8 @@ public:
   PublishActionPerfUseSummary() : PublishAction() {}
   PublishActionPerfUseSummary(std::string const& basePath, 
       std::string const& relativePath, std::string const& name, 
-      std::string const& filesFilter) 
-      : PublishAction(basePath, relativePath, name, filesFilter) {}
+      std::string const& filesFilter, std::string const& finalTrigger) 
+      : PublishAction(basePath, relativePath, name, filesFilter, finalTrigger) {}
   bool GenerateCommitJson(std::string const& taskDataFile, 
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);

@@ -13,6 +13,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <queue>
+#include <unordered_set>
 
 namespace ns_Publish {
 
@@ -31,9 +32,12 @@ private:
     std::filesystem::path outputPath_;
     Index indexed_;
     std::vector<std::shared_ptr<PublishAction>> rules_;
+    std::unordered_map<std::string, std::string> variablesValues_;
 
-    Project(std::string const& name, std::filesystem::path const& path, std::filesystem::path const& outputPath);
+    Project(std::string const& name, std::filesystem::path const& path, std::filesystem::path const& outputPath, 
+        std::unordered_map<std::string, std::string> const& variablesValues);
     bool Save();
+    bool ExecuteTriggers(std::unordered_set<std::string> const& triggers) const;
   };
   struct NotifyFilesRequest {
     std::vector<std::filesystem::path> srcFiles;
@@ -47,6 +51,7 @@ private:
   std::atomic_bool running_;
   std::condition_variable threadWait_;
   std::queue<struct NotifyFilesRequest> pendingNotifyFiles_;
+  std::unordered_map<std::string, std::string> variablesValues_;
 
   std::vector<Project> ScanProjects();
   bool ScanRules(ns_Publish::Publish::Project& project, std::filesystem::path const& directory);

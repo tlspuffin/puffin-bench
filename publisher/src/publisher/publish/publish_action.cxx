@@ -16,9 +16,9 @@ ns_Publish::PublishAction::PublishAction()
 
 ns_Publish::PublishAction::PublishAction(std::string const& basePath, 
     std::string const& relativePath, std::string const& name, 
-    std::string const& filesFilter) 
+    std::string const& filesFilter, std::string const& finalTrigger) 
     : name_(name), basePath_(basePath), relativePath_(relativePath != "." ? relativePath : ""), 
-    filesFilter_(filesFilter), debugFilesFilter_(filesFilter) {
+    filesFilter_(filesFilter), debugFilesFilter_(filesFilter), finalTrigger_(finalTrigger) {
 }
 
 ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperimentsFromFile(
@@ -138,17 +138,17 @@ ns_Publish::PublishAction::TaskAnalysis ns_Publish::PublishAction::ExtractExperi
 
 ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& basePath, 
     std::string const& relativePath, std::string const& action, std::string const& name, 
-    std::string const& filesFilter) {
+    std::string const& filesFilter, std::string const& finalTrigger) {
   if (action == "GenerateReportPerf") {
-    return new PublishActionPerf(basePath, relativePath, name, filesFilter);
+    return new PublishActionPerf(basePath, relativePath, name, filesFilter, finalTrigger);
   } else if (action == "GenerateReportVuln") {
-    return new PublishActionVuln(basePath, relativePath, name, filesFilter);
+    return new PublishActionVuln(basePath, relativePath, name, filesFilter, finalTrigger);
   } else if (action == "GenerateReportPerfFromSummary") {
-    return new PublishActionPerfUseSummary(basePath, relativePath, name, filesFilter);
+    return new PublishActionPerfUseSummary(basePath, relativePath, name, filesFilter, finalTrigger);
   } else if (action == "GenerateReportVuln2") {
-    return new PublishActionVuln2(basePath, relativePath, name, filesFilter);
+    return new PublishActionVuln2(basePath, relativePath, name, filesFilter, finalTrigger);
   } else if (action == "GenerateReportVuln3") {
-    return new PublishActionVuln3(basePath, relativePath, name, filesFilter);
+    return new PublishActionVuln3(basePath, relativePath, name, filesFilter, finalTrigger);
   }
   return nullptr;
 }

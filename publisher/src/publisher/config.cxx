@@ -10,6 +10,9 @@
 #include <rapidjson/error/error.h>
 #include <rapidjson/error/en.h>
 
+Config::Config(bool forceInstall) : publish_(forceInstall) 
+{}
+
 bool Config::Load(std::string const& filepath) {
   bool success = true;
   rapidjson::Document doc;

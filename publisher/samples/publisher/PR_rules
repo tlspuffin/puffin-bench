@@ -5,6 +5,7 @@
   },
   "Vuln": {
     "onFiles": "PR/[0-9a-fA-F].*/Vuln/[0-9][0-9]*\\.json",
-    "action": "GenerateReportVuln"
+    "action": "GenerateReportVuln",
+    "finalTrigger": "${INTERNAL/tlspuffin_history} ${PROJECT_PATH}/PR ${WORKPLACE}"
   }
 }

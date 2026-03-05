@@ -35,10 +35,11 @@ public:
   PublishAction();
   PublishAction(std::string const& basePath, 
       std::string const& relativePath, std::string const& name, 
-      std::string const& filesFilter);
+      std::string const& filesFilter, std::string const& finalTrigger);
   virtual ~PublishAction();
   std::string Name() const;
   std::string ProjectRelativePath() const;
+  std::string FinalTrigger() const;
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
   TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile, 
       std::string const& taskDataFileName);
@@ -54,7 +55,8 @@ public:
       std::unordered_set<std::string>& libsManaged);
 
   static PublishAction* Build(std::string const& basePath, std::string const& relativePath, 
-      std::string const& action, std::string const& name, std::string const& onFiles);
+      std::string const& action, std::string const& name, std::string const& onFiles, 
+      std::string const& finalTrigger);
 
 protected:
   std::string const name_;
@@ -63,6 +65,7 @@ protected:
   std::regex const filesFilter_;
   std::string const debugFilesFilter_;
   std::unordered_set<std::string> targets_;
+  std::string const finalTrigger_;
 };
 
 inline PublishAction::~PublishAction() {}
@@ -73,6 +76,10 @@ inline std::string PublishAction::Name() const {
 
 inline std::string PublishAction::ProjectRelativePath() const {
   return relativePath_;
+}
+
+inline std::string PublishAction::FinalTrigger() const {
+  return finalTrigger_;
 }
 
 inline bool PublishAction::RegisterPath(std::string const& projectRelativePath, std::string const& absolutePath) {

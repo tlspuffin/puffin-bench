@@ -2,17 +2,46 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/dir.hxx"
+#include "../../utils/variables.hxx"
+#include "internal_cmd.hxx"
 #include <fstream>
 
 ns_Publish::Publish::Project::Project(std::string const& name, 
-    std::filesystem::path const& path, std::filesystem::path const& outputPath)
-    : name_(name), path_(path), outputPath_(outputPath), indexed_(), rules_()
+    std::filesystem::path const& path, std::filesystem::path const& outputPath, 
+    std::unordered_map<std::string, std::string> const& variablesValues)
+    : name_(name), path_(path), outputPath_(outputPath), indexed_(), rules_(), 
+    variablesValues_(variablesValues)
 {
+  variablesValues_.emplace("PROJECT_PATH", path_);
   indexed_.Load(path_ / ".index.json");
 }
 
 bool ns_Publish::Publish::Project::Save() {
   return indexed_.Save(path_ / ".index.json");
+}
+
+bool ns_Publish::Publish::Project::ExecuteTriggers(std::unordered_set<std::string> const& triggers) const {
+  for(std::string const& trigger: triggers) {
+    if ((trigger.empty()) || (trigger.find("${") != 0)) {
+      continue;
+    }
+    size_t endPos = trigger.find('}', 2);
+    if (endPos == std::string::npos) {
+        continue;
+    }
+    std::string cmdLine = trigger;
+    if (trigger.find("${INTERNAL/") != 0) {
+      std::string exe = trigger.substr(2, endPos - 2);
+      if (!std::filesystem::exists(exe)) {
+        continue;
+      }
+      cmdLine = exe + trigger.substr(endPos + 1);
+    }
+    cmdLine = ResolveVariables(cmdLine, variablesValues_);
+    cmdLine = "cd \"" + path_.string() + "\" && " + cmdLine;
+    std::system(cmdLine.c_str());
+  }
+  return true;
 }
 
 ns_Publish::Publish::Publish(Config const& config)
@@ -93,7 +122,7 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
   std::vector<ns_Publish::Publish::Project> projects;
 
   LOGI("Publish folder:");
-  std::unordered_set<std::string> filteredProjects { ".html", "Z", "tlspuffin", "tests" };
+  std::unordered_set<std::string> filteredProjects { /*"Z", "tlspuffin", "tests"*/ };
   try {
     for (auto iterator = std::filesystem::recursive_directory_iterator(config_.storage_);
         iterator != std::filesystem::recursive_directory_iterator();
@@ -101,11 +130,14 @@ std::vector<ns_Publish::Publish::Project> ns_Publish::Publish::ScanProjects() {
       if (!iterator->is_directory()) continue;
       iterator.disable_recursion_pending();
       std::string folderName = std::filesystem::relative(*iterator, config_.storage_);
+      if (folderName.find(".") == 0) {
+        continue;
+      }
       if (filteredProjects.find(folderName) != filteredProjects.end()) {
         continue;
       }
       LOGI(" * " << folderName);
-      projects.push_back(Project{ folderName, *iterator, iterator->path() / ".JSON" });
+      projects.push_back(Project{ folderName, *iterator, iterator->path() / ".JSON", variablesValues_ });
     }
   } catch (std::filesystem::filesystem_error const& e) {
     LOGE("Filesystem error during projects scan: " << e.what());
@@ -146,12 +178,13 @@ bool ns_Publish::Publish::ScanRules(ns_Publish::Publish::Project& project, std::
       return true; // stop search in subdir
     }
 
-    const std::string name = it->name.GetString();
-    const std::string action = value["action"].GetString();
-    const std::string onFiles = value["onFiles"].GetString();
-    const std::string relativePath = std::filesystem::relative(directory, project.path_);
+    std::string const name = it->name.GetString();
+    std::string const action = value["action"].GetString();
+    std::string const onFiles = value["onFiles"].GetString();
+    std::string const relativePath = std::filesystem::relative(directory, project.path_);
+    std::string const finalTrigger = value.HasMember("finalTrigger") ? value["finalTrigger"].GetString() : "";
     std::shared_ptr<PublishAction> actionPtr = 
-        std::shared_ptr<PublishAction>(PublishAction::Build(directory, relativePath, action, name, onFiles));
+        std::shared_ptr<PublishAction>(PublishAction::Build(directory, relativePath, action, name, onFiles, finalTrigger));
     if (actionPtr) {
       project.rules_.push_back(actionPtr);
       std::cout << "Add rules: " << name << " → " << action << " (" << onFiles << ") for: " << relativePath << '\n';
@@ -206,6 +239,7 @@ void ns_Publish::Publish::SaveIndex(std::unordered_set<std::string> indexed, std
 void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& project) {
   try {
     int processedCount = 0;
+    std::unordered_set<std::string> triggers;
     LOGI("Scan " << project.path_);
 
     for (auto const& entry : std::filesystem::recursive_directory_iterator(project.path_)) {
@@ -227,6 +261,7 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
             }
             project.indexed_.Add(outFile, relativeInData, libsManaged);
             ++processedCount;
+            triggers.insert(rule->FinalTrigger());
             break;
           }
         }
@@ -235,6 +270,7 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
     }
     if (processedCount > 0) {
       project.Save();
+      project.ExecuteTriggers(triggers);
       LOGI("Processed and indexed " << processedCount << " files");
     }
   } catch (std::filesystem::filesystem_error const& e) {
@@ -245,6 +281,31 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
 }
 
 void ns_Publish::Publish::Main() {
+  {
+    std::filesystem::path scriptPath = config_.storage_ / ".cmds";
+    std::error_code ec;
+    std::filesystem::create_directories(scriptPath, ec);
+    for(auto const& [ _, script ]: internalCMDs) {
+      std::filesystem::path filePath = 
+          std::filesystem::weakly_canonical(scriptPath / script.filename);
+      if (config_.forceInstall_ || (!std::filesystem::exists(filePath))) {
+        std::cerr << "Creating missing required file " << filePath << std::endl;
+        std::ofstream ofs(filePath, std::ios::binary);
+        ofs.write(script.data, script.size);
+        ofs.close();
+        std::filesystem::permissions(filePath,
+            std::filesystem::perms::owner_all |
+            std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
+            std::filesystem::perm_options::replace);
+      }
+    }
+    variablesValues_.emplace("WORKPLACE", config_.storage_ / ".cmds" / "workplace");
+    for(auto const& [k, v]: internalCMDs) {
+      variablesValues_.emplace("INTERNAL/" + k, config_.storage_ / ".cmds" / v.filename);
+    }
+    std::filesystem::create_directories(variablesValues_["WORKPLACE"], ec);
+  }
+
   std::unique_lock<std::mutex> lock(lock_);
   projects_ = ScanProjects();
   for (Project& project: projects_) {
@@ -288,7 +349,7 @@ void ns_Publish::Publish::ProcessANotifyFilesRequest(std::unique_lock<std::mutex
   if (filesStatus == 2) {
     for(size_t i=0; i<request.srcFiles.size(); ++i) {
       std::error_code ec;
-      create_directories(dstFiles[i].parent_path(), ec);
+      std::filesystem::create_directories(dstFiles[i].parent_path(), ec);
       if (!ec) {
         if ((std::filesystem::copy_file(request.srcFiles[i], dstFiles[i], ec)) && (!ec)) {
           continue;
@@ -331,6 +392,7 @@ void ns_Publish::Publish::ProcessANotifyFilesRequest(std::unique_lock<std::mutex
           lock.lock();
           targetProject->indexed_.Add(outFile, relativeInData, libsManaged);
           targetProject->Save();
+          targetProject->ExecuteTriggers({ rule->FinalTrigger() });
           return;
         }
       }
