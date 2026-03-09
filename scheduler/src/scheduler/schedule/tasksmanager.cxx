@@ -15,8 +15,13 @@
 #include <rapidjson/filewritestream.h>
 
 ns_Schedule::TasksManager::TasksManager(
-    ns_Schedule::Config const& config)
+    ns_Schedule::Config const& config, bool resetStatus)
     : config_(config), next_task_id_(0) {
+  if (resetStatus) {
+    std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
+    std::ofstream ofs(filename, std::ios::trunc);
+    ofs << "{}\n";
+  }
 }
 
 ns_Schedule::TasksManager::~TasksManager() {

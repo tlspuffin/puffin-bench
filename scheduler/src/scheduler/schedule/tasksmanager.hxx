@@ -14,7 +14,7 @@ class Schedule;
 
 class TasksManager {
 public:
-  TasksManager(ns_Schedule::Config const& config);
+  TasksManager(ns_Schedule::Config const& config, bool resetStatus);
   ~TasksManager();
 
   ns_Schedule::Task* CreateTask(std::string const& name, 

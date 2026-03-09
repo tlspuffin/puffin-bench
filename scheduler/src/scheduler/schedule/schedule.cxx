@@ -32,7 +32,7 @@
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
-    : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
+    : config_(config), exportPath_(config.exportPath_), tasksManager_(config, true) /*true because LoadStatus call disable*/, 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
       monitor_(config.monitorsPath_), archiver_()
 {
@@ -44,6 +44,7 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cach
   }
 
   // Disable LoadStatus, step group not managed by Executor::Local reload system
+  // To remove disable too true in Taskmanager constructor
   /*auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
   steps_.insert(steps_.end(), pendingsSteps.begin(), pendingsSteps.end());
   stepsRunning_.insert(stepsRunning_.end(), stepsRunning.begin(), stepsRunning.end());

@@ -243,6 +243,12 @@ SummaryRun () {
       if [ ! -r "${readmeFile}" ]; then
         jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
         echo "Missing required file ${readmeFile}" >&2; 
+      elif [ ! -r "${i}" ]; then
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
+        echo "Missing required file ${i}" >&2; 
+      elif jq -e 'has("error")' "${i}" 2>/dev/null >&2; then
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
+        echo "Error in required file ${i}" >&2; 
       else
         local startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
         local endTime=$( jq -r 'select(.type=="global") | .time.secs_since_epoch' "${i}" )
