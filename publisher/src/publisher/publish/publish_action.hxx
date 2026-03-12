@@ -1,6 +1,7 @@
 #pragma once
 #include "file.hxx"
 #include "../../utils/dir.hxx"
+#include "../../utils/rapidjson.hxx"
 #include <string>
 #include <cstdint>
 #include <vector>
@@ -9,6 +10,7 @@
 #include <regex>
 #include <unordered_set>
 #include <iostream>
+#include <rapidjson/document.h>
 
 namespace ns_Publish {
 
@@ -68,6 +70,13 @@ protected:
   std::string const debugFilesFilter_;
   std::unordered_set<std::string> targets_;
   std::string const finalTrigger_;
+
+  static bool UpdateJSON(std::string const& jsonPath, 
+    rapidjson::Document& newJSON, std::unordered_set<std::string>& libsManaged);
+
+private:
+  static std::unordered_set<std::string> MergeResults(
+    rapidjson::Document& lastResults, rapidjson::Document const& newResults);
 };
 
 inline PublishAction::~PublishAction() {}

@@ -3,10 +3,6 @@
 #include "../../utils/file_tgz.hxx"
 #include "../../utils/rapidjson.hxx"
 #include <variant>
-#include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/ostreamwrapper.h>
-#include <rapidjson/writer.h>
 
 bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     std::string const& taskDataFile, std::filesystem::path const& outputPath, 
@@ -166,12 +162,21 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   doc.AddMember("type", "perf_summary", allocator);
   doc.AddMember("commit_id",
     rapidjson::Value(analysis.commit_id.c_str(), allocator), allocator);
-  doc.AddMember("date",
+
+  rapidjson::Value tasksDetails(rapidjson::kArrayType);
+  rapidjson::Value taskDetails(rapidjson::kObjectType);
+  taskDetails.AddMember("date",
     rapidjson::Value(analysis.date.c_str(), allocator), allocator);
-  doc.AddMember("task_id", analysis.task_id, allocator);
-  doc.AddMember("task_name",
+  taskDetails.AddMember("task_id", analysis.task_id, allocator);
+  taskDetails.AddMember("task_name",
     rapidjson::Value(analysis.task_name.c_str(), allocator), allocator);
-  doc.AddMember("no_stats", rapidjson::kArrayType, allocator);
+  std::filesystem::path relativePath = relativePath_;
+  taskDetails.AddMember("task_info",
+    rapidjson::Value((relativePath / analysis.task_infos).c_str(), allocator), allocator);
+  taskDetails.AddMember("task_data",
+    rapidjson::Value((relativePath / analysis.task_data).c_str(), allocator), allocator);
+  tasksDetails.PushBack(taskDetails, allocator);
+  doc.AddMember("tasks", tasksDetails, allocator);
 
   int nbFail = 0;
   rapidjson::Value libsObj(rapidjson::kObjectType);
@@ -243,6 +248,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     if (!haveObjectif.Empty()) {
       libData.AddMember("warn_user", haveObjectif, allocator);
     }
+    libData.AddMember("details_id", 0, allocator);
     libsObj.AddMember(
       rapidjson::Value(libName.c_str(), allocator), libData, allocator);
 
@@ -262,19 +268,10 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   doc.AddMember("global_status",
     rapidjson::Value(analysis.global_status.c_str(), allocator), allocator);
 
-  std::ofstream ofs(jsonPath);
-  if (!ofs.is_open()) {
-    LOGE("Failed to create JSON file: " << jsonPath);
-    throw std::runtime_error("Cannot create commit JSON");
+  if (!UpdateJSON(jsonPath, doc, libsManaged)) {
+    return false;
   }
 
-  rapidjson::OStreamWrapper os(ofs);
-  rapidjson::Writer<rapidjson::OStreamWrapper> writer(os);
-  doc.Accept(writer);
-
-  ofs.close();
-
-  LOGI("Generated " << jsonPath);
   outFile = jsonRelativePath;
   return true;
 }

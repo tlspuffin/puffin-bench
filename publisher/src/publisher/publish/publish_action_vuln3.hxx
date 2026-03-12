@@ -1,7 +1,6 @@
 #pragma once
 #include "publish_action.hxx"
 #include <unordered_map>
-#include <rapidjson/document.h>
 
 namespace ns_Publish {
 
@@ -18,9 +17,6 @@ private:
     LibSummary() : cputs(0), success_count(0), total_runs(0) {}
   };
 
-  std::unordered_set<std::string> MergeResults(rapidjson::Document& lastResults, 
-      rapidjson::Document const& newResults);
-
 public:
   PublishActionVuln3() : PublishAction() {}
   PublishActionVuln3(std::string const& basePath, std::string const& relativePath, 
@@ -33,11 +29,7 @@ public:
       std::unordered_map<std::string, struct LibSummary> const& libSummaries,
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
-  //bool CheckRule(std::vector<std::filesystem::path>& inputFiles);
   bool CheckRule(std::vector<File>& inputFiles);
-  /*bool Process(std::vector<std::filesystem::path> const& inputFiles, 
-      std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
-      std::string& outFile, std::unordered_set<std::string>& libsManaged);*/
   bool Process(std::vector<File> const& inputFiles, 
       std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
       std::string& outFile, std::unordered_set<std::string>& libsManaged);

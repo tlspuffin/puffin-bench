@@ -9,6 +9,9 @@
 #include <fstream>
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
+#include <rapidjson/ostreamwrapper.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/istreamwrapper.h>
 
 ns_Publish::PublishAction::PublishAction() 
     : name_("unnamed"), filesFilter_() {
@@ -152,3 +155,122 @@ ns_Publish::PublishAction* ns_Publish::PublishAction::Build(std::string const& b
   }
   return nullptr;
 }
+
+bool ns_Publish::PublishAction::UpdateJSON(std::string const& jsonPath, 
+    rapidjson::Document& newJSON, std::unordered_set<std::string>& libsManaged) {
+  rapidjson::Document oldDoc;
+  if (std::filesystem::exists(jsonPath)) {
+    std::ifstream ifs(jsonPath);
+    if (!ifs) {
+      return false;
+    }
+    rapidjson::IStreamWrapper isw(ifs);
+    if (oldDoc.ParseStream(isw).HasParseError()) {
+      return false;
+    }
+    ifs.close();
+    libsManaged = MergeResults(oldDoc, newJSON);
+    if (libsManaged.empty()) {
+      return false;
+    }
+    newJSON.Swap(oldDoc);
+  }
+
+  std::ofstream ofs(jsonPath);
+  if (!ofs.is_open()) {
+    LOGE("Failed to create JSON file: " << jsonPath);
+    throw std::runtime_error("Cannot create commit JSON");
+  }
+  rapidjson::OStreamWrapper os(ofs);
+  rapidjson::Writer<rapidjson::OStreamWrapper> writer(os);
+  newJSON.Accept(writer);
+  ofs.close();
+  LOGI("Generated " << jsonPath);
+
+  return true;
+}
+
+std::unordered_set<std::string> ns_Publish::PublishAction::MergeResults(
+    rapidjson::Document& lastResults, rapidjson::Document const& newResults) {
+  std::unordered_set<std::string> libsManaged;
+  if ((!newResults.HasMember("libs")) || (!newResults["libs"].IsObject())) {
+    return libsManaged;
+  }
+
+  std::string newCommitID = GetOrDefault<std::string>(newResults, "commit_id", "");
+  if (newCommitID.empty()) {
+    return libsManaged;
+  }
+  std::string lastCommitID = GetOrDefault<std::string>(lastResults, "commit_id", "");
+  if (lastCommitID.empty() || (newCommitID != lastCommitID)) {
+    return libsManaged;
+  }
+  if ((!newResults.HasMember("tasks")) || (!newResults["tasks"].IsArray())) {
+    return libsManaged;
+  }
+  if ((!lastResults.HasMember("tasks")) || (!lastResults["tasks"].IsArray())) {
+    return libsManaged;
+  }
+  std::string newStatus = GetOrDefault<std::string>(newResults, "global_status", "");
+  if (newStatus.empty()) {
+    return libsManaged;
+  }
+  std::string lastStatus = GetOrDefault<std::string>(lastResults, "global_status", "");
+  if (lastStatus.empty()) {
+    return libsManaged;
+  }
+
+  rapidjson::MemoryPoolAllocator<>& alloc = lastResults.GetAllocator();
+  //lastResults["date"].SetString(newDate.c_str(), alloc);
+  if (newStatus != lastStatus) {
+    if (((lastStatus == "no run") && (newStatus == "fail")) || 
+        ((lastStatus == "fail") && (newStatus == "no run"))) {
+      lastResults["global_status"].SetString("fail", alloc);
+    } else {
+      lastResults["global_status"].SetString("mixed", alloc);
+    }
+  }
+
+  uint64_t detailsID = lastResults["tasks"].Size();
+  rapidjson::Value taskCopy;
+  taskCopy.CopyFrom(newResults["tasks"][0], alloc);
+  lastResults["tasks"].PushBack(taskCopy, alloc);
+
+  rapidjson::Value const& newLibs = newResults["libs"].GetObj();
+  if ((lastResults.HasMember("libs")) && (lastResults["libs"].IsObject())) {
+    rapidjson::Value& libs = lastResults["libs"].GetObj();
+    for(auto it=libs.MemberBegin(); it!=libs.MemberEnd(); ++it) {
+      if (!it->name.IsString()) {
+        continue;
+      }
+      std::string const libName = it->name.GetString();
+      for(auto newIT=newLibs.MemberBegin(); newIT!=newLibs.MemberEnd(); ++newIT) {
+        if ((!newIT->name.IsString()) || (libName != newIT->name.GetString())) {
+          continue;
+        }
+        it->value.CopyFrom(newIT->value, alloc);
+        it->value["details_id"].SetUint64(detailsID);
+        libsManaged.insert(libName);
+        break;
+      }
+    }
+  } else {
+    lastResults.AddMember("libs", rapidjson::Value(rapidjson::kObjectType), alloc);
+  }
+  for(auto it=newLibs.MemberBegin(); it!=newLibs.MemberEnd(); ++it) {
+    if (!it->name.IsString()) {
+      continue;
+    }
+    std::string const libName = it->name.GetString();
+    if (libsManaged.find(libName) != libsManaged.end()) {
+      continue;
+    }
+    rapidjson::Value key(it->name, alloc);
+    rapidjson::Value val(it->value, alloc);
+    val["details_id"].SetUint64(detailsID);
+    lastResults["libs"].AddMember(key, val, alloc);
+    libsManaged.insert(it->name.GetString());
+  }
+  return libsManaged;
+}
+
