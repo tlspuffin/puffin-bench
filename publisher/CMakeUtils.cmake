@@ -27,18 +27,35 @@ function (IsLibWanted libpath libname type wantedlib symbolicName)
     return()
   endif()
 
+  #if (${type} STREQUAL "debug")
+  #  string(REGEX REPLACE "d$" "" libname ${libname})
+  #endif()
+  #if (${libname} IN_LIST wantedlib)
+  #  set(${symbolicName} "${libname}" PARENT_SCOPE)
+  #  return()
+  #endif()
+  #string(REGEX REPLACE "^lib" "" libnamewithoutprefix ${libname})
+  #if (${libnamewithoutprefix} IN_LIST wantedlib)
+  #  set(${symbolicName} "${libnamewithoutprefix}" PARENT_SCOPE)
+  #  return()
+  #endif()
+  set(librarynames "${libname}")
   if (${type} STREQUAL "debug")
-    string(REGEX REPLACE "d$" "" libname ${libname})
+    string(REGEX REPLACE "d$" "" libnamestripped ${libname})
+    LIST(APPEND librarynames "${libnamestripped}")
   endif()
-  if (${libname} IN_LIST wantedlib)
-    set(${symbolicName} "${libname}" PARENT_SCOPE)
-    return()
-  endif()
-  string(REGEX REPLACE "^lib" "" libnamewithoutprefix ${libname})
-  if (${libnamewithoutprefix} IN_LIST wantedlib)
-    set(${symbolicName} "${libnamewithoutprefix}" PARENT_SCOPE)
-    return()
-  endif()
+  foreach(libraryname IN LISTS librarynames)
+    if (${libraryname} IN_LIST wantedlib)
+      set(${symbolicName} "${libraryname}" PARENT_SCOPE)
+      return()
+    endif()
+    string(REGEX REPLACE "^lib" "" libnamewithoutprefix ${libraryname})
+    if (${libnamewithoutprefix} IN_LIST wantedlib)
+      set(${symbolicName} "${libnamewithoutprefix}" PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+
 endfunction()
 
 function (TryFindDLL libname type dllFiles retval)
@@ -119,11 +136,11 @@ endif (UNIX)
 ## Required parameters
 ### libname (in) : name of the library
 ### libsharedstatic (in) : STATIC, SHARED or HEADERSONLY type of library file to find
-### libpath (in) : 
+### libpath (in) :
 ###  * for STATIC or SHARED libraries: path where to search for the headers and libraries files
 ###  * for HEADERSONLY libraries: it match is same as the optional parameter HEADERSAMPLE, can be empty to use default search method
 ### requiredlib (in) : list of libraries names required to find in <libpath>, if empty will use all libraries found
-### outFoundlibs (out) : list of libraries found or NOT-fOUND or NOT-ALL-fOUND
+### outFoundlibs (out) : list of libraries found or -NOTFOUND
 ## Optional (in) parameters
 ### HEADERSONLY : will only setup headers informations
 ### HEADERSPATH <path> : a path where the headers are, not test will be done on it, ignored if path is empty.
@@ -148,7 +165,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   set(verbose ${arg_VERBOSE})
 
   set(foundMSG "not found")
-  set(${outFoundlibs} "NOT-fOUND" PARENT_SCOPE)
+  set(${outFoundlibs} "${outFoundlibs}-NOTFOUND" PARENT_SCOPE)
 
   if (NOT arg_HEADERSPATH)
     if(NOT includesample)
@@ -234,7 +251,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   set(dllFilesLst)
   file(GLOB_RECURSE dllFilesLst "${libpath}/*.dll")
   foreach(file ${dllFilesLst})
-    # subPathName is the relative path of pathName from  libpath 
+    # subPathName is the relative path of pathName from  libpath
     string(REGEX REPLACE "^${libpath}" "" subPathName "${file}")
     list(APPEND dllFiles ${subPathName})
   endforeach()
@@ -244,7 +261,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
     get_filename_component(pathName ${file} DIRECTORY)
     get_filename_component(filename ${file} NAME_WLE)
     #get_filename_component(fileext ${file} LAST_EXT)
-    # subPathName is the relative path of pathName from  libpath 
+    # subPathName is the relative path of pathName from  libpath
     string(REGEX REPLACE "^${libpath}" "" subPathName "${pathName}")
 
     set(libType "release")
@@ -293,7 +310,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
     foreach(alib ${requiredlib})
       if (NOT ${alib} IN_LIST libs)
         set(foundMSG "missing required libs")
-        set(${outFoundlibs} "NOT-fOUND" PARENT_SCOPE)
+        set(${outFoundlibs} "${outFoundlibs}-NOTFOUND" PARENT_SCOPE)
         break()
       endif()
       list(REMOVE_ITEM libs ${alib})
@@ -362,7 +379,13 @@ function(CreateExternalLib libname libs)
     set_target_properties(${libname}::${filename} PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES "${MYLIBSEARCH_${libname}_HEADERS}"
       IMPORTED_LOCATION "${MYLIBSEARCH_${libname}_${filename}}")
-    if (${libtype} STREQUAL "SHARED")
+
+    if (${libtype} STREQUAL "STATIC")
+      if (MYLIBSEARCH_${libname}_${filename}_DEBUG)
+        set_target_properties(${libname}::${filename} PROPERTIES
+            IMPORTED_LOCATION_DEBUG "${MYLIBSEARCH_${libname}_${filename}_DEBUG}")
+      endif()
+    elseif (${libtype} STREQUAL "SHARED")
       set_target_properties(${libname}::${filename} PROPERTIES
         IMPORTED_IMPLIB "${MYLIBSEARCH_${libname}_${filename}}")
       if (MYLIBSEARCH_${libname}_${filename}_DEBUG)
@@ -402,7 +425,7 @@ function(CreateExternalLib libname libs)
         add_dependencies(${deploytarget} ${deploytarget}_${libname}_${filename})
         set_target_properties(${deploytarget}_${libname}_${filename} PROPERTIES FOLDER "${deploytarget} deps")
       endif()
-    endif() 
+    endif()
 
   endforeach()
 
