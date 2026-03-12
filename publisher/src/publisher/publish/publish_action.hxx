@@ -1,4 +1,5 @@
 #pragma once
+#include "file.hxx"
 #include "../../utils/dir.hxx"
 #include <string>
 #include <cstdint>
@@ -40,17 +41,18 @@ public:
   std::string Name() const;
   std::string ProjectRelativePath() const;
   std::string FinalTrigger() const;
+  virtual bool CopyRemote() const;
   bool RegisterPath(std::string const& relativePath, std::string const& absolutePath);
   TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile, 
       std::string const& taskDataFileName);
   TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer, 
       std::filesystem::path taskInfos, std::filesystem::path taskData);
 
-  virtual bool CheckRule(std::vector<std::filesystem::path>& inputFiles) = 0;
-  virtual bool Process(std::vector<std::filesystem::path> const& inputFiles, 
-      std::filesystem::path const& outputPath, std::string& outFile, 
-      std::unordered_set<std::string>& libsManaged) = 0;
-  bool Run(std::vector<std::filesystem::path>& inputFiles, 
+  virtual bool CheckRule(std::vector<File>& inputFiles) = 0;
+  virtual bool Process(std::vector<File> const& inputFiles, 
+      std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
+      std::string& outFile, std::unordered_set<std::string>& libsManaged) = 0;
+  bool Run(std::vector<File>& inputFiles,  std::filesystem::path const& destPath, 
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
 
@@ -82,6 +84,10 @@ inline std::string PublishAction::FinalTrigger() const {
   return finalTrigger_;
 }
 
+inline bool PublishAction::CopyRemote() const {
+  return true;
+}
+
 inline bool PublishAction::RegisterPath(std::string const& projectRelativePath, std::string const& absolutePath) {
   if (!IsSubDir(relativePath_, projectRelativePath)) {
     return false;
@@ -95,13 +101,13 @@ inline bool PublishAction::RegisterPath(std::string const& projectRelativePath, 
   return true;
 }
 
-inline bool PublishAction::Run(std::vector<std::filesystem::path>& inputFiles, 
-    std::filesystem::path const& outputPath, std::string& outFile, 
-    std::unordered_set<std::string>& libsManaged) {
+inline bool PublishAction::Run(std::vector<File>& inputFiles, 
+    std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
+    std::string& outFile, std::unordered_set<std::string>& libsManaged) {
   outFile = "";
   libsManaged.clear();
-  return (targets_.find(inputFiles.back()) != targets_.end()) && 
-      CheckRule(inputFiles) && Process(inputFiles, outputPath, outFile, libsManaged);
+  return (targets_.find(inputFiles.back().AbsolutePath()) != targets_.end()) && 
+      CheckRule(inputFiles) && Process(inputFiles, destPath, outputPath, outFile, libsManaged);
 }
 
 };

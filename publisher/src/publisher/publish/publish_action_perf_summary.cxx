@@ -10,7 +10,8 @@
 
 bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     std::string const& taskDataFile, std::filesystem::path const& outputPath, 
-    std::string& outFile, std::unordered_set<std::string>& libsManaged) {
+    std::string& outFile, std::unordered_set<std::string>& libsManaged, 
+    std::string& taskJSON) {
   FileTGZ filetgz(taskDataFile);
 
   std::vector<std::pair<std::string, uint64_t>> taskInfo = filetgz.ListFiles(std::regex("[0-9]+\\.json"));
@@ -18,9 +19,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     return false;
   }
 
-  std::string taskJSON;
-  taskJSON.resize(taskInfo[0].second + 1);
-  taskJSON[taskInfo[0].second] = 0;
+  taskJSON.resize(taskInfo[0].second);
   int64_t readSize = filetgz.ExtractFileData(taskInfo[0].first, taskInfo[0].second, taskJSON.data(), nullptr);
   if ((readSize != taskInfo[0].second) || (taskJSON.empty())) {
     return false;
@@ -159,7 +158,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
 
   std::filesystem::create_directories(outputPath / "Perf");
   std::filesystem::path jsonRelativePath = std::filesystem::path("Perf") / (analysis.commit_id + ".json");
-  std::filesystem::path jsonPath = outputPath / relativePath_;
+  std::filesystem::path jsonPath = outputPath / jsonRelativePath;
 
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
@@ -278,4 +277,62 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   LOGI("Generated " << jsonPath);
   outFile = jsonRelativePath;
   return true;
+}
+
+bool ns_Publish::PublishActionPerfUseSummary::Process(std::vector<File> const& inputFiles, 
+    std::filesystem::path const& destPath, std::filesystem::path const& outputPath, std::string& outFile, 
+    std::unordered_set<std::string>& libsManaged) {
+  std::string error;
+  std::filesystem::path taskDataFile;
+  std::string taskJSON;
+  std::filesystem::path outFilePath;
+  std::string coreName = std::filesystem::path(destPath);
+  std::string zstdFile;
+  std::string taskJSONFile;
+
+  if (inputFiles.empty()) {
+    error = "Error: no input files for this notification";
+    goto PublishActionPerfUseSummary__Process;
+  }
+  taskDataFile = inputFiles.back().AbsolutePath();
+  if ((taskDataFile.extension() != ".tgz") || 
+      (!GenerateCommitJson(taskDataFile, outputPath, outFile, libsManaged, taskJSON))) {
+    error = "Error: file " + taskDataFile.string() + 
+        " is not a tgz or is not usable to extract informations";
+    goto PublishActionPerfUseSummary__Process;
+  }
+  outFilePath = outFile;
+  coreName = coreName / taskDataFile.stem();
+  zstdFile = coreName + ".zst";
+  if (!ns_Analyze::Generate_Perf_ZST(taskDataFile, zstdFile, "")) {
+    error = "Error: file " + taskDataFile.string() + 
+        " is not usable to generate ZST";
+    goto PublishActionPerfUseSummary__Process;
+  }
+  taskJSONFile = coreName + ".json";
+  {
+    std::ofstream ofs(taskJSONFile, std::ios::trunc);
+    if (!ofs.is_open()) {
+      error = "Error: unable to create " + taskJSONFile;
+      goto PublishActionPerfUseSummary__Process;
+    }
+    ofs << taskJSON;
+    if (ofs.fail()) {
+      error = "Error: unable to write " + taskJSONFile;
+      goto PublishActionPerfUseSummary__Process;
+    }
+  }
+  return true;
+
+PublishActionPerfUseSummary__Process:
+  LOGE(error);
+  std::error_code ec;
+  (!taskJSONFile.empty()) && std::filesystem::exists(taskJSONFile) && 
+      std::filesystem::remove(taskJSONFile, ec);
+  (!zstdFile.empty()) && std::filesystem::exists(zstdFile) && 
+      std::filesystem::remove(zstdFile, ec);
+  (!outFile.empty()) && std::filesystem::exists(outputPath / outFile) && 
+      std::filesystem::remove(outputPath / outFile, ec);
+  outFile = "";
+  return false;
 }

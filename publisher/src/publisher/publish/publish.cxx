@@ -39,7 +39,9 @@ bool ns_Publish::Publish::Project::ExecuteTriggers(std::unordered_set<std::strin
     }
     cmdLine = ResolveVariables(cmdLine, variablesValues_);
     cmdLine = "cd \"" + path_.string() + "\" && " + cmdLine;
-    std::system(cmdLine.c_str());
+    if (std::system(cmdLine.c_str()) != 0) {
+      LOGE("Failling execute: " << cmdLine);
+    }
   }
   return true;
 }
@@ -244,22 +246,30 @@ void ns_Publish::Publish::ProjectStorageScan(ns_Publish::Publish::Project& proje
 
     for (auto const& entry : std::filesystem::recursive_directory_iterator(project.path_)) {
       if (!entry.is_regular_file()) continue;
-      std::filesystem::path relativePath = std::filesystem::relative(entry.path(), project.path_);
-      std::string relativeStr = relativePath.string();
-      if (relativeStr[0] == '.') continue;
+      std::string filename = entry.path().filename();
+      if ((filename[0] == '.') && (filename.find(".remote-") != 0)) {
+        continue;
+      }
 
+      File currentFile(entry.path());
+      if (!currentFile.Exist()) {
+        continue;
+      }
+      std::string projectRelativeStr = currentFile.RelativePathToProject(project.path_);
       for(auto& rule: project.rules_) {
-        if ((rule->RegisterPath(relativeStr, entry.path())) && (!project.indexed_.HaveCachedJSON(project.outputPath_, relativeStr))) {
-          LOGI("Process " << entry << " with " << rule->Name());
+          std::string relativeStr = currentFile.RelativePath(project.path_);
+        if ((rule->RegisterPath(projectRelativeStr, currentFile.AbsolutePath())) && 
+            (!project.indexed_.HaveCachedJSON(project.outputPath_, relativeStr))) {
+          LOGI("Process " << relativeStr << " with " << rule->Name());
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          std::vector<std::filesystem::path> inData { entry };
-          if (rule->Run(inData, project.outputPath_, outFile, libsManaged)) {
-            std::vector<std::string> relativeInData;
-            for(std::filesystem::path const& file: inData) {
-              relativeInData.push_back(std::filesystem::relative(file, project.path_));
+          std::vector<File> inData { currentFile };
+          if (rule->Run(inData, entry.path().parent_path(), project.outputPath_, outFile, libsManaged)) {
+            std::vector<std::string> inDataProcessed;
+            for(File const& file: inData) {
+              inDataProcessed.push_back(file.RelativePath(project.path_));
             }
-            project.indexed_.Add(outFile, relativeInData, libsManaged);
+            project.indexed_.Add(outFile, inDataProcessed, libsManaged);
             ++processedCount;
             triggers.insert(rule->FinalTrigger());
             break;
@@ -327,44 +337,10 @@ void ns_Publish::Publish::Main() {
 void ns_Publish::Publish::ProcessANotifyFilesRequest(std::unique_lock<std::mutex>& lock) {
   struct NotifyFilesRequest request = std::move(pendingNotifyFiles_.front());
   pendingNotifyFiles_.pop();
+
   lock.unlock();
+
   std::filesystem::path const& dstPath = request.dstPath;
-
-  std::vector<std::filesystem::path> dstFiles;
-  for(auto& file: request.srcFiles) {
-    dstFiles.push_back(dstPath / file.filename());
-  }
-  int filesStatus = 0;
-  for(auto& file: dstFiles) {
-    filesStatus |= std::filesystem::exists(file) ? 1 : 2;
-    if (filesStatus == 3) {
-      break;
-    }
-  }
-  if (filesStatus == 3) {
-    LOGE("Some files already exist in " << dstPath);
-    lock.lock();
-    return;
-  }
-  if (filesStatus == 2) {
-    for(size_t i=0; i<request.srcFiles.size(); ++i) {
-      std::error_code ec;
-      std::filesystem::create_directories(dstFiles[i].parent_path(), ec);
-      if (!ec) {
-        if ((std::filesystem::copy_file(request.srcFiles[i], dstFiles[i], ec)) && (!ec)) {
-          continue;
-        }
-      }
-      for(size_t j=0; j<i; ++j) {
-        if ((!std::filesystem::remove(dstFiles[j], ec)) || ec ) {
-          LOGE("Was unable to delete " << dstFiles[j]);
-        }
-      }
-      lock.lock();
-      return;
-    }
-  }
-
   struct Project* targetProject = nullptr;
   for(struct Project& project: projects_) {
     if (IsSubDir(project.path_, dstPath)) {
@@ -376,27 +352,88 @@ void ns_Publish::Publish::ProcessANotifyFilesRequest(std::unique_lock<std::mutex
     lock.lock();
     return;
   }
-  for(auto const& entry : dstFiles)  {
+
+  std::vector<File> dstFiles;
+  for(auto& file: request.srcFiles) {
+    dstFiles.push_back( { dstPath / file.filename(), file });
+  }
+
+  std::shared_ptr<PublishAction> ruleToApply;
+  std::string triggerRuleFile;
+  for(File const& file : dstFiles)  {
     for (auto const& rule: targetProject->rules_) {
-      std::filesystem::path relativePath = std::filesystem::relative(entry, targetProject->path_);
-      std::string relativeStr = relativePath.string();
-      if (rule->RegisterPath(relativeStr, entry)) {
-        LOGI("Process " << entry << " with " << rule->Name());
-        std::string outFile;
-        std::unordered_set<std::string> libsManaged;
-        if (rule->Process(dstFiles, targetProject->outputPath_, outFile, libsManaged)) {
-          std::vector<std::string> relativeInData;
-          for(std::filesystem::path const& file: dstFiles) {
-            relativeInData.push_back(std::filesystem::relative(file, targetProject->path_));
-          }
-          lock.lock();
-          targetProject->indexed_.Add(outFile, relativeInData, libsManaged);
-          targetProject->Save();
-          targetProject->ExecuteTriggers({ rule->FinalTrigger() });
-          return;
+      std::string relativeStr = file.RelativePathToProject(targetProject->path_);
+      if (rule->RegisterPath(relativeStr, file.AbsolutePath())) {
+        triggerRuleFile = file.AbsolutePath();
+        ruleToApply = rule;
+        break;
+      }
+    }
+    if (ruleToApply) {
+      break;
+    }
+  }
+  if (!ruleToApply) {
+    lock.lock();
+    return;
+  }
+
+  int filesStatus = 0;
+  for(File& file: dstFiles) {
+    filesStatus |= file.ExistInProject() ? 1 : 2;
+    if (filesStatus == 3) {
+      break;
+    }
+  }
+  if (filesStatus == 3) {
+    LOGE("Some files already exist in " << dstPath);
+    lock.lock();
+    return;
+  }
+  if (filesStatus == 2) {
+    size_t errorAt = -1;
+    if (ruleToApply->CopyRemote()) {
+      for(size_t i=0; i<dstFiles.size(); ++i) {
+        if (!dstFiles[i].Copy()) {
+          errorAt = i;
+          break;
+        }
+      }
+    } else {
+      for(size_t i=0; i<dstFiles.size(); ++i) {
+        if (!dstFiles[i].Link()) {
+          errorAt = i;
+          break;
         }
       }
     }
+    if (errorAt != -1) {
+      for(size_t j=0; j<errorAt; ++j) {
+        dstFiles[j].RemoveFromProject();
+      }
+      lock.lock();
+      return;
+    }
   }
+
+  LOGI("Process " << triggerRuleFile << " with " << ruleToApply->Name());
+  std::string outFile;
+  std::unordered_set<std::string> libsManaged;
+  if (ruleToApply->Process(dstFiles, dstPath, targetProject->outputPath_, outFile, libsManaged)) {
+    std::vector<std::string> inDataProcessed;
+    for(File const& file: dstFiles) {
+      if (ruleToApply->CopyRemote()) {
+        inDataProcessed.push_back(file.RelativePathToProject(targetProject->path_));
+      } else {
+        inDataProcessed.push_back(file.RelativePath(targetProject->path_));
+      }
+    }
+    lock.lock();
+    targetProject->indexed_.Add(outFile, inDataProcessed, libsManaged);
+    targetProject->Save();
+    targetProject->ExecuteTriggers({ ruleToApply->FinalTrigger() });
+    return;
+  }
+
   lock.lock();
 }

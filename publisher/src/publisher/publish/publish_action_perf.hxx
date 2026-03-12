@@ -27,27 +27,27 @@ public:
       std::unordered_map<std::string, LibSummary> const& libSummaries,
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
-  bool CheckRule(std::vector<std::filesystem::path>& inputFiles);
-  bool Process(std::vector<std::filesystem::path> const& inputFiles, 
-      std::filesystem::path const& outputPath, std::string& outFile, 
-      std::unordered_set<std::string>& libsManaged);
+  bool CheckRule(std::vector<File>& inputFiles);
+  bool Process(std::vector<File> const& inputFiles, 
+      std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
+      std::string& outFile, std::unordered_set<std::string>& libsManaged);
 };
 
-inline bool PublishActionPerf::CheckRule(std::vector<std::filesystem::path>& inputFiles) {
-  std::filesystem::path jsonFile = std::filesystem::path(inputFiles.back()).replace_extension("tgz");
-  return std::filesystem::exists(jsonFile) && (inputFiles.push_back(jsonFile), true);
+inline bool PublishActionPerf::CheckRule(std::vector<File>& inputFiles) {
+  File dataFile = std::filesystem::path(inputFiles.back().AbsolutePath()).replace_extension("tgz");
+  return dataFile.Exist() && (inputFiles.push_back(dataFile), true);
 }
 
-inline bool PublishActionPerf::Process(std::vector<std::filesystem::path> const& inputFiles, 
-    std::filesystem::path const& outputPath, std::string& outFile, 
-    std::unordered_set<std::string>& libsManaged) {
+inline bool PublishActionPerf::Process(std::vector<File> const& inputFiles, 
+    std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
+    std::string& outFile, std::unordered_set<std::string>& libsManaged) {
   if (inputFiles.size() < 2) {
     return false;
   }
   PublishAction::TaskAnalysis analyze;
   std::unordered_map<std::string, struct LibSummary> libSummaries;
-  std::filesystem::path taskJSONFile = inputFiles[inputFiles.size() - 2];
-  std::filesystem::path taskDataFile = inputFiles.back();
+  std::filesystem::path taskJSONFile = inputFiles[inputFiles.size() - 2].AbsolutePath();
+  std::filesystem::path taskDataFile = inputFiles.back().AbsolutePath();
   return taskDataFile.extension() == ".tgz" && taskJSONFile.extension() == ".json" &&
       Analyze(taskJSONFile, taskDataFile, analyze, libSummaries) && 
       GenerateCommitJson(analyze, libSummaries, outputPath, outFile, libsManaged);

@@ -33,27 +33,31 @@ public:
       std::unordered_map<std::string, struct LibSummary> const& libSummaries,
       std::filesystem::path const& outputPath, std::string& outFile, 
       std::unordered_set<std::string>& libsManaged);
-  bool CheckRule(std::vector<std::filesystem::path>& inputFiles);
-  bool Process(std::vector<std::filesystem::path> const& inputFiles, 
-      std::filesystem::path const& outputPath, std::string& outFile, 
-      std::unordered_set<std::string>& libsManaged);
+  //bool CheckRule(std::vector<std::filesystem::path>& inputFiles);
+  bool CheckRule(std::vector<File>& inputFiles);
+  /*bool Process(std::vector<std::filesystem::path> const& inputFiles, 
+      std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
+      std::string& outFile, std::unordered_set<std::string>& libsManaged);*/
+  bool Process(std::vector<File> const& inputFiles, 
+      std::filesystem::path const& destPath, std::filesystem::path const& outputPath, 
+      std::string& outFile, std::unordered_set<std::string>& libsManaged);
 };
 
-inline bool PublishActionVuln3::CheckRule(std::vector<std::filesystem::path>& inputFiles) {
-  std::filesystem::path jsonFile = std::filesystem::path(inputFiles.back()).replace_extension("json");
-  return std::filesystem::exists(jsonFile) && (inputFiles.insert(inputFiles.end()-1, jsonFile), true);
+inline bool PublishActionVuln3::CheckRule(std::vector<File>& inputFiles) {
+  File jsonFile = std::filesystem::path(inputFiles.back().AbsolutePath()).replace_extension("json");
+  return jsonFile.Exist() && (inputFiles.insert(inputFiles.end()-1, jsonFile), true);
 }
 
-inline bool PublishActionVuln3::Process(std::vector<std::filesystem::path> const& inputFiles, 
-    std::filesystem::path const& outputPath, std::string& outFile, 
+inline bool PublishActionVuln3::Process(std::vector<File> const& inputFiles, 
+    std::filesystem::path const& destPath, std::filesystem::path const& outputPath, std::string& outFile, 
     std::unordered_set<std::string>& libsManaged) {
   if (inputFiles.size() < 2) {
     return false;
   }
   PublishActionVuln3::TaskAnalysis analyze;
   std::unordered_map<std::string, struct LibSummary> libSummaries;
-  std::filesystem::path taskDataFile = inputFiles.back();
-  std::filesystem::path taskJSONFile = inputFiles[inputFiles.size() - 2];
+  std::filesystem::path taskDataFile = inputFiles.back().AbsolutePath();
+  std::filesystem::path taskJSONFile = inputFiles[inputFiles.size() - 2].AbsolutePath();
   return taskDataFile.extension() == ".tgz" && taskJSONFile.extension() == ".json" &&
       Analyze(taskDataFile, taskJSONFile, analyze, libSummaries) && 
       GenerateCommitJson(analyze, libSummaries, outputPath, outFile, libsManaged);

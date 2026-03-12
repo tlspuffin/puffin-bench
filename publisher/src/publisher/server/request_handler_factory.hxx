@@ -2,6 +2,7 @@
 
 #include "config.hxx"
 #include "request_handler.hxx"
+#include "../../utils/logs.hxx"
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
 #include <Poco/Net/HTTPServerRequest.h>
 
@@ -29,11 +30,13 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
 
   RequestHandler* requestHandler = nullptr;
   std::string uri = request.getURI();
-  if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST) {
+  std::string method = request.getMethod();
+  LOGI("Got request " << method << " " << uri);
+  if (method == Poco::Net::HTTPRequest::HTTP_POST) {
     if (uri == "/api/notify") {
       requestHandler = new RequestHandlerNotify;
     }
-   } else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET) {
+   } else if (method == Poco::Net::HTTPRequest::HTTP_GET) {
     if (uri.find("/api/download?") == 0 || (uri == "/api/download")) {
       requestHandler = new RequestHandlerDownload();
     } else if (uri.find("/files/") == 0) {

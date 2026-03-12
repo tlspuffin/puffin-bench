@@ -1,5 +1,6 @@
 #include "request_handler.hxx"
 #include "parts_handler.hxx"
+#include "../../utils/logs.hxx"
 #include <fstream>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
@@ -56,20 +57,26 @@ void ns_Server::RequestHandlerNotify::handleRequest(Poco::Net::HTTPServerRequest
   std::ostream& out = response.send();
   try {
     std::string error;
+    std::string debugStr = "src: ";
     std::vector<std::filesystem::path> srcFiles;
     for (auto it = form.begin(); it != form.end(); ++it) {
       if (it->first == "src") {
         srcFiles.push_back(it->second);
+        debugStr += it->second + ", ";
       }
     }
     std::filesystem::path dstPath = form.get("dst", "");
+    debugStr += "dst: " + dstPath.string();
+    LOGI(" args= "+debugStr);
     if (!apis_->publishAPI_.NotifyFiles(srcFiles, dstPath, error)) {
       throw std::runtime_error(error);
     }
     out << R"({"success": true})";
+    LOGI("Notify success");
   } catch (const std::exception& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    LOGI("Notify fail");
   }
   out.flush();
 }
