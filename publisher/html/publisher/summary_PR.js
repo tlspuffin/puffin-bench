@@ -120,16 +120,32 @@ function loadData() {
       return response.json();
     })
     .then(data => {
-      document.getElementById('total-commits').textContent = 
-        `${data.commits.length} commits in history`;
+      const standaloneList = data.standalone && data.standalone.length > 0 ? data.standalone : null;
 
-      document.querySelector('.loading')?.remove();
+      if (standaloneList) {
+        // Sort standalone entries by the position of their base commit in the commits array
+        const sortedStandalone = [...standaloneList].sort((a, b) => {
+          const aIdx = data.commits.findIndex(c => c.id.startsWith(a.base) || a.base.startsWith(c.id));
+          const bIdx = data.commits.findIndex(c => c.id.startsWith(b.base) || b.base.startsWith(c.id));
+          return aIdx - bIdx;
+        });
 
-      loadCommits(data);
+        document.getElementById('total-commits').textContent =
+          `${sortedStandalone.length} standalone commits`;
+
+        document.querySelector('.loading')?.remove();
+        loadCommits({ commits: sortedStandalone });
+      } else {
+        document.getElementById('total-commits').textContent =
+          `${data.commits.length} commits in history`;
+
+        document.querySelector('.loading')?.remove();
+        loadCommits(data);
+      }
     })
     .catch(error => {
       console.error('Error loading git_index.json:', error);
-      document.getElementById('commits-list').innerHTML = 
+      document.getElementById('commits-list').innerHTML =
         '<div class="error">❌ Error loading git index</div>';
     });
 }
@@ -236,7 +252,7 @@ function renderCommit(commit, commitInfos, container) {
         ${commit.commit_id}
       </a>
     </span>
-    <span class="branch-name">🌿 ${commitInfos?.branch ?? 'main'}</span>
+    <span class="branch-name">🌿 ${commitInfos?.branch ?? ''}</span>
     </div>
     <div class="commit-meta">
       ${commentText}
