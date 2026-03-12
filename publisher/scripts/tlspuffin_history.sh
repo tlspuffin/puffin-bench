@@ -1,7 +1,14 @@
 #! /bin/bash
+output="$1"
+[ -z "${output}" ] && {
+  echo "Missing output argument";
+  exit 1;
+}
+shift;
+
 commit_folder=$1;
 [ -z "${commit_folder}" ] && {
-  echo "Missing commit folder argument"; 
+  echo "Missing commit folder argument";
   exit 1;
 }
 [ ! -d "${commit_folder}" ] || [ ! -r "${commit_folder}" ] && { 
@@ -23,12 +30,6 @@ else
   }
 fi
 shift;
-
-output="$1"
-[ -z "${output}" ] && {
-  echo "Missing output argument"; 
-  exit 1;
-}
 
 info="$(mktemp)"
 infoMain="$(mktemp)"
