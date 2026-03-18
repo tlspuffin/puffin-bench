@@ -85,3 +85,5 @@ add_dependencies(srv-static reserve_port-static_blob_h)
 add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/files_ring.cxx)
+target_link_options(testFilesRing PRIVATE -static)
+target_compile_definitions(testFilesRing PRIVATE STATIC)

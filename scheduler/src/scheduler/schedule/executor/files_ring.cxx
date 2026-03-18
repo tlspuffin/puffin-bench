@@ -308,7 +308,7 @@ void ns_Executor::FilesRing::threadMain() {
             it->second.Write(buffers.data(), readBytes);
           } else if (readBytes == 0) {
             LOGE("Close " << fd << " for read == 0");
-            RemoveFD(fd);
+            RemoveFDNoLock(fd);
             break;
           } else {
             if (errno == EINTR) {
@@ -318,7 +318,7 @@ void ns_Executor::FilesRing::threadMain() {
               break;
             }
             LOGE("Fatal Error on reading on fd: " << fd);
-            RemoveFD(fd);
+            RemoveFDNoLock(fd);
             break;
           }
         }
@@ -336,4 +336,27 @@ bool ns_Executor::FilesRing::AddFD(int fd) {
     return false;
   }
   return true;
+}
+
+bool ns_Executor::FilesRing::RemoveFDNoLock(int fd) {
+  if (fd == stopFD_) {
+    bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
+    close(fd);
+    return success;
+  }
+
+  auto it = fds_.find(fd);
+  if (it == fds_.end()) {
+    LOGE("Unable to remove no existing fd: " << fd << " errno: " << errno);
+    close(fd);
+    return false;
+  }
+  bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
+  if (!success) {
+    LOGE("Unable to remove fd: " << fd << " errno: " << errno);
+  }
+  fds_.erase(it);
+
+  close(fd);
+  return success;
 }

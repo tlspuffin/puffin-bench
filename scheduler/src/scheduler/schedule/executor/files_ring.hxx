@@ -53,6 +53,7 @@ private:
 
   void threadMain();
   bool AddFD(int fd);
+  bool RemoveFDNoLock(int fd);
 };
 
 };
