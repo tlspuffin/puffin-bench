@@ -1,5 +1,6 @@
 import { Terminal } from './terminal.js';
 import { Logger } from './logs.js';
+import { JobLauncher } from './joblauncher.js';
 
 const dataSource = {
   mode: 'api',
@@ -805,6 +806,12 @@ function main() {
   document.getElementById('log-stderr').onclick = SwitchOutput.bind(null, 'stderr');
 
   document.getElementById('modal-close').onclick = CloseModal;
+
+  const launcher = new JobLauncher({
+      commitsUrl: '/api/commits',
+      launchUrl:  '/api/job/launch',
+  });
+  document.getElementById('new-task').onclick = () => { launcher.open() };
 }
 
 main();

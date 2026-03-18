@@ -534,6 +534,26 @@ body {
   min-width: 3em;
 }
 
+.new-task {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  z-index: 500;
+  transition: transform 0.2s ease;
+}
+.new-task:hover  { transform: scale(1.1); }
+.new-task:active { transform: scale(0.95); }
+
 .modal-overlay {
     position: fixed;
     top: 0;
