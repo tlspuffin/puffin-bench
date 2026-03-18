@@ -148,6 +148,7 @@ bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
       continue;
     }
     step->request_cancel_ = true;
+    SaveStatus(false);
     return true;
   }
   return false;
@@ -159,6 +160,7 @@ bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
     ns_Schedule::Step* step = *it;
     if (step->task_->id_ == taskID) {
       step->task_->Cancel();
+      SaveStatus(false);
       return true;
     }
   }

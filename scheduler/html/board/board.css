@@ -54,6 +54,14 @@ body {
   background: #404040;
 }
 
+.card-task-cancelling {
+  background: rgba(211, 47, 47, 0.15);
+  transition: background 0.2s;
+}
+.card-task-cancelling:hover {
+  background: rgba(211, 47, 47, 0.22);
+}
+
 .card-task-id {
   display: flex;
   justify-content: space-between;

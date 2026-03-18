@@ -279,7 +279,7 @@ function CreateCardLine(id, type, style, infos) {
   return div;
 }
 
-function CreateAttemptCard(step, taskName) {
+function CreateAttemptCard(step, taskName, taskCancelRequested) {
   const div = document.createElement('div');
   div.classList.add('card-attempt-item');
 
@@ -325,7 +325,7 @@ function CreateAttemptCard(step, taskName) {
     if (dataSource.mode === 'url') {
       logsButton.style.display = 'none';
     }
-    if (step.state == 'Running') {
+    if (step.state == 'Running' && !step.request_cancel && !taskCancelRequested) {
       const cancelButton = document.createElement('button');
       cancelButton.classList.add('card-attempt-cancel-btn');
       cancelButton.textContent = 'Cancel';
@@ -404,7 +404,7 @@ function CreateAttemptCard(step, taskName) {
   return div;
 }
 
-function CreateStepsCard(steps, taskName) {
+function CreateStepsCard(steps, taskName, taskCancelRequested) {
   const div = document.createElement('div');
   div.classList.add('card-step-running');
 
@@ -501,7 +501,7 @@ function CreateStepsCard(steps, taskName) {
 
   steps.forEach(step => {
       //if (step.state != 'Pending') {
-      div.appendChild(CreateAttemptCard(step, taskName));
+      div.appendChild(CreateAttemptCard(step, taskName, taskCancelRequested));
       //}
   });
 
@@ -511,6 +511,9 @@ function CreateStepsCard(steps, taskName) {
 function CreateTaksCard(task, steps) {
   const div = document.createElement('div');
   div.classList.add('card-task-running');
+  if (task.request_cancel) {
+    div.classList.add('card-task-cancelling');
+  }
 
   const cancelButton = document.createElement('button');
   cancelButton.classList.add('card-attempt-cancel-btn');
@@ -523,7 +526,7 @@ function CreateTaksCard(task, steps) {
   for (const [, someSteps] of steps) {
     count += someSteps.filter(step => step.state === 'Running' || step.state === 'Pending').length;
   }
-  if (count == 0) {
+  if (count == 0 || task.request_cancel) {
     cancelButton.style.display = 'none';
   }
 
@@ -612,7 +615,7 @@ function CreateTaksCard(task, steps) {
 
       steps.forEach((step, functionID) => {
           console.log(" - Step:", functionID, steps);
-          divStep.appendChild(CreateStepsCard(step, taskName));
+          divStep.appendChild(CreateStepsCard(step, taskName, task.request_cancel));
       });
       div.appendChild(divStep);
   });
