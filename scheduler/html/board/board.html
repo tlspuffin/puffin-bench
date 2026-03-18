@@ -10,7 +10,8 @@
   <div class="header">
     <div class="header-top">
       <h1>Experiment Scheduler Dashboard</h1>
-      <div>
+      <div id="executors-stats" class="executors-stats"></div>
+      <div class="header-actions">
         <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
         <a style="color: white" href="http://pesto-calc:10082/files/tlspuffin4/summary_PR.html">All Results</a>
       </div>
@@ -61,6 +62,7 @@
       </div>
     </div>
   </div>
+  <div id="exec-tooltip" class="exec-tooltip"></div>
 
   <script type="module" src="board.js"></script>
 </body>

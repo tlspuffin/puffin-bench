@@ -3,7 +3,8 @@
 
 #include <stdexcept>
 
-ns_Executor::Executor* ns_Executor::Executor::Build(ns_Executor::Config* config, uint16_t cachePort) {
+ns_Executor::Executor* ns_Executor::Executor::Build(ns_Executor::Config* config, 
+    uint16_t cachePort, ns_System::Linux& os) {
   switch(config->type_) {
     case Config::Type::Local: {
         LocalConfig* cConfig = 
@@ -12,7 +13,7 @@ ns_Executor::Executor* ns_Executor::Executor::Build(ns_Executor::Config* config,
           throw std::runtime_error("Local Executor '" + 
               cConfig->name_ + "' got an inccorect configuration");
         }
-        return new Local(cConfig->name_, *cConfig, cachePort);
+        return new Local(cConfig->name_, *cConfig, cachePort, os);
       }
     default:
       throw std::runtime_error("Unknown executor type");

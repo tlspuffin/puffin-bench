@@ -1,47 +1,48 @@
-#include "scheduler/schedule/executor/linux_cores.hxx"
+#include "scheduler/system/linux_cores.hxx"
 #include <iostream>
 
 int main() {
 
-  ns_Executor::CoresMonitor cm(15);
+  ns_System::CoresStats t0;
+  ns_System::CoresStats t1;
 
-  std::cout << "Nombre de CPUs logiques : " << cm.cores_infos_.NbCores() << std::endl;
-  std::vector<ns_Executor::CoreStats> t0;
-  std::vector<ns_Executor::CoreStats> t1;
-  cm.cores_infos_.GatherInfos(t0);
+  std::cout << "Nombre de CPUs logiques : " << ns_System::CoreStats::NbCores() << std::endl;
+  t0.GatherInfos();
   std::this_thread::sleep_for(std::chrono::seconds(3));
-  cm.cores_infos_.GatherInfos(t1);
+  t1.GatherInfos();
 
-  std::vector<bool> excluded_cores(cm.cores_infos_.NbCores(), false);
+  std::vector<bool> excluded_cores(ns_System::CoreStats::NbCores(), false);
   excluded_cores[0] = true;
-  std::vector<ns_Executor::CoreStats> r = cm.cores_infos_.SortCoresValuesRatio(ns_Executor::CoreStats::IDLE_INDEX, t0, t1, &excluded_cores);
+  std::vector<ns_System::CoreStats> r = t0.SortCoresValuesRatio(ns_System::CoreStats::IDLE_INDEX, t1, &excluded_cores);
 
   for(auto const& core_perf: r) {
     std::cout << core_perf.id_ << ": "
-      << core_perf.values_[ns_Executor::CoreStats::IDLE_INDEX] << ", "
+      << core_perf.values_[ns_System::CoreStats::IDLE_INDEX] << ", "
       << (core_perf.excluded_ ? "T" : "F")
       << std::endl;
   }
 
   if (r.size() > 0) {
     std::cout << "CPU le moins occupé : CPU " << r.front().id_
-        << " (idle moyen = " << r.front().values_[ns_Executor::CoreStats::IDLE_INDEX]
+        << " (idle moyen = " << r.front().values_[ns_System::CoreStats::IDLE_INDEX]
         << ")" << std::endl;
   }
 
   if (r.size() > 1) {
     std::cout << "CPU le plus occupé : CPU " << r.back().id_
-      << " (idle moyen = " << r.back().values_[ns_Executor::CoreStats::IDLE_INDEX]
+      << " (idle moyen = " << r.back().values_[ns_System::CoreStats::IDLE_INDEX]
       << ")" << std::endl;
   }
 
+  t0.GatherInfos();
   std::this_thread::sleep_for(std::chrono::seconds(20));
+  t1.GatherInfos();
 
-  r = cm.CoresValuesRatio();
-  ns_Executor::CoresStats::SortCoresValuesRatio(ns_Executor::CoreStats::IDLE_INDEX, r, &excluded_cores);
+  r = t0.CoresValuesRatio(t1);
+  ns_System::CoresStats::SortCoresValuesRatio(ns_System::CoreStats::IDLE_INDEX, r, &excluded_cores);
   for(auto const& core_perf: r) {
     std::cout << core_perf.id_ << ": "
-      << core_perf.values_[ns_Executor::CoreStats::IDLE_INDEX] << ", "
+      << core_perf.values_[ns_System::CoreStats::IDLE_INDEX] << ", "
       << (core_perf.excluded_ ? "T" : "F")
       << std::endl;
   }

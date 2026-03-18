@@ -31,17 +31,21 @@
 
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
-ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cachePort) 
-    : config_(config), exportPath_(config.exportPath_), tasksManager_(config, true) /*true because LoadStatus call disable*/, 
+ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cachePort) 
+    : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
-      monitor_(config.monitorsPath_), archiver_()
+      monitor_(config.monitorsPath_), archiver_(), os_(os)
 {
   static int installHandler = InstallSigUSRHandler();
 
   for (auto const& executorConfig : config.executors_) {
-    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, cachePort);
+    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, cachePort, os_);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
+
+  //if (resetStatus) { true because LoadStatus call disable
+    SaveStatus(true);
+  //}
 
   // Disable LoadStatus, step group not managed by Executor::Local reload system
   // To remove disable too true in Taskmanager constructor
@@ -57,6 +61,9 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, uint16_t cach
     threadRunning_ = true;
     thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
   }*/
+
+  threadRunning_ = true;
+  thread_ = std::thread(&ns_Schedule::Schedule::ScheduleLoop, this);
 }
 
 ns_Schedule::Schedule::~Schedule() {
@@ -113,6 +120,8 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
   taskFile.close();
 
   lockThread_.lock();
+
+  SaveStatus(false);
 
   for(ns_Schedule::Step* step : task->root_steps_) {
     steps_.push_back(step);
@@ -224,7 +233,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
   bool updateStatus = false;
   lockThread_.lock();
-  while((!steps_.empty()) && (threadRunning_)) {
+  while(/*(!steps_.empty()) &&*/ (threadRunning_)) {
     std::list<ns_Schedule::Step*> toRun = SearchTasksToRun();
     lockThread_.unlock();
 
@@ -235,13 +244,28 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
     monitor_.Add(toRun);
 
-    if ((toRun.size() > 0) || updateStatus) {
-      tasksManager_.SaveStatus();
-      ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
-      updateStatus = false;
+    for(auto& executor : executors_) {
+      executor.second->GatherStats();
+    }
+    std::unordered_map<ns_Schedule::Task*, std::vector<ns_Schedule::Step*>> runningTasksAndSteps;
+    for (ns_Schedule::Step* step : stepsRunning_) {
+      runningTasksAndSteps[step->task_].push_back(step);
+      step->UpdateStats();
+      updateStatus = true;
+    }
+    for (auto& [task, steps] : runningTasksAndSteps) {
+      task->UpdateStats(steps);
+      updateStatus = true;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    //if ((toRun.size() > 0) || updateStatus) {
+      lockThread_.lock();
+      SaveStatus(true);
+      lockThread_.unlock();
+      updateStatus = false;
+    //}
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     for(auto& executor : executors_) {
       std::list<ns_Schedule::Step*> executorStepsDone = executor.second->CheckFinishedSteps(stepsRunning_);
@@ -296,8 +320,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     stepsDone_.clear();
   }
 
-  tasksManager_.SaveStatus();
-  ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+  SaveStatus(true);
   if (shutdownTasksAtExit__) {
     for (ns_Schedule::Step* step: steps_) {
       if (step->IsRunning()) {
@@ -371,7 +394,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     std::cout << "Tasks " << task_id << " done" << std::endl;
   }
 
-  tasksManager_.SaveStatus();
+  SaveStatus(false);
 }
 
 void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename, 
@@ -399,6 +422,38 @@ void ns_Schedule::Schedule::ExportRunningSteps(std::string const& filename,
   std::fclose(fp);
 
   std::filesystem::rename((filename + "tmp"), filename);
+}
+
+void ns_Schedule::Schedule::SaveStatus(bool exportRunningSteps) {
+  rapidjson::Document doc;
+  doc.SetObject();
+  rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
+  rapidjson::Value tasksManagerJSON(rapidjson::kObjectType);
+  tasksManager_.ToJSON(tasksManagerJSON, alloc);
+  doc.AddMember("tasksmanager", tasksManagerJSON, alloc);
+  rapidjson::Value executorsJSON(rapidjson::kArrayType);
+  for(auto const& [name, executor] : executors_) {
+    rapidjson::Value executorJSON(rapidjson::kObjectType);
+    executor->ToJSON(executorJSON, alloc);
+    executorsJSON.PushBack(executorJSON, alloc);
+  }
+  doc.AddMember("executors", executorsJSON, alloc);
+  std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
+  FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
+  if (!fp) {
+    throw std::system_error(errno, std::generic_category(), "Unable to open " + filename);
+  }
+  char buffer[65536];
+  rapidjson::FileWriteStream os(fp, buffer, sizeof(buffer));
+  rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
+  doc.Accept(writer);
+  std::fclose(fp);
+
+  std::filesystem::rename((filename + "tmp"), filename);
+
+  if (exportRunningSteps) {
+    ExportRunningSteps(config_.exportPath_ / "status.json", stepsRunning_);
+  }
 }
 
 void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step) {

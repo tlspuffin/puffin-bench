@@ -14,15 +14,9 @@
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/filewritestream.h>
 
-ns_Schedule::TasksManager::TasksManager(
-    ns_Schedule::Config const& config, bool resetStatus)
-    : config_(config), next_task_id_(0) {
-  if (resetStatus) {
-    std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
-    std::ofstream ofs(filename, std::ios::trunc);
-    ofs << "{}\n";
-  }
-}
+ns_Schedule::TasksManager::TasksManager(ns_Schedule::Config const& config)
+    : config_(config), next_task_id_(0) 
+{}
 
 ns_Schedule::TasksManager::~TasksManager() {
 }
@@ -81,7 +75,6 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.push_back(task);
-    SaveStatusInternal();
   }
 
   return task;
@@ -92,7 +85,6 @@ void ns_Schedule::TasksManager::DeleteTask(ns_Schedule::Task* task) {
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.remove(task);
-    SaveStatusInternal();
   }
 }
 
@@ -119,7 +111,6 @@ void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.remove(task);
-    SaveStatusInternal();
   }
 }
 
@@ -148,7 +139,7 @@ enum ns_Schedule::OutputState ns_Schedule::TasksManager::GetRunningOutput(
 
         if (step->uuid_ == stepUUID) {
           //std::cerr << "\tFound " << std::endl;
-          return step->executor_->GetRunningOutput(
+          return step->task_->executor_->GetRunningOutput(
               *step, type, readSize, readOffset, data);
         }
         step = step->next_;
@@ -161,9 +152,9 @@ enum ns_Schedule::OutputState ns_Schedule::TasksManager::GetRunningOutput(
 }
 
 std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
-ns_Schedule::TasksManager::LoadStatus(
+ns_Schedule::TasksManager::LoadStatus(rapidjson::Value const& tasksmanager, 
     ns_Schedule::Schedule const* schedule) {
-  std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
+  /*std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
   std::ifstream statusFile(filename);
   if (!statusFile.is_open()) {
     std::cerr << "Warning: Unable to open tasksmanager status file " << 
@@ -180,16 +171,16 @@ ns_Schedule::TasksManager::LoadStatus(
         (config_.exportPath_ / "status.json").string() + "' : " +
         rapidjson::GetParseError_En(doc.GetParseError()) +
         " (offset: " + std::to_string(doc.GetErrorOffset()) + ")");
-  }
+  }*/
 
-  if (!doc.HasMember("tasks") || !doc["tasks"].IsArray()) {
+  if (!tasksmanager.HasMember("tasks") || !tasksmanager["tasks"].IsArray()) {
     throw std::runtime_error("Missing or invalid 'tasks' array");
   }
 
   std::list<ns_Schedule::Step*> stepsPending;
   std::list<ns_Schedule::Step*> stepsRunning;
   std::list<ns_Schedule::Step*> stepsDone;
-  rapidjson::Value const& tasksArray = doc["tasks"];
+  rapidjson::Value const& tasksArray = tasksmanager["tasks"];
   for (rapidjson::SizeType i = 0; i < tasksArray.Size(); i++) {
     rapidjson::Value const& taskJson = tasksArray[i];
     ns_Schedule::Task* task = 
@@ -237,29 +228,13 @@ void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {
   delete task;
 }
 
-void ns_Schedule::TasksManager::SaveStatusInternal() const {
-  rapidjson::Document doc;
-  doc.SetObject();
-  rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
-
+void ns_Schedule::TasksManager::ToJSONInternal(rapidjson::Value& root, 
+    rapidjson::MemoryPoolAllocator<>& alloc) const {
   rapidjson::Value tasksArray(rapidjson::kArrayType);
   for (auto const& task : tasks_) {
     rapidjson::Value taskJSON(rapidjson::kObjectType);
     task->ToJSON(taskJSON, alloc, nullptr);
     tasksArray.PushBack(taskJSON, alloc);
   }
-  doc.AddMember("tasks", tasksArray, alloc);
-
-  std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
-  FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
-  if (!fp) {
-    throw std::system_error(errno, std::generic_category(), "Unable to open " + filename);
-  }
-  char buffer[65536];
-  rapidjson::FileWriteStream os(fp, buffer, sizeof(buffer));
-  rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
-  doc.Accept(writer);
-  std::fclose(fp);
-
-  std::filesystem::rename((filename + "tmp"), filename);
+  root.AddMember("tasks", tasksArray, alloc);
 }

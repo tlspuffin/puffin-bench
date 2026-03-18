@@ -8,6 +8,7 @@
 #include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
 #include "monitor/monitor.hxx"
+#include "../system/linux.hxx"
 #include "../../utils/file.hxx"
 #include <vector>
 #include <list>
@@ -21,7 +22,7 @@ namespace ns_Schedule {
 
 class Schedule : public ns_Executor::ExecutorsProvider {
 public:
-  Schedule(ns_Schedule::Config const& config, uint16_t cachePort);
+  Schedule(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cachePort);
   ~Schedule();
   uint64_t AddTask(std::string const& name, std::string const& tasksList, 
       std::string const& functions, 
@@ -44,6 +45,7 @@ private:
   void ManageEndOfStep(ns_Schedule::Step* step, std::ofstream& stepsDoneFile);
   void ExportRunningSteps(
       std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
+  void SaveStatus(bool exportRunningSteps);
   static void AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step);
 
   ns_Schedule::Config const& config_;
@@ -63,6 +65,8 @@ private:
   ns_Monitor::Monitor monitor_;
 
   Archiver archiver_;
+
+  ns_System::Linux& os_;
 
   static bool shutdownTasksAtExit__;
   static void HandlerUSR1(int sig);

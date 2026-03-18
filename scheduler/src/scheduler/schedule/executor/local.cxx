@@ -1,5 +1,4 @@
 #include "local.hxx"
-#include "linux_process.hxx"
 #include "../step.hxx"
 #include "../../../utils/rapidjson.hxx"
 #include "../../../utils/logs.hxx"
@@ -20,12 +19,52 @@
 
 #define FREE_ARG_STRINGS(args) for(char* string: args) free(string)
 
-ns_Executor::LocalData::LocalData() : process_status_(Internal)
+ns_Executor::LocalTaskData::LocalTaskData() : cgroupPath_(), os_memory_load_(-1), os_cores_load_(-1), 
+    os_memory_max_load_(-1), os_cores_max_load_(-1)
+{}
+
+ns_Executor::LocalTaskData::LocalTaskData(rapidjson::Value const& config)
+    : os_memory_load_(-1), os_cores_load_(-1), 
+    os_memory_max_load_(-1), os_cores_max_load_(-1)
 {
+  if (!config.IsObject()) {
+    throw std::runtime_error("LocalData JSON must be an object");
+  }
+  if (!config.HasMember("cgroup_path") || !config["cgroup_path"].IsString()) {
+    throw std::runtime_error("LocalTaskData missing 'cgroup_path' string");
+  }
+  cgroupPath_ = Get<std::string>(config, "cgroup_path");
+
+  if (config.HasMember("os_load") && config["os_load"].IsObject()) {
+    rapidjson::Value const& loadJSON = config["os_load"].GetObject();
+    os_memory_load_ = Get<uint64_t>(loadJSON, "memory");
+    os_cores_load_ = Get<uint64_t>(loadJSON, "cores");
+    os_memory_max_load_ = Get<uint64_t>(loadJSON, "memory_max");
+    os_cores_max_load_ = Get<uint64_t>(loadJSON, "cores_max");
+  }
 }
 
+void ns_Executor::LocalTaskData::ToJSON(rapidjson::Value& out, 
+    rapidjson::Document::AllocatorType& alloc) const {
+  out.AddMember("cgroup_path", rapidjson::Value(cgroupPath_.c_str(), alloc), alloc);
+
+  rapidjson::Value osLoad(rapidjson::kObjectType);
+  osLoad.AddMember("memory", os_memory_load_, alloc);
+  osLoad.AddMember("cores", os_cores_load_, alloc);
+  osLoad.AddMember("memory_max", os_memory_max_load_, alloc);
+  osLoad.AddMember("cores_max", os_cores_max_load_, alloc);
+  out.AddMember("os_load", osLoad, alloc);
+}
+
+
+ns_Executor::LocalData::LocalData(uint32_t nbCores) 
+    : process_status_(Internal), os_memory_load_(0), os_cores_load_(nbCores), 
+    os_memory_max_load_(0), os_cores_max_load_(0)
+{}
+
 ns_Executor::LocalData::LocalData(rapidjson::Value const& config) 
-    : process_status_(External)
+    : process_status_(External), os_memory_load_(0), os_memory_max_load_(0), 
+    os_cores_max_load_(0)
 {
   if (!config.IsObject()) {
     throw std::runtime_error("LocalData JSON must be an object");
@@ -51,6 +90,28 @@ ns_Executor::LocalData::LocalData(rapidjson::Value const& config)
   launcher_file_ = Get<std::string>(config, "launcher_file");
   user_state_file_ = Get<std::string>(config, "user_state_file");
   step_parameters_file_ = Get<std::string>(config, "step_parameters_file");
+
+  cgroup_path_ = Get<std::string>(config, "cgroup_path");
+
+  if (config.HasMember("os_load") && config["os_load"].IsObject()) {
+    rapidjson::Value const& loadJSON = config["os_load"].GetObject();
+    os_memory_load_ = Get<uint64_t>(loadJSON, "memory");
+    if ((!loadJSON.HasMember("cores")) || (!loadJSON["cores"].IsArray())) {
+      throw std::runtime_error("Missing cores array in load object");
+    }
+    rapidjson::Value const& coresJSON = loadJSON["cores"].GetArray();
+    os_cores_load_.reserve(coresJSON.Size());
+    for (size_t i=0; i<coresJSON.Size(); ++i) {
+      if (!coresJSON[i].IsUint64()) {
+        throw std::runtime_error("Error cores array contains non-numbers");
+      }
+      os_cores_load_.push_back(coresJSON[i].GetUint64());
+    }
+    os_memory_max_load_ = Get<uint64_t>(loadJSON, "memory_max");
+    os_cores_max_load_ = Get<uint64_t>(loadJSON, "cores_max");
+  } else {
+    os_cores_load_.resize(cores_.size(), 0);
+  }
 }
 
 void ns_Executor::LocalData::ToJSON(rapidjson::Value& out, 
@@ -71,18 +132,37 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
   out.AddMember("launcher_file", rapidjson::Value(launcher_file_.c_str(), alloc), alloc);
   out.AddMember("user_state_file", rapidjson::Value(user_state_file_.c_str(), alloc), alloc);
   out.AddMember("step_parameters_file", rapidjson::Value(step_parameters_file_.c_str(), alloc), alloc);
+
+  out.AddMember("cgroup_path", rapidjson::Value(cgroup_path_.c_str(), alloc), alloc);
+
+  rapidjson::Value osLoad(rapidjson::kObjectType);
+  osLoad.AddMember("memory", os_memory_load_, alloc);
+  rapidjson::Value osCoresLoad(rapidjson::kArrayType);
+  for(uint8_t load: os_cores_load_) {
+    osCoresLoad.PushBack(load, alloc);
+  }
+  osLoad.AddMember("cores", osCoresLoad, alloc);
+  osLoad.AddMember("memory_max", os_memory_max_load_, alloc);
+  osLoad.AddMember("cores_max", os_cores_max_load_, alloc);
+  out.AddMember("os_load", osLoad, alloc);
 }
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
-    uint16_t cachePort)
-    : Executor(name), config_(config), coresMonitor_(15), nbCoresFree_(config_.nbCores_), 
-      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), filesRing_(config_.logsSize_)
+    uint16_t cachePort, ns_System::Linux& os)
+    : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
+      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), filesRing_(config_.logsSize_),
+      cgroupRoot_(), cgroupRootCapabilities_(0)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
     throw std::runtime_error(std::string("Failed to enable subreaper mode: ") + 
         std::strerror(errno));
   }
+
+  std::string uid = std::to_string(geteuid());
+  cgroupRoot_ = "/sys/fs/cgroup/user.slice/user-" + uid +".slice/user@" + uid + ".service/";
+  cgroupRootCapabilities_ = DetectCGroupSupport(cgroupRoot_);
+  LOGI("CGroup are " << (cgroupRoot_.empty() ? "des" : "") << "activated");
 
   if (nbCoresFree_ == 0) {
     coresFree_ = config_.cores_;
@@ -92,6 +172,76 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
       }
     }
   }
+}
+
+ns_Executor::Local::~Local() {
+  if (!cgroupRoot_.empty()) {
+    std::error_code ec;
+    std::filesystem::remove(cgroupRoot_, ec);
+    if (ec) {
+      LOGE("Failled to remove cgroup " << cgroupRoot_ << 
+          " code: " << ec.value() << ": " << ec.message());
+    }
+  }
+
+}
+
+bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
+  if (task->executor_data_ == nullptr) {
+    task->executor_data_ = new LocalTaskData();
+  }
+  LocalTaskData* localtaskData = dynamic_cast<LocalTaskData*>(task->executor_data_);
+  if (localtaskData == nullptr) {
+    return false;
+  }
+  if (cgroupRoot_.empty()) {
+    localtaskData->cgroupPath_.clear();
+    return true;
+  }
+  localtaskData->cgroupPath_ = cgroupRoot_ / std::to_string(task->id_);
+  std::error_code ec;
+  if ((!std::filesystem::create_directory(localtaskData->cgroupPath_, ec)) || ec) {
+    localtaskData->cgroupPath_.clear();
+    return true;
+  }
+
+  std::string capabilities = "";
+  if (cgroupRootCapabilities_ & 1) {
+    capabilities += "+memory ";
+  }
+  if (cgroupRootCapabilities_ & 2) {
+    capabilities += "+cpuset";
+  }
+  if (capabilities.empty()) {
+    return true;
+  }
+
+  std::ofstream subtreeControlFile(localtaskData->cgroupPath_ / "cgroup.subtree_control");
+  if (!subtreeControlFile.is_open()) {
+    std::filesystem::remove(localtaskData->cgroupPath_);
+    localtaskData->cgroupPath_.clear();
+    return true;
+  }
+  subtreeControlFile << capabilities;
+  subtreeControlFile.close();
+  if (subtreeControlFile.fail()) {
+    std::filesystem::remove(localtaskData->cgroupPath_);
+    localtaskData->cgroupPath_.clear();
+  }
+
+  return true;
+}
+
+bool ns_Executor::Local::TaskFinalize(ExecutorTaskData* data) {
+  if (cgroupRoot_.empty()) {
+    return true;
+  }
+  LocalTaskData* localData = dynamic_cast<LocalTaskData*>(data);
+  if (localData == nullptr) {
+    return false;
+  }
+  std::error_code ec;
+  return std::filesystem::remove(localData->cgroupPath_, ec) && (!ec);
 }
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
@@ -128,7 +278,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     throw std::runtime_error("Fatal erreor: a step required a number of core");
   }
 
-  LocalData* localData = new LocalData();
+  LocalData* localData = new LocalData(step.nb_cores_);
   localData->cores_ = AssignCores(step.nb_cores_);
   if (step.group_id_ == 0) {
     localData->run_path_ = step.task_->run_root_path_ / "executor" / step.ID();
@@ -139,7 +289,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   localData->fatalerror_path_ = step.task_->run_root_path_ / "executor" / ("fe-" + step.ID());
   localData->done_path_ = localData->run_path_ / (".done-" + step.ID());
 
-  std::string baseRunPath = step.task_->run_root_path_ / "executor"; 
+  std::string baseRunPath = step.task_->run_root_path_ / "executor";
   localData->launcher_file_ = baseRunPath + "-" + step.ID() + "-launcher";
   localData->user_state_file_ = baseRunPath + "-" + step.ID() + "-userstate";
   localData->step_parameters_file_ = baseRunPath + "-" + step.ID() + "-parameters";
@@ -195,10 +345,27 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   int outhandler = localData->pipeFDOut[1];
   int errhandler = localData->pipeFDErr[1];
 
-  pid_t pid = fork();
+  localData->cgroup_path_.clear();
+  if (!cgroupRoot_.empty()) {
+    localData->cgroup_path_ = cgroupRoot_ / std::to_string(step.TaskID()) / step.ID();
+  }
 
+  pid_t pid = fork();
   if (pid == 0) {
     localData->pid_ = getpid();
+
+    if (!cgroupRoot_.empty()) {
+      std::filesystem::create_directory(localData->cgroup_path_);
+      std::ofstream procFile(localData->cgroup_path_ / "cgroup.procs");
+      if (procFile.is_open()) {
+        procFile << localData->pid_;
+        procFile.close();
+        LOGI("Step " << step.ID() << " use " << localData->cgroup_path_);
+      } else {
+        std::cerr << "unable to self register in cgroup" << std::endl;
+        exit(-1);
+     }
+    }
 
     pid_t spid = setsid();
     if (spid == -1) {
@@ -271,7 +438,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     {
       std::stringstream oss;
       oss << "Step running: " << step.task_->id_ << " / " << step.ID()  << \
-          " uuid: " << step.uuid_ << " with pid: " << spid << std::endl;
+          " uuid: " << step.uuid_ << " with pid: " << localData->pid_ << std::endl;
       std::cerr << oss.str();
     }
 
@@ -311,7 +478,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     std::list<ns_Schedule::Step*>& runningSteps) {
   std::list<ns_Schedule::Step*> result;
   for(ns_Schedule::Step* step : runningSteps) {
-    if ((step->IsDone()) || (step->executor_ != this)) {
+    if ((step->IsDone()) || (step->task_->executor_ != this)) {
       continue;
     }
     LocalData* localData = dynamic_cast<LocalData*>(step->executor_data_);
@@ -348,7 +515,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
         step->MarkLaunchError();
       } else {
         if (localData->process_status_ != ns_Executor::LocalData::External) {
-          KillSession(childPID, step, "Step run");
+          KillSession(childPID, localData->cgroup_path_, step, "Step run");
         }
         step->MarkDone(WEXITSTATUS(status));
       }
@@ -366,7 +533,7 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
     throw std::runtime_error("ExecutorData are not of type LocalData");
   }
 
-  KillSession(localData->pid_, &step, "Step timeout run");
+  KillSession(localData->pid_, localData->cgroup_path_, &step, "Step timeout run");
 
   if (!std::filesystem::exists(localData->fatalerror_path_)) {
     pid_t pid = RunShutdown(step, localData);
@@ -377,7 +544,7 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
     LOGE("Step shutdown final pid: " << pid);
     pid_t retval = waitpid(pid, nullptr, 0);
     LOGE("Step shutdown final pid: " << pid << " wait return: " << retval << " errno: " << errno);
-    KillSession(pid, &step, "Step shutdown final");
+    KillSession(pid, localData->cgroup_path_, &step, "Step shutdown final");
   }
 
   EndRun(step, localData, true);
@@ -412,8 +579,8 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
       localData->fatalerror_path_, localData->done_path_, logSS);
   if (status == ns_Schedule::Step::exitCode_NotSet_) {
     if (VerifyProcessArgs(localData->pid_, localData->arguments_)) {
-      std::cerr << "Step " << step.ID() << " process still running, re-reserving " 
-          << localData->cores_.size() << " cores" << std::endl;
+      std::cerr << "Step " << step.ID() << " process still running, re-reserving " << 
+          localData->cores_.size() << " cores" << std::endl;
       ReAssignCores(localData->cores_);
       ++nbChild_;
       return;
@@ -489,12 +656,94 @@ enum ns_Schedule::OutputState ns_Executor::Local::GetRunningOutput(
 
 ns_Executor::ExecutorTaskData* ns_Executor::Local::CreateLocalTaskData(
     rapidjson::Value const& config) const {
-  return nullptr;
+  return new LocalTaskData(config);
 }
 
 ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
     rapidjson::Value const& config) const {
   return new LocalData(config);
+}
+
+void ns_Executor::Local::GatherStats() {
+  ns_System::CoreStats global;
+  std::vector<ns_System::CoreStats> perCores;
+  ns_System::Memory::MemoryStats memory;
+  os_.GetLoad(global, perCores, memory);
+  stats_.memory = memory.UsedRatio() * 100.0;
+  stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
+  stats_.perCores.resize(perCores.size());
+  for(size_t i=0; i<perCores.size(); ++i) {
+    stats_.perCores[i] = 100 - (perCores[i].values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
+  }
+}
+
+void ns_Executor::Local::UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const {
+  ns_Executor::LocalTaskData* localTaskData = dynamic_cast<ns_Executor::LocalTaskData*>(data);
+  if (localTaskData == nullptr) {
+    return;
+  }
+  if (localTaskData->cgroupPath_.empty() || (!(cgroupRootCapabilities_ & 1)) ||
+      !CGroupMemoryUsed(localTaskData->cgroupPath_ / "memory.stat", localTaskData->os_memory_load_)) {
+    localTaskData->os_memory_load_ = stats_.memory;
+  }
+  if (localTaskData->os_memory_load_ > localTaskData->os_memory_max_load_) {
+    localTaskData->os_memory_max_load_ = localTaskData->os_memory_load_;
+  }
+  //localTaskData->os_cores_load_ = stats_.cores;
+  localTaskData->os_cores_load_ = 0;
+  uint64_t totalLoad = 0;
+  uint64_t nbLoad = 0;
+  for (ns_Executor::ExecutorData const* stepData: stepsData) {
+    ns_Executor::LocalData const* localData = dynamic_cast<ns_Executor::LocalData const*>(stepData);
+    if (localData == nullptr) {
+      continue;
+    }
+    for(uint8_t const load : localData->os_cores_load_) {
+      totalLoad += load;
+      ++nbLoad;
+    }
+  }
+  localTaskData->os_cores_load_ = totalLoad / nbLoad;
+  if (localTaskData->os_cores_load_ > localTaskData->os_cores_max_load_) {
+    localTaskData->os_cores_max_load_ = localTaskData->os_cores_load_;
+  }
+}
+
+void ns_Executor::Local::UpdateStepStats(ExecutorData* data) const {
+  ns_Executor::LocalData* localData = dynamic_cast<ns_Executor::LocalData*>(data);
+  if (localData == nullptr) {
+    return;
+  }
+  if (localData->cgroup_path_.empty() || (!(cgroupRootCapabilities_ & 1)) || 
+      (!CGroupMemoryUsed(localData->cgroup_path_ / "memory.stat", localData->os_memory_load_))) {
+    localData->os_memory_load_ = stats_.memory;
+  }
+  if (localData->os_memory_load_ > localData->os_memory_max_load_) {
+    localData->os_memory_max_load_ = localData->os_memory_load_;
+  }
+
+  uint64_t cpuLoad = 0;
+  for(size_t i=0; i<localData->cores_.size(); ++i) {
+    localData->os_cores_load_[i] = stats_.perCores[localData->cores_[i]];
+    cpuLoad += stats_.perCores[localData->cores_[i]];
+  }
+  cpuLoad /= localData->cores_.size();
+  if (cpuLoad > localData->os_cores_max_load_) {
+    localData->os_cores_max_load_ = cpuLoad;
+  }
+}
+
+void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const {
+  root.AddMember("name", rapidjson::Value(Name().c_str(), alloc), alloc);
+  rapidjson::Value stats(rapidjson::kObjectType);
+  stats.AddMember("load_memory", stats_.memory, alloc);
+  stats.AddMember("load_cores", stats_.cores, alloc);
+  rapidjson::Value loadPerCore(rapidjson::kArrayType);
+  for(auto const loadCore : stats_.perCores) {
+    loadPerCore.PushBack(loadCore, alloc);
+  }
+  stats.AddMember("load_per_core", loadPerCore, alloc);
+  root.AddMember("stats", stats, alloc);
 }
 
 void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {
@@ -509,7 +758,7 @@ void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step
         " uuid: " << step->uuid_ << " session: " << sessionID << 
         " cleaned_pid: " << killedPID);
   }
-  std::vector<pid_t> pids = ns_Executor::Process::GetPidsBySid(sessionID);
+  std::vector<pid_t> pids = os_.process_.GetPidsBySid(sessionID);
   for(pid_t pid: pids) {
     LOGE("waiting for " << pid);
     waitpid(pid, nullptr, 0);
@@ -522,7 +771,14 @@ void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step
   }
 }
 
-void ns_Executor::Local::KillSession(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {
+void ns_Executor::Local::KillSession(pid_t sessionID, 
+    std::filesystem::path const& cgroupPath, ns_Schedule::Step* step, 
+    std::string const& label) {
+
+  if (!cgroupPath.empty()) {
+    return KillCGroupSession(cgroupPath, step, label);
+  }
+
   for(int sig: std::vector<int>{SIGTERM, SIGKILL}) {
     if (kill(-sessionID, 0) != 0) {
       break;
@@ -533,6 +789,27 @@ void ns_Executor::Local::KillSession(pid_t sessionID, ns_Schedule::Step* step, s
   WaitSessionEnd(sessionID, step, label);
 }
 
+void ns_Executor::Local::KillCGroupSession(std::filesystem::path const& cgroupPath, 
+    ns_Schedule::Step* step, std::string const& label) {
+  if (!std::filesystem::exists(cgroupPath)) {
+    return;
+  }
+  int nbAttempts = 0;
+  std::error_code ec;
+  do {
+    std::ofstream killFile(cgroupPath / "cgroup.kill");
+    if (killFile.is_open()) {
+      killFile << 1;
+      killFile.close();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::filesystem::remove(cgroupPath, ec);
+  } while (ec && (ec.value() == 16) && (++nbAttempts < 20));
+  LOGE(label << " cleanup: " << step->task_->id_ << " / " << step->ID()  << 
+        " uuid: " << step->uuid_ << " cgroup: " << cgroupPath << 
+        (ec ? " failure: " + ec.message() : " success"));
+}
+
 pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localData) {
   int outhandler = localData->pipeFDOut[1];
   int errhandler = localData->pipeFDErr[1];
@@ -541,6 +818,18 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
 
   if (pid == 0) {
     pid_t localPID = getpid();
+
+    if (!localData->cgroup_path_.empty()) {
+      std::filesystem::create_directory(localData->cgroup_path_);
+      std::ofstream procFile(localData->cgroup_path_ / "cgroup.procs");
+      if (procFile.is_open()) {
+        procFile << localPID;
+        procFile.close();
+      } else {
+        std::cerr << "unable to self register in cgroup" << std::endl;
+        exit(-1);
+     }
+    }
 
     pid_t spid = setsid();
     if (spid == -1) {
@@ -604,6 +893,11 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
 }
 
 void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores) {
+
+  if (!localData->cgroup_path_.empty()) {
+    KillCGroupSession(localData->cgroup_path_, &step, "End run");
+  }
+
   filesRing_.RemoveFD(localData->pipeFDOut[0]);
   filesRing_.RemoveFD(localData->pipeFDErr[0]);
   close(localData->pipeFDOut[1]);
@@ -651,7 +945,7 @@ std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
       }
     }
   } else {
-    result = coresMonitor_.SelectMostIdleCores(nbCores, &coresFree_);
+    result = os_.cores_.SelectMostIdleCores(nbCores, &coresFree_);
     for (size_t i=0; i<result.size(); ++i) {
       coresFree_[result[i]] = false;
     }
@@ -777,6 +1071,95 @@ bool ns_Executor::Local::VerifyProcessArgs(pid_t pid,
     }
   }
 
+  return true;
+}
+
+int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoot) const {
+  if (faccessat(AT_FDCWD, cgroupRoot.c_str(), W_OK | X_OK, AT_EACCESS) != 0) {
+    cgroupRoot.clear();
+    return 0;
+  }
+  cgroupRoot /= ("scheduler-" + std::to_string(getpid()));
+  std::error_code ec;
+  if ((!std::filesystem::create_directories(cgroupRoot, ec)) || ec) {
+    cgroupRoot.clear();
+    return 0;
+  }
+
+  std::ofstream procFile(cgroupRoot / "cgroup.procs");
+  if (!procFile.is_open()) {
+    std::filesystem::remove(cgroupRoot);
+    cgroupRoot.clear();
+    return 0;
+  }
+
+  pid_t cpid = fork();
+  if (cpid < 0) {
+    std::filesystem::remove(cgroupRoot);
+    throw std::runtime_error("Fatal error, fork failed " + std::to_string(errno));
+  }
+  if (cpid == 0) {
+    while(true) {
+      sleep(1);
+    }
+    _exit(0);
+  }
+
+  procFile << cpid;
+  procFile.close();
+
+  kill(cpid, SIGTERM);
+  waitpid(cpid, nullptr, 0);
+
+  if (procFile.fail()) {
+    std::filesystem::remove(cgroupRoot);
+    cgroupRoot.clear();
+    return 0;
+  }
+
+  std::ofstream subtreeControlFile(cgroupRoot / "cgroup.subtree_control");
+  if (!subtreeControlFile.is_open()) {
+    std::filesystem::remove(cgroupRoot);
+    cgroupRoot.clear();
+    return 0;
+  }
+  int32_t capabilities = 3;
+  subtreeControlFile << "+memory";
+  subtreeControlFile.close();
+  if (subtreeControlFile.fail()) {
+    capabilities -= 1;
+  }
+  subtreeControlFile.clear();
+  subtreeControlFile.open(cgroupRoot / "cgroup.subtree_control");
+  subtreeControlFile << "+cpuset";
+  subtreeControlFile.close();
+  if (subtreeControlFile.fail()) {
+    capabilities -= 2;
+  }
+  if (capabilities == 0) {
+    std::filesystem::remove(cgroupRoot);
+    cgroupRoot.clear();
+  }
+  return capabilities;
+}
+
+bool ns_Executor::Local::CGroupMemoryUsed(std::filesystem::path const& cgroupMemoryPath, int8_t& percentOfUsedMemory) const {
+  percentOfUsedMemory = 0;
+  std::ifstream ifs(cgroupMemoryPath);
+  if (!ifs.is_open()) {
+    return false;
+  }
+  uint64_t usedMemory = 0;
+  std::string key;
+  uint64_t value;
+  while (ifs >> key >> value) {
+    if (key == "anon") usedMemory += value;
+    else if (key == "shmem") usedMemory += value;
+  }
+  if (usedMemory == 0) {
+    return false;
+  }
+  percentOfUsedMemory = ((double)usedMemory / (double)os_.memory_.Total()) * 100.0;
   return true;
 }
 

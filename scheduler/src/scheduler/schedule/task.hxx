@@ -4,6 +4,8 @@
 #include "publish.hxx"
 #include "archiver.hxx"
 #include "executor/executors_provider.hxx"
+#include "executor/executor.hxx"
+#include "../system/linux.hxx"
 #include <cstdint>
 #include <iostream>
 #include <list>
@@ -42,8 +44,9 @@ public:
 
   StepConfigurations configurations_;
 
-  std::unordered_map<ns_Executor::Executor*, ns_Executor::ExecutorTaskData*> 
-      executors_;
+  std::string executor_name_;
+  ns_Executor::Executor* executor_;
+  ns_Executor::ExecutorTaskData* executor_data_;
 
   std::list<ns_Schedule::Step*> root_steps_;
 
@@ -86,11 +89,12 @@ public:
       rapidjson::Document::AllocatorType& alloc, 
       ns_Schedule::Step const* step) const;
 
+  void UpdateStats(std::vector<ns_Schedule::Step*> steps);
+
 private:
   bool CreateRunFolders();
 
-  void CreateStepsFromJson(rapidjson::Value const& configJSON, 
-      ns_Executor::ExecutorsProvider const& executorsProvider);
+  void CreateStepsFromJson(rapidjson::Value const& configJSON);
 
   std::list<ns_Schedule::Step*> steps_;
 

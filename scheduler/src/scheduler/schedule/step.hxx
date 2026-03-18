@@ -47,7 +47,6 @@ public:
       std::list<ns_Schedule::Step*> dependFrom);
   Step(Step const& source, uint64_t run_id, 
       uint64_t rank_id, uint64_t attempt_id, uint64_t group_id, 
-      ns_Executor::ExecutorsProvider const& executorsProvider,
       std::list<ns_Schedule::Step*> dependFrom, 
       std::vector<rapidjson::Value const*> configurationStack, 
       GroupStepConfigurations const& groupConfigurations, 
@@ -55,13 +54,11 @@ public:
   Step(ns_Schedule::Task* task, std::string const& name, 
     uint64_t run_id, uint64_t step_id, uint64_t group_id, uint16_t group_status, 
     std::list<ns_Schedule::Step*> dependFrom, 
-    ns_Executor::ExecutorsProvider const& executorsProvider,
     GroupStepConfigurations const& groupConfigurations, 
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration,
     rapidjson::Value const* monitorJSON);
   Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
-      ns_Executor::ExecutorsProvider const* executorsProvider, 
       struct UUIDDependencies& dependencies);
   ~Step();
 
@@ -86,6 +83,7 @@ public:
   void KillAndMarkTimedout();
   void KillAndMarkCancel();
 
+  bool TaskFirstStep();
   bool TaskLastStep();
   bool TaskCancelled();
   void Execute();
@@ -102,6 +100,8 @@ public:
   std::string ID() const;
   std::string GID() const;
 
+  void UpdateStats();
+
   ns_Schedule::Task* task_;
   std::string name_;
   std::string id_;
@@ -111,8 +111,6 @@ public:
   uint64_t rank_id_;
   uint64_t attempt_id_;
   uint64_t run_id_;
-  std::string executor_name_;
-  ns_Executor::Executor* executor_;
   ns_Executor::ExecutorData* executor_data_;
   std::string function_;
   std::unordered_map<std::string, std::string> args_;
@@ -230,7 +228,7 @@ inline void Step::MarkLaunchError() {
 }
 
 inline void Step::KillAndMarkTimedout() {
-  executor_->Shutdown(*this);
+  task_->executor_->Shutdown(*this);
   state_ = State::TimedOut;
   time_points_[1] = std::chrono::system_clock::now();
   exit_code_ = exitCode_Timedout_;
@@ -238,7 +236,7 @@ inline void Step::KillAndMarkTimedout() {
 
 inline void Step::KillAndMarkCancel() {
   if (state_ == State::Running) {
-    executor_->Shutdown(*this);
+    task_->executor_->Shutdown(*this);
   }
   state_ = State::Cancelled;
   time_points_[1] = std::chrono::system_clock::now();
@@ -250,19 +248,22 @@ inline bool Step::TaskCancelled() {
 }
 
 inline void Step::Execute() {
-  executor_->Execute(*this);
+  if (TaskFirstStep()) {
+    task_->PrepareToRun();
+  }
+  task_->executor_->Execute(*this);
 }
 
 inline void Step::Shutdown() {
   if (state_ == State::Running) {
-    executor_->Shutdown(*this);
+    task_->executor_->Shutdown(*this);
     state_ = State::Shutdown;
   }
 }
 
 inline void Step::GatherFilesToLocal() {
   if (state_ >= State::Running) {
-    executor_->GatherFilesToLocal(*this);
+    task_->executor_->GatherFilesToLocal(*this);
   }
   end_processed_ = true;
 }

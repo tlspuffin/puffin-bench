@@ -1,8 +1,8 @@
 #pragma once
 
 #include "config.hxx"
-#include "../task.hxx"
 #include "../output_state.hxx"
+#include "../../system/linux.hxx"
 #include "../../../utils/file.hxx"
 #include <string>
 #include <list>
@@ -10,6 +10,7 @@
 #include <rapidjson/document.h>
 
 namespace ns_Schedule {
+  class Task;
   class Step;
 }
 
@@ -35,10 +36,19 @@ inline ExecutorTaskData::~ExecutorTaskData() {}
 
 class Executor {
 public:
-  static Executor* Build(ns_Executor::Config* config, uint16_t cachePort);
+  struct OSLoad {
+    int8_t memory = -1;
+    int8_t cores = -1;
+    std::vector<int8_t> perCores;
+  };
+
+  static Executor* Build(ns_Executor::Config* config, uint16_t cachePort, ns_System::Linux& os);
   virtual ~Executor();
 
   std::string Name() const;
+
+  virtual bool TaskPrepareToRun(ns_Schedule::Task* task) = 0;
+  virtual bool TaskFinalize(ExecutorTaskData* data) = 0;
 
   virtual std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& tasks) const = 0;
   virtual void Execute(ns_Schedule::Step& step) = 0;
@@ -55,10 +65,13 @@ public:
   virtual ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const = 0;
   virtual ExecutorData* CreateLocalData(rapidjson::Value const& config) const = 0;
 
+  virtual void GatherStats() = 0;
+  virtual void UpdateTaskStats(ExecutorTaskData* data, std::vector<ns_Executor::ExecutorData*> stepsData) const = 0;
+  virtual void UpdateStepStats(ExecutorData* data) const = 0;
+  virtual void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const = 0;
+
 protected:
   Executor(std::string const& name);
-
-  template<typename T> T* GetExecutorTaskData(ns_Schedule::Task* task);
 
 private:
   std::string name_;
@@ -72,18 +85,6 @@ inline Executor::~Executor() {}
 
 inline std::string Executor::Name() const {
   return name_;
-}
-
-template<typename T> inline T* Executor::GetExecutorTaskData(ns_Schedule::Task* task) {
-  auto executorTaskDataIT = task->executors_.find(this);
-  if (executorTaskDataIT == task->executors_.end()) {
-    throw std::runtime_error("ExecutorTaskData not found in task");
-  }
-  T* executorTaskData = dynamic_cast<T*>(executorTaskDataIT->second);
-  if (executorTaskData == nullptr) {
-    throw std::runtime_error("ExecutorTaskData are not of type LocalTaskData");
-  }
-  return executorTaskData;
 }
 
 };

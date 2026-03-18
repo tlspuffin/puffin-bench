@@ -120,6 +120,7 @@ void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files
     form.set("dst", archivePath);
     form.prepareSubmit(request);
 
+    LOGI("Sending notify request to " << path);
     std::ostream& requestStream = session->sendRequest(request);
     form.write(requestStream);
     requestStream.flush();
@@ -130,10 +131,12 @@ void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files
     if (response.getStatus() != Poco::Net::HTTPResponse::HTTP_OK) {
       std::string responseBody;
       Poco::StreamCopier::copyToString(responseStream, responseBody);
+      LOGE("Notify report error " << responseBody);
       throw std::runtime_error("Server returned status " + 
           std::to_string(response.getStatus()) + 
           ": " + responseBody);
     }
+    LOGI("Sending notify was successful");
 
   } catch (const Poco::Exception& e) {
     throw std::runtime_error("HTTP[S] request failed: " + e.displayText());

@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace ns_Executor {
+namespace ns_System {
 
 class Process {
 public:

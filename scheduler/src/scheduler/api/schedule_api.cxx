@@ -1,7 +1,7 @@
 #include "schedule_api.hxx"
 
-ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, uint16_t cache_port)
-    : config_(config), schedule_(config, cache_port)
+ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cache_port)
+    : config_(config), schedule_(config, os, cache_port)
 {
 }
 

@@ -14,7 +14,7 @@ class Schedule;
 
 class TasksManager {
 public:
-  TasksManager(ns_Schedule::Config const& config, bool resetStatus);
+  TasksManager(ns_Schedule::Config const& config);
   ~TasksManager();
 
   ns_Schedule::Task* CreateTask(std::string const& name, 
@@ -31,9 +31,9 @@ public:
     size_t readSize, ssize_t readOffset, 
     struct FileExtractedText& data);
 
-  void SaveStatus();
+  void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc);
   std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
-  LoadStatus(ns_Schedule::Schedule const* schedule);
+  LoadStatus(rapidjson::Value const& tasksmanager, ns_Schedule::Schedule const* schedule);
 
 private:
   ns_Schedule::Config const& config_;
@@ -42,12 +42,13 @@ private:
   std::list<ns_Schedule::Task*> tasks_;
 
   void DeleteTaskInternal(ns_Schedule::Task* task);
-  void SaveStatusInternal() const;
+  void ToJSONInternal(rapidjson::Value& root, rapidjson::MemoryPoolAllocator<>& alloc) const;
 };
 
-inline void ns_Schedule::TasksManager::SaveStatus() {
+inline void ns_Schedule::TasksManager::ToJSON(rapidjson::Value& root, 
+    rapidjson::MemoryPoolAllocator<>& alloc) {
   std::lock_guard<std::mutex> lock(lock_);
-  SaveStatusInternal();
+  ToJSONInternal(root, alloc);
 }
 
 };

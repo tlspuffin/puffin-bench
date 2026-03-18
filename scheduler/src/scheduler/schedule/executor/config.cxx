@@ -1,5 +1,5 @@
 #include "config.hxx"
-#include "linux_cores.hxx"
+#include "../../system/linux_cores.hxx"
 #include "../../../utils/rapidjson.hxx"
 
 #include "../../../embeded/scheduler/executor_sh.h"
@@ -48,8 +48,7 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
     : Config(Config::Type::Local, name), nbCores_(1), cores_(), 
     scriptPath_("scripts"), logsSize_(16*1024*1024)
 {
-  CoresStats coresStats;
-  uint64_t maxNbCores = coresStats.NbCores();
+  uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   cores_.assign(maxNbCores, true);
   if (maxNbCores > 1) {
     cores_[0] = false;
@@ -57,14 +56,13 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
 }
 
 void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
-  CoresStats coresStats;
-  uint64_t maxNbCores = coresStats.NbCores();
+  uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   if ((cores_.size() > maxNbCores) || ((nbCores_ > maxNbCores))) {
     throw std::runtime_error("Config of Local executor requires more cores than system have (" + 
         std::to_string(maxNbCores) + ")");
   }
   auto discard = std::filesystem::canonical(scriptPath_);
-  for(auto const& [ file, data, size ] : { 
+  for(auto const& [ file, data, size ] : {
       std::tuple{ "executor.sh", Executor_Script_data, Executor_Script_size },
       std::tuple{ "functions.sh", Functions_Script_data, Functions_Script_size },
     }) {
@@ -84,9 +82,9 @@ void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
 }
 
 void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
+  uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   nbCores_ = 0;
   cores_.clear();
-  CoresStats coresStats;
   if (node.HasMember("cores") && node["cores"].IsArray()) {
     const rapidjson::Value& arr = node["cores"];
     std::vector<uint64_t> indexes;
@@ -97,12 +95,11 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
       uint64_t coreIndex = arr[i].GetUint64();
       indexes.push_back(coreIndex);
     }
-    cores_.assign(coresStats.NbCores(), false);
+    cores_.assign(maxNbCores, false);
     for (auto const& index : indexes) {
       cores_[index] = true;
     }
   } else if (node.HasMember("excludeCores") && node["excludeCores"].IsArray()) {
-    uint64_t maxNbCores = coresStats.NbCores();
     cores_.assign(maxNbCores, true);
 
     if (node.HasMember("nbCores") && node["nbCores"].IsUint64()) {
@@ -124,7 +121,6 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
       cores_[coreIndex] = false;
     }
   } else {
-    uint64_t maxNbCores = coresStats.NbCores();
     nbCores_ = 1;
     cores_.assign(maxNbCores, true);
     if (maxNbCores > 1) {

@@ -9,8 +9,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     uint64_t attempt_id, std::list<ns_Schedule::Step*> dependFrom) 
     : task_(source.task_), name_(source.name_), id_(source.id_), uuid_(++next_uuid_),
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(source.rank_id_), 
-    attempt_id_(attempt_id), run_id_(run_id), executor_name_(source.executor_name_), 
-    executor_(source.executor_), executor_data_(source.executor_data_), 
+    attempt_id_(attempt_id), run_id_(run_id), executor_data_(nullptr), 
     function_(source.function_), args_(source.args_), nb_cores_(source.nb_cores_), 
     nb_retry_(source.nb_retry_), timeout_(source.timeout_), 
     next_(const_cast <ns_Schedule::Step *>(&source)), 
@@ -42,15 +41,13 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
 
 ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
     uint64_t rank_id, uint64_t attempt_id, uint64_t group_id, 
-    ns_Executor::ExecutorsProvider const& executorsProvider,
     std::list<ns_Schedule::Step*> dependFrom, 
     std::vector<rapidjson::Value const*> configurationStack, 
     GroupStepConfigurations const& groupConfigurations, 
     rapidjson::Value const* configuration) 
     : task_(source.task_), name_(source.name_), id_(source.id_), uuid_(++next_uuid_),
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(rank_id), 
-    attempt_id_(attempt_id), run_id_(run_id), executor_name_(source.executor_name_), 
-    executor_(source.executor_), executor_data_(source.executor_data_), 
+    attempt_id_(attempt_id), run_id_(run_id), executor_data_(nullptr), 
     function_(source.function_), args_(source.args_), nb_cores_(source.nb_cores_), 
     nb_retry_(source.nb_retry_), timeout_(source.timeout_), 
     next_(const_cast <ns_Schedule::Step *>(&source)), 
@@ -71,10 +68,6 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
   }
   ReadFromTaskJSON(configurationStack, groupConfigurations, configuration);
 
-  if (executor_name_.compare(source.executor_name_) != 0) {
-    executor_ = executorsProvider.GetExecutor(executor_name_);
-  }
-
   std::string step_name = ID();
   stdout_ = source.task_->logs_path_ / ("stdout." + step_name + ".txt");
   stderr_ = source.task_->logs_path_ / ("stderr." + step_name + ".txt");
@@ -89,14 +82,13 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
 ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name, 
     uint64_t run_id, uint64_t step_id, uint64_t group_id, uint16_t group_status, 
     std::list<ns_Schedule::Step*> dependFrom, 
-    ns_Executor::ExecutorsProvider const& executorsProvider,
     GroupStepConfigurations const& groupConfigurations, 
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration,
     rapidjson::Value const* monitorJSON) 
     : task_(task), name_(name), id_(), uuid_(++next_uuid_), group_id_(group_id), 
     step_id_(step_id), rank_id_(0), attempt_id_(0), run_id_(run_id), 
-    executor_name_("default"), executor_(nullptr), executor_data_(nullptr), 
+    executor_data_(nullptr), 
     function_(name), args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
     next_(this), previous_(this), dependencies_(), depend_from_(dependFrom), 
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
@@ -114,8 +106,6 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
   }
   ReadFromTaskJSON(configurationStack, groupConfigurations, configuration);
 
-  executor_ = executorsProvider.GetExecutor(executor_name_);
-
   std::string step_name = ID();
   stdout_ = task_->logs_path_ / ("stdout." + step_name + ".txt");
   stderr_ = task_->logs_path_ / ("stderr." + step_name + ".txt");
@@ -131,7 +121,6 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
 
 ns_Schedule::Step::Step(ns_Schedule::Task* task, 
     rapidjson::Value const& config, 
-    ns_Executor::ExecutorsProvider const* executorsProvider, 
     struct UUIDDependencies& dependencies) {
   dependencies.Reset();
 
@@ -152,7 +141,6 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   rank_id_ = Get<uint64_t>(config, "rank_id");
   attempt_id_ = Get<uint64_t>(config, "attempt_id");
   run_id_ = Get<uint64_t>(config, "run_id");
-  executor_name_ = Get<std::string>(config, "executor_name");
 
   function_ = Get<std::string>(config, "function");
 
@@ -224,21 +212,13 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
     message_from_run_ = Get<std::string>(config, "message_from_run");
   }
 
-  std::string executorName = GetOrDefault<std::string>(config, "executor", "");
-  executor_ = nullptr;
   executor_data_ = nullptr;
-  if (!executorName.empty()) {
-    executor_ = executorsProvider->GetExecutor(executorName);
-    if (executorName.compare(executor_->Name()) != 0) {
-      throw std::runtime_error("Step JSON unable to find required executor: " + 
-          executor_name_);
-    }
-
+  if (task_->executor_ != nullptr) {
     if (config.HasMember("executor_data")) {
       if (!config["executor_data"].IsObject()) {
         throw std::runtime_error("Step JSON executor_data must be an object");
       }
-      executor_data_ = executor_->CreateLocalData(config["executor_data"]);
+      executor_data_ = task_->executor_->CreateLocalData(config["executor_data"]);
     }
   }
 
@@ -278,7 +258,6 @@ void ns_Schedule::Step::ReadFromTaskJSON(
   }
  
   id_ = stepConfiguration.id_;
-  executor_name_ = stepConfiguration.executor_name_;
   nb_cores_ = stepConfiguration.nb_cores_;
   nb_retry_ = stepConfiguration.nb_retry_;
   timeout_ = stepConfiguration.timeout_;
@@ -287,6 +266,18 @@ void ns_Schedule::Step::ReadFromTaskJSON(
   if (group_status_ != stepsGroup_None_) {
     nb_retry_ = groupConfigurations.NbRetry(configName);
   }
+}
+
+bool ns_Schedule::Step::TaskFirstStep() {
+  bool inRootSteps = false;
+  bool allPending = true;
+  for(Step const* step: task_->root_steps_) {
+    allPending &= step->IsPending();
+    if (step == this) {
+      inRootSteps = true;
+    }
+  }
+  return inRootSteps && allPending;
 }
 
 bool ns_Schedule::Step::TaskLastStep() {
@@ -322,15 +313,11 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("rank_id", rank_id_, alloc);
   out.AddMember("attempt_id", attempt_id_, alloc);
   out.AddMember("run_id", run_id_, alloc);
-  out.AddMember("executor_name", rapidjson::Value(executor_name_.c_str(), alloc), alloc);
 
-  if (executor_ != nullptr) {
-    out.AddMember("executor", rapidjson::Value(executor_->Name().c_str(), alloc), alloc);
-    if (executor_data_ != nullptr) {
-      rapidjson::Value executorDataJSON(rapidjson::kObjectType);
-      executor_data_->ToJSON(executorDataJSON, alloc);
-      out.AddMember("executor_data", executorDataJSON, alloc);
-    }
+  if (executor_data_ != nullptr) {
+    rapidjson::Value executorDataJSON(rapidjson::kObjectType);
+    executor_data_->ToJSON(executorDataJSON, alloc);
+    out.AddMember("executor_data", executorDataJSON, alloc);
   }
 
   out.AddMember("function", rapidjson::Value(function_.c_str(), alloc), alloc);
@@ -389,6 +376,10 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     out.AddMember("monitor_path", rapidjson::Value(monitor_path_.c_str(), alloc), alloc);
     out.AddMember("message_from_run", rapidjson::Value(message_from_run_.c_str(), alloc), alloc);
   }
+}
+
+void ns_Schedule::Step::UpdateStats() {
+  task_->executor_->UpdateStepStats(this->executor_data_);
 }
 
 inline uint64_t ns_Schedule::Step::ToMillis(

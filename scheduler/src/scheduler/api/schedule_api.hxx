@@ -12,7 +12,7 @@ namespace ns_API {
 
 class ScheduleAPI {
 public:
-  ScheduleAPI(ns_Schedule::Config const& config, uint16_t cache_port);
+  ScheduleAPI(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cache_port);
 
   uint64_t AddTask(std::string const& name, 
       std::vector<uint8_t> const& flow, 
