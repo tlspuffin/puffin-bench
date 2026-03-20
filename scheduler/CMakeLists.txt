@@ -87,3 +87,23 @@ add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx)
 target_link_options(testFilesRing PRIVATE -static)
 target_compile_definitions(testFilesRing PRIVATE STATIC)
+
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/tlspuffin_history.sh" "${CMAKE_SOURCE_DIR}/src/embeded/git_restapi/tlspuffin_history_sh.h" TLSPuffinHistory_Script)
+
+set(GIT_RESTAPI_SRC 
+  src/git_restapi/main.cxx src/git_restapi/config.cxx 
+  src/utils/rapidjson.cxx src/utils/variables.cxx 
+  src/git_restapi/api/api.cxx 
+  src/git_restapi/server/config.cxx src/git_restapi/server/server.cxx src/git_restapi/server/parts_handler.cxx src/git_restapi/server/request_handler.cxx 
+  src/embeded/git_restapi/tlspuffin_history_sh.h
+)
+
+add_executable(git_restapi ${GIT_RESTAPI_SRC})
+target_link_libraries(git_restapi PRIVATE Poco)
+target_include_directories(git_restapi PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(git_restapi-static ${GIT_RESTAPI_SRC})
+target_link_libraries(git_restapi-static PRIVATE Poco)
+target_include_directories(git_restapi-static PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+target_link_options(git_restapi-static PRIVATE -static)
+target_compile_definitions(git_restapi-static PRIVATE STATIC)
