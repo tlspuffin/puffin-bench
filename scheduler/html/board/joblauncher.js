@@ -26,10 +26,12 @@ export class JobLauncher {
       launchUrl:  config.launchUrl  ?? '/api/job/launch',
     };
     this.#buildDOM();
-    this.#loadCommits();
   }
 
-  open()  { this.#overlay.classList.add('open'); }
+  open()  { 
+    this.#overlay.classList.add('open');
+    this.#loadCommits();
+  }
   close() { this.#overlay.classList.remove('open'); this.#reset(); }
 
   // ── Build DOM ─────────────────────────────────────────────────────────────
@@ -268,7 +270,7 @@ export class JobLauncher {
 
       // first cell: optional badge + hash stacked
       const hashWrap = this.#el('div', 'jl-item-hash-wrap');
-      if (isDev && item.branch) {
+      if (item.branch) {
         const badge = this.#el('span', 'jl-item-badge',
           item.branch === 'main' ? 'jl-branch-main' : 'jl-branch-dev');
         badge.textContent = item.branch;

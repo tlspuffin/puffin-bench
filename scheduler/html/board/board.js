@@ -844,7 +844,7 @@ function main() {
   document.getElementById('modal-close').onclick = CloseModal;
 
   const launcher = new JobLauncher({
-      commitsUrl: '/api/commits',
+      commitsUrl: `http://${window.location.hostname}:10083/api/git/history`,
       launchUrl:  '/api/job/launch',
   });
   document.getElementById('new-task').onclick = () => { launcher.open() };
