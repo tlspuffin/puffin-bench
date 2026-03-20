@@ -21,10 +21,8 @@ void ns_API::ScheduleAPI::GetRunningTaskSummary() {
 void ns_API::ScheduleAPI::GetTaskInfos(uint64_t task_id) {
 }
 
-ns_Schedule::OutputState ns_API::ScheduleAPI::GetOutput(
+void ns_API::ScheduleAPI::GetOutput(
     std::string const& type, std::string const& taskID, uint64_t stepUUID, 
-    std::string const& stepID, size_t readSize, ssize_t readOffset, 
-    struct FileExtractedText& data) {
-  return schedule_.GetOutput(type, taskID, stepUUID, stepID, 
-      readSize, readOffset, data);
+    std::string const& stepID, struct FileExtractedText& data) {
+  return schedule_.GetOutput(type, taskID, stepUUID, stepID, data);
 }

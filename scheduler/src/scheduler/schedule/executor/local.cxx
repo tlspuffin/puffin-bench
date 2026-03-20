@@ -58,13 +58,13 @@ void ns_Executor::LocalTaskData::ToJSON(rapidjson::Value& out,
 
 
 ns_Executor::LocalData::LocalData(uint32_t nbCores) 
-    : process_status_(Internal), os_memory_load_(0), os_cores_load_(nbCores), 
-    os_memory_max_load_(0), os_cores_max_load_(0)
+    : process_status_(Internal), fdCaptureThread_(2), os_memory_load_(0), 
+    os_cores_load_(nbCores), os_memory_max_load_(0), os_cores_max_load_(0)
 {}
 
 ns_Executor::LocalData::LocalData(rapidjson::Value const& config) 
-    : process_status_(External), os_memory_load_(0), os_memory_max_load_(0), 
-    os_cores_max_load_(0)
+    : process_status_(External), fdCaptureThread_(2), os_memory_load_(0), 
+    os_memory_max_load_(0), os_cores_max_load_(0)
 {
   if (!config.IsObject()) {
     throw std::runtime_error("LocalData JSON must be an object");
@@ -150,7 +150,7 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
     uint16_t cachePort, ns_System::Linux& os)
     : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
-      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), filesRing_(config_.logsSize_),
+      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), 
       cgroupRoot_(), cgroupRootCapabilities_(0)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
@@ -323,7 +323,8 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         " (" + std::strerror(errno) + ")"
     );
   }
-  if (!filesRing_.AddFD(localData->pipeFDOut[0], step.stdout_)) {
+  if (!localData->fdCaptureThread_.AddFD(localData->pipeFDOut[0], 
+      new ns_Executor::MemoryRing{step.stdout_, config_.logsSize_})) {
     close(localData->pipeFDOut[0]);
     close(localData->pipeFDOut[1]);
     close(localData->pipeFDErr[0]);
@@ -332,12 +333,13 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         std::string("adding rotation log for stdout failed: ") + step.stdout_.c_str()
     );
   }
-  if (!filesRing_.AddFD(localData->pipeFDErr[0], step.stderr_)) {
+  if (!localData->fdCaptureThread_.AddFD(localData->pipeFDErr[0], 
+      new ns_Executor::MemoryRing{step.stderr_, config_.logsSize_})) {
     close(localData->pipeFDOut[0]);
     close(localData->pipeFDOut[1]);
     close(localData->pipeFDErr[0]);
     close(localData->pipeFDErr[1]);
-    filesRing_.RemoveFD(localData->pipeFDOut[0]);
+    localData->fdCaptureThread_.RemoveFD(localData->pipeFDOut[0]);
     throw std::runtime_error(
         std::string("adding rotation log for stderr failed: ") + step.stderr_.c_str()
     );
@@ -629,29 +631,22 @@ Local__CheckReloadRunning__Error:
   step.MarkPending();
 }
 
-enum ns_Schedule::OutputState ns_Executor::Local::GetRunningOutput(
+void ns_Executor::Local::GetRunningOutput(
     ns_Schedule::Step const& step, std::string const& type, 
-    size_t readSize, ssize_t readOffset, 
     struct FileExtractedText& data) const {
-  enum ns_Schedule::OutputState state = ns_Schedule::OutputState::UNKNOWN;
-  std::filesystem::path outputPath = step.task_->logs_path_;
-  std::string prefix = type;
-  std::stringstream oss;
-  oss << prefix << '.' << step.ID() << ".txt";
-  outputPath = outputPath / oss.str();
-
-  FileReadState fileState = FileExtractText(outputPath, readSize, readOffset, data);
-  switch (fileState) {
-    case FileReadState::Ok:
-      state = ns_Schedule::OutputState::GOT_DATA;
-      break;
-    case FileReadState::EndOfFile:
-      state = ns_Schedule::OutputState::POSSIBLE_MORE_DATA;
-      break;
-    default:
-      break;
+  LocalData* localData = dynamic_cast<LocalData*>(step.executor_data_);
+  if (localData == nullptr) {
+    return;
   }
-  return state;
+  int fd = localData->pipeFDOut[0];
+  if (type == "stderr") {
+    fd = localData->pipeFDErr[0];
+  }
+  localData->fdCaptureThread_.Read(fd, data);
+  if (data.state != FileReadState::NotExecuted) {
+    return;
+  }
+  FileExtractText(type == "stderr" ? step.stderr_ : step.stdout_, data);
 }
 
 ns_Executor::ExecutorTaskData* ns_Executor::Local::CreateLocalTaskData(
@@ -898,8 +893,8 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
     KillCGroupSession(localData->cgroup_path_, &step, "End run");
   }
 
-  filesRing_.RemoveFD(localData->pipeFDOut[0]);
-  filesRing_.RemoveFD(localData->pipeFDErr[0]);
+  localData->fdCaptureThread_.RemoveFD(localData->pipeFDOut[0]);
+  localData->fdCaptureThread_.RemoveFD(localData->pipeFDErr[0]);
   close(localData->pipeFDOut[1]);
   close(localData->pipeFDErr[1]);
   localData->pipeFDOut[0] = -1;

@@ -1,4 +1,4 @@
-#include "files_ring.hxx"
+#include "output_ring.hxx"
 #include "../../../utils/logs.hxx"
 #include <unistd.h>
 #include <fcntl.h>
@@ -6,6 +6,10 @@
 #include <sys/eventfd.h>
 #include <filesystem>
 #include <fstream>
+
+std::mutex ns_Executor::FDCaptureThread::threadsLock__;
+std::list<std::shared_ptr<ns_Executor::FDCaptureThread::FDCaptureThreadImpl>> 
+    ns_Executor::FDCaptureThread::threadsPoll__;
 
 ns_Executor::FileRing::FileRing() 
     : file_(), maxSize_(0), nbFiles_(0), 
@@ -42,7 +46,7 @@ ns_Executor::FileRing& ns_Executor::FileRing::operator=(FileRing&& other) {
     mergeAtEnd_ = other.mergeAtEnd_;
     fd_ = other.fd_;
     fileSize_ = other.fileSize_;
-        
+
     other.fd_ = -1;
   }
   return *this;
@@ -68,7 +72,7 @@ ns_Executor::FileRing::~FileRing() {
       LOGE("Unable to open file " << previousFile);
       return;
     }
-    std::string tmpFile = file_ + ".tmp";    
+    std::string tmpFile = file_ + ".tmp";
     std::ofstream out(tmpFile, std::ios::binary);
     if (!out) {
       LOGE("Unable to create file " << tmpFile);
@@ -135,11 +139,11 @@ bool ns_Executor::FileRing::RotateFile() {
   }
 
   fileSize_ = 0;
-  fd_ = open(file_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644); 
+  fd_ = open(file_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
   if (fd_ < 0) {
     LOGE("Failed to open " << file_);
     return false;
-  }   
+  }
   return true;
 }
 
@@ -174,27 +178,148 @@ bool ns_Executor::FileRing::CleanRotationFiles() {
   return success;
 }
 
-ns_Executor::FilesRing::FilesRing(uint64_t maxSize) 
-    : maxSize_(maxSize), epollID_(epoll_create1(EPOLL_CLOEXEC)), 
-    stopFD_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK))
+ns_Executor::MemoryRing::MemoryRing() 
+    : buffer_(), bufferStart_(0), maxSize_(0), virtualSize_(0), file_(), full_(false)
+{}
+
+ns_Executor::MemoryRing::MemoryRing(std::string const& file, uint64_t maxSize) 
+    : buffer_(maxSize), bufferStart_(0), maxSize_(maxSize), virtualSize_(0), 
+      file_(file), full_(false)
+{}
+
+ns_Executor::MemoryRing::MemoryRing(ns_Executor::MemoryRing&& other) : MemoryRing()
+{
+  *this = std::move(other);
+}
+
+ns_Executor::MemoryRing& ns_Executor::MemoryRing::operator=(ns_Executor::MemoryRing&& other) {
+  buffer_.swap(other.buffer_);
+
+  uint64_t tmpInt = bufferStart_;
+  bufferStart_ = other.bufferStart_;
+  other.bufferStart_ = tmpInt;
+
+  tmpInt = maxSize_;
+  maxSize_ = other.maxSize_;
+  other.maxSize_ = tmpInt;
+
+  tmpInt = virtualSize_;
+  virtualSize_ = other.virtualSize_;
+  other.virtualSize_ = tmpInt;
+
+  file_.swap(other.file_);
+  bool tmpBool = full_;
+  full_ = other.full_;
+  other.full_ = tmpBool;
+  return *this;
+}
+
+bool ns_Executor::MemoryRing::Write(uint8_t const* data, uint64_t size) {
+  std::lock_guard lock(lock_);
+  virtualSize_ += size;
+  if (size > maxSize_) {
+    buffer_.assign(&(data[size - maxSize_]), &(data[size]));
+    bufferStart_ = 0;
+    full_ = true;
+    return true;
+  }
+  uint64_t endIndex = bufferStart_ + size;
+  if (endIndex < maxSize_) {
+    memcpy(&(buffer_.data()[bufferStart_]), data, size);
+    bufferStart_ = endIndex;
+  } else {
+    memcpy(&(buffer_.data()[bufferStart_]), data, maxSize_ - bufferStart_);
+    memcpy(buffer_.data(), &(data[maxSize_ - bufferStart_]), endIndex - maxSize_);
+    bufferStart_ = endIndex - maxSize_;
+    full_ = true;
+  }
+  return true;
+}
+
+void ns_Executor::MemoryRing::Read(struct FileExtractedText& data) {
+  data.supportSeek = false;
+  data.state = FileReadState::EndOfFile;
+  data.startOffset = data.requestReadOffset;
+
+  std::lock_guard lock(lock_);
+  data.filesize = virtualSize_;
+  if (data.requestReadOffset >= virtualSize_) {
+    return;
+  }
+  if (!full_) {
+    data.buffer.resize(bufferStart_);
+    memcpy(data.buffer.data(), buffer_.data(), bufferStart_);
+    data.startOffset = 0;
+  } else {
+    data.buffer.resize(maxSize_);
+    uint64_t endIndex = bufferStart_ + maxSize_;
+    memcpy(data.buffer.data(), &(buffer_.data()[bufferStart_]), maxSize_ - bufferStart_);
+    memcpy(&(data.buffer.data()[maxSize_ - bufferStart_]), buffer_.data(), endIndex - maxSize_);
+    data.startOffset = virtualSize_ - maxSize_;
+  }
+}
+
+ns_Executor::MemoryRing::~MemoryRing() {
+  if (file_.empty()) {
+    return;
+  }
+  FileExtractedText data;
+  Read(data);
+
+  std::ofstream ofs(file_, std::ios::trunc);
+  if (!ofs.is_open()) {
+    LOGE("Unable to open file " << file_);
+    return;
+  }
+  ofs.write((char const*)data.buffer.data(), data.buffer.size());
+  ofs.close();
+  if (ofs.fail()) {
+    LOGE("Error while writing " << file_);
+    return;
+  }
+}
+
+ns_Executor::FDCaptureThread::FDCaptureThread(uint64_t nbFileDescriptor) 
+    : nbFileDescriptor_(nbFileDescriptor) {
+  std::lock_guard lock(threadsLock__);
+  for(auto& t: threadsPoll__) {
+    if (t->Load(nbFileDescriptor_)) {
+      thread_ = t;
+      return;
+    }
+  }
+  thread_ = std::make_shared<FDCaptureThread::FDCaptureThreadImpl>();
+  threadsPoll__.push_back(thread_);
+}
+
+ns_Executor::FDCaptureThread::~FDCaptureThread() {
+  std::lock_guard lock(threadsLock__);
+  if (thread_->Unload(nbFileDescriptor_) == 0) {
+    threadsPoll__.remove(thread_);
+  }
+}
+
+ns_Executor::FDCaptureThread::FDCaptureThreadImpl::FDCaptureThreadImpl() 
+    : epollID_(epoll_create1(EPOLL_CLOEXEC)), 
+    stopFD_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)), load_(0)
 {
   std::string errorMsg;
   if (epollID_ == -1) {
     errorMsg = "Fatal Error: Unable to create EPOLL";
-    goto ns_Executor__FilesRing__FilesRing__Error;
+    goto ns_Executor__FDCaptureThreadImpl__FDCaptureThreadImpl__Error;
   }
   if (stopFD_ == -1) {
     errorMsg = "Fatal Error: Unable to create EVENTFD";
-    goto ns_Executor__FilesRing__FilesRing__Error;
+    goto ns_Executor__FDCaptureThreadImpl__FDCaptureThreadImpl__Error;
   }
   if (!AddFD(stopFD_)) {
     errorMsg = "Fatal Error: Unable to start FilesRing thread";
-    goto ns_Executor__FilesRing__FilesRing__Error;
+    goto ns_Executor__FDCaptureThreadImpl__FDCaptureThreadImpl__Error;
   }
   runThread_ = std::thread([this]() { threadMain(); });
   return;
 
-ns_Executor__FilesRing__FilesRing__Error:
+ns_Executor__FDCaptureThreadImpl__FDCaptureThreadImpl__Error:
   if (stopFD_ > -1) {
     close(stopFD_);
   }
@@ -204,7 +329,7 @@ ns_Executor__FilesRing__FilesRing__Error:
   throw std::runtime_error(errorMsg);
 }
 
-ns_Executor::FilesRing::~FilesRing() {
+ns_Executor::FDCaptureThread::FDCaptureThreadImpl::~FDCaptureThreadImpl() {
   if (runThread_.joinable()) {
     uint64_t one = 1;
     write(stopFD_, &one, sizeof(one));
@@ -214,21 +339,8 @@ ns_Executor::FilesRing::~FilesRing() {
   close(epollID_);
 }
 
-void ns_Executor::FilesRing::UpdateConfig(uint64_t maxSize) {
-  std::lock_guard<std::mutex> lock(lockFDs_);
-  maxSize_ = maxSize;
-}
-
-bool ns_Executor::FilesRing::AddFD(int fd, std::string const& outFile) {
-  std::lock_guard<std::mutex> lock(lockFDs_);
-
-  std::pair<std::unordered_map<int, ns_Executor::FileRing>::iterator, bool> storage;
-  storage = fds_.insert({fd, ns_Executor::FileRing{outFile, maxSize_, 2, true}});
-  if (!storage.second) {
-    LOGE("Unable to store fd: " << fd << " errno: " << errno);
-    return false;
-  }
-
+bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(
+    int fd, std::shared_ptr<ns_Executor::OutputBuffer> outputBuffer) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
     LOGE("Unable to retrieve flags on fd: " << fd << " errno: " << errno);
@@ -239,6 +351,15 @@ bool ns_Executor::FilesRing::AddFD(int fd, std::string const& outFile) {
     return false;
   }
 
+  std::lock_guard<std::mutex> lock(lockFDs_);
+
+  std::pair<std::unordered_map<int, std::shared_ptr<OutputBuffer>>::iterator, bool> storage;
+  storage = fds_.insert({fd, std::shared_ptr<ns_Executor::OutputBuffer>(outputBuffer)});
+  if (!storage.second) {
+    LOGE("Unable to store fd: " << fd << " errno: " << errno);
+    return false;
+  }
+
   if (!AddFD(fd)) {
     fds_.erase(storage.first);
     return false;
@@ -246,7 +367,7 @@ bool ns_Executor::FilesRing::AddFD(int fd, std::string const& outFile) {
   return true;
 }
 
-bool ns_Executor::FilesRing::RemoveFD(int fd) {
+bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFD(int fd) {
   if (fd == stopFD_) {
     bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
     close(fd);
@@ -270,7 +391,26 @@ bool ns_Executor::FilesRing::RemoveFD(int fd) {
   return success;
 }
 
-void ns_Executor::FilesRing::threadMain() {
+bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::HaveFD(int fd) {
+  std::lock_guard<std::mutex> lock(lockFDs_);
+  return fds_.find(fd) != fds_.end();
+}
+
+bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::Load(uint64_t load) {
+  load += load_;
+  if (load <= 8) {
+    load_ = load;
+    return true;
+  }
+  return false;
+}
+
+uint64_t ns_Executor::FDCaptureThread::FDCaptureThreadImpl::Unload(uint64_t load) {
+  load_ -= load;
+  return load_;
+}
+
+void ns_Executor::FDCaptureThread::FDCaptureThreadImpl::threadMain() {
   std::vector<epoll_event> events(128);
   std::vector<uint8_t> buffers(65535);
   while(true) {
@@ -305,7 +445,7 @@ void ns_Executor::FilesRing::threadMain() {
         while(true) {
           ssize_t readBytes = read(fd, buffers.data(), buffers.size());
           if (readBytes > 0) {
-            it->second.Write(buffers.data(), readBytes);
+            it->second->Write(buffers.data(), readBytes);
           } else if (readBytes == 0) {
             LOGE("Close " << fd << " for read == 0");
             RemoveFDNoLock(fd);
@@ -327,7 +467,7 @@ void ns_Executor::FilesRing::threadMain() {
   }
 }
 
-bool ns_Executor::FilesRing::AddFD(int fd) {
+bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(int fd) {
   struct epoll_event epollEvent {};
   epollEvent.events = EPOLLIN | EPOLLPRI;
   epollEvent.data.fd = fd;
@@ -338,7 +478,7 @@ bool ns_Executor::FilesRing::AddFD(int fd) {
   return true;
 }
 
-bool ns_Executor::FilesRing::RemoveFDNoLock(int fd) {
+bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFDNoLock(int fd) {
   if (fd == stopFD_) {
     bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
     close(fd);

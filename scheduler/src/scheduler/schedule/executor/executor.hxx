@@ -1,7 +1,6 @@
 #pragma once
 
 #include "config.hxx"
-#include "../output_state.hxx"
 #include "../../system/linux.hxx"
 #include "../../../utils/file.hxx"
 #include <string>
@@ -57,10 +56,8 @@ public:
   virtual void GatherFilesToLocal(ns_Schedule::Step& step) = 0;
   virtual void CheckReloadRunning(ns_Schedule::Step& step) = 0;
 
-  virtual enum ns_Schedule::OutputState GetRunningOutput(ns_Schedule::Step const& step, 
-      std::string const& type, 
-      size_t readSize, ssize_t readOffset, 
-      struct FileExtractedText& data) const = 0;
+  virtual void GetRunningOutput(ns_Schedule::Step const& step, 
+      std::string const& type, struct FileExtractedText& data) const = 0;
 
   virtual ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const = 0;
   virtual ExecutorData* CreateLocalData(rapidjson::Value const& config) const = 0;

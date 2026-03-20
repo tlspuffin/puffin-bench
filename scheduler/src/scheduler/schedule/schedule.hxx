@@ -3,7 +3,6 @@
 #include "config.hxx"
 #include "step.hxx"
 #include "tasksmanager.hxx"
-#include "output_state.hxx"
 #include "archiver.hxx"
 #include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
@@ -32,10 +31,10 @@ public:
   bool CancelTask(uint64_t taskID);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
-  OutputState GetOutput(
+  void GetOutput(
       std::string const& type, std::string const& taskID,
       uint64_t stepUUID, std::string const& stepID, 
-      size_t readSize, ssize_t readOffset, struct FileExtractedText& data);
+      struct FileExtractedText& data);
 
 private:
   void ScheduleLoop();

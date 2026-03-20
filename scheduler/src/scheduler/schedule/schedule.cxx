@@ -180,20 +180,18 @@ ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& nam
   return executorIT->second;
 }
 
-ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
+void ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     uint64_t stepUUID, std::string const& stepID,
-    size_t readSize, ssize_t readOffset, struct FileExtractedText& data) {
-  ns_Schedule::OutputState state = OutputState::UNKNOWN;
-
+    struct FileExtractedText& data) {
   if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
-    return state;
+    return;
   }
 
-  state = tasksManager_.GetRunningOutput(type, 
-      std::stoull(taskID), stepUUID, readSize, readOffset, data);
-  if (state != OutputState::UNKNOWN) {
-    return state;
+  tasksManager_.GetRunningOutput(type, 
+      std::stoull(taskID), stepUUID, data);
+  if (data.state != FileReadState::NotExecuted) {
+    return;
   }
 
   std::filesystem::path outputPath = config_.exportPath_;
@@ -202,18 +200,8 @@ ns_Schedule::OutputState ns_Schedule::Schedule::GetOutput(
   oss << type << '.' << stepID << ".txt";
   outputPath = outputPath / oss.str();
 
-  FileReadState fileState = FileExtractText(outputPath, readSize, readOffset, data);
-  switch (fileState) {
-    case FileReadState::Ok:
-      state = ns_Schedule::OutputState::GOT_DATA;
-      break;
-    case FileReadState::EndOfFile:
-      state = ns_Schedule::OutputState::END_OF_DATA;
-      break;
-    default:
-      break;
-  }
-  return state;
+  data.partialFile = false;
+  FileExtractText(outputPath, data);
 }
 
 

@@ -3,7 +3,6 @@
 #include "config.hxx"
 #include "task.hxx"
 #include "step.hxx"
-#include "output_state.hxx"
 #include "../../utils/file.hxx"
 #include <mutex>
 #include <rapidjson/document.h>
@@ -26,9 +25,8 @@ public:
   void DeleteTasks();
   void TaskEnded(ns_Schedule::Task* task);
 
-  enum OutputState GetRunningOutput(std::string const& type, 
+  void GetRunningOutput(std::string const& type, 
     uint64_t taskID, uint64_t stepUUID, 
-    size_t readSize, ssize_t readOffset, 
     struct FileExtractedText& data);
 
   void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc);

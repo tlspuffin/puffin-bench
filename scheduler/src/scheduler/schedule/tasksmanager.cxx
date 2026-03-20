@@ -113,13 +113,10 @@ void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
     tasks_.remove(task);
   }
 }
-
-enum ns_Schedule::OutputState ns_Schedule::TasksManager::GetRunningOutput(
+void ns_Schedule::TasksManager::GetRunningOutput(
     std::string const& type, uint64_t taskID, uint64_t stepUUID, 
-    size_t readSize, ssize_t readOffset, 
     struct FileExtractedText& data) {
   //std::cerr << "Look for task: " << taskID << std::endl;
-  enum ns_Schedule::OutputState state = OutputState::UNKNOWN;
   std::lock_guard<std::mutex> lock(lock_);
   for(auto const& task: tasks_) {
     if (task->id_ != taskID) {
@@ -139,8 +136,9 @@ enum ns_Schedule::OutputState ns_Schedule::TasksManager::GetRunningOutput(
 
         if (step->uuid_ == stepUUID) {
           //std::cerr << "\tFound " << std::endl;
+          data.partialFile = true;
           return step->task_->executor_->GetRunningOutput(
-              *step, type, readSize, readOffset, data);
+              *step, type, data);
         }
         step = step->next_;
       } while(step != firstStep);
@@ -148,7 +146,6 @@ enum ns_Schedule::OutputState ns_Schedule::TasksManager::GetRunningOutput(
 
     break;
   }
-  return state;
 }
 
 std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 

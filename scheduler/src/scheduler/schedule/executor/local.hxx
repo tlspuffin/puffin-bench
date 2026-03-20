@@ -2,7 +2,7 @@
 
 #include "executor.hxx"
 #include "../../system/linux.hxx"
-#include "files_ring.hxx"
+#include "output_ring.hxx"
 #include <cstdint>
 #include <vector>
 
@@ -53,6 +53,7 @@ public:
 
   std::filesystem::path cgroup_path_;
 
+  FDCaptureThread fdCaptureThread_;
   int pipeFDOut[2];
   int pipeFDErr[2];
 
@@ -78,10 +79,8 @@ public:
   void GatherFilesToLocal(ns_Schedule::Step& step);
   void CheckReloadRunning(ns_Schedule::Step& step);
 
-  enum ns_Schedule::OutputState GetRunningOutput(ns_Schedule::Step const& step, 
-      std::string const& type, 
-      size_t readSize, ssize_t readOffset, 
-      struct FileExtractedText& data) const;
+  void GetRunningOutput(ns_Schedule::Step const& step, 
+      std::string const& type, struct FileExtractedText& data) const;
 
   ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const;
   ExecutorData* CreateLocalData(rapidjson::Value const& config) const;
@@ -99,7 +98,6 @@ private:
   std::vector<bool> coresFree_;
   uint64_t nbChild_;
   uint16_t cachePort_;
-  FilesRing filesRing_;
   std::filesystem::path cgroupRoot_;
   int32_t cgroupRootCapabilities_;
   struct Executor::OSLoad stats_;

@@ -142,11 +142,12 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
     }
 
     struct FileExtractedText data;
-    ns_Schedule::OutputState state = apis_->scheduleAPI_.GetOutput(
-        type, taskid, stepuuid, stepid, readsize, readoffset, data);
-    if (state == ns_Schedule::OutputState::UNKNOWN) {
+    data.requestReadOffset = readoffset;
+    data.requestReadSize = readsize;
+    apis_->scheduleAPI_.GetOutput(type, taskid, stepuuid, stepid, data);
+    if ((data.state != FileReadState::Ok) && (data.state != FileReadState::EndOfFile)) {
       throw std::runtime_error("Server can't read requested output");
-    } else if (state != ns_Schedule::OutputState::POSSIBLE_MORE_DATA) {
+    } else if (data.partialFile) {
       response.set("Cache-Control", "no-store, no-cache, must-revalidate");
       response.set("Pragma", "no-cache");
     }
@@ -160,7 +161,9 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
     out = &(response.send());
 
     *out << R"({"success": true, "data": ")" << oss.str() << R"(", "size": )" << 
-        data.buffer.size() << R"(, "filesize": )" << data.filesize << R"(, "state": )" << state << "}";
+        data.buffer.size() << R"(, "filesize": )" << data.filesize << R"(, "state": )" << 
+        (int)(data.state) << R"(, "support_seek": )" << data.supportSeek << 
+        R"(, "start_offset": )" << data.startOffset << "}";
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {

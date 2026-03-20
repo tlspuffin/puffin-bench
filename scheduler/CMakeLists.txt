@@ -60,7 +60,7 @@ set(SRV_SRC
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
   src/scheduler/schedule/executor/config.cxx src/scheduler/schedule/executor/executor.cxx src/scheduler/schedule/executor/local.cxx 
-  src/scheduler/schedule/executor/files_ring.cxx
+  src/scheduler/schedule/executor/output_ring.cxx
   src/scheduler/system/linux_cores.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx 
   src/scheduler/system/linux.cxx
   src/scheduler/api/schedule_api.cxx
@@ -84,6 +84,6 @@ add_dependencies(srv-static reserve_port-static_blob_h)
 
 add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 
-add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/files_ring.cxx)
+add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx)
 target_link_options(testFilesRing PRIVATE -static)
 target_compile_definitions(testFilesRing PRIVATE STATIC)

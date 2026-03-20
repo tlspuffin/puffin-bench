@@ -22,9 +22,9 @@ public:
   void GetRunningTaskSummary();
   void GetTaskInfos(uint64_t task_id);
   std::filesystem::path ExportPath();
-  ns_Schedule::OutputState GetOutput(std::string const& type, 
+  void GetOutput(std::string const& type, 
     std::string const& taskID, uint64_t stepUUID, std::string const& stepID, 
-    size_t readSize, ssize_t readOffset, struct FileExtractedText& data);
+    struct FileExtractedText& data);
   bool CancelStep(uint64_t taskID, uint64_t stepID);
   bool CancelTask(uint64_t taskID);
 

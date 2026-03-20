@@ -1,4 +1,4 @@
-#include "scheduler/schedule/executor/files_ring.hxx"
+#include "scheduler/schedule/executor/output_ring.hxx"
 #include <unistd.h>
 #include <fcntl.h>
 #include <thread>
@@ -13,8 +13,8 @@ int main() {
     return 1;
   }
 
-  ns_Executor::FilesRing filesRing(16 * 1024 * 1024);
-  filesRing.AddFD(p[0], "outfile.txt");
+  ns_Executor::FDCaptureThread filesRing(1);
+  filesRing.AddFD(p[0], new ns_Executor::MemoryRing{"outfile.txt", 16 * 1024 * 1024});
 
   auto start = std::chrono::steady_clock::now();
   uint64_t totalBytes = 0;
@@ -34,6 +34,7 @@ int main() {
     totalBytes += n;
   }
 
+  fsync(p[1]);
   close(p[1]);
   filesRing.RemoveFD(p[0]);
 

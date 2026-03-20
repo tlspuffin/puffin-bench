@@ -86,13 +86,13 @@ class Logs {
         'state': '',
         'offset': 0,
         'decoder': new TextDecoder("utf-8"),
-        'data': null
+        'data': ''
       },
       'stderr' : {
         'state': '',
         'offset': 0,
         'decoder': new TextDecoder("utf-8"),
-        'data': null
+        'data': ''
       }
     }
     if (this.#step != null) {

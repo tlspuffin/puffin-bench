@@ -2,26 +2,31 @@
 #include <cstdint>
 #include <fstream>
 
-FileReadState FileExtractText(std::filesystem::path const& file, 
-    size_t readSize, ssize_t readOffset, struct FileExtractedText& out) {
+void FileExtractText(std::filesystem::path const& file, 
+    struct FileExtractedText& out) {
+  out.supportSeek = true;
 
   std::error_code ec;
   out.filesize = std::filesystem::file_size(file, ec);
   if (ec) {
-    return FileReadState::Error_Access;
+    out.state = FileReadState::Error_Access;
+    return;
   }
   std::ifstream ifs(file);
   if (!ifs) {
-    return FileReadState::Error_Open;
+    out.state = FileReadState::Error_Open;
+    return;
   }
-  ifs.seekg(readOffset, readOffset >= 0 ? std::ios::beg : std::ios::end);
+  ifs.seekg(out.requestReadOffset, out.requestReadOffset >= 0 ? std::ios::beg : std::ios::end);
   if (!ifs) {
-    return FileReadState::Error_OverFlow;
+    out.state = FileReadState::Error_OverFlow;
+    return;
   }
+  out.startOffset = out.requestReadOffset;
 
-  out.buffer.resize(readSize);
-  ifs.read(&out.buffer[0], readSize);
+  out.buffer.resize(out.requestReadSize);
+  ifs.read(&out.buffer[0], out.requestReadSize);
   out.buffer.resize(ifs.gcount());
 
-  return out.buffer.size() == readSize ? FileReadState::Ok : FileReadState::EndOfFile; 
+  out.state = out.buffer.size() == out.requestReadSize ? FileReadState::Ok : FileReadState::EndOfFile; 
 }

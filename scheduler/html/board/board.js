@@ -83,6 +83,11 @@ function EnableUI() {
   document.body.removeAttribute('aria-busy');
 }
 
+const FileReadState = Object.freeze({
+  Error_Access: 0, Error_Open: 1, Error_OverFlow: 2,
+  NotExecuted: 3, Ok: 4, EndOfFile: 5
+});
+
 const logsInfos = {
   timerID: null,
   timerRun: false,
@@ -94,12 +99,16 @@ const logsInfos = {
     decoder: new TextDecoder("utf-8"),
     lastoffset: 0,
     state: 0,
+    supportSeek: true,
+    startOffset: 0,
   },
   stderr: {
     terminal: new Terminal('stderr-container'),
     decoder: new TextDecoder("utf-8"),
     lastoffset: 0,
     state: 0,
+    supportSeek: true,
+    startOffset: 0,
   },
 }
 
@@ -122,8 +131,8 @@ function SwitchOutput(newOutput) {
   document.getElementById(`${logsInfos.type}-content`).classList.add('active');
   if ((logsInfos.timerID != null) && (logsInfos.timerRun)) {
     window.clearTimeout(logsInfos.timerID);
-    RetrieveFullStepLogs(logsInfos, 10000000);
   }
+  RetrieveFullStepLogs(logsInfos, 10000000);
 }
 
 async function RetrieveStepLogs(logsInfos, size) {
@@ -146,7 +155,11 @@ async function RetrieveStepLogs(logsInfos, size) {
   }
 
   logsInfos[type].state = data.state;
-  logsInfos[type].lastoffset += data.size;
+  logsInfos[type].supportSeek = data.support_seek;
+  logsInfos[type].startOffset = data.start_offset;
+  if (data.support_seek) {
+    logsInfos[type].lastoffset += data.size;
+  }
 
   return [true, data.state, atob(data.data)];
 }
@@ -155,22 +168,41 @@ async function RetrieveFullStepLogs(logsInfos, size) {
   logsInfos.timerID = null;
 
   var success = true;
-  var state = 1;
+  var state = FileReadState.Ok;
   var data;
-  while(success && (state == 1)) {
+  while(success && (state === FileReadState.Ok)) {
+    const wasLive = !logsInfos[logsInfos.type].supportSeek;
+
     [success, state, data] = await RetrieveStepLogs(logsInfos, size);
-    if (success && (data.length > 0)) {
-      console.log('update', data.length);
+    if (!success || data.length === 0) {
+      break;
+    }
+
+    const type = logsInfos.type;
+    if (wasLive && logsInfos[type].supportSeek) {
+      logsInfos[type].terminal.SetText("");
+      logsInfos[type].decoder = new TextDecoder("utf-8");
+      logsInfos[type].lastoffset = 0;
+      [success, state, data] = await RetrieveStepLogs(logsInfos, size);
+      if (!success || data.length === 0) break;
+    }
+
+    console.log('update', data.length);
+
+    const decoded = logsInfos[type].decoder.decode(
+        Uint8Array.from(data, c => c.charCodeAt(0)),
+        { stream: state === FileReadState.Ok }
+    );
+
+    if (logsInfos[type].supportSeek) {
       //document.getElementById(`${logsInfos.type}-content`).innerText += 
-      logsInfos[logsInfos.type].terminal.AppendText(
-          logsInfos[logsInfos.type].decoder.decode(
-              Uint8Array.from(data, c => c.charCodeAt(0)),
-              { stream: state != 2 }
-          )
-      );
+      logsInfos[type].terminal.AppendText(decoded);
+    } else  {
+      //document.getElementById(`${logsInfos.type}-content`).innerText = 
+      logsInfos[type].terminal.SetText(decoded);
     }
   }
-  if (state == 2) {
+  if (logsInfos[logsInfos.type].supportSeek && state === FileReadState.EndOfFile) {
     logsInfos.timerRun = false;
   }
 
@@ -189,10 +221,14 @@ async function StepLogs(step, taskName) {
     logsInfos.stdout.decoder = new TextDecoder("utf-8");
     logsInfos.stdout.lastoffset = 0;
     logsInfos.stdout.state = 0;
+    logsInfos.stdout.supportSeek = true;
+    logsInfos.stdout.startOffset = 0;
     logsInfos.stderr.terminal.SetText("");
     logsInfos.stderr.decoder = new TextDecoder("utf-8");
     logsInfos.stderr.lastoffset = 0;
     logsInfos.stderr.state = 0;
+    logsInfos.stderr.supportSeek = true;
+    logsInfos.stderr.startOffset = 0;
     //document.getElementById('stdout-content').innerText = '';
     //document.getElementById('stderr-content').innerText = '';
   }
