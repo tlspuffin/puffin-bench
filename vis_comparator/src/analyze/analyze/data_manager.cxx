@@ -84,7 +84,7 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
     throw std::runtime_error("JSON data missing series array");
   }
   std::stack<std::pair<const rapidjson::Value*, std::string>> stack;
-  rapidjson::Value const& value = doc["series"].GetObj();
+  rapidjson::Value const& value = doc["series"].GetObject();
   stack.push({&value, ""});
   while(!stack.empty()) {
     auto [current, path] = stack.top();

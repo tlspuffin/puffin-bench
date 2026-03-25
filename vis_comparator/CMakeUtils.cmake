@@ -1,14 +1,3 @@
-#***********************************************\
-#                                               *
-#  project : Cmake Helper to find Library       *
-#                                               *
-#  author : Olivier Demengeon                   *
-#  created : 2024                               *
-#                                               *
-#***********************************************/
-
-cmake_minimum_required(VERSION 3.16)
-
 #######################################################################
 ########################## Helper functions ##########################
 #######################################################################
@@ -18,7 +7,7 @@ function (IsLibWanted libpath libname type wantedlib symbolicName)
   string(REGEX MATCHALL "/[^/]*" pathSplit ${libpath})
   foreach(arch ${MYTOOLS_LIB_PATH_ARCH_AVOID})
     if("/${arch}" IN_LIST pathSplit)
-        return()
+      return()
     endif()
   endforeach()
 
@@ -119,7 +108,7 @@ endif (UNIX)
 ## Required parameters
 ### libname (in) : name of the library
 ### libsharedstatic (in) : STATIC, SHARED or HEADERSONLY type of library file to find
-### libpath (in) : 
+### libpath (in) :
 ###  * for STATIC or SHARED libraries: path where to search for the headers and libraries files
 ###  * for HEADERSONLY libraries: it match is same as the optional parameter HEADERSAMPLE, can be empty to use default search method
 ### requiredlib (in) : list of libraries names required to find in <libpath>, if empty will use all libraries found
@@ -234,7 +223,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   set(dllFilesLst)
   file(GLOB_RECURSE dllFilesLst "${libpath}/*.dll")
   foreach(file ${dllFilesLst})
-    # subPathName is the relative path of pathName from  libpath 
+    # subPathName is the relative path of pathName from  libpath
     string(REGEX REPLACE "^${libpath}" "" subPathName "${file}")
     list(APPEND dllFiles ${subPathName})
   endforeach()
@@ -244,7 +233,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
     get_filename_component(pathName ${file} DIRECTORY)
     get_filename_component(filename ${file} NAME_WLE)
     #get_filename_component(fileext ${file} LAST_EXT)
-    # subPathName is the relative path of pathName from  libpath 
+    # subPathName is the relative path of pathName from  libpath
     string(REGEX REPLACE "^${libpath}" "" subPathName "${pathName}")
 
     set(libType "release")
@@ -256,8 +245,8 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
       set(libPostfix "_DEBUG")
     else()
       if ((NOT ${filenameRelease} STREQUAL ${filename}) AND ("${filenameRelease}" IN_LIST files))
-      set(libType "debug")
-      set(libPostfix "_DEBUG")
+        set(libType "debug")
+        set(libPostfix "_DEBUG")
       endif()
     endif()
 
@@ -292,7 +281,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
 
     foreach(alib ${requiredlib})
       if (NOT ${alib} IN_LIST libs)
-        set(foundMSG "missing required libs")
+        set(foundMSG "missing required libs ${alib}")
         set(${outFoundlibs} "NOT-fOUND" PARENT_SCOPE)
         break()
       endif()
@@ -402,7 +391,7 @@ function(CreateExternalLib libname libs)
         add_dependencies(${deploytarget} ${deploytarget}_${libname}_${filename})
         set_target_properties(${deploytarget}_${libname}_${filename} PROPERTIES FOLDER "${deploytarget} deps")
       endif()
-    endif() 
+    endif()
 
   endforeach()
 
@@ -410,6 +399,29 @@ function(CreateExternalLib libname libs)
   target_link_libraries(${libname} INTERFACE ${library_elements})
 endfunction()
 
+function(PrintTargetProperties tgt)
+  if(NOT TARGET ${tgt})
+    message(STATUS "La cible ${tgt} n'existe pas.")
+    return()
+  endif()
+
+  # Liste non exhaustive des propriétés communes
+  set(props
+        INTERFACE_INCLUDE_DIRECTORIES
+        INTERFACE_LINK_LIBRARIES
+        COMPILE_DEFINITIONS
+        SOURCES
+        BINARY_DIR
+    )
+
+  message(STATUS "Propriétés pour la cible : ${tgt}")
+  foreach(prop ${props})
+    get_target_property(propval ${tgt} ${prop})
+    if(propval)
+      message(STATUS "  ${prop} = ${propval}")
+    endif()
+  endforeach()
+endfunction()
 
 # EmbedTextFile(<input_txt> <output_header> <varname_prefix>)
 ## Required parameters
