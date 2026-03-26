@@ -89,3 +89,5 @@ done < <(git -C "${repo_directory}" for-each-ref --format='%(refname:short)' 're
 mv "${tmp_json}" "${output}"
 
 (( remove_repo == 1)) && rm -rf "${repo_directory}"
+
+exit 0

@@ -10,6 +10,9 @@
 #include <rapidjson/error/error.h>
 #include <rapidjson/error/en.h>
 
+Config::Config(std::string const& tmpStorage) : git_(tmpStorage)
+{}
+
 bool Config::Load(std::string const& filepath) {
   bool sucess = true;
   rapidjson::Document doc;
@@ -35,6 +38,7 @@ bool Config::Load(std::string const& filepath) {
     doc.SetObject();
   }
   server_.Load("server", doc);
+  git_.Load("git", doc);
   return sucess;
 }
 
@@ -43,6 +47,7 @@ void Config::Save(std::string const& filepath) const {
   doc.SetObject();
   rapidjson::MemoryPoolAllocator<>& alloc = doc.GetAllocator();
   server_.Save("server", doc, alloc);
+  git_.Save("git", doc, alloc);
   std::ofstream ofs(filepath);
   if (!ofs) {
     std::cerr << "Can't open for writing: " << filepath << "\n";
@@ -56,4 +61,5 @@ void Config::Save(std::string const& filepath) const {
 
 void Config::Validate(bool forceInstall) {
   server_.Validate();
+  git_.Validate(forceInstall);
 }

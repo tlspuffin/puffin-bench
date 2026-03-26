@@ -2,10 +2,11 @@
 #include <unistd.h>
 #include <cstring>
 
-ns_API::APIS::APIS(std::string const& cmdLine) 
-    : tmpPath_(std::filesystem::temp_directory_path() / (std::string(basename(cmdLine.c_str())) + "-" + std::to_string(getpid())))
+ns_API::APIS::APIS(ns_GIT::Config const& configGit) 
 {
-  if (!std::filesystem::create_directories(tmpPath_)) {
-    throw std::runtime_error(std::string("Fatal error: ") + tmpPath_.string() + " seems not empty");
+  for(auto const& repository: configGit.repositories_) {
+    gitAPI_.try_emplace(
+        repository.first, 
+        configGit, repository.first, repository.second);
   }
 }

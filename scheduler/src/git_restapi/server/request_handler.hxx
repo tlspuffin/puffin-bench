@@ -2,6 +2,7 @@
 
 #include "config.hxx"
 #include "../api/api.hxx"
+#include <string>
 #include <Poco/Net/HTMLForm.h>
 #include <Poco/Net/HTTPRequestHandler.h>
 #include <Poco/Net/HTTPServerResponse.h>
@@ -38,6 +39,8 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
 }
 
 REQUESTHANDLER(Error);
-REQUESTHANDLER(History, std::string const);
+REQUESTHANDLER(History, std::string const, std::string const);
+REQUESTHANDLER(Log, std::string const, std::string const);
+REQUESTHANDLER(Logs, std::string const);
 
 };

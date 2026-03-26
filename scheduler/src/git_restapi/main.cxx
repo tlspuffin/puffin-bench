@@ -3,6 +3,7 @@
 #include "../embeded/git_restapi/tlspuffin_history_sh.h"
 #include <fstream>
 #include <iostream>
+#include <unistd.h>
 
 static void CleanTMP(std::string const& tmpPath) {
   std::error_code ec;
@@ -13,7 +14,10 @@ static void CleanTMP(std::string const& tmpPath) {
 }
 
 int main(int argc, char *argv[]) {
-  Config config;
+  std::string tmpPath = std::filesystem::temp_directory_path() / 
+      (std::string(basename(argv[0])) + "-" + std::to_string(getpid()));
+
+  Config config(tmpPath);
 
   bool forceInstall = false;
   std::string configFile = "git_restapi-config.json";
@@ -48,30 +52,18 @@ int main(int argc, char *argv[]) {
   config.Validate(forceInstall);
 
   try {
-    struct ns_API::APIS apis(argv[0]);
-    ns_Server::MyServerApp app(config.server_, apis);
-    Poco::Util::ServerApplication::registerTerminateCallback(CleanTMP, apis.tmpPath_);
-
-    for(auto const& [ file, data, size ] : {
-      std::tuple{ "tlspuffin_history.sh", TLSPuffinHistory_Script_data, TLSPuffinHistory_Script_size },
-    }) {
-      std::filesystem::path filePath = 
-          std::filesystem::weakly_canonical(apis.tmpPath_ / file);
-      if (forceInstall || (!std::filesystem::exists(filePath))) {
-        std::cerr << "Creating missing required file " << filePath << std::endl;
-        std::ofstream ofs(filePath, std::ios::binary);
-        ofs.write(data, size);
-        ofs.close();
-        std::filesystem::permissions(filePath,
-          std::filesystem::perms::owner_all |
-          std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
-          std::filesystem::perm_options::replace);
-      }
+    if (!std::filesystem::create_directories(tmpPath)) {
+      throw std::runtime_error(std::string("Fatal error: unable to create path: ") + tmpPath);
     }
-    std::filesystem::create_directory(apis.tmpPath_ / "tlspuffin.git");
+    Poco::Util::ServerApplication::registerTerminateCallback(CleanTMP, tmpPath);
+
+    struct ns_API::APIS apis(config.git_);
+    ns_Server::MyServerApp app(config.server_, apis);
     return app.run(1, argv);
   } catch(std::runtime_error const& e) {
     std::cerr << e.what() << std::endl;
+    std::error_code ec;
+    std::filesystem::remove_all(tmpPath);
     return 1;
   }
 }

@@ -33,14 +33,23 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   std::string method = request.getMethod();
 
   RequestHandler* requestHandler = nullptr;
+  static std::regex historyURI = std::regex(R"(/api/git/history/([0-9a-zA-Z-_.]+)(\?.*)?)");
+  static std::regex logURI = std::regex(R"(/api/git/log/([0-9a-zA-Z-_.]+)\?commit=([0-9a-fA-F]+))");
+  static std::regex logsURI = std::regex(R"(/api/git/logs/([0-9a-zA-Z-_.]+))");
 
   try {
     if (method == "GET") {
       std::smatch matches;
-      if (std::regex_match(uri, matches, std::regex(R"(/api/git/history(\?.*)?)"))) {
-        requestHandler = new RequestHandlerHistory(uri);
+      if (std::regex_match(uri, matches, historyURI)) {
+        requestHandler = new RequestHandlerHistory(matches[1].str(), uri);
+      } else if (std::regex_match(uri, matches, logURI)) {
+        requestHandler = new RequestHandlerLog(matches[1].str(), matches[2].str());
       }
     } else if (method == "POST") {
+      std::smatch matches;
+      if (std::regex_match(uri, matches, logsURI)) {
+        requestHandler = new RequestHandlerLogs(matches[1].str());
+      }
     } else if (method == "PUT") {
     } else if (method == "DELETE") {
     }

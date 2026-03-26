@@ -93,7 +93,7 @@ EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/tlspuffin_history.sh" "${CMAKE_
 set(GIT_RESTAPI_SRC 
   src/git_restapi/main.cxx src/git_restapi/config.cxx 
   src/utils/rapidjson.cxx src/utils/variables.cxx 
-  src/git_restapi/api/api.cxx 
+  src/git_restapi/api/api.cxx src/git_restapi/git/git_api.cxx src/git_restapi/git/config.cxx
   src/git_restapi/server/config.cxx src/git_restapi/server/server.cxx src/git_restapi/server/parts_handler.cxx src/git_restapi/server/request_handler.cxx 
   src/embeded/git_restapi/tlspuffin_history_sh.h
 )
