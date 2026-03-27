@@ -1,7 +1,7 @@
 #include "variables.hxx"
 
 std::string ResolveVariables(std::string const& pattern, 
-    std::unordered_map<std::string, std::string> const& taskVariables) {
+    std::unordered_map<std::string, std::string> const& nameValues) {
   std::string result = pattern;
   size_t pos = 0;
   while ((pos = result.find("${", pos)) != std::string::npos) {
@@ -10,8 +10,8 @@ std::string ResolveVariables(std::string const& pattern,
       break;
     }
     std::string variableName = result.substr(pos + 2, end - pos - 2);
-    auto const& it = taskVariables.find(variableName);
-    if (it != taskVariables.end()) {
+    auto const& it = nameValues.find(variableName);
+    if (it != nameValues.end()) {
       result.replace(pos, end - pos + 1, it->second);
       pos += it->second.length();
     } else {

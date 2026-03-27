@@ -270,7 +270,7 @@ inline void Step::GatherFilesToLocal() {
 
 inline struct ArchiveJob Step::FinalizeAndArchive(std::filesystem::path const& savePath) {
   if (state_ >= State::Running) {
-    return task_->FinalizeAndArchive(savePath);
+    return task_->FinalizeAndArchive(request_cancel_ ? savePath / "Canceled" : savePath);
   }
   return ArchiveJob();
 }

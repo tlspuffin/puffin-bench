@@ -236,6 +236,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
 
     for(auto& executor : executors_) {
       executor.second->GatherStats();
+      updateStatus = true;
     }
     std::unordered_map<ns_Schedule::Task*, std::vector<ns_Schedule::Step*>> runningTasksAndSteps;
     for (ns_Schedule::Step* step : stepsRunning_) {
@@ -377,7 +378,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     // todo signal end of the flow
     uint64_t task_id = step->TaskID();
     ArchiveJob archiveJob = step->FinalizeAndArchive(config_.exportPath_);
-    if (archiveJob.sources_.size() > 0) {
+    if ((!step->task_->request_cancel_) && (archiveJob.sources_.size() > 0)) {
       archiver_.AddJob(archiveJob);
     }
     tasksManager_.TaskEnded(step->task_);

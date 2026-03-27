@@ -151,7 +151,7 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     uint16_t cachePort, ns_System::Linux& os)
     : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
       coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), 
-      cgroupRoot_(), cgroupRootCapabilities_(0)
+      cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -159,8 +159,6 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
         std::strerror(errno));
   }
 
-  std::string uid = std::to_string(geteuid());
-  cgroupRoot_ = "/sys/fs/cgroup/user.slice/user-" + uid +".slice/user@" + uid + ".service/";
   cgroupRootCapabilities_ = DetectCGroupSupport(cgroupRoot_);
   LOGI("CGroup are " << (cgroupRoot_.empty() ? "des" : "") << "activated");
 
@@ -779,6 +777,9 @@ void ns_Executor::Local::KillSession(pid_t sessionID,
       break;
     }
     kill(-sessionID, sig);
+    if (sig == SIGKILL) {
+      break;
+    }
     std::this_thread::sleep_for(std::chrono::seconds(4));
   }
   WaitSessionEnd(sessionID, step, label);
@@ -1071,70 +1072,69 @@ bool ns_Executor::Local::VerifyProcessArgs(pid_t pid,
 
 int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoot) const {
   if (faccessat(AT_FDCWD, cgroupRoot.c_str(), W_OK | X_OK, AT_EACCESS) != 0) {
+    LOGE("No access to " << cgroupRoot);
     cgroupRoot.clear();
     return 0;
   }
+
+  std::filesystem::path serverFolder = cgroupRoot / "server";
+  {
+    std::error_code ec;
+    std::filesystem::create_directory(serverFolder, ec);
+  }
+  if (!std::filesystem::exists(serverFolder)) {
+    LOGE("Unable to create folder " << serverFolder);
+    cgroupRoot.clear();
+    return 0;
+  }
+
+  pid_t pid = getpid();
+  {
+    std::ofstream procFile(serverFolder / "cgroup.procs");
+    if (!procFile.is_open()) {
+      LOGE("Unable to open " << serverFolder / "cgroup.procs");
+      cgroupRoot.clear();
+      return 0;
+    }
+    procFile << pid;
+    procFile.close();
+    if (procFile.fail()) {
+      LOGE("Unable to write in " << serverFolder / "cgroup.procs");
+      cgroupRoot.clear();
+      return 0;
+    }
+  }
+
+  int32_t capabilities = 7;
+  std::vector<std::string> capabilitiesName {"+memory", "+cpuset", "+pids"};
+  for(size_t i=0; i<capabilitiesName.size(); ++i) {
+    std::ofstream subtreeControlFile(cgroupRoot / "cgroup.subtree_control");
+    if (!subtreeControlFile.is_open()) {
+      LOGE("Unable to open " << cgroupRoot / "cgroup.subtree_control");
+      cgroupRoot.clear();
+      return 0;
+    }
+    subtreeControlFile << capabilitiesName[i];
+    subtreeControlFile.close();
+    if (subtreeControlFile.fail()) {
+      LOGE("Fail writing " << capabilitiesName[i] << " in " << (cgroupRoot / "cgroup.subtree_control"));
+      capabilities -= (1 << i);
+    }
+  }
+
+  if (capabilities == 0) {
+    cgroupRoot.clear();
+    return 0;
+  }
+
   cgroupRoot /= ("scheduler-" + std::to_string(getpid()));
   std::error_code ec;
   if ((!std::filesystem::create_directories(cgroupRoot, ec)) || ec) {
+    LOGE("Unable to create " << cgroupRoot);
     cgroupRoot.clear();
     return 0;
   }
 
-  std::ofstream procFile(cgroupRoot / "cgroup.procs");
-  if (!procFile.is_open()) {
-    std::filesystem::remove(cgroupRoot);
-    cgroupRoot.clear();
-    return 0;
-  }
-
-  pid_t cpid = fork();
-  if (cpid < 0) {
-    std::filesystem::remove(cgroupRoot);
-    throw std::runtime_error("Fatal error, fork failed " + std::to_string(errno));
-  }
-  if (cpid == 0) {
-    while(true) {
-      sleep(1);
-    }
-    _exit(0);
-  }
-
-  procFile << cpid;
-  procFile.close();
-
-  kill(cpid, SIGTERM);
-  waitpid(cpid, nullptr, 0);
-
-  if (procFile.fail()) {
-    std::filesystem::remove(cgroupRoot);
-    cgroupRoot.clear();
-    return 0;
-  }
-
-  std::ofstream subtreeControlFile(cgroupRoot / "cgroup.subtree_control");
-  if (!subtreeControlFile.is_open()) {
-    std::filesystem::remove(cgroupRoot);
-    cgroupRoot.clear();
-    return 0;
-  }
-  int32_t capabilities = 3;
-  subtreeControlFile << "+memory";
-  subtreeControlFile.close();
-  if (subtreeControlFile.fail()) {
-    capabilities -= 1;
-  }
-  subtreeControlFile.clear();
-  subtreeControlFile.open(cgroupRoot / "cgroup.subtree_control");
-  subtreeControlFile << "+cpuset";
-  subtreeControlFile.close();
-  if (subtreeControlFile.fail()) {
-    capabilities -= 2;
-  }
-  if (capabilities == 0) {
-    std::filesystem::remove(cgroupRoot);
-    cgroupRoot.clear();
-  }
   return capabilities;
 }
 

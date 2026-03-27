@@ -32,6 +32,8 @@ struct LocalConfig : public Config {
   std::vector<bool> cores_;
   std::filesystem::path scriptPath_;
   uint64_t logsSize_;
+  std::string cgroupPathSymbolic_;
+  std::filesystem::path cgroupPath_;
   void Validate(bool forceInstall) const;
 
   LocalConfig(std::string const& name);

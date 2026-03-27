@@ -187,17 +187,19 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
-  std::ostream& out = response.send();
+  std::ostream* out = nullptr;
   try {
     if (!apis_->scheduleAPI_.CancelTask(taskID)) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("task cancel failed");
     }
-    out << R"({"success": true})";
+    out = &(response.send());
+    *out << R"({"success": true})";
   } catch(std::runtime_error const& e) {
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-    out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out = &(response.send());
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
-  out.flush();
+  out->flush();
 }
 
 void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -214,17 +216,19 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
   response.set("Pragma", "no-cache");
 
-  std::ostream& out = response.send();
+  std::ostream* out = nullptr;
   try {
     if (!apis_->scheduleAPI_.CancelStep(taskID, stepUUID)) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("step cancel failed");
     }
-    out << R"({"success": true})";
+    out = &(response.send());
+    *out << R"({"success": true})";
   } catch(std::runtime_error const& e) {
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-    out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out = &(response.send());
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
-  out.flush();
+  out->flush();
 }
 
 void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerRequest& request,

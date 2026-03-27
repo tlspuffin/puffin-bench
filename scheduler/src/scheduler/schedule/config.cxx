@@ -113,6 +113,8 @@ void ns_Schedule::Config::Validate(bool forceInstall) const {
   discard = std::filesystem::canonical(runPath_);
   discard = std::filesystem::canonical(userPath_);
   discard = std::filesystem::canonical(exportPath_);
+  std::error_code ec;
+  std::filesystem::create_directory(exportPath_ / "Canceled", ec);
   for (auto const& [name, executorConfig] : executors_) {
     executorConfig->Validate(forceInstall);
   }

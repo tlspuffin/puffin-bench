@@ -1,6 +1,7 @@
 #include "config.hxx"
 #include "../../system/linux_cores.hxx"
 #include "../../../utils/rapidjson.hxx"
+#include "../../../utils/variables.hxx"
 
 #include "../../../embeded/scheduler/executor_sh.h"
 #include "../../../embeded/scheduler/functions_sh.h"
@@ -8,6 +9,7 @@
 #include <iostream>
 #include <fstream>
 #include <tuple>
+#include <unistd.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -17,7 +19,7 @@ ns_Executor::Config::Config(enum ns_Executor::Config::Type type, std::string con
 
 ns_Executor::Config* ns_Executor::Config::BuildConfig(std::string const& name, rapidjson::Value const& node) {
   enum Type type = (enum Type)GetOrDefault<int>(node, "type", 
-      (int)Config::Type::Local);
+      (int)Config::Type::None);
   Config* config = nullptr;
   switch (type) {
     case Config::Type::Local:
@@ -46,13 +48,19 @@ static ns_Executor::LocalConfig defaultLocalConfig("local");
 
 ns_Executor::LocalConfig::LocalConfig(std::string const& name) 
     : Config(Config::Type::Local, name), nbCores_(1), cores_(), 
-    scriptPath_("scripts"), logsSize_(16*1024*1024)
+    scriptPath_("scripts"), logsSize_(16*1024*1024), 
+    cgroupPathSymbolic_("/sys/fs/cgroup/user.slice/user-${euid}.slice/user@${euid}.service/"), 
+    cgroupPath_()
 {
   uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   cores_.assign(maxNbCores, true);
   if (maxNbCores > 1) {
     cores_[0] = false;
   }
+
+  std::string uid = std::to_string(geteuid());
+  cgroupPath_ = std::filesystem::weakly_canonical(ResolveVariables(cgroupPathSymbolic_, 
+      {{"euid", std::to_string(geteuid())}, {"uid", std::to_string(getuid())}}));
 }
 
 void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
@@ -131,6 +139,10 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
       GetOrDefault<std::string>(node, "scriptPath", defaultLocalConfig.scriptPath_))
       .string();
   logsSize_ = GetOrDefault(node, "logsSize", defaultLocalConfig.logsSize_);
+
+  cgroupPathSymbolic_ = GetOrDefault<std::string>(node, "cgroupPath", defaultLocalConfig.cgroupPathSymbolic_);
+  cgroupPath_ = std::filesystem::weakly_canonical(ResolveVariables(cgroupPathSymbolic_, 
+      {{"euid", std::to_string(geteuid())}, {"uid", std::to_string(getuid())}}));
 }
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
@@ -156,4 +168,7 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
   node.AddMember("scriptPath", 
       rapidjson::Value(scriptPath_.c_str(), alloc), alloc);
   node.AddMember("logsSize", logsSize_, alloc);
+
+  node.AddMember("cgroupPath", 
+      rapidjson::Value(cgroupPathSymbolic_.c_str(), alloc), alloc);
 }
