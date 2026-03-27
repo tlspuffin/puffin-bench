@@ -15,6 +15,11 @@ ExperimentCheckAllThreadsRunning() {
     return 1;
   fi
 
+  local logsPath=$( dirname "${stats}" )
+  local errorFile="${logsPath}/error.log"
+  [ ! -e "${errorFile}" ] && { errorFile="${logsPath}/log/error.log"; [ ! -e "${errorFile}" ] && errorFile="" }
+  [ -e "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && { echo "Timeout found in error.log" >&2; return 1; }
+
   local lastTS=$( tail -c 64K "${stats}" | sed 's/}{/}\n{/g' 2>/dev/null | head -n -1 | tail -1 | jq -r '.time.secs_since_epoch' );
   if (( ref_lastcheck != 0 )); then
     local diffTS=$(( lastTS - ref_lastcheck ));

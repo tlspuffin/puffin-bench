@@ -203,6 +203,9 @@ SaveSummary() {
 
   echo "${summary}" > "${output}"
   [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&1
+
+  local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
+  [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && echo '{"run_error":"fuzzer timeout"}' >> "${output}"
 }
 
 ManageResults () {
@@ -258,7 +261,10 @@ SummaryRun () {
         [ -z "${objectiveSize}" ] && objectiveSize=0;
         local totalExecs=$( jq 'select(.type == "global") | .total_execs' "${i}" );
         [ -z "${totalExecs}" ] && totalExecs=0;
-        jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}, \"objective_size\": ${objectiveSize}, \"valid\": true }";
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}";
+        local cancelByRunError=$( jq -r 'select(has("run_error")) | .run_error' "${i}" )
+        [ -n "${cancelByRunError}" ] && { jsonEntry+=", \"run_error\": \"${cancelByRunError}\""; objectiveSize=0; }
+        jsonEntry+=", \"objective_size\": ${objectiveSize}, \"valid\": true }";
         [ -z "${cputs}" ] && cputs=$( jq -r 'select(has("cputs")) | .cputs' "${i}" )
       fi
       if (( ! firstRun )); then
