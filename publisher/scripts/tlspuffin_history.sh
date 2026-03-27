@@ -7,14 +7,16 @@ output="$1"
 shift;
 
 commit_folder=$1;
-[ -z "${commit_folder}" ] && {
-  echo "Missing commit folder argument";
-  exit 1;
-}
-[ ! -d "${commit_folder}" ] || [ ! -r "${commit_folder}" ] && { 
-  echo "Directory ${commit_folder} is not readable"; 
-  exit 1; 
-}
+if [ "${commit_folder}" != "--no-standalone" ]; then
+  [ -z "${commit_folder}" ] && {
+    echo "Missing commit folder argument";
+    exit 1;
+  }
+  [ ! -d "${commit_folder}" ] || [ ! -r "${commit_folder}" ] && { 
+    echo "Directory ${commit_folder} is not readable"; 
+    exit 1; 
+  }
+fi
 shift
 
 remove_repo=0;
@@ -40,14 +42,14 @@ git -C "${repo_directory}" log main --first-parent --oneline --pretty=format:"%H
 echo '{"commits": [' > "${output}.tmp"
 cat "${info}" >> "${output}.tmp"
 cat "${infoMain}" >> "${output}.tmp"
-echo -e '],\n "standalone": []}' >> "${output}.tmp"
+echo -e '],\n "standalone": [],\n "PR": []}' >> "${output}.tmp"
 rm "${info}" "${infoMain}"
 mv "${output}.tmp" "${output}"
 
 tmp_json="$(mktemp)"
 tmp="$(mktemp)"
 cp "${output}" "${tmp_json}"
-if [ ! -z "$(ls -A "${commit_folder}")" ]; then
+if [ "${commit_folder}" != "--no-standalone" ] && [ ! -z "$(ls -A "${commit_folder}")" ]; then
   for path in "${commit_folder}"/*; do
     commit="$(basename "$path")"
 
@@ -65,6 +67,28 @@ if [ ! -z "$(ls -A "${commit_folder}")" ]; then
     ' "${tmp_json}" > "${tmp}" && mv "${tmp}" "${tmp_json}"
   done
 fi
+
+# Populate PR section - branches not merged into main or dev
+while read -r branch_ref; do
+  git -C "${repo_directory}" merge-base --is-ancestor "$branch_ref" main 2>/dev/null && continue
+  git -C "${repo_directory}" merge-base --is-ancestor "$branch_ref" dev  2>/dev/null && continue
+
+  branch_name=$(echo "$branch_ref" | sed 's|origin/||')
+  commit=$(git -C "${repo_directory}" rev-parse --short "$branch_ref")
+  infos=$(git -C "${repo_directory}" show -s --format='%cs %s' "$branch_ref")
+  date=$(echo "$infos" | sed 's/^\([^ ]*\) .*/\1/')
+  comment=$(echo "$infos" | sed 's/^[^ ]* \(.*\)/\1/' | sed 's/"/\\"/g')
+  baseID=$(git -C "${repo_directory}" merge-base "$branch_ref" dev 2>/dev/null \
+           || git -C "${repo_directory}" merge-base "$branch_ref" main 2>/dev/null || echo "")
+  [ -n "$baseID" ] && baseID=$(git -C "${repo_directory}" rev-parse --short "$baseID")
+
+  jq --arg branch "$branch_name" --arg id "$commit" \
+     --arg date "$date" --arg comment "$comment" --arg base "$baseID" \
+    '.PR += [{branch: $branch, id: $id, date: $date, comment: $comment, base: $base}]' \
+    "${tmp_json}" > "${tmp}" && mv "${tmp}" "${tmp_json}"
+done < <(git -C "${repo_directory}" for-each-ref --format='%(refname:short)' 'refs/remotes/origin/*' \
+         | grep -v 'origin/HEAD\|origin/main\|origin/dev')
+
 mv "${tmp_json}" "${output}"
 
 (( remove_repo == 1)) && rm -rf "${repo_directory}"

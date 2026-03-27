@@ -14,6 +14,7 @@ private:
     std::vector<uint64_t> success_durations_s;
     std::vector<uint64_t> fail_total_execs;
     std::vector<uint64_t> fail_durations_s;
+    std::vector<std::string> fail_comment;
     LibSummary() : cputs(0), success_count(0), total_runs(0) {}
   };
 

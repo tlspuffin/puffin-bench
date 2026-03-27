@@ -84,6 +84,8 @@ bool ns_Publish::PublishActionVuln3::Analyze(std::string const& taskDataFile,
         libSummaries[libName].fail_durations_s.push_back(libraryJSON[j]["duration"].GetUint64());
         libSummaries[libName].fail_total_execs.push_back(libraryJSON[j]["total_execs"].GetUint64());
         libSummaries[libName].total_runs++;
+        libSummaries[libName].fail_comment.push_back("execution failed");
+
         LOGI("  Fail " << libName << " attempt=" << libraryJSON[j]["id"].GetString());
         continue;
       }
@@ -98,7 +100,14 @@ bool ns_Publish::PublishActionVuln3::Analyze(std::string const& taskDataFile,
         libSummaries[libName].fail_durations_s.push_back(libraryJSON[j]["duration"].GetUint64());
         libSummaries[libName].fail_total_execs.push_back(libraryJSON[j]["total_execs"].GetUint64());
         libSummaries[libName].total_runs++;
-        LOGI("  Fail " << libName << " attempt=" << libraryJSON[j]["id"].GetString());
+
+        std::string comment = "no objectif found";
+        if (libraryJSON[j].HasMember("run_error") || (libraryJSON[j]["run_error"].IsString())) {
+          comment = libraryJSON[j]["run_error"].GetString();
+        }
+        libSummaries[libName].fail_comment.push_back(comment);
+
+        LOGI("  Fail " << libName << " attempt=" << libraryJSON[j]["id"].GetString() << " comment=" << comment);
       }
     }
   }
@@ -202,6 +211,12 @@ bool ns_Publish::PublishActionVuln3::GenerateCommitJson(
       failTotalExecs.PushBack(value, allocator);
     }
     libData.AddMember("fail_total_execs", failTotalExecs, allocator);
+
+    rapidjson::Value failComments(rapidjson::kArrayType);
+    for (auto value : libSum.fail_comment) {
+      failComments.PushBack(rapidjson::Value(value.c_str(), allocator), allocator);
+    }
+    libData.AddMember("fail_comments", failComments, allocator);
 
     libData.AddMember("cputs", libSum.cputs, allocator);
 
