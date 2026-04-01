@@ -1,4 +1,4 @@
-curl -X POST http://localhost:8080/api/task/new -F "name=myrun" -F "config=@./samples/test_monitor.json" -F "script=@./samples/test_monitor.sh" -F "files[]=@./samples/shell.nix" -F "args[COMMIT_ID]=3f648f016c84884d6470fc906735bb8c5da7891b"
+curl -X POST http://localhost:8080/api/task/new -F "name=myrun" -F "config=@./samples/test_monitor.json" -F "script=@./samples/test_monitor.sh" -F "files[]=@./samples/shell.nix" -F "files[]=@./samples/wolfssl_put.c.patch" -F "args[COMMIT_ID]=3f648f016c84884d6470fc906735bb8c5da7891b"
 curl -X GET http://localhost:8080/api/tasks/running
 
 git log --graph --oneline --first-parent 3bc37034a9a9decd0a069aa810929c0e518056c9^..HEAD

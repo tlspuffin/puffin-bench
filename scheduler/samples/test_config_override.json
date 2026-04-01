@@ -1,0 +1,65 @@
+{
+  "name": "Test Config Override",
+  "configurations": {
+    "Conf_Base": {
+      "timeout": "2m",
+      "nb_cores": 1,
+      "args": {
+        "source": "named_config",
+        "speed": "normal"
+      }
+    },
+    "Conf_Fast": {
+      "timeout": "1m",
+      "nb_cores": 2,
+      "args": {
+        "source": "named_config",
+        "speed": "fast"
+      }
+    }
+  },
+  "flow": [
+    {
+      "step": "ByNamedConfig",
+      "run": ["Conf_Base", "Conf_Fast"]
+    },
+    {
+      "step": "ByInlineOverride",
+      "run": [
+        {"args": {"source": "inline", "color": "red"}},
+        {"args": {"source": "inline", "color": "blue"}}
+      ]
+    },
+    {
+      "step": "ByNamedAndOverride",
+      "run": [
+        {"configuration": "Conf_Base", "override": {"args": {"speed": "boosted", "extra": "yes"}}},
+        {"configuration": "Conf_Fast", "override": {"args": {"extra": "turbo"}}}
+      ]
+    },
+    {
+      "step": "ByStepConfig",
+      "configuration": {
+        "args": {
+          "source": "step_level",
+          "base": "common",
+          "mode": "default"
+        }
+      },
+      "run": [
+        {"args": {"variant": "A", "mode": "overridden"}},
+        {"args": {"variant": "B"}}
+      ]
+    },
+    {
+      "step": "ByNbRetry",
+      "run": [
+        {"nb_retry": 2, "args": {"label": "with_retry"}},
+        {"nb_retry": 1, "args": {"label": "no_retry"}}
+      ]
+    },
+    {
+      "step": "Summary"
+    }
+  ]
+}

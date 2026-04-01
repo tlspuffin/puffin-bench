@@ -542,6 +542,11 @@ Init () {
     sed -i 's/\(.*nativeBuildInputs = \[.*\)/\1\n    pkgs.libfaketime/' shell.nix || return 1
   fi
 
+  [ -r "tlspuffin/harness/wolfssl/src/put.c" ] &&
+    ! grep -q MyTimeoutCallBack "tlspuffin/harness/wolfssl/src/put.c" &&
+    patch --dry-run "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch" &&
+    patch "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch"
+
   nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
 
   return 0;
