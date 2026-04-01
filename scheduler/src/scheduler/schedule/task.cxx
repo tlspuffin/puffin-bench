@@ -32,7 +32,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     artefacts_path_(run_root_path_ / "artefacts"),
     monitors_path_(monitorsRootPath),
     args_(args), configurations_(), executor_data_(nullptr), 
-    root_steps_(), steps_file_(), request_cancel_(false), 
+    root_steps_(), steps_file_(), request_cancel_(false), cancel_source_(),
     publish_(), md5_(std::move(md5))
 {
   if (name_.empty()) {
@@ -185,6 +185,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   }
 
   request_cancel_ = Get<bool>(config, "request_cancel");
+  cancel_source_ = Get<std::string>(config, "cancel_source");
 
   if (config.HasMember("publish")) {
     publish_.ReadJSON(publishersConfig, config["publish"]);
@@ -208,9 +209,12 @@ ns_Schedule::Task::~Task() {
   }
 }
 
-void ns_Schedule::Task::Cancel() {
+void ns_Schedule::Task::Cancel(std::string const& source) {
+  if (!request_cancel_) {
+    cancel_source_ = source;
+  }
   request_cancel_ = true;
-  LOGE("Cancel task " << id_);
+  LOGE("Cancel task " << id_ << " 1st source:" << cancel_source_);
 }
 
 bool ns_Schedule::Task::PrepareToRun() {
@@ -322,6 +326,7 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("monitors_path", rapidjson::Value(monitors_path_.c_str(), alloc), alloc);
 
   out.AddMember("request_cancel", request_cancel_, alloc);
+  out.AddMember("cancel_source", rapidjson::Value(cancel_source_.c_str(), alloc), alloc);
 
   out.AddMember("executor_name", rapidjson::Value(executor_name_.c_str(), alloc), alloc);
   if (executor_data_ != nullptr) {
@@ -397,13 +402,22 @@ bool ns_Schedule::Task::CreateRunFolders() {
   return true;
 }
 
-void ns_Schedule::Task::UpdateStats(std::vector<ns_Schedule::Step*> steps) {
+struct ns_Schedule::SRessourcesSummary ns_Schedule::Task::UpdateStats(std::vector<ns_Schedule::Step*> steps) {
+  std::chrono::milliseconds running_time = std::chrono::milliseconds(1);
+  std::chrono::time_point<std::chrono::system_clock> now = 
+      std::chrono::time_point<std::chrono::system_clock>::clock::now();
   std::vector<ns_Executor::ExecutorData*> stepsExecutorData;
   stepsExecutorData.reserve(steps.size());
   for(ns_Schedule::Step const* step: steps) {
-    stepsExecutorData.push_back(step->executor_data_);
+    if (step->IsRunning()) {
+      stepsExecutorData.push_back(step->executor_data_);
+      running_time += std::chrono::duration_cast<std::chrono::milliseconds>(now - step->StartTime());
+    } else {
+      running_time += step->RunTime();
+    }
   }
-  executor_->UpdateTaskStats(executor_data_, stepsExecutorData);
+  std::pair<int8_t, int8_t> ressourcesUsage = executor_->UpdateTaskStats(executor_data_, stepsExecutorData);
+  return { ressourcesUsage.first, ressourcesUsage.second, this, running_time };
 }
 
 void ns_Schedule::Task::CreateStepsFromJson(

@@ -11,7 +11,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(source.rank_id_), 
     attempt_id_(attempt_id), run_id_(run_id), executor_data_(nullptr), 
     function_(source.function_), args_(source.args_), nb_cores_(source.nb_cores_), 
-    nb_retry_(source.nb_retry_), timeout_(source.timeout_), 
+    nb_retry_(source.nb_retry_), memory_max_(source.memory_max_), timeout_(source.timeout_), 
     next_(const_cast <ns_Schedule::Step *>(&source)), 
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
@@ -49,7 +49,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(rank_id), 
     attempt_id_(attempt_id), run_id_(run_id), executor_data_(nullptr), 
     function_(source.function_), args_(source.args_), nb_cores_(source.nb_cores_), 
-    nb_retry_(source.nb_retry_), timeout_(source.timeout_), 
+    nb_retry_(source.nb_retry_), memory_max_(source.memory_max_), timeout_(source.timeout_), 
     next_(const_cast <ns_Schedule::Step *>(&source)), 
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
@@ -89,12 +89,12 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     : task_(task), name_(name), id_(), uuid_(++next_uuid_), group_id_(group_id), 
     step_id_(step_id), rank_id_(0), attempt_id_(0), run_id_(run_id), 
     executor_data_(nullptr), 
-    function_(name), args_(), nb_cores_(1), nb_retry_(0), timeout_(0), 
-    next_(this), previous_(this), dependencies_(), depend_from_(dependFrom), 
-    stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
-    request_cancel_(false), monitor_(), monitor_path_(), message_from_run_(""), 
-    state_(State::Pending), end_processed_(false), user_run_state_(""), 
-    group_status_(group_status)
+    function_(name), args_(), nb_cores_(1), nb_retry_(0), memory_max_(0), 
+    timeout_(0), next_(this), previous_(this), dependencies_(), 
+    depend_from_(dependFrom), stdout_(), stderr_(), exit_code_(exitCode_NotSet_), 
+    monitor_count_(0), request_cancel_(false), monitor_(), monitor_path_(), 
+    message_from_run_(""), state_(State::Pending), end_processed_(false), 
+    user_run_state_(""), group_status_(group_status)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -157,6 +157,7 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
 
   nb_cores_ = Get<uint64_t>(config, "nb_cores");
   nb_retry_ = Get<uint64_t>(config, "nb_retry");
+  memory_max_ = Get<uint64_t>(config, "memory_max");
   timeout_ = Get<uint64_t>(config, "timeout");
 
   if ((!config.HasMember("dependencies")) || 
@@ -260,6 +261,7 @@ void ns_Schedule::Step::ReadFromTaskJSON(
   id_ = stepConfiguration.id_;
   nb_cores_ = stepConfiguration.nb_cores_;
   nb_retry_ = stepConfiguration.nb_retry_;
+  memory_max_ = stepConfiguration.memory_max_;
   timeout_ = stepConfiguration.timeout_;
   args_= stepConfiguration.args_;
 
@@ -332,6 +334,7 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
 
   out.AddMember("nb_cores", nb_cores_, alloc);
   out.AddMember("nb_retry", nb_retry_, alloc);
+  out.AddMember("memory_max", memory_max_, alloc);
   out.AddMember("timeout", timeout_, alloc);
 
   rapidjson::Value stepDependencies(rapidjson::kObjectType);

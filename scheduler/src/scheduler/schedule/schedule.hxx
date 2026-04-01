@@ -28,7 +28,7 @@ public:
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args);
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
-  bool CancelTask(uint64_t taskID);
+  bool CancelTask(uint64_t taskID, std::string const& source);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
   void GetOutput(
@@ -46,6 +46,7 @@ private:
       std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
   void SaveStatus(bool exportRunningSteps);
   static void AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step);
+  bool LimitRessourcesUsages();
 
   ns_Schedule::Config const& config_;
   std::filesystem::path exportPath_;

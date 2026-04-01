@@ -3,6 +3,7 @@
 #include "step_configurations.hxx"
 #include "publish.hxx"
 #include "archiver.hxx"
+#include "ressources_summary.hxx"
 #include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
 #include "../system/linux.hxx"
@@ -53,6 +54,7 @@ public:
   std::ofstream steps_file_;
 
   bool request_cancel_;
+  std::string cancel_source_;
 
   Publish publish_;
 
@@ -79,7 +81,7 @@ public:
       std::list<ns_Schedule::Step*>& stepsDone);
   ~Task();
 
-  void Cancel();
+  void Cancel(std::string const& source);
 
   bool PrepareToRun();
 
@@ -89,7 +91,7 @@ public:
       rapidjson::Document::AllocatorType& alloc, 
       ns_Schedule::Step const* step) const;
 
-  void UpdateStats(std::vector<ns_Schedule::Step*> steps);
+  struct ns_Schedule::SRessourcesSummary UpdateStats(std::vector<ns_Schedule::Step*> steps);
 
 private:
   bool CreateRunFolders();

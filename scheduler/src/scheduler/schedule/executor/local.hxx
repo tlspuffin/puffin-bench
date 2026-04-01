@@ -72,7 +72,7 @@ public:
   bool TaskPrepareToRun(ns_Schedule::Task* task);
   bool TaskFinalize(ExecutorTaskData* data);
 
-  std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps) const;
+  std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps);
   void Execute(ns_Schedule::Step& step);
   std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps);
   void Shutdown(ns_Schedule::Step& step);
@@ -85,14 +85,13 @@ public:
   ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const;
   ExecutorData* CreateLocalData(rapidjson::Value const& config) const;
 
-  void GatherStats();
-  void UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const;
+  std::pair<bool, bool> RetrieveStats();
+  std::pair<int8_t, int8_t> UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const;
   void UpdateStepStats(ExecutorData* data) const;
   void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const;
 
 private:
   ns_Executor::LocalConfig const& config_;
-  //ns_Executor::CoresMonitor coresMonitor_;
   ns_System::Linux& os_;
   uint64_t nbCoresFree_;
   std::vector<bool> coresFree_;
@@ -100,6 +99,8 @@ private:
   uint16_t cachePort_;
   std::filesystem::path cgroupRoot_;
   int32_t cgroupRootCapabilities_;
+  std::string cgroupRootCapabilitiesString_;
+  bool cgroupDisableUpdateSliceUser_;
   struct Executor::OSLoad stats_;
 
   void WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);
@@ -114,6 +115,7 @@ private:
   std::vector<uint64_t> AssignCores(uint64_t nbCores);
   void ReAssignCores(std::vector<uint64_t>& cores);
   void ReleaseCores(std::vector<uint64_t>& cores);
+  void UpdateUserSliceCpuset();
 
   std::vector<std::string> BuildExecutorArgs(ns_Schedule::Step const& step);
   int16_t CheckExternalProcessIsRunning(pid_t pid, 
@@ -123,8 +125,10 @@ private:
   bool VerifyProcessArgs(pid_t pid, 
       std::vector<std::string> const& expectedArgs);
 
-  int32_t DetectCGroupSupport(std::filesystem::path& cgroupRoot) const;
+  int32_t DetectCGroupSupport(std::filesystem::path& cgroupRoot, std::string& capabilitiesString) const;
   bool CGroupMemoryUsed(std::filesystem::path const& cgroupMemoryPath, int8_t& usedMemory) const;
+
+  void GatherStats();
 
   static bool PinCoresToProcess(std::vector<uint64_t> const& cores_);
   static void SaveArtefacts(ns_Schedule::Step& step);

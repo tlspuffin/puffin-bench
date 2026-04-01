@@ -19,6 +19,22 @@
 
 #define FREE_ARG_STRINGS(args) for(char* string: args) free(string)
 
+template<typename T>
+static bool WriteCGroup(std::string const& filename, T const& value) {
+  std::ofstream ofs(filename);
+  if (!ofs.is_open()) {
+    LOGE("Unable to open " << filename);
+    return true;
+  }
+  ofs << value;
+  ofs.close();
+  if (ofs.fail()) {
+    LOGE("Unable to write " << value << " in " << filename);
+    return true;
+  }
+  return false;
+}
+
 ns_Executor::LocalTaskData::LocalTaskData() : cgroupPath_(), os_memory_load_(-1), os_cores_load_(-1), 
     os_memory_max_load_(-1), os_cores_max_load_(-1)
 {}
@@ -151,7 +167,7 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     uint16_t cachePort, ns_System::Linux& os)
     : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
       coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), 
-      cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0)
+      cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0), cgroupDisableUpdateSliceUser_(false)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -159,8 +175,27 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
         std::strerror(errno));
   }
 
-  cgroupRootCapabilities_ = DetectCGroupSupport(cgroupRoot_);
+  cgroupRootCapabilities_ = DetectCGroupSupport(cgroupRoot_, cgroupRootCapabilitiesString_);
   LOGI("CGroup are " << (cgroupRoot_.empty() ? "des" : "") << "activated");
+
+  cgroupDisableUpdateSliceUser_ = (!(cgroupRootCapabilities_ & 2)) ||
+      (cgroupRoot_.string().find("/user.slice/") != std::string::npos);
+  if (!cgroupDisableUpdateSliceUser_) {
+    std::string allCores;
+    for (size_t i = 0; i < coresFree_.size(); ++i) {
+      if (!allCores.empty()) allCores += ',';
+      allCores += std::to_string(i);
+    }
+    std::string cmd = "sudo -n systemctl set-property user.slice AllowedCPUs=" 
+        + allCores + " 2>/dev/null";
+    cgroupDisableUpdateSliceUser_ = std::system(cmd.c_str()) != 0;
+    if (cgroupDisableUpdateSliceUser_) {
+      LOGW("sudo systemctl set-property user.slice not available, CPU reservation disabled");
+    } else {
+      LOGI("user.slice CPU reservation enabled");
+    }
+  }
+
 
   if (nbCoresFree_ == 0) {
     coresFree_ = config_.cores_;
@@ -203,28 +238,14 @@ bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
     return true;
   }
 
-  std::string capabilities = "";
-  if (cgroupRootCapabilities_ & 1) {
-    capabilities += "+memory ";
-  }
-  if (cgroupRootCapabilities_ & 2) {
-    capabilities += "+cpuset";
-  }
-  if (capabilities.empty()) {
+  if (cgroupRootCapabilitiesString_.empty()) {
     return true;
   }
 
-  std::ofstream subtreeControlFile(localtaskData->cgroupPath_ / "cgroup.subtree_control");
-  if (!subtreeControlFile.is_open()) {
+  if (WriteCGroup(localtaskData->cgroupPath_ / "cgroup.subtree_control", cgroupRootCapabilitiesString_)) {
     std::filesystem::remove(localtaskData->cgroupPath_);
     localtaskData->cgroupPath_.clear();
     return true;
-  }
-  subtreeControlFile << capabilities;
-  subtreeControlFile.close();
-  if (subtreeControlFile.fail()) {
-    std::filesystem::remove(localtaskData->cgroupPath_);
-    localtaskData->cgroupPath_.clear();
   }
 
   return true;
@@ -243,21 +264,28 @@ bool ns_Executor::Local::TaskFinalize(ExecutorTaskData* data) {
 }
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
-    std::list<ns_Schedule::Step*> const& steps) const {
+    std::list<ns_Schedule::Step*> const& steps) {
+  GatherStats();
+  uint64_t freeMemory = stats_.freeMemory;
+
   uint64_t nbCoresFree = nbCoresFree_;
   std::list<ns_Schedule::Step*> result;
 
   for(auto step : steps) {
     uint64_t nbCoresRequired = step->nb_cores_;
-    if (!step->IsReady() || nbCoresRequired > nbCoresFree) {
+    uint64_t memoryRequired = step->memory_max_;
+    if ((!step->IsReady()) || (nbCoresRequired > nbCoresFree) || 
+        ((memoryRequired > 0) && (memoryRequired > freeMemory))) {
       continue;
     }
     nbCoresFree -= nbCoresRequired;
+    freeMemory -= memoryRequired;
     {
       std::stringstream oss;
       oss << "Can run step " << step->task_->id_ << " / " << step->ID() << 
           " requires " << nbCoresRequired << " cores, left " << nbCoresFree << 
-          " cores " << std::endl;
+          " cores " << ", memory " << memoryRequired << ", left " << freeMemory <<
+          std::endl;
       std::cerr << oss.str();
     }
     result.push_back(step);
@@ -277,7 +305,6 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   }
 
   LocalData* localData = new LocalData(step.nb_cores_);
-  localData->cores_ = AssignCores(step.nb_cores_);
   if (step.group_id_ == 0) {
     localData->run_path_ = step.task_->run_root_path_ / "executor" / step.ID();
   } else {
@@ -313,6 +340,9 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         " (" + std::strerror(errno) + ")"
     );
   }
+  if (fcntl(localData->pipeFDOut[1], F_SETPIPE_SZ, 1048576) == -1) {
+    LOGW("Unable to upgrade stdout pipe buffer size for " << step.task_->id_ << "/" << step.ID());
+  }
   if (pipe(localData->pipeFDErr) != 0) {
     close(localData->pipeFDOut[0]);
     close(localData->pipeFDOut[1]);
@@ -320,6 +350,9 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         std::string("creation of pipe for stderr failed: ") + std::to_string(errno) +
         " (" + std::strerror(errno) + ")"
     );
+  }
+  if (fcntl(localData->pipeFDErr[1], F_SETPIPE_SZ, 1048576) == -1) {
+    LOGW("Unable to upgrade stderr pipe buffer size for " << step.task_->id_ << "/" << step.ID());
   }
   if (!localData->fdCaptureThread_.AddFD(localData->pipeFDOut[0], 
       new ns_Executor::MemoryRing{step.stdout_, config_.logsSize_})) {
@@ -350,21 +383,42 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     localData->cgroup_path_ = cgroupRoot_ / std::to_string(step.TaskID()) / step.ID();
   }
 
+  localData->cores_ = AssignCores(step.nb_cores_);
+
   pid_t pid = fork();
   if (pid == 0) {
-    localData->pid_ = getpid();
+    pid = getpid();
+
+    std::string cores;
+    for(uint64_t core: localData->cores_) {
+      cores += std::to_string(core) + ',';
+    }
+    cores.pop_back();
 
     if (!cgroupRoot_.empty()) {
-      std::filesystem::create_directory(localData->cgroup_path_);
-      std::ofstream procFile(localData->cgroup_path_ / "cgroup.procs");
-      if (procFile.is_open()) {
-        procFile << localData->pid_;
-        procFile.close();
-        LOGI("Step " << step.ID() << " use " << localData->cgroup_path_);
-      } else {
-        std::cerr << "unable to self register in cgroup" << std::endl;
+      std::filesystem::create_directories(localData->cgroup_path_);
+
+      if ((cgroupRootCapabilities_ & 1) && (step.memory_max_ > 0)) {
+        if (WriteCGroup(localData->cgroup_path_ / "memory.max", step.memory_max_)) {
+          std::cerr << "unable to set cgroup memory.max for step" << step.ID() << std::endl;
+          exit(-1);
+        } else {
+          LOGI("Step " << step.ID() << " set memory max to " << step.memory_max_);
+        }
+      }
+
+      if (cgroupRootCapabilities_ & 2) {
+        if (WriteCGroup(localData->cgroup_path_ / "cpuset.cpus", cores)) {
+          LOGW("Unable to force cpuset.cpus");
+        }
+      }
+
+      if (WriteCGroup(localData->cgroup_path_ / "cgroup.procs", pid)) {
+        std::cerr << "unable to self register in cgroup for step" << step.ID() << std::endl;
         exit(-1);
-     }
+      } else {
+        LOGI("Step " << step.ID() << " use " << localData->cgroup_path_);
+      }
     }
 
     pid_t spid = setsid();
@@ -387,11 +441,6 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     }
     stepParameters.close();
 
-    std::string cores;
-    for(uint64_t core: localData->cores_) {
-      cores += std::to_string(core) + ',';
-    }
-    cores.pop_back();
     std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::trunc);
     stepLauncher << "THEJOB_ROOT_PATH=\"" << localData->run_path_ << "\"\n"
         << "THEJOB_FUNCTIONS_PATH=\"" << step.task_->functions_path_ << "\"\n"
@@ -402,7 +451,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_ARTEFACTS_PATH=\"" << step.task_->artefacts_path_ << "\"\n"
         << "THEJOB_TOOLS_PATH=\"" << step.task_->tools_path_ << "\"\n"
         << "THEJOB_UNIQ_STEP=" << (step.next_ == &step) << "\n"
-        << "THEJOB_PID=" << localData->pid_ << "\n"
+        << "THEJOB_PID=" << pid << "\n"
         << "THEJOB_STEP_ID=\"" << step.id_ << "\"\n"
         << "THEJOB_STEP_NUMID=\"" << step.step_id_ << "\"\n"
         << "THEJOB_STEP_RANK_ID=\"" << step.rank_id_ << "\"\n"
@@ -438,7 +487,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     {
       std::stringstream oss;
       oss << "Step running: " << step.task_->id_ << " / " << step.ID()  << \
-          " uuid: " << step.uuid_ << " with pid: " << localData->pid_ << std::endl;
+          " uuid: " << step.uuid_ << " with pid: " << pid << std::endl;
       std::cerr << oss.str();
     }
 
@@ -466,6 +515,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   localData->pid_ = pid;
 
   if (pid == -1) {
+    ReleaseCores(localData->cores_);
     throw std::runtime_error("Local Executor failed to fork " + 
         std::to_string(step.step_id_) + " : " + std::strerror(errno));
   }
@@ -517,7 +567,12 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
         if (localData->process_status_ != ns_Executor::LocalData::External) {
           KillSession(childPID, localData->cgroup_path_, step, "Step run");
         }
-        step->MarkDone(WEXITSTATUS(status));
+
+        if (WIFSIGNALED(status) && (WTERMSIG(status) == SIGKILL)) {
+          step->MarkDone(ns_Schedule::Step::exitCode_Killed_);
+        } else {
+          step->MarkDone(WIFEXITED(status) ? WEXITSTATUS(status) : ns_Schedule::Step::exitCode_NoExitCode_);
+        }
       }
       EndRun(*step, localData, true);
       result.push_back(step);
@@ -657,23 +712,14 @@ ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
   return new LocalData(config);
 }
 
-void ns_Executor::Local::GatherStats() {
-  ns_System::CoreStats global;
-  std::vector<ns_System::CoreStats> perCores;
-  ns_System::Memory::MemoryStats memory;
-  os_.GetLoad(global, perCores, memory);
-  stats_.memory = memory.UsedRatio() * 100.0;
-  stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
-  stats_.perCores.resize(perCores.size());
-  for(size_t i=0; i<perCores.size(); ++i) {
-    stats_.perCores[i] = 100 - (perCores[i].values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
-  }
+std::pair<bool, bool> ns_Executor::Local::RetrieveStats() {
+  return std::make_pair<>(stats_.cores > 90, stats_.memory > 85);
 }
 
-void ns_Executor::Local::UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const {
+std::pair<int8_t, int8_t> ns_Executor::Local::UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const {
   ns_Executor::LocalTaskData* localTaskData = dynamic_cast<ns_Executor::LocalTaskData*>(data);
   if (localTaskData == nullptr) {
-    return;
+    return std::make_pair<>(0, 0);
   }
   if (localTaskData->cgroupPath_.empty() || (!(cgroupRootCapabilities_ & 1)) ||
       !CGroupMemoryUsed(localTaskData->cgroupPath_ / "memory.stat", localTaskData->os_memory_load_)) {
@@ -700,6 +746,7 @@ void ns_Executor::Local::UpdateTaskStats(ExecutorTaskData* data, std::vector<Exe
   if (localTaskData->os_cores_load_ > localTaskData->os_cores_max_load_) {
     localTaskData->os_cores_max_load_ = localTaskData->os_cores_load_;
   }
+  return std::make_pair<>(localTaskData->os_cores_load_, localTaskData->os_memory_load_);
 }
 
 void ns_Executor::Local::UpdateStepStats(ExecutorData* data) const {
@@ -947,6 +994,9 @@ std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
     }
   }
   nbCoresFree_ -= result.size();
+
+  UpdateUserSliceCpuset();
+
   return result;
 }
 
@@ -964,6 +1014,8 @@ void ns_Executor::Local::ReAssignCores(std::vector<uint64_t>& cores) {
   } else {
     nbCoresFree_ = 0;
   }
+
+  UpdateUserSliceCpuset();
 }
 
 inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
@@ -971,7 +1023,34 @@ inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
     coresFree_[core] = true;
   }
   nbCoresFree_ += cores.size();
+
+  UpdateUserSliceCpuset();
 }
+
+void ns_Executor::Local::UpdateUserSliceCpuset() {
+  if (cgroupDisableUpdateSliceUser_) {
+    return;
+  }
+
+  std::string cpuList;
+  for (size_t i=0; i<coresFree_.size(); ++i) {
+    if (coresFree_[i] || !config_.cores_[i]) {
+      if (!cpuList.empty()) {
+        cpuList += ',';
+      }
+      cpuList += std::to_string(i);
+    }
+  }
+  if (cpuList.empty()) {
+    return;
+  }
+  std::string cmd = "sudo -n systemctl set-property user.slice AllowedCPUs=" + cpuList + " 2>/dev/null";
+  LOGI(cmd);
+  if (std::system(cmd.c_str()) != 0) {
+    LOGW("Failed to update user.slice AllowedCPUs to " << cpuList);
+  }
+}
+
 
 std::vector<std::string> ns_Executor::Local::BuildExecutorArgs(
     ns_Schedule::Step const& step) {
@@ -1070,7 +1149,8 @@ bool ns_Executor::Local::VerifyProcessArgs(pid_t pid,
   return true;
 }
 
-int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoot) const {
+int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoot, std::string& capabilitiesString) const {
+  capabilitiesString.clear();
   if (faccessat(AT_FDCWD, cgroupRoot.c_str(), W_OK | X_OK, AT_EACCESS) != 0) {
     LOGE("No access to " << cgroupRoot);
     cgroupRoot.clear();
@@ -1078,10 +1158,8 @@ int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoo
   }
 
   std::filesystem::path serverFolder = cgroupRoot / "server";
-  {
-    std::error_code ec;
-    std::filesystem::create_directory(serverFolder, ec);
-  }
+  std::error_code ec;
+  std::filesystem::create_directory(serverFolder, ec);
   if (!std::filesystem::exists(serverFolder)) {
     LOGE("Unable to create folder " << serverFolder);
     cgroupRoot.clear();
@@ -1089,36 +1167,19 @@ int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoo
   }
 
   pid_t pid = getpid();
-  {
-    std::ofstream procFile(serverFolder / "cgroup.procs");
-    if (!procFile.is_open()) {
-      LOGE("Unable to open " << serverFolder / "cgroup.procs");
-      cgroupRoot.clear();
-      return 0;
-    }
-    procFile << pid;
-    procFile.close();
-    if (procFile.fail()) {
-      LOGE("Unable to write in " << serverFolder / "cgroup.procs");
-      cgroupRoot.clear();
-      return 0;
-    }
+  if (WriteCGroup(serverFolder / "cgroup.procs", pid)) {
+    cgroupRoot.clear();
+    return 0;
   }
 
+  std::string capabilitiesFile = cgroupRoot / "cgroup.subtree_control";
   int32_t capabilities = 7;
   std::vector<std::string> capabilitiesName {"+memory", "+cpuset", "+pids"};
   for(size_t i=0; i<capabilitiesName.size(); ++i) {
-    std::ofstream subtreeControlFile(cgroupRoot / "cgroup.subtree_control");
-    if (!subtreeControlFile.is_open()) {
-      LOGE("Unable to open " << cgroupRoot / "cgroup.subtree_control");
-      cgroupRoot.clear();
-      return 0;
-    }
-    subtreeControlFile << capabilitiesName[i];
-    subtreeControlFile.close();
-    if (subtreeControlFile.fail()) {
-      LOGE("Fail writing " << capabilitiesName[i] << " in " << (cgroupRoot / "cgroup.subtree_control"));
+    if (WriteCGroup(capabilitiesFile, capabilitiesName[i])) {
       capabilities -= (1 << i);
+    } else {
+      capabilitiesString += capabilitiesName[i] + " ";
     }
   }
 
@@ -1127,10 +1188,18 @@ int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoo
     return 0;
   }
 
-  cgroupRoot /= ("scheduler-" + std::to_string(getpid()));
-  std::error_code ec;
+  cgroupRoot /= ("scheduler-" + std::to_string(pid));
   if ((!std::filesystem::create_directories(cgroupRoot, ec)) || ec) {
     LOGE("Unable to create " << cgroupRoot);
+    capabilitiesString.clear();
+    cgroupRoot.clear();
+    return 0;
+  }
+
+  capabilitiesFile = cgroupRoot / "cgroup.subtree_control";
+  if (WriteCGroup(capabilitiesFile, capabilitiesString)) {
+    std::filesystem::remove(cgroupRoot);
+    capabilitiesString.clear();
     cgroupRoot.clear();
     return 0;
   }
@@ -1156,6 +1225,20 @@ bool ns_Executor::Local::CGroupMemoryUsed(std::filesystem::path const& cgroupMem
   }
   percentOfUsedMemory = ((double)usedMemory / (double)os_.memory_.Total()) * 100.0;
   return true;
+}
+
+void ns_Executor::Local::GatherStats() {
+  ns_System::CoreStats global;
+  std::vector<ns_System::CoreStats> perCores;
+  ns_System::Memory::MemoryStats memory;
+  os_.GetLoad(global, perCores, memory);
+  stats_.memory = memory.UsedRatio() * 100.0;
+  stats_.freeMemory = memory.free_kb * 1024;
+  stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
+  stats_.perCores.resize(perCores.size());
+  for(size_t i=0; i<perCores.size(); ++i) {
+    stats_.perCores[i] = 100 - (perCores[i].values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
+  }
 }
 
 bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) {

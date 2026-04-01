@@ -42,7 +42,7 @@ inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
 }
 
 inline bool ScheduleAPI::CancelTask(uint64_t taskID) {
-  return schedule_.CancelTask(taskID);
+  return schedule_.CancelTask(taskID, "rest api request");
 }
 
 };

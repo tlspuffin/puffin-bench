@@ -30,10 +30,15 @@ public:
     uint64_t timeout_;
     std::unordered_map<std::string, std::string> args_;
 
+    uint64_t memory_core_;
+    uint64_t memory_consumption_;
+    uint64_t memory_max_;
+
     Configuration();
     Configuration(std::string id, std::string const& executor_name, 
-        uint32_t nb_cores, uint32_t nb_retry, uint64_t timeout, 
-        std::unordered_map<std::string, std::string> const& args);
+          uint32_t nb_cores, uint32_t nb_retry, uint64_t memory_core, 
+          uint64_t memory_consumption, uint64_t timeout, 
+          std::unordered_map<std::string, std::string> const& args);
   };
 
   StepConfigurations();

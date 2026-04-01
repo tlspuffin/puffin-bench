@@ -31,14 +31,16 @@ ns_Schedule::StepConfigurations::Configuration::Configuration() :
 
 ns_Schedule::StepConfigurations::Configuration::Configuration(
     std::string id, std::string const& executor_name, uint32_t nb_cores, 
-    uint32_t nb_retry, uint64_t timeout, 
-    std::unordered_map<std::string, std::string> const& args) : id_(id), 
-    executor_name_(executor_name), nb_cores_(nb_cores), nb_retry_(nb_retry), 
-    timeout_(timeout), args_(args) {
+    uint32_t nb_retry, uint64_t memory_core, uint64_t memory_consumption, 
+    uint64_t timeout, std::unordered_map<std::string, std::string> const& args) 
+    : id_(id), executor_name_(executor_name), nb_cores_(nb_cores), 
+    nb_retry_(nb_retry), memory_max_(memory_core+(memory_consumption*timeout)), 
+    timeout_(timeout), args_(args), memory_core_(memory_core), 
+    memory_consumption_(memory_consumption) {
 }
 
 ns_Schedule::StepConfigurations::StepConfigurations() :
-    defaultConfiguration_(".", "", 1ul, 1ul, 0ull, {}) {
+    defaultConfiguration_(".", "", 1ul, 1ul, 0ull, 0ull, 0ull, {}) {
 
 }
 
@@ -71,6 +73,8 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
   std::string executor_name;
   uint32_t nb_cores = 1;
   uint32_t nb_retry = 1;
+  uint64_t memory_core = 0;
+  uint64_t memory_consumption = 0;
   uint64_t timeout = 0;
   std::unordered_map<std::string, std::string> args;
   auto configurationIT = configurations_.find(name);
@@ -81,6 +85,8 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     executor_name = base.executor_name_;
     nb_cores = base.nb_cores_;
     nb_retry = base.nb_retry_;
+    memory_core = base.memory_core_;
+    memory_consumption = base.memory_consumption_;
     timeout = base.timeout_;
     args = base.args_;
   }
@@ -92,6 +98,8 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     executor_name = GetOrDefault<std::string>(*override, "executor_name", executor_name);
     nb_cores = GetOrDefault<uint32_t>(*override, "nb_cores", nb_cores);
     nb_retry = GetOrDefault<uint32_t>(*override, "nb_retry", nb_retry);
+    memory_core = GetOrDefault<uint64_t>(*override, "memory_core", memory_core);
+    memory_consumption = GetOrDefault<uint64_t>(*override, "memory_consumption", memory_consumption);
     std::string timeoutStr = GetOrDefault<std::string>(
         *override, "timeout", std::to_string(timeout)+"s");
     timeout = ParseDurationToSeconds(timeoutStr);
@@ -114,7 +122,7 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     id = name.empty() ? "." : name;
   }
   return ns_Schedule::StepConfigurations::Configuration
-      (id, executor_name, nb_cores, nb_retry, timeout, args);
+      (id, executor_name, nb_cores, nb_retry, memory_core, memory_consumption, timeout, args);
 }
 
 
@@ -131,10 +139,15 @@ ns_Schedule::StepConfigurations::ReadEntryFromTaskJSON(std::string const& name,
   uint32_t nb_cores = GetOrDefault<uint32_t>(
       entry, "nb_cores", defaultConfiguration.nb_cores_);
   uint32_t nb_retry = GetOrDefault<uint32_t>(
-      entry, "nb_retry", defaultConfiguration.nb_retry_);
+      entry, "nb_retry", defaultConfiguration.nb_retry_); 
   std::string timeoutString = GetOrDefault<std::string>(
       entry, "timeout", std::to_string(defaultConfiguration.timeout_)+"s");
   uint64_t timeout = ParseDurationToSeconds(timeoutString);
+
+  uint64_t memory_core = GetOrDefault<uint64_t>(
+      entry, "memory_core", defaultConfiguration.memory_core_);
+  uint64_t memory_consumption = GetOrDefault<uint64_t>(
+      entry, "memory_consumption", defaultConfiguration.memory_consumption_);
 
   std::unordered_map<std::string, std::string> args;
   if (entry.HasMember("args")) {
@@ -153,5 +166,6 @@ ns_Schedule::StepConfigurations::ReadEntryFromTaskJSON(std::string const& name,
   }
 
   return ns_Schedule::StepConfigurations::Configuration
-      (configName, executor_name, nb_cores, nb_retry, timeout, args);
+      (configName, executor_name, nb_cores, nb_retry, memory_core, memory_consumption, 
+      timeout, args);
 }

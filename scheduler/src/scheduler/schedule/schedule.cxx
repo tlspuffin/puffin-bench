@@ -154,12 +154,12 @@ bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
   return false;
 }
 
-bool ns_Schedule::Schedule::CancelTask(uint64_t taskID) {
+bool ns_Schedule::Schedule::CancelTask(uint64_t taskID, std::string const& source) {
   std::lock_guard<std::mutex> lock(lockThread_);
   for (auto it = steps_.begin(); it != steps_.end(); ++it) {
     ns_Schedule::Step* step = *it;
     if (step->task_->id_ == taskID) {
-      step->task_->Cancel();
+      step->task_->Cancel(source);
       SaveStatus(false);
       return true;
     }
@@ -234,20 +234,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
     stepsRunning_.insert(stepsRunning_.end(), toRun.begin(), toRun.end());
     monitor_.Add(toRun);
 
-    for(auto& executor : executors_) {
-      executor.second->GatherStats();
-      updateStatus = true;
-    }
-    std::unordered_map<ns_Schedule::Task*, std::vector<ns_Schedule::Step*>> runningTasksAndSteps;
-    for (ns_Schedule::Step* step : stepsRunning_) {
-      runningTasksAndSteps[step->task_].push_back(step);
-      step->UpdateStats();
-      updateStatus = true;
-    }
-    for (auto& [task, steps] : runningTasksAndSteps) {
-      task->UpdateStats(steps);
-      updateStatus = true;
-    }
+    updateStatus |= LimitRessourcesUsages();
 
     //if ((toRun.size() > 0) || updateStatus) {
       lockThread_.lock();
@@ -263,6 +250,9 @@ void ns_Schedule::Schedule::ScheduleLoop() {
       stepsDone_.insert(stepsDone_.end(), executorStepsDone.begin(), executorStepsDone.end());
       for(ns_Schedule::Step* step : executorStepsDone) {
         DEBUG_STEP_MSG("Step done", step);
+        if (step->IsOSKilled()) {
+          CancelTask(step->task_->id_, "Killed by SIGKILL (maybe cgroup memory.max)");
+        }
       }
     }
 
@@ -458,6 +448,39 @@ void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedul
 
   log << buffer.GetString() << std::endl;
   log.flush();
+}
+
+bool ns_Schedule::Schedule::LimitRessourcesUsages() {
+  bool updateStatus = false;
+  std::unordered_map<ns_Executor::Executor*, std::vector<struct SRessourcesSummary>> executorsMemoryFull;
+  for(auto& executor : executors_) {
+    if (executor.second->RetrieveStats().second) {
+      executorsMemoryFull[executor.second] = {};
+    }
+    updateStatus = true;
+  }
+  std::unordered_map<ns_Schedule::Task*, std::vector<ns_Schedule::Step*>> runningTasksAndSteps;
+  for (ns_Schedule::Step* step : stepsRunning_) {
+    runningTasksAndSteps[step->task_].push_back(step);
+    step->UpdateStats();
+    updateStatus = true;
+  }
+  for (auto& [task, steps] : runningTasksAndSteps) {
+    struct SRessourcesSummary ressourcesSummary = task->UpdateStats(steps);
+    auto it = executorsMemoryFull.find(task->executor_);
+    if (it != executorsMemoryFull.end()) {
+      executorsMemoryFull[task->executor_].push_back(ressourcesSummary);
+    }
+    updateStatus = true;
+  }
+  for (auto& [executor, tasks] : executorsMemoryFull) {
+    if (tasks.empty()) {
+      continue;
+    }
+    SRessourcesSummary const* worst = SRessourcesSummary::ToKill(tasks);
+    CancelTask(worst->task->id_, "out of ressources");
+  }
+  return updateStatus;
 }
 
 void ns_Schedule::Schedule::HandlerUSR1(int sig) {

@@ -25,7 +25,9 @@ public:
   static uint16_t constexpr exitCode_Timedout_ = 0x0200;
   static uint16_t constexpr exitCode_Cancelled_ = 0x0400;
   static uint16_t constexpr exitCode_LaunchError_ = 0x0800;
-  static uint16_t constexpr exitCode_Lost_ = 0x1000;
+  static uint16_t constexpr exitCode_NoExitCode_ = 0x1000;
+  static uint16_t constexpr exitCode_Killed_ = 0x2000;
+  static uint16_t constexpr exitCode_Lost_ = 0x4000;
 
   static uint16_t constexpr stepsGroup_None_ = 0x0000;
   static uint16_t constexpr stepsGroup_In_ = 0x0001;
@@ -74,6 +76,10 @@ public:
   bool IsRunning() const;
   bool IsDone() const;
   bool IsTimedOut() const;
+  bool IsOSKilled() const;
+
+  std::chrono::time_point<std::chrono::system_clock> StartTime() const;
+  std::chrono::milliseconds RunTime() const;
 
   void MarkPending();
   void MarkRunning();
@@ -116,6 +122,7 @@ public:
   std::unordered_map<std::string, std::string> args_;
   uint32_t nb_cores_;
   uint32_t nb_retry_;
+  uint64_t memory_max_;
   uint64_t timeout_;
   Step* next_;
   Step* previous_;
@@ -186,6 +193,25 @@ inline bool Step::IsTimedOut() const {
   auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - time_points_[0]);
   return (timeout_ > 0) && (elapsed.count() >= timeout_);
 }
+
+inline bool Step::IsOSKilled() const {
+  return (state_ == State::Done) && (exit_code_ == Step::exitCode_Killed_);
+}
+
+inline std::chrono::time_point<std::chrono::system_clock> Step::StartTime() const {
+  if (state_ < State::Running) {
+    return std::chrono::time_point<std::chrono::system_clock>::clock::now();
+  }
+  return time_points_[0];
+}
+
+inline std::chrono::milliseconds Step::RunTime() const {
+  if ((state_ != State::Done) && (state_ != State::TimedOut)) {
+    return std::chrono::milliseconds::zero();
+  }
+  return std::chrono::duration_cast<std::chrono::milliseconds>(time_points_[1] - time_points_[0]);
+}
+
 
 inline void Step::MarkPending() {
   state_ = State::Pending;
