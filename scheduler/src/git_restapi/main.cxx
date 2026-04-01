@@ -1,3 +1,4 @@
+#include "../version.h"
 #include "server/server.hxx"
 #include "config.hxx"
 #include "../embeded/git_restapi/tlspuffin_history_sh.h"
@@ -14,6 +15,8 @@ static void CleanTMP(std::string const& tmpPath) {
 }
 
 int main(int argc, char *argv[]) {
+  std::cout << "Version: " << buildID << (buildGitDirty ? "-dev" : "") << std::endl;
+
   std::string tmpPath = std::filesystem::temp_directory_path() / 
       (std::string(basename(argv[0])) + "-" + std::to_string(getpid()));
 

@@ -7,6 +7,14 @@ include(CMakeUtils.cmake)
 
 include(CMakeLists.conf)
 
+set(IN_VERSION_C "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in")
+set(GENERATED_VERSION_C "${CMAKE_CURRENT_BINARY_DIR}/version.c")
+add_custom_target(generate_version ALL
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${IN_VERSION_C} -DOUTPUT=${GENERATED_VERSION_C} -P ${CMAKE_SOURCE_DIR}/CMakeGenVersion.cmake
+    BYPRODUCTS ${GENERATED_VERSION_C}
+    VERBATIM
+)
+
 add_executable(reserve_port src/reserve_port.c)
 
 add_executable(reserve_port-static src/reserve_port.c)
@@ -68,6 +76,7 @@ set(SRV_SRC
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx
   src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
+  ${GENERATED_VERSION_C}
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})
@@ -96,6 +105,7 @@ set(GIT_RESTAPI_SRC
   src/git_restapi/api/api.cxx src/git_restapi/git/git_api.cxx src/git_restapi/git/config.cxx
   src/git_restapi/server/config.cxx src/git_restapi/server/server.cxx src/git_restapi/server/parts_handler.cxx src/git_restapi/server/request_handler.cxx 
   src/embeded/git_restapi/tlspuffin_history_sh.h
+  ${GENERATED_VERSION_C}
 )
 
 add_executable(git_restapi ${GIT_RESTAPI_SRC})

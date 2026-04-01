@@ -1,3 +1,4 @@
+#include "../version.h"
 #include "server/server.hxx"
 #include "api/api.hxx"
 
@@ -13,6 +14,7 @@
 #define EXPORT_PATH "../users_data"
 
 int main(int argc, char *argv[]) {
+  std::cout << "Version: " << buildID << (buildGitDirty ? "-dev" : "") << std::endl;
   Config config;
 
 #if 0
