@@ -8,6 +8,12 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
     std::string const& taskDataFile, std::filesystem::path const& outputPath, 
     std::string& outFile, std::unordered_set<std::string>& libsManaged, 
     std::string& taskJSON) {
+
+  std::filesystem::path taskJSONFile = std::filesystem::path(taskDataFile).replace_extension("json");
+  if (!std::filesystem::exists(taskJSONFile)) {
+    return false;
+  }
+
   FileTGZ filetgz(taskDataFile);
 
   std::vector<std::pair<std::string, uint64_t>> taskInfo = filetgz.ListFiles(std::regex("[0-9]+\\.json"));
@@ -33,7 +39,7 @@ bool ns_Publish::PublishActionPerfUseSummary::GenerateCommitJson(
   int nbTimeout = 0;
   TaskAnalysis analysis;
   try {
-    analysis = ExtractExperimentsFromBuffer(taskJSON, "", taskDataFile);
+    analysis = ExtractExperimentsFromBuffer(taskJSON, taskJSONFile, taskDataFile);
     for (ExperimentResult const& result: analysis.experiments) {
       bool success = (result.exit_code == 512) && (result.state == "TimedOut");
       states[result.id].runs[result.attempt] = success;
