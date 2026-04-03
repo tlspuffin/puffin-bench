@@ -39,7 +39,7 @@ git -C "${repo_directory}" fetch 2>/dev/null || git clone --filter=blob:none htt
 git -C "${repo_directory}" checkout dev
 echo '{"commits": [' > "${output}.tmp"
 git -C "${repo_directory}" log dev --first-parent --oneline --pretty=format:"%h§%ad§%s§%p" --date=short ^main | sed 's/"/\\"/g'  | awk -v gwd="$repo_directory" 'BEGIN{FS="§";PREV=""} {alias=""; if (NF == 4) { n=split($4, p, " "); if (n >=2) { cmd="git -C "gwd" diff --quiet "$1" "p[2]; if (system(cmd) == 0) { alias=p[2] } } } printf(" {\"id\":\"%s\",\"date\":\"%s\",\"comment\":\"%s\", \"alias\": \"%s\", \"branch\":\"dev\"},\n", $1, $2, $3, alias);}' >> "${output}.tmp"
-git -C "${repo_directory}" log main --first-parent --oneline --pretty=format:"%h§%ad§%s§%p" --date=short 3bc37034a^...0b44eed3b | sed 's/"/\\"/g'  | awk -v gwd="$repo_directory" 'BEGIN{FS="§";PREV=""} {alias=""; if (NF == 4) { n=split($4, p, " "); if (n >=2) { cmd="git -C "gwd" diff --quiet "$1" "p[2]; if (system(cmd) == 0) { alias=p[2] } } } printf(" {\"id\":\"%s\",\"date\":\"%s\",\"comment\":\"%s\", \"alias\": \"%s\", \"branch\":\"dev\"},\n", $1, $2, $3, alias);}' | head -c -2 >> "${output}.tmp"
+git -C "${repo_directory}" log main --first-parent --oneline --pretty=format:"%h§%ad§%s§%p" --date=short 3bc37034a^...0b44eed3b | sed 's/"/\\"/g'  | awk -v gwd="$repo_directory" 'BEGIN{FS="§";PREV=""} {alias=""; if (NF == 4) { n=split($4, p, " "); if (n >=2) { cmd="git -C "gwd" diff --quiet "$1" "p[2]; if (system(cmd) == 0) { alias=p[2] } } } printf(" {\"id\":\"%s\",\"date\":\"%s\",\"comment\":\"%s\", \"alias\": \"%s\", \"branch\":\"main\"},\n", $1, $2, $3, alias);}' | head -c -2 >> "${output}.tmp"
 echo -e '],\n "standalone": [],\n "PR": []}' >> "${output}.tmp"
 mv "${output}.tmp" "${output}"
 
