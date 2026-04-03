@@ -365,10 +365,13 @@ void ns_Schedule::Schedule::ManageEndOfStep(
   step->GatherFilesToLocal();
 
   if (step->TaskLastStep()) {
-    // todo signal end of the flow
+    step->SetUserRunState(
+        step->task_->request_cancel_ ? "flow cancelled" : "flow ended");
     uint64_t task_id = step->TaskID();
-    ArchiveJob archiveJob = step->FinalizeAndArchive(config_.exportPath_);
-    if ((!step->task_->request_cancel_) && (archiveJob.sources_.size() > 0)) {
+    ArchiveJob archiveJob = step->FinalizeAndArchive(
+        step->task_->request_cancel_ ? config_.exportCanceledPath_ : config_.exportPath_);
+    if (archiveJob.sources_.size() > 0) {
+      archiveJob.doPublish_ = !step->task_->request_cancel_;
       archiver_.AddJob(archiveJob);
     }
     tasksManager_.TaskEnded(step->task_);

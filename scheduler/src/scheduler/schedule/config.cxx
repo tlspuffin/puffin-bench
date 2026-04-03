@@ -13,6 +13,7 @@ static ns_Schedule::Config defaultConfig;
 ns_Schedule::Config::Config() 
     : toolsPath_("tools"), runPath_("runs"), 
     exportPath_(std::filesystem::path("exports") / "schedule"), 
+    exportCanceledPath_(exportPath_ / "Canceled"), 
     userPath_("users_data"), executors_(), monitorsPath_(runPath_ / "monitors")
 {}
 
@@ -41,6 +42,7 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
   exportPath_ = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(*scheduleConfig, "exportPath", defaultConfig.exportPath_))
       .string();
+  exportCanceledPath_ = exportPath_ / "Canceled";
 
   monitorsPath_ = runPath_ / "monitors";
 
@@ -114,7 +116,7 @@ void ns_Schedule::Config::Validate(bool forceInstall) const {
   discard = std::filesystem::canonical(userPath_);
   discard = std::filesystem::canonical(exportPath_);
   std::error_code ec;
-  std::filesystem::create_directory(exportPath_ / "Canceled", ec);
+  std::filesystem::create_directory(exportCanceledPath_, ec);
   for (auto const& [name, executorConfig] : executors_) {
     executorConfig->Validate(forceInstall);
   }

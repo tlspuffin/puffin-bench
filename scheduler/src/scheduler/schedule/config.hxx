@@ -19,6 +19,7 @@ struct Config {
   std::filesystem::path toolsPath_;
   std::filesystem::path runPath_;
   std::filesystem::path exportPath_;
+  std::filesystem::path exportCanceledPath_;
   std::filesystem::path userPath_;
   std::unordered_map<std::string, ns_Executor::Config*> executors_;
 

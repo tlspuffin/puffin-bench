@@ -20,16 +20,17 @@ struct ArchiveJob {
   std::vector<std::filesystem::path> sources_; //1st always the task.json
   std::filesystem::path deleteDir_;  
   std::filesystem::path baseDir_;
+  bool doPublish_;
   
   ArchiveJob() : publish_(), variables_({}), archivePath_(""), sources_({}), 
-      deleteDir_(""), baseDir_("") {}
+      deleteDir_(""), baseDir_(""), doPublish_(false) {}
   ArchiveJob(Publish& publish, std::unordered_map<std::string, std::string> variables, 
       std::filesystem::path const& archivePath, 
       std::vector<std::filesystem::path> const& sources,
       std::filesystem::path const& deleteDir = "",
       std::filesystem::path const& baseDir = "")
       : publish_(publish), variables_(variables), archivePath_(archivePath), 
-        sources_(sources), deleteDir_(deleteDir), baseDir_(baseDir) {}
+        sources_(sources), deleteDir_(deleteDir), baseDir_(baseDir), doPublish_(false) {}
   };
 
 class Archiver {
