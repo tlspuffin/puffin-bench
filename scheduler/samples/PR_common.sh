@@ -1,5 +1,7 @@
 #### HELPER START ####
 
+declare -r SAVE_CORPUS 1
+
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
@@ -17,7 +19,7 @@ ExperimentCheckAllThreadsRunning() {
 
   local logsPath=$( dirname "${stats}" )
   local errorFile="${logsPath}/error.log"
-  [ ! -e "${errorFile}" ] && { errorFile="${logsPath}/log/error.log"; [ ! -e "${errorFile}" ] && errorFile="" }
+  [ ! -e "${errorFile}" ] && { errorFile="${logsPath}/log/error.log"; [ ! -e "${errorFile}" ] && errorFile=""; }
   [ -e "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && { echo "Timeout found in error.log" >&2; return 1; }
 
   local lastTS=$( tail -c 64K "${stats}" | sed 's/}{/}\n{/g' 2>/dev/null | head -n -1 | tail -1 | jq -r '.time.secs_since_epoch' );
@@ -266,7 +268,7 @@ ExperimentPostLaunchSetup() {
     echo "Missing parameter to tell to save objectif or not"
     return 1
   fi
-  local saveObjectif="$1"
+  local saveData="$1"
   shift;
 
   if [ -z "$1" ]; then
@@ -308,10 +310,8 @@ ExperimentPostLaunchSetup() {
     };
 
     if ref_statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-      if (( saveObjectif == 1 )); then
-        CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-        CreateArtefact "${ref_statsJSON}.1" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json.1" "commit_id:${COMMIT_ID}" "features:${features}"
-      fi
+      CreateArtefact "${ref_statsJSON}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+      CreateArtefact "${ref_statsJSON}.1" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json.1" "commit_id:${COMMIT_ID}" "features:${features}"
       break;
     fi
 
@@ -347,9 +347,10 @@ ExperimentPostLaunchSetup() {
 
   StartMonitor
 
-  if (( saveObjectif == 1 )); then
-    CreateArtefact "${experiment_base}/objective" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-objective" "commit_id:${COMMIT_ID}" "features:${features}"
-  fi
+  CreateArtefact "${experiment_base}/objective" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-objective" "commit_id:${COMMIT_ID}" "features:${features}"
+
+  (( saveData && SAVE_CORPUS )) && 
+      CreateArtefact "${experiment_base}/corpus" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-corpus" "commit_id:${COMMIT_ID}" "features:${features}"
 
   return 0;
 }
@@ -421,7 +422,7 @@ ExperimentRun() {
     echo "Missing parameter to tell to save objectif or not"
     return 1
   fi
-  local saveObjectif="$1"
+  local saveData="$1"
   shift;
 
 
@@ -442,7 +443,7 @@ ExperimentRun() {
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
-  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveObjectif}" "${features}"; then
+  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveData}" "${features}"; then
     kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
     ref_tlspuffin_killed=1
   fi
@@ -473,7 +474,7 @@ ExperimentRunWithCargo() {
     echo "Missing parameter to tell to save objectif or not"
     return 1
   fi
-  local saveObjectif="$1"
+  local saveData="$1"
   shift;
 
   if [ -z "${features}" ]; then
@@ -493,7 +494,7 @@ ExperimentRunWithCargo() {
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
   ref_tlspuffin_killed=0
-  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveObjectif}" "${features}"; then
+  if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveData}" "${features}"; then
     echo "KILLING tlspuffin, experiment post launch setup failed" >&2
     kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
     ref_tlspuffin_killed=1

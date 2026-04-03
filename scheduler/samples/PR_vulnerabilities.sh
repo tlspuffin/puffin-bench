@@ -60,7 +60,7 @@ Experiment () {
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
-  ExperimentRun tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
+  ExperimentRun tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
   echo  "${stats}" > ./.xp_state_file
   echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
@@ -76,10 +76,10 @@ Experiment () {
 }
 
 ExperimentWithCargo () {
-  local tlspuffin_pid;
-  local tlspuffin_killed;
+  local tlspuffin_pid=-1;
+  local tlspuffin_killed=-1;
   local stats="";
-  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
+  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
   echo  "${stats}" > ./.xp_state_file
   echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
@@ -202,7 +202,7 @@ SaveSummary() {
     }' "${output}" | jq -c '.' 2>/dev/null )
 
   echo "${summary}" > "${output}"
-  [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&1
+  [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&2
 
   local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
   [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && echo '{"run_error":"fuzzer timeout"}' >> "${output}"
