@@ -18,7 +18,8 @@ public:
       std::vector<uint8_t> const& flow, 
       std::vector<uint8_t> const & functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
-      std::unordered_map<std::string, std::string>& args);
+      std::unordered_map<std::string, std::string>& args, 
+      std::unordered_map<std::string, std::string>& runtimeConfig);
   void GetRunningTaskSummary();
   void GetTaskInfos(uint64_t task_id);
   std::filesystem::path ExportPath();

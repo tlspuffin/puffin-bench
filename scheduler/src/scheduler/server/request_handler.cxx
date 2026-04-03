@@ -81,8 +81,23 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       }
     }
 
+    std::unordered_map<std::string, std::string> runtimeConfig;
+    for (auto& [name, value] : form) {
+      if ((name.find("runtime[") != 0) || (name.rfind("]") != (name.size()-1))) {
+        continue;
+      }
+      std::string key = name.substr(5, name.size() - 6);
+      if (key.empty()) {
+        throw std::runtime_error("Empty key in runtime[]");
+      }
+      auto success = runtimeConfig.emplace(key, value);
+      if (!success.second) {
+        throw std::runtime_error("runtime[] value duplicate key found");
+      }
+    }
+
     uint64_t taskID = apis_->scheduleAPI_.AddTask(name, flow->second.content, 
-        functions->second.content, files, args);
+        functions->second.content, files, args, runtimeConfig);
 
     out << R"({"success": true, "task_id": ")" << taskID << R"("})";
   } catch (const std::exception& e) {

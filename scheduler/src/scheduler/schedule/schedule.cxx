@@ -2,6 +2,7 @@
 #include "task.hxx"
 #include "executor/local.hxx"
 #include "../../utils/file.hxx"
+#include "../../utils/variables.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -90,10 +91,28 @@ ns_Schedule::Schedule::~Schedule() {
 }
 
 uint64_t ns_Schedule::Schedule::AddTask(std::string const& name, 
-    std::string const& tasksList, 
+    std::string const& tasksListPattern, 
     std::string const& functions, 
     std::unordered_map<std::string, std::vector<uint8_t>>& files,
-    std::unordered_map<std::string, std::string>& args) {
+    std::unordered_map<std::string, std::string>& args, 
+    std::unordered_map<std::string, std::string>& runtimeConfig) {
+
+  std::string tasksList;
+  {
+    auto const nbRetryIt = runtimeConfig.find("RUNTIME_NB_RUN");
+    auto const nbCoreIt = runtimeConfig.find("RUNTIME_NB_CORES");
+    auto const timeoutIt = runtimeConfig.find("RUNTIME_TIMEOUT");
+    auto const runsSelectIt = runtimeConfig.find("RUNTIME_RUN_SELECT");
+    auto const runsConfigIt = runtimeConfig.find("RUNTIME_RUN_CONFIG");
+    tasksList = ResolveVariables(tasksListPattern, {
+      { "RUNTIME_NB_RUN", nbRetryIt != runtimeConfig.end() ? nbRetryIt->second : "1" },
+      { "RUNTIME_NB_CORES", nbCoreIt != runtimeConfig.end() ? nbCoreIt->second : "1" },
+      { "RUNTIME_TIMEOUT", timeoutIt != runtimeConfig.end() ? timeoutIt->second : "3h" },
+      { "RUNTIME_RUN_SELECT", runsSelectIt != runtimeConfig.end() ? runsSelectIt->second : "" },
+      { "RUNTIME_RUN_CONFIG", runsConfigIt != runtimeConfig.end() ? runsConfigIt->second : "" },
+    });
+  }
+
   rapidjson::Document stepsJSON;
   stepsJSON.Parse(tasksList.c_str());
 

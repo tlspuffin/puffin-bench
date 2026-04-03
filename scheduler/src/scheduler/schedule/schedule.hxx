@@ -23,10 +23,11 @@ class Schedule : public ns_Executor::ExecutorsProvider {
 public:
   Schedule(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cachePort);
   ~Schedule();
-  uint64_t AddTask(std::string const& name, std::string const& tasksList, 
+  uint64_t AddTask(std::string const& name, std::string const& tasksListPattern, 
       std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
-      std::unordered_map<std::string, std::string>& args);
+      std::unordered_map<std::string, std::string>& args,
+      std::unordered_map<std::string, std::string>& runtimeConfig);
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
   bool CancelTask(uint64_t taskID, std::string const& source);
 

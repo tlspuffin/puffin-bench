@@ -430,6 +430,15 @@ void ns_Schedule::Task::CreateStepsFromJson(
     throw std::runtime_error("Invalid or missing 'flow' in JSON");
   }
 
+  std::vector<rapidjson::Value const*> configurationsList;
+  if (configJSON.HasMember("configurations") && 
+      (configJSON["configurations"].IsObject())) {
+    rapidjson::Value const* configurations = &configJSON["configurations"];
+    for(auto member = configurations->MemberBegin(); member != configurations->MemberEnd(); ++member) {
+      configurationsList.push_back(&(member->name));
+    }
+  }
+
   rapidjson::Value runEmptyConfiguration(rapidjson::kObjectType);
 
   uint64_t step_id = 0;
@@ -459,8 +468,15 @@ void ns_Schedule::Task::CreateStepsFromJson(
           }
           if (element.HasMember("run") && element["run"].IsArray()) {
             rapidjson::Value const& run_array = element["run"];
-            for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-              runList.push_back(&(run_array[j]));
+            if (run_array.Size() != 0) {
+              for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+                runList.push_back(&(run_array[j]));
+              }
+            } else {
+              if (configurationsList.empty()) {
+                throw std::runtime_error("empty run array requiere a global configuration object");
+              }
+              runList = configurationsList;
             }
           }
         } else if (element.HasMember("step")) {
@@ -522,8 +538,15 @@ void ns_Schedule::Task::CreateStepsFromJson(
           throw std::runtime_error("step inside a group can not have a run field");
         }
         rapidjson::Value const& run_array = stepJSON["run"];
-        for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-          runList.push_back(&(run_array[j]));
+        if (run_array.Size() != 0) {
+          for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+            runList.push_back(&(run_array[j]));
+          }
+        } else {
+          if (configurationsList.empty()) {
+            throw std::runtime_error("empty run array requiere a global configuration object");
+          }
+          runList = configurationsList;
         }
       }
       if (!runList.empty()) {
@@ -531,8 +554,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
           rapidjson::Value const& run = *(runList[j]);
           if (j != 0) {
             step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, group_id, 
-                parent_stack, configurationsStack, groupConfigurations, 
-                &run);
+                parent_stack, configurationsStack, groupConfigurations, &run);
             step = step->next_;
           } else {
             step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
