@@ -443,6 +443,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
     std::vector<rapidjson::Value const*> runList;
 
     GroupStepConfigurations groupConfigurations;
+    rapidjson::Value const* groupConfigurationJSON = nullptr;
     std::queue<rapidjson::Value const*> flowElements;
     if (flowElement.IsObject()) {
       flowElements.push(&flowElement);
@@ -454,6 +455,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
         if (!element.HasMember("step")) {
           if (element.HasMember("configuration") && element["configuration"].IsObject()) {
             groupConfigurations.ReadFromTaskJSON(element["configuration"]);
+            groupConfigurationJSON = &element["configuration"];
           }
           if (element.HasMember("run") && element["run"].IsArray()) {
             rapidjson::Value const& run_array = element["run"];
@@ -500,6 +502,9 @@ void ns_Schedule::Task::CreateStepsFromJson(
       }
 
       std::vector<rapidjson::Value const*> configurationsStack;
+      if (groupConfigurationJSON != nullptr) {
+        configurationsStack.push_back(groupConfigurationJSON);
+      }
       if (stepJSON.HasMember("configuration")) {
         configurationsStack.push_back(&stepJSON["configuration"]);
       }

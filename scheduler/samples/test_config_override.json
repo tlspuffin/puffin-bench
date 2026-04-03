@@ -58,6 +58,22 @@
         {"nb_retry": 1, "args": {"label": "no_retry"}}
       ]
     },
+    [
+      {
+        "configuration": {
+          "nb_cores": 3
+        }
+      },
+      {
+        "step": "GroupNbCoresDefault"
+      },
+      {
+        "step": "GroupNbCoresOverride",
+        "configuration": {
+          "nb_cores": 2
+        }
+      }
+    ],
     {
       "step": "Summary"
     }

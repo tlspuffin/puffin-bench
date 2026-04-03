@@ -174,6 +174,27 @@ ByNbRetry() {
   fi
 }
 
+# ─── Mechanism 6: Group-level nb_cores ───────────────────────────────────────
+#
+# Group configuration: {"nb_cores": 3}
+# Steps:
+#   GroupNbCoresDefault  → no individual config  → inherits nb_cores=3 from group
+#   GroupNbCoresOverride → configuration: {"nb_cores": 2} → overrides to 2
+#
+# Expected:
+#   GroupNbCoresDefault:  nb_cores=3  (group default)
+#   GroupNbCoresOverride: nb_cores=2  (individual override wins)
+#
+GroupNbCoresDefault() {
+  echo "=== GroupNbCoresDefault | nb_cores=${THEJOB_NB_CORES}" 1>&2
+  check "GroupNbCoresDefault" "0" "nb_cores" "3" "${THEJOB_NB_CORES}"
+}
+
+GroupNbCoresOverride() {
+  echo "=== GroupNbCoresOverride | nb_cores=${THEJOB_NB_CORES}" 1>&2
+  check "GroupNbCoresOverride" "0" "nb_cores" "2" "${THEJOB_NB_CORES}"
+}
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 Summary() {
   echo "=== Summary ===" 1>&2
