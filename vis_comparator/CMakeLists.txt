@@ -23,6 +23,28 @@ include(CMakeExternal.cmake)
 #    find_package(LibArchive)
 #endif()
 
+# Auto-detect OpenSSL, attempt system install if missing
+find_package(OpenSSL QUIET)
+if(NOT OPENSSL_FOUND)
+  message(STATUS "OpenSSL not found, attempting automatic installation...")
+  find_program(APT_GET_EXECUTABLE apt-get)
+  if(APT_GET_EXECUTABLE)
+    execute_process(
+      COMMAND sudo ${APT_GET_EXECUTABLE} install -y libssl-dev
+      RESULT_VARIABLE _apt_result
+    )
+    if(_apt_result EQUAL 0)
+      find_package(OpenSSL QUIET)
+    endif()
+  endif()
+  if(NOT OPENSSL_FOUND)
+    message(FATAL_ERROR
+      "OpenSSL introuvable et l'installation automatique a échoué.\n"
+      "Installez manuellement: sudo apt-get install libssl-dev")
+  endif()
+endif()
+message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+
 block()
 FetchContent_Declare(
   Poco

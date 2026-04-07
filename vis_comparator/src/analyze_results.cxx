@@ -288,7 +288,7 @@ std::vector<std::filesystem::path> ListJSONFilesIn(std::filesystem::path const& 
 
 int main(int argc, char* argv[]) {
   //std::filesystem::path inPath = "data";
-  std::filesystem::path inPath = "/home/olivier/Desktop/analyze/BINOUT";
+  std::filesystem::path inPath = "/home/nbaffou/Desktop/analyze/BINOUT";
   std::unordered_set<std::string> ingnoredFiles;
   int argKey = -1;
   for(int i=1; i<argc; ++i) {
