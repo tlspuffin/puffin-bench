@@ -300,71 +300,86 @@ class GraphManager {
 
     const requireUI = options?.showIcons || options?.title || options?.showRawToggle || options?.showCIToggle || options?.showAxesToggle;
     if (requireUI) {
-      const ui = document.createElement('div');
-      ui.id = 'graph_ui_' + id;
+      // ── Title bar (solid colour background) ──────────────────────────
+      const titleBar = document.createElement('div');
+      titleBar.className = 'graph_title_bar';
+
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'graph_title_text';
+      titleSpan.textContent = options?.title ?? '';
+      titleBar.appendChild(titleSpan);
 
       if (options?.showIcons) {
-        const eltDelete = document.createElement('span');
-        eltDelete.className = 'graph_ui_icons';
-        eltDelete.id = 'graph_ui_delete_' + id;
-        eltDelete.innerHTML = '<span>\u2716</span><span class="graph_ui_icon_label">Delete</span>';
-        eltDelete.onclick = this.DelGraph.bind(this, id);
-        ui.appendChild(eltDelete);
+        const controlsDiv = document.createElement('div');
+        controlsDiv.className = 'graph_title_controls';
 
-        const eltCollapse = document.createElement('span');
-        eltCollapse.className = 'graph_ui_icons';
+        const eltCollapse = document.createElement('button');
+        eltCollapse.className = 'graph_icon_btn';
         eltCollapse.id = 'graph_ui_collapse_' + id;
-        eltCollapse.innerHTML = '<span>\u2796</span><span class="graph_ui_icon_label">Minimize</span>';
+        eltCollapse.textContent = '\u2796';
+        eltCollapse.title = 'Minimize';
         eltCollapse.onclick = function() {
           const isVisible = graphArea.style.display !== 'none';
           graphArea.style.display = isVisible ? 'none' : '';
-          eltCollapse.innerHTML = isVisible
-            ? '<span>\u2795</span><span class="graph_ui_icon_label">Expand</span>'
-            : '<span>\u2796</span><span class="graph_ui_icon_label">Minimize</span>';
+          eltCollapse.textContent = isVisible ? '\u2795' : '\u2796';
+          eltCollapse.title = isVisible ? 'Expand' : 'Minimize';
           if (!isVisible) {
             Plotly.Plots.resize(graphArea);
           }
         };
-        ui.appendChild(eltCollapse);
+        controlsDiv.appendChild(eltCollapse);
+
+        const eltDelete = document.createElement('button');
+        eltDelete.className = 'graph_icon_btn graph_icon_btn_delete';
+        eltDelete.id = 'graph_ui_delete_' + id;
+        eltDelete.textContent = '\u2716';
+        eltDelete.title = 'Delete graph';
+        eltDelete.onclick = this.DelGraph.bind(this, id);
+        controlsDiv.appendChild(eltDelete);
+
+        titleBar.appendChild(controlsDiv);
       }
 
-      if (options?.showAxesToggle) {
-        const eltSplit = document.createElement('button');
-        eltSplit.className = 'graph-toggle-btn';
-        eltSplit.id = 'graph_ui_split_' + id;
-        eltSplit.textContent = 'Split Y-Axes';
-        eltSplit.title = 'Use one Y-axis per metric (useful when scales differ)';
-        eltSplit.onclick = this.ToggleSplitAxes.bind(this, id);
-        ui.appendChild(eltSplit);
-      }
+      container.appendChild(titleBar);
 
-      if (options?.showRawToggle) {
-        const eltRaw = document.createElement('button');
-        eltRaw.className = 'graph-toggle-btn';
-        eltRaw.id = 'graph_ui_raw_' + id;
-        eltRaw.textContent = 'All Runs';
-        eltRaw.title = 'Show each individual run as a separate trace';
-        eltRaw.onclick = this.ToggleRawTraces.bind(this, id);
-        ui.appendChild(eltRaw);
-      }
+      // ── Toggle bar (white band below title) ──────────────────────────
+      const showAnyToggle = options?.showAxesToggle || options?.showRawToggle || options?.showCIToggle;
+      if (showAnyToggle) {
+        const toggleBar = document.createElement('div');
+        toggleBar.className = 'graph_toggle_bar';
 
-      if (options?.showCIToggle) {
-        const eltCI = document.createElement('button');
-        eltCI.className = 'graph-toggle-btn';
-        eltCI.id = 'graph_ui_ci_' + id;
-        eltCI.textContent = 'Confidence Bands';
-        eltCI.title = 'Show 95% confidence interval around the mean';
-        eltCI.onclick = this.ToggleCIShadow.bind(this, id);
-        ui.appendChild(eltCI);
-      }
+        if (options?.showAxesToggle) {
+          const eltSplit = document.createElement('button');
+          eltSplit.className = 'graph-toggle-btn';
+          eltSplit.id = 'graph_ui_split_' + id;
+          eltSplit.textContent = 'Split Y-Axes';
+          eltSplit.title = 'Use one Y-axis per metric (useful when scales differ)';
+          eltSplit.onclick = this.ToggleSplitAxes.bind(this, id);
+          toggleBar.appendChild(eltSplit);
+        }
 
-      if (options?.title) {
-        const title = document.createElement('span');
-        title.innerText = options.title;
-        ui.appendChild(title);
-      }
+        if (options?.showRawToggle) {
+          const eltRaw = document.createElement('button');
+          eltRaw.className = 'graph-toggle-btn';
+          eltRaw.id = 'graph_ui_raw_' + id;
+          eltRaw.textContent = 'All Runs';
+          eltRaw.title = 'Show each individual run as a separate trace';
+          eltRaw.onclick = this.ToggleRawTraces.bind(this, id);
+          toggleBar.appendChild(eltRaw);
+        }
 
-      container.appendChild(ui);
+        if (options?.showCIToggle) {
+          const eltCI = document.createElement('button');
+          eltCI.className = 'graph-toggle-btn';
+          eltCI.id = 'graph_ui_ci_' + id;
+          eltCI.textContent = 'Confidence Bands';
+          eltCI.title = 'Show 95% confidence interval around the mean';
+          eltCI.onclick = this.ToggleCIShadow.bind(this, id);
+          toggleBar.appendChild(eltCI);
+        }
+
+        container.appendChild(toggleBar);
+      }
     }
 
     container.appendChild(graphArea);

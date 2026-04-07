@@ -299,7 +299,11 @@ function ConfigBaseInformations() {
   modalpage.classList.add('modalpage_visible');
 }
 
+const DEFAULT_STEP_DIVISOR = 20_000;
+
 function AddGraphique(currentState) {
+  let selectedSubject = currentState.subject;
+  let currentMetrics = currentState.metrics;
   let selectedCommits = [currentState.commit];
   let selectedMetrics = [];
   let metricsUIContainer = null;
@@ -311,8 +315,17 @@ function AddGraphique(currentState) {
   const container = document.createElement('div');
   ui.Reset();
 
-  // 1. Commit selection
-  container.appendChild(ui.CreateTitle("1. Select commit(s)", 'h3'));
+  // 1. PUT selection
+  container.appendChild(ui.CreateTitle("1. Select PUT", 'h3'));
+  const selectSubject = ui.CreateSelect(
+    (currentState.subjects ?? []).map(function(s) {
+      return { value: s.value, text: s.text, selected: s.value === currentState.subject };
+    })
+  );
+  container.appendChild(selectSubject);
+
+  // 2. Commit selection
+  container.appendChild(ui.CreateTitle("2. Select commit(s)", 'h3'));
   const commitsUI = ui.CreateCommits(currentState.commits, new Set(selectedCommits), {
     maxSelect: 4,
     callback: function(event) {
@@ -327,16 +340,16 @@ function AddGraphique(currentState) {
   });
   container.appendChild(commitsUI);
 
-  // 2. Metrics (rebuilt dynamically when commit selection changes)
-  container.appendChild(ui.CreateTitle("2. Select metric(s)", 'h3'));
+  // 3. Metrics (rebuilt dynamically when commit or PUT selection changes)
+  container.appendChild(ui.CreateTitle("3. Select metric(s)", 'h3'));
   const metricsWrapper = document.createElement('div');
   container.appendChild(metricsWrapper);
 
-  // 3. Time range
-  container.appendChild(ui.CreateTitle("3. Time range (\u03bcs)", 'h3'));
+  // 4. Time range
+  container.appendChild(ui.CreateTitle("4. Time range (\u03bcs)", 'h3'));
   const timeID = ui.ID();
   const time = ui.CreateTimeSelection(
-      0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / 20_000));
+      0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / DEFAULT_STEP_DIVISOR));
   container.appendChild(time);
 
   setModalCancel(function() {
@@ -345,7 +358,7 @@ function AddGraphique(currentState) {
     EnableMainUI(true);
   });
 
-  // 4. Actions
+  // 5. Actions
   const btOkContainerID = 'ui_' + ui.ID();
   const actions = ui.CreateActions(true, {
     ok: {
@@ -360,7 +373,7 @@ function AddGraphique(currentState) {
           // COMPARE mode: one merged graph
           const results = await Promise.all(
             selectedCommits.map(c => apirest.LoadCommitMetricsValues(
-              currentState.type, c, currentState.subject, min, max, step, selectedMetrics
+              currentState.type, c, selectedSubject, min, max, step, selectedMetrics
             ))
           );
           const commitsData = new Map(
@@ -373,7 +386,7 @@ function AddGraphique(currentState) {
               compareCommits: validCommits,
               metrics: selectedMetrics,
               type: currentState.type,
-              subject: currentState.subject,
+              subject: selectedSubject,
               min, max, step,
               showRaw: false,
               splitAxes: true
@@ -385,7 +398,7 @@ function AddGraphique(currentState) {
           // NORMAL mode: single commit graph
           const theCommit = selectedCommits[0];
           const data = await apirest.LoadCommitMetricsValues(
-            currentState.type, theCommit, currentState.subject, min, max, step, selectedMetrics);
+            currentState.type, theCommit, selectedSubject, min, max, step, selectedMetrics);
           if (data != null) {
             const { header, series } = data;
             const graphSetting = {
@@ -393,7 +406,7 @@ function AddGraphique(currentState) {
               metrics: selectedMetrics,
               type: currentState.type,
               commit: theCommit,
-              subject: currentState.subject,
+              subject: selectedSubject,
               min, max, step,
               showRaw: true,
               showCI: true,
@@ -429,11 +442,32 @@ function AddGraphique(currentState) {
 
   modalpage.classList.add('modalpage_visible');
 
+  // PUT change: reload metrics for the new subject
+  selectSubject.onchange = async function(event) {
+    const newSubject = event.target.value;
+    if (newSubject === selectedSubject || newSubject === '') return;
+    selectedSubject = newSubject;
+    UI.DisableElement(selectSubject);
+    const commit = selectedCommits[0] ?? currentState.commit;
+    const newMetrics = await apirest.LoadCommitMetrics(currentState.type, commit, newSubject);
+    UI.EnableElement(selectSubject);
+    if (newMetrics && newMetrics.metrics) {
+      currentMetrics = newMetrics;
+      const startInput = document.getElementById('time_start_' + timeID);
+      const endInput = document.getElementById('time_end_' + timeID);
+      const stepInput = document.getElementById('time_step_' + timeID);
+      if (startInput) startInput.value = 0;
+      if (endInput) endInput.value = newMetrics.maxTimeMicroS;
+      if (stepInput) stepInput.value = Math.floor(newMetrics.maxTimeMicroS / DEFAULT_STEP_DIVISOR);
+      rebuildMetricsUI();
+    }
+  };
+
   function rebuildMetricsUI() {
     selectedMetrics = [];
     const isCompare = selectedCommits.length >= 2;
     if (metricsUIContainer) metricsUIContainer.remove();
-    metricsUIContainer = ui.CreateMetrics(currentState.metrics, {
+    metricsUIContainer = ui.CreateMetrics(currentMetrics, {
       maxSelect: isCompare ? 4 : Infinity,
       callback: function(event) {
         if (event.target.checked) {
@@ -561,11 +595,7 @@ function NewGraph() {
   setModalCancel(function() {
     clearModalCancel();
     modalpage.classList.remove('modalpage_visible');
-    if (state.commit === '') {
-      UI.EnableElement(uiLoadView);
-    } else {
-      EnableMainUI(true);
-    }
+    if (state.commit !== '') EnableMainUI(true);
   });
 
   container.appendChild(ui.CreateActions(true, {
@@ -581,11 +611,7 @@ function NewGraph() {
       callback: function(event) {
         clearModalCancel();
         modalpage.classList.remove('modalpage_visible');
-        if (state.commit === '') {
-          UI.EnableElement(uiLoadView);
-        } else {
-          EnableMainUI(true);
-        }
+        if (state.commit !== '') EnableMainUI(true);
       }
     }
   }));
@@ -621,46 +647,47 @@ function OpenInfoModal() {
   body.innerHTML = `
     <p>This dashboard visualises performance and vulnerability test results as interactive time-series graphs. Follow the steps below to explore your data.</p>
 
-    <h3>1 — Getting started (📋)</h3>
-    <p>Click <strong>📋</strong> (bottom right) to open a saved view or start fresh.</p>
+    <h3>1 — Getting started</h3>
+    <p>Use the toolbar in the top-right header to manage views:</p>
     <ul>
-      <li><strong>New</strong> — opens the view creator to generate a new blank view.</li>
-      <li><strong>File name</strong> — click a listed name to restore a saved view.</li>
+      <li><strong>Ouvrir vue</strong> — open a saved view or start fresh (click <strong>New</strong> inside the dialog).</li>
+      <li><strong>Nouvelle vue</strong> — jump directly to the view creator for a blank dashboard.</li>
     </ul>
 
     <h3>2 — View Creator</h3>
-    <p>Select/Fill four values in order — each step unlocks the next:</p>
+    <p>Select/fill four values in order — each step unlocks the next:</p>
     <ol>
       <li><strong>XP Type</strong> — choose <em>Perf</em> (performance) or <em>Vuln</em> (vulnerability).</li>
-      <li><strong>Commit</strong> — select the commit whose data will be based on (available metrics) and default commit to be selected.</li>
-      <li><strong>Library</strong> — pick the library (benchmark name) for that commit.</li>
-      <li><strong>View name</strong> — auto-generated from your selections; edit if you want a custom name.</li>
+      <li><strong>Commit</strong> — select the commit to base available metrics and the default selection on.</li>
+      <li><strong>Library (PUT)</strong> — pick the programme under test (benchmark name) for that commit.</li>
+      <li><strong>View name</strong> — auto-generated from your selections; edit for a custom name.</li>
     </ol>
     <p>Click <strong>OK</strong> to confirm. A new view with those parameters will be created.</p>
 
-    <h3>3 — Add a graph (➕)</h3>
-    <p>Click <strong>➕</strong> to add a new graph panel. Three steps:</p>
+    <h3>3 — Add a graph (+ Graphe)</h3>
+    <p>Click <strong>+ Graphe</strong> in the toolbar to add a new graph panel. Four steps:</p>
     <ol>
-      <li><strong>Commit(s)</strong> — select one commit for a standard graph, or 2–4 commits to compare them stacked.</li>
-      <li><strong>Metric(s)</strong> — browse the metric tree (click <strong>➕</strong> to expand a folder). Unlimited metrics but be careful to the readability.</li>
+      <li><strong>PUT</strong> — pre-selected from the global config; change to graph a different library.</li>
+      <li><strong>Commit(s)</strong> — select one commit for a standard graph, or 2–4 commits to compare.</li>
+      <li><strong>Metric(s)</strong> — browse the metric tree (click <strong>➕</strong> to expand a folder).</li>
       <li><strong>Time range</strong> — set Start, End, and Step in microseconds (µs). Smaller step = more detail, slower load.</li>
     </ol>
 
     <h3>4 — Graph controls</h3>
-    <p>Each graph panel has a toolbar with these controls:</p>
+    <p>Each graph panel has controls in its title bar and a toggle row below:</p>
     <ul>
-      <li><strong>✖ Delete</strong> — remove the graph.</li>
-      <li><strong>➖ / ➕ Minimize / Expand</strong> — hide or show the plot area.</li>
+      <li><strong>✖</strong> (red) — delete the graph.</li>
+      <li><strong>➖ / ➕</strong> — minimize or expand the plot area.</li>
       <li><strong>Split Y-Axes</strong> — give each metric its own Y-axis (useful for different scales).</li>
       <li><strong>All Runs</strong> — overlay individual run data as dotted lines.</li>
       <li><strong>Confidence Bands</strong> — show 95% confidence interval shading around means.</li>
     </ul>
 
-    <h3>5 — Save and load (💾 / 📋)</h3>
+    <h3>5 — Save and load</h3>
     <ul>
-      <li><strong>💾</strong> saves the entire dashboard (all graphs and settings) under the title shown in the header.</li>
+      <li><strong>Sauvegarder</strong> — saves the entire dashboard (all graphs and settings) under the title shown in the header.</li>
       <li>Click <strong>✏ Edit</strong> next to the title to rename before saving.</li>
-      <li><strong>📋</strong> lists all saved views; search, sort, load, or delete them.</li>
+      <li><strong>Ouvrir vue</strong> — lists all saved views; search, sort, load, or delete them.</li>
     </ul>
 
     <h3>Tips</h3>
@@ -675,24 +702,24 @@ function OpenInfoModal() {
     <h3>Plain-language guide</h3>
 
     <h4 style="margin-top:16px; color:#555;">Starting from scratch</h4>
-    <p>Click 📋 (bottom-right) to open a saved view, or choose <strong>New</strong> to start a blank dashboard. The view ties together a type of test, a code commit, and a benchmark library.</p>
+    <p>Click <strong>Ouvrir vue</strong> (top-right toolbar) to open a saved view, or <strong>Nouvelle vue</strong> to start a blank dashboard. The view ties together a test type, a code commit, and a benchmark library (PUT).</p>
 
     <h4 style="margin-top:16px; color:#555;">Setting up a view</h4>
-    <p>Fill the four fields in order — each one unlocks the next. The name auto-fills for you once you pick a subject; change it if you want something more memorable.</p>
+    <p>Fill the four fields in order — each one unlocks the next. The name auto-fills once you pick a subject; change it if you want something more memorable.</p>
 
     <h4 style="margin-top:16px; color:#555;">Adding a graph</h4>
-    <p>Click ➕, pick one or more commits, choose your metrics, and set a time window. Selecting two or more commits produces a side-by-side comparison chart instead of a single-commit chart.</p>
+    <p>Click <strong>+ Graphe</strong>, choose the PUT, pick one or more commits, select your metrics, and set a time window. Two or more commits produces a comparison chart.</p>
 
     <h4 style="margin-top:16px; color:#555;">What the toggle buttons actually show you</h4>
     <ul>
-      <li><strong>All Runs</strong> — shows every individual benchmark run as a faint dotted line behind the main curve. Wide spread = inconsistent results.</li>
-      <li><strong>Confidence Bands</strong> — adds a shaded area around each mean line. The wider the band, the less certain the result. Uses a 95% confidence interval.</li>
-      <li><strong>Split Y-Axes</strong> — gives each metric its own vertical scale on the right side. Useful when comparing metrics that use very different units or magnitudes (e.g. bytes vs. milliseconds).</li>
+      <li><strong>All Runs</strong> — shows every individual benchmark run as a faint dotted line. Wide spread = inconsistent results.</li>
+      <li><strong>Confidence Bands</strong> — adds a shaded area around each mean. The wider the band, the less certain the result (95% CI).</li>
+      <li><strong>Split Y-Axes</strong> — gives each metric its own vertical scale. Useful when comparing metrics with very different units or magnitudes.</li>
     </ul>
-    <p>Clicking a trace name in the legend hides/shows it. That hidden state is remembered if you then toggle one of the buttons above.</p>
+    <p>Clicking a trace name in the legend hides/shows it. That hidden state is preserved when you toggle the buttons above.</p>
 
     <h4 style="margin-top:16px; color:#555;">Saving and loading</h4>
-    <p>Click 💾 to save your dashboard. Click <strong>✏ Edit</strong> in the header to rename it first. Click 📋 to manage saved views: search, sort alphabetically, load one, or delete old ones.</p>
+    <p>Click <strong>Sauvegarder</strong> to save your dashboard. Click <strong>✏ Edit</strong> in the header to rename it first. Use <strong>Ouvrir vue</strong> to manage saved views: search, sort, load, or delete.</p>
   `;
   container.appendChild(body);
 
@@ -812,9 +839,16 @@ headerEditBtn.onclick = function() {
   }
 };
 
-header.appendChild(headerConfigIcon);
-header.appendChild(headerTitle);
-header.appendChild(headerEditBtn);
+const headerLeft = document.createElement('div');
+headerLeft.className = 'header-left';
+headerLeft.appendChild(headerConfigIcon);
+headerLeft.appendChild(headerTitle);
+headerLeft.appendChild(headerEditBtn);
+header.appendChild(headerLeft);
+
+const headerToolbar = document.createElement('div');
+headerToolbar.className = 'header-toolbar';
+header.appendChild(headerToolbar);
 
 function UpdateHeader() {
   if (state.type) {
@@ -854,57 +888,48 @@ const graphManager = new GraphManager(main, {
 });
 
 // ============================================================
-// FLOATING ACTION BUTTONS
+// HEADER TOOLBAR BUTTONS
 // ============================================================
 
 const UIElt = [];
-const mainUI = document.createElement('div');
-mainUI.id = 'ui_icons';
 
-const uiAddGraph = document.createElement('span');
-uiAddGraph.className = 'ui_icons';
-uiAddGraph.innerText = '➕';
-uiAddGraph.onclick = function(event) {
+const uiAddGraph = UI.CreateToolbarBtn('+ Graphe', 'Add a new graph');
+uiAddGraph.onclick = function() {
   EnableMainUI(false);
   AddGraphique(state);
-}
+};
+headerToolbar.appendChild(uiAddGraph);
 UIElt.push(uiAddGraph);
 
-const uiSaveView = document.createElement('span');
-uiSaveView.className = 'ui_icons';
-uiSaveView.innerText = '💾';
-uiSaveView.onclick = function(event) {
+const uiSaveView = UI.CreateToolbarBtn('Sauvegarder', 'Save the current view');
+uiSaveView.onclick = function() {
   EnableMainUI(false);
   Save(state);
-}
+};
+headerToolbar.appendChild(uiSaveView);
 UIElt.push(uiSaveView);
+
+const uiOpenView = UI.CreateToolbarBtn('Ouvrir vue', 'Open a saved view');
+uiOpenView.onclick = function() {
+  EnableMainUI(false);
+  NewGraph();
+};
+headerToolbar.appendChild(uiOpenView);
+
+const uiNewView = UI.CreateToolbarBtn('Nouvelle vue', 'Create a new blank view');
+uiNewView.onclick = function() {
+  EnableMainUI(false);
+  ConfigBaseInformations();
+};
+headerToolbar.appendChild(uiNewView);
+
+const uiInfo = UI.CreateToolbarBtn('Aide', 'Help');
+uiInfo.onclick = OpenInfoModal;
+headerToolbar.appendChild(uiInfo);
 
 UIElt.forEach(function(element) {
   UI.DisableElement(element);
 });
-
-const uiLoadView = document.createElement('span');
-uiLoadView.className = 'ui_icons';
-uiLoadView.innerText = '📋';
-uiLoadView.onclick = function(event) {
-  EnableMainUI(false);
-  NewGraph();
-}
-UI.EnableElement(uiLoadView);
-UIElt.push(uiLoadView);
-
-UIElt.forEach(function(element) {
-  mainUI.appendChild(element);
-});
-
-const uiInfo = document.createElement('span');
-uiInfo.className = 'ui_icons';
-uiInfo.innerText = 'ℹ';
-uiInfo.title = 'Help';
-uiInfo.onclick = OpenInfoModal;
-mainUI.appendChild(uiInfo);
-
-main.appendChild(mainUI);
 
 const modalpage = document.getElementById('modalpage');
 

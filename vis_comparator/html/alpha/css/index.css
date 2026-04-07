@@ -46,13 +46,63 @@ body {
 .header {
   background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
   color: white;
-  padding: 20px 30px;
+  padding: 12px 24px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   font-size: 1.2rem;
   font-weight: 600;
   position: sticky;
   top: 0;
   z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.header-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.header-toolbar-btn {
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  padding: 6px 13px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 0;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+  font-family: inherit;
+}
+
+.header-toolbar-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  transform: none;
+}
+
+.header-toolbar-btn:active {
+  background: rgba(255, 255, 255, 0.45);
+  transform: none;
+}
+
+.header-toolbar-btn:disabled,
+.header-toolbar-btn.is-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* =================================================================
@@ -63,46 +113,8 @@ body {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
-  padding-bottom: 60px;
 }
 
-/* =================================================================
-   Main UI Icons (➕ 📌 buttons at bottom)
-   ================================================================= */
-
-#ui_icons {
-  position: fixed;
-  bottom: 30px;
-  right: 30px;
-  display: flex;
-  gap: 15px;
-  z-index: 50;
-}
-
-.ui_icons {
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-  color: white;
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.8rem;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-  transition: all 0.3s ease;
-  user-select: none;
-}
-
-.ui_icons:hover {
-  transform: translateY(-3px) scale(1.05);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-}
-
-.ui_icons:active {
-  transform: translateY(-1px) scale(0.98);
-}
 
 /* =================================================================
    Graph Containers
@@ -122,62 +134,69 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
-/* Graph UI Bar (top bar with controls) */
-div[id^="graph_ui_"] {
-  background: linear-gradient(90deg, var(--color-graph-bar) 0%, var(--color-graph-bar-end) 100%);
-  padding: 8px 8px;
+/* Graph title bar (coloured background) */
+.graph_title_bar {
+  background: var(--color-primary);
+  padding: 7px 10px;
   display: flex;
   align-items: center;
-  gap: 15px;
-  border-bottom: 2px solid #e0e0e0;
+  gap: 8px;
 }
 
-.graph_ui_icons {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  padding: 3px 7px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  user-select: none;
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.graph_ui_icon_label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--color-text-dark);
-  white-space: nowrap;
-  line-height: 1;
-}
-
-.graph_ui_icons_active {
-  background: rgba(102, 126, 234, 0.25);
-  outline: 2px solid rgba(102, 126, 234, 0.5);
-}
-
-.graph_ui_icons:hover {
-  background: rgba(255, 255, 255, 1);
-  transform: scale(1.1);
-}
-
-.graph_ui_icons_active:hover {
-  background: rgba(102, 126, 234, 0.35);
-}
-
-.graph_ui_icons:active {
-  transform: scale(0.95);
-}
-
-/* Graph title in UI bar */
-div[id^="graph_ui_"] span:not(.graph_ui_icons) {
-  font-weight: 600;
-  color: var(--color-text-dark);
+.graph_title_text {
   flex: 1;
-  font-size: 1.1rem;
+  text-align: center;
+  font-weight: 600;
+  color: white;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.graph_title_controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.graph_icon_btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin: 0;
+  line-height: 1.5;
+  transition: background 0.15s ease;
+  font-family: inherit;
+}
+
+.graph_icon_btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: none;
+}
+
+.graph_icon_btn_delete {
+  color: #ff8080;
+  border-color: rgba(255, 128, 128, 0.45);
+}
+
+.graph_icon_btn.graph_icon_btn_delete:hover {
+  background: rgba(255, 100, 100, 0.25);
+}
+
+/* Toggle bar (white band below title) */
+.graph_toggle_bar {
+  background: white;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 /* Graph area (Plotly container) */
@@ -520,25 +539,23 @@ button:disabled,
 
 @media (max-width: 768px) {
   .header {
-    padding: 15px 20px;
+    padding: 10px 14px;
     font-size: 1rem;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-toolbar {
+    gap: 4px;
+  }
+
+  .header-toolbar-btn {
+    padding: 5px 9px;
+    font-size: 0.78rem;
   }
 
   .main {
     padding: 15px;
-    padding-bottom: 60px;
-  }
-
-  #ui_icons {
-    bottom: 20px;
-    right: 20px;
-    gap: 10px;
-  }
-
-  .ui_icons {
-    width: 50px;
-    height: 50px;
-    font-size: 1.5rem;
   }
 
   .modalpage > div {
@@ -620,15 +637,15 @@ button:disabled,
   font-weight: 600;
   padding: 4px 12px;
   border-radius: 999px;
-  border: 2px solid rgba(44, 62, 80, 0.35);
-  background: rgba(255, 255, 255, 0.88);
+  border: 2px solid rgba(44, 62, 80, 0.25);
+  background: #f4f5f7;
   color: var(--color-text-dark);
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
   white-space: nowrap;
   margin: 0;
-  margin-top: 0;
+  font-family: inherit;
 }
 
 .graph-toggle-btn:hover {

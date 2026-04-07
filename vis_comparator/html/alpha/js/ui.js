@@ -305,6 +305,7 @@ class UI {
    */
   static DisableElement(element) {
     element.style.pointerEvents = 'none';
+    element.classList.add('is-disabled');
   }
 
   /**
@@ -313,6 +314,21 @@ class UI {
    */
   static EnableElement(element) {
     element.style.pointerEvents = '';
+    element.classList.remove('is-disabled');
+  }
+
+  /**
+   * Creates a styled header toolbar button.
+   * @param {string} label - Button text
+   * @param {string} title - Tooltip text
+   * @returns {HTMLButtonElement}
+   */
+  static CreateToolbarBtn(label, title) {
+    const btn = document.createElement('button');
+    btn.className = 'header-toolbar-btn';
+    btn.textContent = label;
+    btn.title = title;
+    return btn;
   }
 
   #ApplyOptions(element, options) {
