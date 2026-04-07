@@ -4,6 +4,7 @@ class GraphManager {
   #callbacks;
   static #nextid = 0;
   static #PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'];
+  static #DASH_PALETTE = ['solid', 'dot', 'dash', 'dashdot'];
 
   constructor(document, callbacks) {
     this.#configs = new Map();
@@ -13,12 +14,33 @@ class GraphManager {
 
   async AddGraph(config, header, series) {
     const id = GraphManager.#nextid++;
-    const { container: graphContainer, graphArea } = this.#BuildGraphContainer(id, { showIcons: true, title: config.metrics.toString() });
+    const { container: graphContainer, graphArea } = this.#BuildGraphContainer(id, {
+      showIcons: true,
+      showAxesToggle: true,
+      showRawToggle: true,
+      showCIToggle: true,
+      title: config.metrics.toString()
+    });
     this.#document.appendChild(graphContainer);
 
-    await this.#DrawGraph(graphArea, config.metrics, header, series, config.commit);
+    await this.#DrawGraph(graphArea, config, header, series);
 
     this.#configs.set(id, { config, header, series, graphContainer, graphArea });
+
+    const eltSplit = document.getElementById('graph_ui_split_' + id);
+    if (eltSplit) {
+      if (config.metrics.length <= 1) {
+        eltSplit.style.pointerEvents = 'none';
+      } else if (config.splitAxes) {
+        eltSplit.classList.add('graph_ui_icons_active');
+      }
+    }
+    if (config.showRaw !== false) {
+      document.getElementById('graph_ui_raw_' + id)?.classList.add('graph_ui_icons_active');
+    }
+    if (config.showCI !== false) {
+      document.getElementById('graph_ui_ci_' + id)?.classList.add('graph_ui_icons_active');
+    }
 
     return id;
   }
@@ -29,6 +51,7 @@ class GraphManager {
     const title = `${config.metrics.join(', ')} [${shortHashes}]`;
     const { container: graphContainer, graphArea } = this.#BuildGraphContainer(id, {
       showIcons: true,
+      showAxesToggle: true,
       showRawToggle: true,
       showCIToggle: true,
       title
@@ -38,6 +61,15 @@ class GraphManager {
     await this.#DrawCompareGraph(graphArea, config, commitsData);
 
     this.#configs.set(id, { config, graphContainer, graphArea, mode: 'compare', commitsData });
+
+    const eltSplit = document.getElementById('graph_ui_split_' + id);
+    if (eltSplit) {
+      if (config.metrics.length <= 1) {
+        eltSplit.style.pointerEvents = 'none';
+      } else if (config.splitAxes) {
+        eltSplit.classList.add('graph_ui_icons_active');
+      }
+    }
 
     return id;
   }
@@ -59,26 +91,43 @@ class GraphManager {
 
   ToggleRawTraces(id) {
     const stored = this.#configs.get(id);
-    if (!stored || stored.mode !== 'compare') return;
+    if (!stored) return;
     stored.config.showRaw = !stored.config.showRaw;
-    const eltRaw = document.getElementById('graph_ui_raw_' + id);
-    if (eltRaw) eltRaw.classList.toggle('graph_ui_icons_active', stored.config.showRaw);
-    this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData);
+    document.getElementById('graph_ui_raw_' + id)
+      ?.classList.toggle('graph_ui_icons_active', stored.config.showRaw);
+    stored.mode === 'compare'
+      ? this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData)
+      : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series);
   }
 
   ToggleCIShadow(id) {
     const stored = this.#configs.get(id);
-    if (!stored || stored.mode !== 'compare') return;
-    stored.config.showCI = !(stored.config.showCI ?? true);
-    const eltCI = document.getElementById('graph_ui_ci_' + id);
-    if (eltCI) eltCI.classList.toggle('graph_ui_icons_active', stored.config.showCI !== false);
-    this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData);
+    if (!stored) return;
+    stored.config.showCI = !(stored.config.showCI ?? false);
+    document.getElementById('graph_ui_ci_' + id)
+      ?.classList.toggle('graph_ui_icons_active', stored.config.showCI !== false);
+    stored.mode === 'compare'
+      ? this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData)
+      : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series);
   }
 
-  async #DrawGraph(container, metrics, header, series, commit) {
-    const traces = this.#PrepareTracesForPlotly(metrics, header, series);
+  ToggleSplitAxes(id) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    stored.config.splitAxes = !stored.config.splitAxes;
+    const eltSplit = document.getElementById('graph_ui_split_' + id);
+    if (eltSplit) eltSplit.classList.toggle('graph_ui_icons_active', stored.config.splitAxes);
+    if (stored.mode === 'compare') {
+      this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData);
+    } else {
+      this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series);
+    }
+  }
+
+  async #DrawGraph(container, config, header, series) {
+    const traces = this.#PrepareTracesForPlotly(config, header, series);
     const layout = {
-      title: `${commit}`,
+      title: `${config.commit}`,
       xaxis: { title: 'Time (s)', type: 'linear', ticksuffix: 's' },
       yaxis: { title: 'Value', type: 'linear' },
       hovermode: 'x unified',
@@ -89,6 +138,13 @@ class GraphManager {
       autosize: true,
       height: 400
     };
+    if (config.splitAxes && config.metrics.length > 1) {
+      const { xDomain, axes } = GraphManager.#BuildSplitAxisLayout(config.metrics);
+      layout.xaxis.domain = xDomain;
+      Object.assign(layout, axes);
+      layout.margin.r = 80;
+      layout.legend = { x: 1.12, xanchor: 'left', y: 1 };
+    }
     const plotlyConfig = {
       responsive: true,
       displayModeBar: true,
@@ -99,21 +155,23 @@ class GraphManager {
 
   async #DrawCompareGraph(container, config, commitsData) {
     const traces = this.#PrepareTracesForCompare(config, commitsData);
-    const hasDualAxis = config.metrics.length === 2;
+    const splitAxes = config.splitAxes && config.metrics.length > 1;
     const layout = {
       title: `Compare: ${config.metrics.join(' | ')}`,
       xaxis: { title: 'Time (s)', type: 'linear', ticksuffix: 's' },
-      yaxis: { title: hasDualAxis ? config.metrics[0] : 'Value', type: 'linear' },
+      yaxis: { title: splitAxes ? config.metrics[0] : 'Value', type: 'linear' },
       hovermode: 'x unified',
       hoverlabel: { namelength: -1 },
       showlegend: true,
-      legend: { x: 1.12, xanchor: 'left', y: 1 },
-      margin: { l: 60, r: hasDualAxis ? 80 : 20, t: 40, b: 40 },
+      legend: { x: splitAxes ? 1.12 : 1, xanchor: splitAxes ? 'left' : 'right', y: 1 },
+      margin: { l: 60, r: splitAxes ? 80 : 20, t: 40, b: 40 },
       autosize: true,
       height: 400
     };
-    if (hasDualAxis) {
-      layout.yaxis2 = { title: config.metrics[1], type: 'linear', overlaying: 'y', side: 'right' };
+    if (splitAxes) {
+      const { xDomain, axes } = GraphManager.#BuildSplitAxisLayout(config.metrics);
+      layout.xaxis.domain = xDomain;
+      Object.assign(layout, axes);
     }
     const plotlyConfig = {
       responsive: true,
@@ -135,7 +193,7 @@ class GraphManager {
     graphArea.style.width = '100%';
     graphArea.style.height = '400px';
 
-    const requireUI = options?.showIcons || options?.title || options?.showRawToggle || options?.showCIToggle;
+    const requireUI = options?.showIcons || options?.title || options?.showRawToggle || options?.showCIToggle || options?.showAxesToggle;
     if (requireUI) {
       const ui = document.createElement('div');
       ui.id = 'graph_ui_' + id;
@@ -164,11 +222,15 @@ class GraphManager {
         };
         ui.appendChild(eltCollapse);
 
-        const eltConfig = document.createElement('span');
-        eltConfig.className = 'graph_ui_icons';
-        eltConfig.id = 'graph_ui_config_' + id;
-        eltConfig.innerHTML = '<span>🧾</span><span class="graph_ui_icon_label">Config</span>';
-        ui.appendChild(eltConfig);
+      }
+
+      if (options?.showAxesToggle) {
+        const eltSplit = document.createElement('span');
+        eltSplit.className = 'graph_ui_icons';
+        eltSplit.id = 'graph_ui_split_' + id;
+        eltSplit.innerHTML = '<span>📐</span><span class="graph_ui_icon_label">Split Y</span>';
+        eltSplit.onclick = this.ToggleSplitAxes.bind(this, id);
+        ui.appendChild(eltSplit);
       }
 
       if (options?.showRawToggle) {
@@ -182,9 +244,9 @@ class GraphManager {
 
       if (options?.showCIToggle) {
         const eltCI = document.createElement('span');
-        eltCI.className = 'graph_ui_icons graph_ui_icons_active';
+        eltCI.className = 'graph_ui_icons';
         eltCI.id = 'graph_ui_ci_' + id;
-        eltCI.innerHTML = '<span>🌫️</span><span class="graph_ui_icon_label">CI</span>';
+        eltCI.innerHTML = '<span>🌫️</span><span class="graph_ui_icon_label">Conf. Int.</span>';
         eltCI.onclick = this.ToggleCIShadow.bind(this, id);
         ui.appendChild(eltCI);
       }
@@ -202,61 +264,75 @@ class GraphManager {
     return { container, graphArea };
   }
 
-  #PrepareTracesForPlotly(metrics, header, series) {
+  #PrepareTracesForPlotly(config, header, series) {
+    const { metrics, splitAxes } = config;
     const timestamps = [];
     for (let t = header.min; t < header.max; t += header.step) {
       timestamps.push(t / 1_000_000);
     }
 
     const traces = [];
-    for (const metricName of metrics) {
+    for (let metricIdx = 0; metricIdx < metrics.length; metricIdx++) {
+      const metricName = metrics[metricIdx];
+      const yAxis = splitAxes && metricIdx > 0 ? 'y' + (metricIdx + 1) : 'y';
+      const dash = GraphManager.#DASH_PALETTE[metricIdx % GraphManager.#DASH_PALETTE.length];
+
       const rawData = series[metricName];
       if (rawData) {
-        if (Array.isArray(rawData[0])) {
+        if (config.showRaw !== false && Array.isArray(rawData[0])) {
           rawData.forEach((data, idx) => {
+            const group = `m${metricIdx}_${header.runs[idx]}`;
             traces.push({
               x: timestamps, y: data,
               mode: 'lines',
               name: `${header.runs[idx]}`,
               line: { width: 1, dash: 'dot' },
-              opacity: 0.5
+              opacity: 0.5,
+              yaxis: yAxis,
+              legendgroup: group,
+              showlegend: config.showCI === false,
             });
           });
-        } else {
+        } else if (!Array.isArray(rawData[0])) {
           traces.push({
             x: timestamps, y: rawData,
             mode: 'lines',
             name: metricName,
-            line: { width: 2 }
+            line: { width: 2, dash },
+            yaxis: yAxis
           });
         }
       }
 
-      for (const runID of header.runs) {
-        const meanKey = `${metricName}_${runID}.mean`;
-        const ciLowerKey = `${metricName}_${runID}.ci_lower`;
-        const ciUpperKey = `${metricName}_${runID}.ci_upper`;
+      if (config.showCI !== false) {
+        for (const runID of header.runs) {
+          const meanKey = `${metricName}_${runID}.mean`;
+          const ciLowerKey = `${metricName}_${runID}.ci_lower`;
+          const ciUpperKey = `${metricName}_${runID}.ci_upper`;
 
-        if (series[meanKey]) {
-          const meanData = Array.isArray(series[meanKey][0]) ? series[meanKey][0] : series[meanKey];
-          const ciLower = Array.isArray(series[ciLowerKey][0]) ? series[ciLowerKey][0] : series[ciLowerKey];
-          const ciUpper = Array.isArray(series[ciUpperKey][0]) ? series[ciUpperKey][0] : series[ciUpperKey];
+          if (series[meanKey]) {
+            const meanData = Array.isArray(series[meanKey][0]) ? series[meanKey][0] : series[meanKey];
+            const ciLower = Array.isArray(series[ciLowerKey][0]) ? series[ciLowerKey][0] : series[ciLowerKey];
+            const ciUpper = Array.isArray(series[ciUpperKey][0]) ? series[ciUpperKey][0] : series[ciUpperKey];
+            const group = `m${metricIdx}_${runID}`;
 
-          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', name: `${metricName} CI (run ${runID})`, line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
-          traces.push({ x: timestamps, y: meanData, mode: 'lines', name: `${metricName} Mean (run ${runID})`, line: { width: 3 }, fill: 'tonexty', fillcolor: 'rgba(68, 68, 68, 0.2)' });
-          traces.push({ x: timestamps, y: ciLower, mode: 'lines', name: `${metricName} CI (run ${runID})`, line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: 'rgba(68, 68, 68, 0.2)', hoverinfo: 'skip' });
+            traces.push({ x: timestamps, y: ciUpper, mode: 'lines', name: `${metricName} CI (run ${runID})`, line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group });
+            traces.push({ x: timestamps, y: meanData, mode: 'lines', name: `${metricName} Mean (run ${runID})`, line: { width: 3, dash }, fill: 'tonexty', fillcolor: 'rgba(68, 68, 68, 0.2)', yaxis: yAxis, legendgroup: group });
+            traces.push({ x: timestamps, y: ciLower, mode: 'lines', name: `${metricName} CI (run ${runID})`, line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: 'rgba(68, 68, 68, 0.2)', hoverinfo: 'skip', yaxis: yAxis, legendgroup: group });
+          }
         }
-      }
 
-      const globalMeanKey = `${metricName}.mean`;
-      if (series[globalMeanKey]) {
-        const meanData = Array.isArray(series[globalMeanKey][0]) ? series[globalMeanKey][0] : series[globalMeanKey];
-        const ciLower = Array.isArray(series[`${metricName}.ci_lower`][0]) ? series[`${metricName}.ci_lower`][0] : series[`${metricName}.ci_lower`];
-        const ciUpper = Array.isArray(series[`${metricName}.ci_upper`][0]) ? series[`${metricName}.ci_upper`][0] : series[`${metricName}.ci_upper`];
+        const globalMeanKey = `${metricName}.mean`;
+        if (series[globalMeanKey]) {
+          const meanData = Array.isArray(series[globalMeanKey][0]) ? series[globalMeanKey][0] : series[globalMeanKey];
+          const ciLower = Array.isArray(series[`${metricName}.ci_lower`][0]) ? series[`${metricName}.ci_lower`][0] : series[`${metricName}.ci_lower`];
+          const ciUpper = Array.isArray(series[`${metricName}.ci_upper`][0]) ? series[`${metricName}.ci_upper`][0] : series[`${metricName}.ci_upper`];
+          const globalGroup = `m${metricIdx}_global`;
 
-        traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' });
-        traces.push({ x: timestamps, y: meanData, mode: 'lines', name: 'Mean', line: { width: 3, color: 'rgb(31, 119, 180)' }, fill: 'tonexty', fillcolor: 'rgba(31, 119, 180, 0.3)' });
-        traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: 'rgba(31, 119, 180, 0.3)', hoverinfo: 'skip' });
+          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: globalGroup });
+          traces.push({ x: timestamps, y: meanData, mode: 'lines', name: 'Mean', line: { width: 3, color: 'rgb(31, 119, 180)', dash }, fill: 'tonexty', fillcolor: 'rgba(31, 119, 180, 0.3)', yaxis: yAxis, legendgroup: globalGroup });
+          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: 'rgba(31, 119, 180, 0.3)', hoverinfo: 'skip', yaxis: yAxis, legendgroup: globalGroup });
+        }
       }
     }
 
@@ -264,7 +340,8 @@ class GraphManager {
   }
 
   #PrepareTracesForCompare(config, commitsData) {
-    const showCI = config.showCI !== false;
+    const showCI = config.showCI === true;
+    const splitAxes = config.splitAxes && config.metrics.length > 1;
     const traces = [];
 
     const firstData = commitsData.values().next().value;
@@ -284,8 +361,11 @@ class GraphManager {
       const { series } = data;
 
       config.metrics.forEach((metricName, metricIdx) => {
-        // 2e métrique sur l'axe Y droit
-        const yAxis = (config.metrics.length > 1 && metricIdx === 1) ? 'y2' : 'y';
+        const yAxis = splitAxes
+          ? (metricIdx === 0 ? 'y' : 'y' + (metricIdx + 1))
+          : 'y';
+        const dash = GraphManager.#DASH_PALETTE[metricIdx % GraphManager.#DASH_PALETTE.length];
+        const group = `c${commitIdx}_m${metricIdx}`;
 
         const meanKey = `${metricName}.mean`;
         const lowerKey = `${metricName}.ci_lower`;
@@ -298,17 +378,16 @@ class GraphManager {
         const traceName = config.metrics.length === 1
           ? shortHash
           : `${shortHash}/${metricName}`;
-        const dash = (config.metrics.length > 1 && metricIdx === 1) ? 'dash' : 'solid';
 
         if (showCI && series[lowerKey] && series[upperKey]) {
           const ciLower = Array.isArray(series[lowerKey][0]) ? series[lowerKey][0] : series[lowerKey];
           const ciUpper = Array.isArray(series[upperKey][0]) ? series[upperKey][0] : series[upperKey];
 
-          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis });
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis });
-          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis });
+          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group });
+          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group });
+          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group });
         } else {
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis });
+          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group });
         }
 
         if (config.showRaw) {
@@ -322,7 +401,8 @@ class GraphManager {
                 line: { width: 1, color, dash: 'dot' },
                 opacity: 0.3,
                 showlegend: false,
-                yaxis: yAxis
+                yaxis: yAxis,
+                legendgroup: group
               });
             });
           }
@@ -331,6 +411,42 @@ class GraphManager {
     });
 
     return traces;
+  }
+
+  static #BuildSplitAxisLayout(metrics) {
+    const n = metrics.length;
+    const PAD = 0.08;
+
+    // metrics[1],[3],[5]... → right axes
+    // metrics[2],[4],[6]... → extra left axes
+    const rightCount     = Math.ceil((n - 1) / 2);
+    const extraLeftCount = Math.floor((n - 1) / 2);
+
+    const domainStart = extraLeftCount > 0 ? extraLeftCount * PAD : 0;
+    // first right axis sits at domainEnd; each extra right axis goes PAD further out
+    const domainEnd = rightCount > 1 ? 1 - (rightCount - 1) * PAD : 1;
+
+    const axes = { yaxis: { title: { text: metrics[0], standoff: 8 }, type: 'linear' } };
+
+    metrics.slice(1).forEach((metric, i) => {
+      const axisKey = 'yaxis' + (i + 2);
+      const isRight = i % 2 === 0; // i=0,2,4... → right; i=1,3,5... → extra left
+
+      const position = isRight
+        ? domainEnd + (i / 2) * PAD              // right: domainEnd, domainEnd+PAD, ...
+        : domainStart - ((i - 1) / 2 + 1) * PAD; // left:  domainStart-PAD, domainStart-2*PAD, ...
+
+      axes[axisKey] = {
+        overlaying: 'y',
+        side: isRight ? 'right' : 'left',
+        title: { text: metric, standoff: 8 },
+        type: 'linear',
+        anchor: 'free',
+        position
+      };
+    });
+
+    return { xDomain: [domainStart, domainEnd], axes };
   }
 
   static #HexToRgba(hex, alpha) {

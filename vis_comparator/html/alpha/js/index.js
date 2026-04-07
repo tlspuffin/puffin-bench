@@ -9,6 +9,10 @@ const config = {
   apiBase: '/api/PR',
 };
 
+let currentModalCancelFn = null;
+function setModalCancel(fn) { currentModalCancelFn = fn; }
+function clearModalCancel() { currentModalCancelFn = null; }
+
 const state = {
   type: '',
   commit: '',
@@ -61,19 +65,17 @@ async function ResetState(state, newState) {
   }
   state.graphSettings = graphSettings;
 
-  header.innerText = `${state.type} (${state.commit}) : ${state.title}`;
+  UpdateHeader();
 }
 
 function SetBaseInformations(state, newState) {
   Object.assign(state, newState);
-  header.innerText = `${state.type} (${state.commit}) : ${state.title}`;
+  UpdateHeader();
   EnableMainUI(true);
 }
 
-async function ConfigBaseInformations(oldState) {
-  const currentState = {};
-  await ResetState(currentState, oldState);
-  currentState.metrics = [];
+function ConfigBaseInformations() {
+  const currentState = { type: '', commit: '', subject: '', commits: [], subjects: [], metrics: [], title: state.title, graphSettings: new Map() };
 
   const modalpage = document.getElementById('modalpage');
   modalpage.innerHTML = '';
@@ -121,20 +123,46 @@ async function ConfigBaseInformations(oldState) {
   container.appendChild(selectSubject);
   elements.push(selectSubject);
 
+  container.appendChild(ui.CreateTitle("4. Dashboard title", 'h3'));
+  const titleInput = document.createElement('input');
+  titleInput.type = 'text';
+  titleInput.className = 'modal_text_input';
+  titleInput.value = currentState.title;
+  titleInput.placeholder = 'Dashboard title…';
+  container.appendChild(titleInput);
+
+  setModalCancel(function() {
+    modalpage.classList.remove('modalpage_visible');
+    NewGraph();
+  });
+
   const actions = ui.CreateActions(true, {
     ok: {
       callback: function(event) {
         apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject).then(function(metrics) {
             currentState.metrics = metrics;
+            currentState.title = titleInput.value.trim() || currentState.title;
+            clearModalCancel();
             modalpage.classList.remove('modalpage_visible');
-            SetBaseInformations(state, currentState);
+            ResetState(state, currentState).then(function() {
+              EnableMainUI(true);
+            });
         });
+      },
+      className: "ok_button"
+    },
+    cancel: {
+      callback: function (event) {
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        NewGraph();
       }
     }
   });
-  UI.DisableElement(actions);
+  const ok_action = actions.getElementsByClassName("ok_button").item(0);
+  UI.DisableElement(ok_action);
   container.appendChild(actions);
-  elements.push(actions);
+  elements.push(ok_action);
 
 
   selectType.onchange = function(event) {
@@ -150,7 +178,7 @@ async function ConfigBaseInformations(oldState) {
       UI.EnableElement(selectType);
       UI.DisableElement(selectCommit);
       UI.DisableElement(selectSubject);
-      UI.DisableElement(actions);
+      UI.DisableElement(ok_action);
       return;
     }
     elements.forEach(function(element) {
@@ -185,7 +213,7 @@ async function ConfigBaseInformations(oldState) {
       UI.EnableElement(selectType);
       UI.EnableElement(selectCommit);
       UI.DisableElement(selectSubject);
-      UI.DisableElement(actions);
+      UI.DisableElement(ok_action);
       return;
     }
     elements.forEach(function(element) {
@@ -215,9 +243,9 @@ async function ConfigBaseInformations(oldState) {
     }
     currentState.subject = event.target.value;
     if (currentState.subject === '') {
-      UI.DisableElement(actions);
+      UI.DisableElement(ok_action);
     } else {
-      UI.EnableElement(actions);
+      UI.EnableElement(ok_action);
     }
   };
 
@@ -265,6 +293,12 @@ function AddGrahique(currentState) {
       0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / 20_000));
   container.appendChild(time);
 
+  setModalCancel(function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+    EnableMainUI(true);
+  });
+
   // 4. Actions
   const btOkContainerID = 'ui_' + ui.ID();
   const actions = ui.CreateActions(true, {
@@ -295,7 +329,8 @@ function AddGrahique(currentState) {
               type: currentState.type,
               subject: currentState.subject,
               min, max, step,
-              showRaw: false
+              showRaw: false,
+              splitAxes: true
             };
             const id = await graphManager.AddCompareGraph(graphConfig, commitsData);
             currentState.graphSettings.set(id, graphConfig);
@@ -313,19 +348,24 @@ function AddGrahique(currentState) {
               type: currentState.type,
               commit: theCommit,
               subject: currentState.subject,
-              min, max, step
+              min, max, step,
+              showRaw: true,
+              showCI: true,
+              splitAxes: true
             };
             const id = await graphManager.AddGraph(graphSetting, header, series);
             currentState.graphSettings.set(id, graphSetting);
           }
         }
 
+        clearModalCancel();
         modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
     },
     cancel: {
       callback: function(event) {
+        clearModalCancel();
         modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
@@ -348,7 +388,7 @@ function AddGrahique(currentState) {
     const isCompare = selectedCommits.length >= 2;
     if (metricsUIContainer) metricsUIContainer.remove();
     metricsUIContainer = ui.CreateMetrics(currentState.metrics, {
-      maxSelect: isCompare ? 2 : Infinity,
+      maxSelect: isCompare ? 4 : Infinity,
       callback: function(event) {
         if (event.target.checked) {
           selectedMetrics.push(event.target.value);
@@ -381,6 +421,7 @@ function NewGraph() {
 
   ui.Reset();
   container.appendChild(ui.CreateTitle("Create / Load graph", 'h3'));
+
   const listFiles = ui.CreateListFiles(null, {
     callback: function(event) {
       apirest.LoadPage(event.target.innerText).then(function(newstate) {
@@ -392,22 +433,32 @@ function NewGraph() {
     }
   });
   container.appendChild(listFiles);
+  setModalCancel(function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+    if (state.commit === '') {
+      UI.EnableElement(uiLoadView);
+    } else {
+      EnableMainUI(true);
+    }
+  });
+
   const btOkID = 'ui_' + ui.ID();
   container.appendChild(ui.CreateActions(true, {
     ok: {
       text: 'New',
       callback: function(event) {
-        ResetState(state, null).then(function() {
-          modalpage.classList.remove('modalpage_visible');
-          ConfigBaseInformations();
-        });
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        ConfigBaseInformations();
       }
     },
     cancel: {
       callback: function(event) {
+        clearModalCancel();
         modalpage.classList.remove('modalpage_visible');
         if (state.commit === '') {
-          UI.EnableElement(uiLoadView)
+          UI.EnableElement(uiLoadView);
         } else {
           EnableMainUI(true);
         }
@@ -418,6 +469,84 @@ function NewGraph() {
   apirest.ListPages().then(function(answer) {
     ui.UpdateListFiles(listFiles, answer.files);
   });
+
+  modalpage.appendChild(container);
+  modalpage.classList.add('modalpage_visible');
+}
+
+function OpenInfoModal() {
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+
+  const container = document.createElement('div');
+  ui.Reset();
+
+  container.appendChild(ui.CreateTitle('How to use this tool', 'h3'));
+
+  const body = document.createElement('div');
+  body.className = 'info-modal-body';
+  body.innerHTML = `
+    <p>This dashboard visualises performance and vulnerability test results as interactive time-series graphs. Follow the steps below to explore your data.</p>
+
+    <h3>1 — Getting started (📋)</h3>
+    <p>Click <strong>📋</strong> (bottom right) to open a saved view or start fresh.</p>
+    <ul>
+      <li><strong>New</strong> — opens the view creator to generate a new blank view.</li>
+      <li><strong>File name</strong> — click a listed name to restore a saved view.</li>
+    </ul>
+
+    <h3>2 — View Creator</h3>
+    <p>Select/Fill four values in order — each step unlocks the next:</p>
+    <ol>
+      <li><strong>XP Type</strong> — choose <em>Perf</em> (performance) or <em>Vuln</em> (vulnerability).</li>
+      <li><strong>Commit</strong> — select the commit whose data will be based on (available metrics) and default commit to be selected.</li>
+      <li><strong>Library</strong> — pick the library (benchmark name) for that commit.</li>
+      <li><strong>View name</strong> — keep the default or fill in a specific name for this view</li>
+    </ol>
+    <p>Click <strong>OK</strong> to confirm. A new view with those parameters will be created</p>
+
+    <h3>3 — Add a graph (➕)</h3>
+    <p>Click <strong>➕</strong> to add a new graph panel. Three steps:</p>
+    <ol>
+      <li><strong>Commit(s)</strong> — select one commit for a standard graph, or 2–4 commits to compare them stacked.</li>
+      <li><strong>Metric(s)</strong> — browse the metric tree (click <strong>➕</strong> to expand a folder). Unlimited metrics but be careful to the readability.</li>
+      <li><strong>Time range</strong> — set Start, End, and Step in microseconds (µs). Smaller step = more detail, slower load.</li>
+    </ol>
+
+    <h3>4 — Graph controls</h3>
+    <p>Each graph panel has a toolbar with these controls:</p>
+    <ul>
+      <li><strong>✖ Delete</strong> — remove the graph.</li>
+      <li><strong>➖ / ➕ Minimize / Expand</strong> — hide or show the plot area.</li>
+      <li><strong>📐 Split Y axes</strong> — give each metric its own Y-axis (useful for different scales).</li>
+      <li><strong>📈 Raw traces</strong> — overlay individual run data.</li>
+      <li><strong>🌫 Conf. Int.</strong> — show 95% confidence interval shading around means.</li>
+    </ul>
+
+    <h3>5 — Save and load (💾 / 📋)</h3>
+    <ul>
+      <li><strong>💾</strong> saves the entire dashboard (all graphs and settings) under the title shown in the header.</li>
+      <li>The header title is the save file name, it can be updated if you want to create new views with the same view parameters but different graphs.</li>
+      <li><strong>📋</strong> lists all saved views; click a name to restore it.</li>
+    </ul>
+
+    <h3>Tips</h3>
+    <ul>
+      <li>CI bands use a 95% t-distribution confidence interval (Bessel-corrected variance).</li>
+      <li>Hover over any graph for a unified tooltip showing all metric values at that time point.</li>
+    </ul>
+  `;
+  container.appendChild(body);
+
+  const closeFn = function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+  };
+  setModalCancel(closeFn);
+
+  container.appendChild(ui.CreateActions(false, {
+    ok: { text: 'Close', callback: closeFn }
+  }));
 
   modalpage.appendChild(container);
   modalpage.classList.add('modalpage_visible');
@@ -441,6 +570,21 @@ function EnableMainUI(state) {
 
 const header = document.getElementById('header');
 const main = document.getElementById('main');
+
+const headerStatic = document.createElement('span');
+const headerTitle = document.createElement('span');
+headerTitle.contentEditable = 'true';
+headerTitle.style.outline = 'none';
+headerTitle.style.cursor = 'text';
+headerTitle.onblur = function() { state.title = headerTitle.innerText.trim() || state.title; };
+headerTitle.onkeydown = function(e) { if (e.key === 'Enter') { e.preventDefault(); headerTitle.blur(); } };
+header.appendChild(headerStatic);
+header.appendChild(headerTitle);
+
+function UpdateHeader() {
+  headerStatic.innerText = state.type ? `${state.type} (${state.commit}) : ` : '';
+  headerTitle.innerText = state.title;
+}
 
 const errorManager = new ErrorManager();
 const apirest = new ApiREST(config.apiBase, errorManager);
@@ -491,6 +635,31 @@ UIElt.forEach(function(element) {
   mainUI.appendChild(element);
 });
 
+const uiInfo = document.createElement('span');
+uiInfo.className = 'ui_icons';
+uiInfo.innerText = 'ℹ';
+uiInfo.title = 'Help';
+uiInfo.onclick = OpenInfoModal;
+mainUI.appendChild(uiInfo);
+
 main.appendChild(mainUI);
+
+const modalpage = document.getElementById('modalpage');
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && currentModalCancelFn) {
+    const fn = currentModalCancelFn;
+    currentModalCancelFn = null;
+    fn();
+  }
+});
+
+modalpage.addEventListener('click', function(e) {
+  if (e.target === modalpage && currentModalCancelFn) {
+    const fn = currentModalCancelFn;
+    currentModalCancelFn = null;
+    fn();
+  }
+});
 
 console.log('done');
