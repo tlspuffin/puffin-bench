@@ -60,6 +60,22 @@ class ApiREST {
     return null;
   }
 
+  async DeletePage(name) {
+    try {
+      const encodedName = encodeURIComponent(name);
+      const response = await fetch(`${this.#apiURI}/userdata/${encodedName}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return true;
+    } catch (error) {
+      this.#errorManager.Error('Failed to delete view: ' + error.message);
+    }
+    return false;
+  }
+
   async LoadCommits(commitType) {
     const commitID = [];
     try {

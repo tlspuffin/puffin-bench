@@ -117,9 +117,9 @@ div[id^="graph_ui_"] {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  font-size: 1.2rem;
+  font-size: 0.85rem;
   cursor: pointer;
-  padding: 5px 10px;
+  padding: 3px 7px;
   border-radius: 6px;
   transition: all 0.2s ease;
   user-select: none;
@@ -589,6 +589,273 @@ button:disabled,
 .info-modal-body li {
   margin-bottom: 6px;
   color: #555;
+}
+
+/* =================================================================
+   Graph Toggle Pill Buttons (Split Y-Axes, All Runs, Confidence Bands)
+   ================================================================= */
+
+.graph-toggle-btn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(44, 62, 80, 0.35);
+  background: rgba(255, 255, 255, 0.88);
+  color: #2c3e50;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  white-space: nowrap;
+  margin: 0;
+  margin-top: 0;
+}
+
+.graph-toggle-btn:hover {
+  border-color: #667eea;
+  background: white;
+}
+
+.graph-toggle-btn.active {
+  background: #667eea;
+  border-color: #667eea;
+  color: white;
+}
+
+.graph-toggle-btn.active:hover {
+  background: #5a70d8;
+  border-color: #5a70d8;
+}
+
+.graph-toggle-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* =================================================================
+   Toast Notifications
+   ================================================================= */
+
+#toast-container {
+  position: fixed;
+  bottom: 30px;
+  left: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: white;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  max-width: 360px;
+  word-break: break-word;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-success {
+  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+}
+
+.toast-error {
+  background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%);
+}
+
+.toast-info {
+  background: linear-gradient(135deg, #2980b9 0%, #3498db 100%);
+}
+
+/* =================================================================
+   Header Config Icon + Tooltip
+   ================================================================= */
+
+.header-config-icon {
+  display: inline-block;
+  font-size: 1rem;
+  cursor: default;
+  margin-right: 8px;
+  vertical-align: middle;
+  position: relative;
+}
+
+.header-config-icon:hover .header-config-tooltip {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.header-config-tooltip {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: white;
+  color: #333;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  font-weight: 400;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  z-index: 200;
+  transition: opacity 0.15s ease;
+  line-height: 1.8;
+}
+
+.header-config-tooltip b {
+  display: inline-block;
+  min-width: 60px;
+  color: #667eea;
+  font-weight: 600;
+}
+
+/* =================================================================
+   Header Edit Button + Input
+   ================================================================= */
+
+.header-title-text {
+  vertical-align: middle;
+}
+
+.header-edit-btn {
+  background: rgba(255, 255, 255, 0.25) !important;
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 12px;
+  margin-top: 0 !important;
+  transition: background 0.2s ease;
+  vertical-align: middle;
+}
+
+.header-edit-btn:hover {
+  background: rgba(255, 255, 255, 0.4) !important;
+}
+
+.header-edit-input {
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+  min-width: 200px;
+  vertical-align: middle;
+}
+
+/* =================================================================
+   View Management (filter, sort, delete)
+   ================================================================= */
+
+.view-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.view-filter-input {
+  flex: 1;
+  margin-bottom: 0 !important;
+}
+
+.view-sort-btn {
+  white-space: nowrap;
+  margin: 0 !important;
+  padding: 10px 16px;
+}
+
+.view-list-container {
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+}
+
+.view-list-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.view-list-row:last-child {
+  border-bottom: none;
+}
+
+.view-list-name-btn {
+  flex: 1;
+  text-align: left;
+  background: none !important;
+  border: none !important;
+  color: #333 !important;
+  font-size: 0.95rem;
+  padding: 10px 15px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+.view-list-name-btn:hover {
+  background: #f0f4ff !important;
+  color: #667eea !important;
+  transform: none !important;
+}
+
+.view-list-delete-btn {
+  background: none !important;
+  border: none !important;
+  color: #e74c3c;
+  font-size: 1.1rem;
+  padding: 8px 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+
+.view-list-delete-btn:hover {
+  background: #fde8e8 !important;
+  transform: none !important;
+}
+
+.view-list-empty {
+  text-align: center;
+  color: #999;
+  padding: 20px;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+/* Disabled inputs */
+input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f5f5f5;
 }
 
 /* =================================================================

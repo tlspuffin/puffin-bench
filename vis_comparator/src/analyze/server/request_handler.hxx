@@ -47,6 +47,7 @@ REQUESTHANDLER(APIGetCommitMetricsValues, std::string const, std::string const, 
 
 REQUESTHANDLER(APILoadUserData, std::string const);
 REQUESTHANDLER(APISaveUserData, std::string const);
+REQUESTHANDLER(APIDeleteUserData, std::string const);
 REQUESTHANDLER(APIListUserData);
 
 };

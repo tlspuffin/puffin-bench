@@ -62,6 +62,10 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         } else if (std::regex_search(path, match, regListUserData)) {
           requestHandler = new RequestHandlerAPIListUserData();
         }
+      } else if (method == "DELETE") {
+        if (std::regex_search(path, match, regSaveLoadUserData)) {
+          requestHandler = new RequestHandlerAPIDeleteUserData(match[1].str());
+        }
       } else if (method == "POST") {
         if (std::regex_search(path, match, regGetCommitMetricsValues)) {
           requestHandler = new RequestHandlerAPIGetCommitMetricsValues(

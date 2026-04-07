@@ -123,12 +123,14 @@ function ConfigBaseInformations() {
   container.appendChild(selectSubject);
   elements.push(selectSubject);
 
-  container.appendChild(ui.CreateTitle("4. Dashboard title", 'h3'));
+  container.appendChild(ui.CreateTitle("4. View name", 'h3'));
   const titleInput = document.createElement('input');
   titleInput.type = 'text';
   titleInput.className = 'modal_text_input';
-  titleInput.value = currentState.title;
-  titleInput.placeholder = 'Dashboard title…';
+  titleInput.placeholder = 'Auto-generated once subject is selected…';
+  titleInput.disabled = true;
+  let titleWasEdited = false;
+  titleInput.addEventListener('input', function() { titleWasEdited = true; });
   container.appendChild(titleInput);
 
   setModalCancel(function() {
@@ -138,16 +140,31 @@ function ConfigBaseInformations() {
 
   const actions = ui.CreateActions(true, {
     ok: {
-      callback: function(event) {
-        apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject).then(function(metrics) {
-            currentState.metrics = metrics;
-            currentState.title = titleInput.value.trim() || currentState.title;
-            clearModalCancel();
-            modalpage.classList.remove('modalpage_visible');
-            ResetState(state, currentState).then(function() {
-              EnableMainUI(true);
-            });
-        });
+      callback: async function(event) {
+        let title = titleInput.value.trim() || (`${currentState.type} \u2013 ${currentState.subject} (${currentState.commit.slice(0, 8)})`);
+
+        // Check for duplicate names and auto-increment if needed
+        const pages = await apirest.ListPages();
+        if (pages?.files) {
+          const existingNames = new Set(pages.files);
+          if (existingNames.has(title)) {
+            const baseTitle = title;
+            let counter = 2;
+            let candidate;
+            do {
+              candidate = `${baseTitle} (${counter++})`;
+            } while (existingNames.has(candidate));
+            title = candidate;
+            titleInput.value = title;
+          }
+        }
+
+        currentState.metrics = await apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject);
+        currentState.title = title;
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        await ResetState(state, currentState);
+        EnableMainUI(true);
       },
       className: "ok_button"
     },
@@ -174,6 +191,9 @@ function ConfigBaseInformations() {
     currentState.subject = '';
     currentState.commits = [];
     currentState.subjects = [];
+    titleWasEdited = false;
+    titleInput.disabled = true;
+    titleInput.value = '';
     if (event.target.value === '') {
       UI.EnableElement(selectType);
       UI.DisableElement(selectCommit);
@@ -209,6 +229,9 @@ function ConfigBaseInformations() {
     currentState.commit = '';
     currentState.subject = '';
     currentState.subjects = [];
+    titleWasEdited = false;
+    titleInput.disabled = true;
+    titleInput.value = '';
     if (event.target.value === '') {
       UI.EnableElement(selectType);
       UI.EnableElement(selectCommit);
@@ -237,14 +260,21 @@ function ConfigBaseInformations() {
       UI.EnableElement(selectSubject);
     });
   };
+
   selectSubject.onchange = function(event) {
     if (event.target.value === currentState.subject) {
       return;
     }
     currentState.subject = event.target.value;
     if (currentState.subject === '') {
+      titleInput.disabled = true;
       UI.DisableElement(ok_action);
     } else {
+      titleInput.disabled = false;
+      if (!titleWasEdited) {
+        const shortHash = currentState.commit.slice(0, 8);
+        titleInput.value = `${currentState.type} \u2013 ${currentState.subject} (${shortHash})`;
+      }
       UI.EnableElement(ok_action);
     }
   };
@@ -287,7 +317,7 @@ function AddGrahique(currentState) {
   container.appendChild(metricsWrapper);
 
   // 3. Time range
-  container.appendChild(ui.CreateTitle("3. Time range (μs)", 'h3'));
+  container.appendChild(ui.CreateTitle("3. Time range (\u03bcs)", 'h3'));
   const timeID = ui.ID();
   const time = ui.CreateTimeSelection(
       0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / 20_000));
@@ -418,21 +448,100 @@ function NewGraph() {
   modalpage.innerHTML = '';
 
   const container = document.createElement('div');
-
   ui.Reset();
-  container.appendChild(ui.CreateTitle("Create / Load graph", 'h3'));
+  container.appendChild(ui.CreateTitle("Create / Load view", 'h3'));
 
-  const listFiles = ui.CreateListFiles(null, {
-    callback: function(event) {
-      apirest.LoadPage(event.target.innerText).then(function(newstate) {
-        ResetState(state, newstate).then(function() {
-          modalpage.classList.remove('modalpage_visible');
-          EnableMainUI(true);
-        });
-      });
+  // Sort + filter controls
+  const viewControls = document.createElement('div');
+  viewControls.className = 'view-controls';
+
+  const filterInput = document.createElement('input');
+  filterInput.type = 'text';
+  filterInput.className = 'modal_text_input view-filter-input';
+  filterInput.placeholder = 'Filter views\u2026';
+  viewControls.appendChild(filterInput);
+
+  const sortBtn = document.createElement('button');
+  sortBtn.className = 'view-sort-btn';
+  sortBtn.textContent = 'A \u2192 Z';
+  sortBtn.title = 'Toggle sort order';
+  let sortAsc = true;
+  viewControls.appendChild(sortBtn);
+  container.appendChild(viewControls);
+
+  // View list
+  const listContainer = document.createElement('div');
+  listContainer.className = 'view-list-container';
+  const loadingSpan = document.createElement('span');
+  loadingSpan.className = 'modal_wait';
+  loadingSpan.textContent = '\u{1F550}';
+  listContainer.appendChild(loadingSpan);
+  container.appendChild(listContainer);
+
+  let allFiles = [];
+
+  function renderList() {
+    listContainer.innerHTML = '';
+    const filterText = filterInput.value.toLowerCase();
+    let files = allFiles.filter(f => f.toLowerCase().includes(filterText));
+    files = [...files].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
+
+    if (files.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'view-list-empty';
+      empty.textContent = filterText ? 'No views match your filter.' : 'No saved views yet.';
+      listContainer.appendChild(empty);
+      return;
     }
-  });
-  container.appendChild(listFiles);
+
+    files.forEach(function(name) {
+      const row = document.createElement('div');
+      row.className = 'view-list-row';
+
+      const nameBtn = document.createElement('button');
+      nameBtn.className = 'view-list-name-btn';
+      nameBtn.textContent = name;
+      nameBtn.onclick = function() {
+        apirest.LoadPage(name).then(function(newstate) {
+          if (newstate == null) return;
+          ResetState(state, newstate).then(function() {
+            modalpage.classList.remove('modalpage_visible');
+            clearModalCancel();
+            EnableMainUI(true);
+            errorManager.Success('View loaded: ' + name);
+          });
+        });
+      };
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'view-list-delete-btn';
+      delBtn.textContent = '\u{1F5D1}';
+      delBtn.title = 'Delete this view';
+      delBtn.onclick = function(e) {
+        e.stopPropagation();
+        if (!confirm(`Delete view \u201c${name}\u201d? This cannot be undone.`)) return;
+        apirest.DeletePage(name).then(function(ok) {
+          if (ok) {
+            allFiles = allFiles.filter(f => f !== name);
+            renderList();
+            errorManager.Success('View deleted: ' + name);
+          }
+        });
+      };
+
+      row.appendChild(nameBtn);
+      row.appendChild(delBtn);
+      listContainer.appendChild(row);
+    });
+  }
+
+  filterInput.oninput = renderList;
+  sortBtn.onclick = function() {
+    sortAsc = !sortAsc;
+    sortBtn.textContent = sortAsc ? 'A \u2192 Z' : 'Z \u2192 A';
+    renderList();
+  };
+
   setModalCancel(function() {
     clearModalCancel();
     modalpage.classList.remove('modalpage_visible');
@@ -443,7 +552,6 @@ function NewGraph() {
     }
   });
 
-  const btOkID = 'ui_' + ui.ID();
   container.appendChild(ui.CreateActions(true, {
     ok: {
       text: 'New',
@@ -467,7 +575,16 @@ function NewGraph() {
   }));
 
   apirest.ListPages().then(function(answer) {
-    ui.UpdateListFiles(listFiles, answer.files);
+    if (answer?.files) {
+      allFiles = answer.files;
+      renderList();
+    } else {
+      listContainer.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'view-list-empty';
+      p.textContent = 'Failed to load views.';
+      listContainer.appendChild(p);
+    }
   });
 
   modalpage.appendChild(container);
@@ -501,9 +618,9 @@ function OpenInfoModal() {
       <li><strong>XP Type</strong> — choose <em>Perf</em> (performance) or <em>Vuln</em> (vulnerability).</li>
       <li><strong>Commit</strong> — select the commit whose data will be based on (available metrics) and default commit to be selected.</li>
       <li><strong>Library</strong> — pick the library (benchmark name) for that commit.</li>
-      <li><strong>View name</strong> — keep the default or fill in a specific name for this view</li>
+      <li><strong>View name</strong> — auto-generated from your selections; edit if you want a custom name.</li>
     </ol>
-    <p>Click <strong>OK</strong> to confirm. A new view with those parameters will be created</p>
+    <p>Click <strong>OK</strong> to confirm. A new view with those parameters will be created.</p>
 
     <h3>3 — Add a graph (➕)</h3>
     <p>Click <strong>➕</strong> to add a new graph panel. Three steps:</p>
@@ -518,23 +635,48 @@ function OpenInfoModal() {
     <ul>
       <li><strong>✖ Delete</strong> — remove the graph.</li>
       <li><strong>➖ / ➕ Minimize / Expand</strong> — hide or show the plot area.</li>
-      <li><strong>📐 Split Y axes</strong> — give each metric its own Y-axis (useful for different scales).</li>
-      <li><strong>📈 Raw traces</strong> — overlay individual run data.</li>
-      <li><strong>🌫 Conf. Int.</strong> — show 95% confidence interval shading around means.</li>
+      <li><strong>Split Y-Axes</strong> — give each metric its own Y-axis (useful for different scales).</li>
+      <li><strong>All Runs</strong> — overlay individual run data as dotted lines.</li>
+      <li><strong>Confidence Bands</strong> — show 95% confidence interval shading around means.</li>
     </ul>
 
     <h3>5 — Save and load (💾 / 📋)</h3>
     <ul>
       <li><strong>💾</strong> saves the entire dashboard (all graphs and settings) under the title shown in the header.</li>
-      <li>The header title is the save file name, it can be updated if you want to create new views with the same view parameters but different graphs.</li>
-      <li><strong>📋</strong> lists all saved views; click a name to restore it.</li>
+      <li>Click <strong>✏ Edit</strong> next to the title to rename before saving.</li>
+      <li><strong>📋</strong> lists all saved views; search, sort, load, or delete them.</li>
     </ul>
 
     <h3>Tips</h3>
     <ul>
       <li>CI bands use a 95% t-distribution confidence interval (Bessel-corrected variance).</li>
       <li>Hover over any graph for a unified tooltip showing all metric values at that time point.</li>
+      <li>Hidden legend items are preserved when you toggle All Runs / Confidence Bands / Split Y-Axes.</li>
     </ul>
+
+    <hr style="margin: 28px 0; border: none; border-top: 2px solid #e0e0e0;">
+
+    <h3>Plain-language guide</h3>
+
+    <h4 style="margin-top:16px; color:#555;">Starting from scratch</h4>
+    <p>Click 📋 (bottom-right) to open a saved view, or choose <strong>New</strong> to start a blank dashboard. The view ties together a type of test, a code commit, and a benchmark library.</p>
+
+    <h4 style="margin-top:16px; color:#555;">Setting up a view</h4>
+    <p>Fill the four fields in order — each one unlocks the next. The name auto-fills for you once you pick a subject; change it if you want something more memorable.</p>
+
+    <h4 style="margin-top:16px; color:#555;">Adding a graph</h4>
+    <p>Click ➕, pick one or more commits, choose your metrics, and set a time window. Selecting two or more commits produces a side-by-side comparison chart instead of a single-commit chart.</p>
+
+    <h4 style="margin-top:16px; color:#555;">What the toggle buttons actually show you</h4>
+    <ul>
+      <li><strong>All Runs</strong> — shows every individual benchmark run as a faint dotted line behind the main curve. Wide spread = inconsistent results.</li>
+      <li><strong>Confidence Bands</strong> — adds a shaded area around each mean line. The wider the band, the less certain the result. Uses a 95% confidence interval.</li>
+      <li><strong>Split Y-Axes</strong> — gives each metric its own vertical scale on the right side. Useful when comparing metrics that use very different units or magnitudes (e.g. bytes vs. milliseconds).</li>
+    </ul>
+    <p>Clicking a trace name in the legend hides/shows it. That hidden state is remembered if you then toggle one of the buttons above.</p>
+
+    <h4 style="margin-top:16px; color:#555;">Saving and loading</h4>
+    <p>Click 💾 to save your dashboard. Click <strong>✏ Edit</strong> in the header to rename it first. Click 📋 to manage saved views: search, sort alphabetically, load one, or delete old ones.</p>
   `;
   container.appendChild(body);
 
@@ -553,8 +695,11 @@ function OpenInfoModal() {
 }
 
 function Save(state) {
-  apirest.SavePage(state.title, state).then(function() {
-      EnableMainUI(true);
+  apirest.SavePage(state.title, state).then(function(ok) {
+    if (ok) {
+      errorManager.Success('View saved: ' + state.title);
+    }
+    EnableMainUI(true);
   });
 }
 
@@ -571,19 +716,78 @@ function EnableMainUI(state) {
 const header = document.getElementById('header');
 const main = document.getElementById('main');
 
-const headerStatic = document.createElement('span');
+// Header: config icon (with hover tooltip) + read-only title + edit button
+const headerConfigIcon = document.createElement('span');
+headerConfigIcon.className = 'header-config-icon';
+headerConfigIcon.textContent = '\u2699\uFE0F';
+headerConfigIcon.style.display = 'none';
+
+const headerConfigTooltip = document.createElement('div');
+headerConfigTooltip.className = 'header-config-tooltip';
+headerConfigIcon.appendChild(headerConfigTooltip);
+
 const headerTitle = document.createElement('span');
-headerTitle.contentEditable = 'true';
-headerTitle.style.outline = 'none';
-headerTitle.style.cursor = 'text';
-headerTitle.onblur = function() { state.title = headerTitle.innerText.trim() || state.title; };
-headerTitle.onkeydown = function(e) { if (e.key === 'Enter') { e.preventDefault(); headerTitle.blur(); } };
-header.appendChild(headerStatic);
+headerTitle.className = 'header-title-text';
+
+const headerEditBtn = document.createElement('button');
+headerEditBtn.className = 'header-edit-btn';
+headerEditBtn.textContent = '\u270F Edit';
+headerEditBtn.title = 'Rename this view';
+headerEditBtn.style.display = 'none';
+let headerEditInput = null;
+
+headerEditBtn.onclick = function() {
+  if (headerEditBtn.dataset.editing === 'true') {
+    // Commit the edit
+    const newTitle = headerEditInput.value.trim() || state.title;
+    state.title = newTitle;
+    headerTitle.textContent = newTitle;
+    headerTitle.style.display = '';
+    headerEditInput.remove();
+    headerEditInput = null;
+    headerEditBtn.textContent = '\u270F Edit';
+    headerEditBtn.dataset.editing = 'false';
+  } else {
+    // Start editing
+    headerEditInput = document.createElement('input');
+    headerEditInput.type = 'text';
+    headerEditInput.className = 'header-edit-input';
+    headerEditInput.value = state.title;
+    headerEditInput.onkeydown = function(e) {
+      if (e.key === 'Enter') { headerEditBtn.onclick(); }
+      if (e.key === 'Escape') {
+        headerTitle.style.display = '';
+        headerEditInput.remove();
+        headerEditInput = null;
+        headerEditBtn.textContent = '\u270F Edit';
+        headerEditBtn.dataset.editing = 'false';
+      }
+    };
+    headerTitle.style.display = 'none';
+    headerTitle.insertAdjacentElement('afterend', headerEditInput);
+    headerEditInput.focus();
+    headerEditInput.select();
+    headerEditBtn.textContent = '\u2714 Done';
+    headerEditBtn.dataset.editing = 'true';
+  }
+};
+
+header.appendChild(headerConfigIcon);
 header.appendChild(headerTitle);
+header.appendChild(headerEditBtn);
 
 function UpdateHeader() {
-  headerStatic.innerText = state.type ? `${state.type} (${state.commit}) : ` : '';
-  headerTitle.innerText = state.title;
+  if (state.type) {
+    const shortCommit = state.commit.length > 16 ? state.commit.slice(0, 16) + '\u2026' : state.commit;
+    headerConfigTooltip.innerHTML =
+      `<b>Type:</b> ${state.type}<br><b>Commit:</b> ${shortCommit}<br><b>Subject:</b> ${state.subject}`;
+    headerConfigIcon.style.display = '';
+  } else {
+    headerConfigIcon.style.display = 'none';
+  }
+  headerTitle.textContent = state.title;
+  headerEditBtn.style.display = state.type ? '' : 'none';
+  if (headerEditInput) { headerEditInput.value = state.title; }
 }
 
 const errorManager = new ErrorManager();

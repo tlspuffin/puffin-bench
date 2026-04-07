@@ -20,7 +20,7 @@ inline static bool ToBool(std::string const& v) {
 static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.set("Access-Control-Allow-Origin", "*");
-  response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  response.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   response.set("Access-Control-Allow-Headers", "Content-Type");
 
   if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_OPTIONS) {
@@ -143,8 +143,15 @@ static void SendErrorResponse(Poco::Net::HTTPServerResponse& response,
   auto& allocator = doc.GetAllocator();
   doc.AddMember("error", rapidjson::Value(message.c_str(), allocator), allocator);
 
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  doc.Accept(writer);
+
+  response.setContentType("application/json");
   response.setStatus(static_cast<Poco::Net::HTTPResponse::HTTPStatus>(status));
-  SendJSONResponse(response, doc);
+  std::ostream& out = response.send();
+  out << buffer.GetString();
+  out.flush();
 }
 
 void ns_Server::RequestHandlerAPIListCommits::handleRequest(
@@ -502,6 +509,30 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
     return;
   }
 
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const filePath = config_->userdata_ / (std::get<0>(args_) + ".dat");
+
+  if (!std::filesystem::exists(filePath)) {
+    SendErrorResponse(response, 404, "View not found: " + filePath.string());
+    return;
+  }
+
+  try {
+    std::filesystem::remove(filePath);
+  } catch (std::exception const& e) {
+    SendErrorResponse(response, 500, std::string("Failed to delete view: ") + e.what());
+    return;
+  }
+
+  rapidjson::Document doc;
   SendJSONResponse(response, doc);
 }
 

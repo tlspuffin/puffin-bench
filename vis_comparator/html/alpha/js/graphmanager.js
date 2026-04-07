@@ -14,32 +14,34 @@ class GraphManager {
 
   async AddGraph(config, header, series) {
     const id = GraphManager.#nextid++;
+    const shortHash = config.commit.slice(0, 8);
     const { container: graphContainer, graphArea } = this.#BuildGraphContainer(id, {
       showIcons: true,
       showAxesToggle: true,
       showRawToggle: true,
       showCIToggle: true,
-      title: config.metrics.toString()
+      title: `[${shortHash}] ${config.metrics.join(' \u2022 ')}`
     });
     this.#document.appendChild(graphContainer);
 
-    await this.#DrawGraph(graphArea, config, header, series);
+    const stored = { config, header, series, graphContainer, graphArea, hiddenGroups: new Set() };
+    this.#configs.set(id, stored);
 
-    this.#configs.set(id, { config, header, series, graphContainer, graphArea });
+    await this.#DrawGraph(graphArea, config, header, series, stored);
 
     const eltSplit = document.getElementById('graph_ui_split_' + id);
     if (eltSplit) {
       if (config.metrics.length <= 1) {
-        eltSplit.style.pointerEvents = 'none';
+        eltSplit.disabled = true;
       } else if (config.splitAxes) {
-        eltSplit.classList.add('graph_ui_icons_active');
+        eltSplit.classList.add('active');
       }
     }
     if (config.showRaw !== false) {
-      document.getElementById('graph_ui_raw_' + id)?.classList.add('graph_ui_icons_active');
+      document.getElementById('graph_ui_raw_' + id)?.classList.add('active');
     }
     if (config.showCI !== false) {
-      document.getElementById('graph_ui_ci_' + id)?.classList.add('graph_ui_icons_active');
+      document.getElementById('graph_ui_ci_' + id)?.classList.add('active');
     }
 
     return id;
@@ -48,7 +50,7 @@ class GraphManager {
   async AddCompareGraph(config, commitsData) {
     const id = GraphManager.#nextid++;
     const shortHashes = config.compareCommits.map(c => c.slice(0, 8)).join(', ');
-    const title = `${config.metrics.join(', ')} [${shortHashes}]`;
+    const title = `[${shortHashes}] ${config.metrics.join(' \u2022 ')}`;
     const { container: graphContainer, graphArea } = this.#BuildGraphContainer(id, {
       showIcons: true,
       showAxesToggle: true,
@@ -58,16 +60,17 @@ class GraphManager {
     });
     this.#document.appendChild(graphContainer);
 
-    await this.#DrawCompareGraph(graphArea, config, commitsData);
+    const stored = { config, graphContainer, graphArea, mode: 'compare', commitsData, hiddenGroups: new Set() };
+    this.#configs.set(id, stored);
 
-    this.#configs.set(id, { config, graphContainer, graphArea, mode: 'compare', commitsData });
+    await this.#DrawCompareGraph(graphArea, config, commitsData, stored);
 
     const eltSplit = document.getElementById('graph_ui_split_' + id);
     if (eltSplit) {
       if (config.metrics.length <= 1) {
-        eltSplit.style.pointerEvents = 'none';
+        eltSplit.disabled = true;
       } else if (config.splitAxes) {
-        eltSplit.classList.add('graph_ui_icons_active');
+        eltSplit.classList.add('active');
       }
     }
 
@@ -94,10 +97,10 @@ class GraphManager {
     if (!stored) return;
     stored.config.showRaw = !stored.config.showRaw;
     document.getElementById('graph_ui_raw_' + id)
-      ?.classList.toggle('graph_ui_icons_active', stored.config.showRaw);
+      ?.classList.toggle('active', stored.config.showRaw);
     stored.mode === 'compare'
-      ? this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData)
-      : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series);
+      ? this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData, stored)
+      : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series, stored);
   }
 
   ToggleCIShadow(id) {
@@ -105,10 +108,10 @@ class GraphManager {
     if (!stored) return;
     stored.config.showCI = !(stored.config.showCI ?? false);
     document.getElementById('graph_ui_ci_' + id)
-      ?.classList.toggle('graph_ui_icons_active', stored.config.showCI !== false);
+      ?.classList.toggle('active', stored.config.showCI !== false);
     stored.mode === 'compare'
-      ? this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData)
-      : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series);
+      ? this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData, stored)
+      : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series, stored);
   }
 
   ToggleSplitAxes(id) {
@@ -116,15 +119,18 @@ class GraphManager {
     if (!stored) return;
     stored.config.splitAxes = !stored.config.splitAxes;
     const eltSplit = document.getElementById('graph_ui_split_' + id);
-    if (eltSplit) eltSplit.classList.toggle('graph_ui_icons_active', stored.config.splitAxes);
+    if (eltSplit) eltSplit.classList.toggle('active', stored.config.splitAxes);
     if (stored.mode === 'compare') {
-      this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData);
+      this.#DrawCompareGraph(stored.graphArea, stored.config, stored.commitsData, stored);
     } else {
-      this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series);
+      this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series, stored);
     }
   }
 
-  async #DrawGraph(container, config, header, series) {
+  async #DrawGraph(container, config, header, series, stored = null) {
+    // Capture hidden traces before the redraw wipes them out
+    const hiddenBefore = stored?.hiddenGroups ? new Set(stored.hiddenGroups) : new Set();
+
     const traces = this.#PrepareTracesForPlotly(config, header, series);
     const layout = {
       title: `${config.commit}`,
@@ -151,9 +157,37 @@ class GraphManager {
       modeBarButtonsToRemove: ['lasso2d', 'select2d']
     };
     await Plotly.newPlot(container, traces, layout, plotlyConfig);
+
+    // Re-attach legend click tracker (newPlot resets listeners)
+    if (stored) {
+      container.on('plotly_legendclick', function(data) {
+        const trace = data.data[data.curveNumber];
+        const key = trace?.legendgroup ?? trace?.name;
+        if (!key) return;
+        const currentlyHidden = trace.visible === 'legendonly' || trace.visible === false;
+        if (currentlyHidden) {
+          stored.hiddenGroups.delete(key);
+        } else {
+          stored.hiddenGroups.add(key);
+        }
+      });
+    }
+
+    // Restore previously hidden traces by legendgroup (or name as fallback)
+    if (hiddenBefore.size > 0) {
+      const toHide = (container.data ?? [])
+        .map((t, i) => hiddenBefore.has(t.legendgroup ?? t.name) ? i : -1)
+        .filter(i => i >= 0);
+      if (toHide.length > 0) {
+        Plotly.restyle(container, { visible: 'legendonly' }, toHide);
+      }
+    }
   }
 
-  async #DrawCompareGraph(container, config, commitsData) {
+  async #DrawCompareGraph(container, config, commitsData, stored = null) {
+    // Capture hidden traces before the redraw wipes them out
+    const hiddenBefore = stored?.hiddenGroups ? new Set(stored.hiddenGroups) : new Set();
+
     const traces = this.#PrepareTracesForCompare(config, commitsData);
     const splitAxes = config.splitAxes && config.metrics.length > 1;
     const layout = {
@@ -179,6 +213,31 @@ class GraphManager {
       modeBarButtonsToRemove: ['lasso2d', 'select2d']
     };
     await Plotly.newPlot(container, traces, layout, plotlyConfig);
+
+    // Re-attach legend click tracker (newPlot resets listeners)
+    if (stored) {
+      container.on('plotly_legendclick', function(data) {
+        const trace = data.data[data.curveNumber];
+        const key = trace?.legendgroup ?? trace?.name;
+        if (!key) return;
+        const currentlyHidden = trace.visible === 'legendonly' || trace.visible === false;
+        if (currentlyHidden) {
+          stored.hiddenGroups.delete(key);
+        } else {
+          stored.hiddenGroups.add(key);
+        }
+      });
+    }
+
+    // Restore previously hidden traces by legendgroup (or name as fallback)
+    if (hiddenBefore.size > 0) {
+      const toHide = (container.data ?? [])
+        .map((t, i) => hiddenBefore.has(t.legendgroup ?? t.name) ? i : -1)
+        .filter(i => i >= 0);
+      if (toHide.length > 0) {
+        Plotly.restyle(container, { visible: 'legendonly' }, toHide);
+      }
+    }
   }
 
   #BuildGraphContainer(id, options) {
@@ -202,51 +261,53 @@ class GraphManager {
         const eltDelete = document.createElement('span');
         eltDelete.className = 'graph_ui_icons';
         eltDelete.id = 'graph_ui_delete_' + id;
-        eltDelete.innerHTML = '<span>✖</span><span class="graph_ui_icon_label">Delete</span>';
+        eltDelete.innerHTML = '<span>\u2716</span><span class="graph_ui_icon_label">Delete</span>';
         eltDelete.onclick = this.DelGraph.bind(this, id);
         ui.appendChild(eltDelete);
 
         const eltCollapse = document.createElement('span');
         eltCollapse.className = 'graph_ui_icons';
         eltCollapse.id = 'graph_ui_collapse_' + id;
-        eltCollapse.innerHTML = '<span>➖</span><span class="graph_ui_icon_label">Minimize</span>';
+        eltCollapse.innerHTML = '<span>\u2796</span><span class="graph_ui_icon_label">Minimize</span>';
         eltCollapse.onclick = function() {
           const isVisible = graphArea.style.display !== 'none';
           graphArea.style.display = isVisible ? 'none' : '';
           eltCollapse.innerHTML = isVisible
-            ? '<span>➕</span><span class="graph_ui_icon_label">Expand</span>'
-            : '<span>➖</span><span class="graph_ui_icon_label">Minimize</span>';
+            ? '<span>\u2795</span><span class="graph_ui_icon_label">Expand</span>'
+            : '<span>\u2796</span><span class="graph_ui_icon_label">Minimize</span>';
           if (!isVisible) {
             Plotly.Plots.resize(graphArea);
           }
         };
         ui.appendChild(eltCollapse);
-
       }
 
       if (options?.showAxesToggle) {
-        const eltSplit = document.createElement('span');
-        eltSplit.className = 'graph_ui_icons';
+        const eltSplit = document.createElement('button');
+        eltSplit.className = 'graph-toggle-btn';
         eltSplit.id = 'graph_ui_split_' + id;
-        eltSplit.innerHTML = '<span>📐</span><span class="graph_ui_icon_label">Split Y</span>';
+        eltSplit.textContent = 'Split Y-Axes';
+        eltSplit.title = 'Use one Y-axis per metric (useful when scales differ)';
         eltSplit.onclick = this.ToggleSplitAxes.bind(this, id);
         ui.appendChild(eltSplit);
       }
 
       if (options?.showRawToggle) {
-        const eltRaw = document.createElement('span');
-        eltRaw.className = 'graph_ui_icons';
+        const eltRaw = document.createElement('button');
+        eltRaw.className = 'graph-toggle-btn';
         eltRaw.id = 'graph_ui_raw_' + id;
-        eltRaw.innerHTML = '<span>📈</span><span class="graph_ui_icon_label">Raw</span>';
+        eltRaw.textContent = 'All Runs';
+        eltRaw.title = 'Show each individual run as a separate trace';
         eltRaw.onclick = this.ToggleRawTraces.bind(this, id);
         ui.appendChild(eltRaw);
       }
 
       if (options?.showCIToggle) {
-        const eltCI = document.createElement('span');
-        eltCI.className = 'graph_ui_icons';
+        const eltCI = document.createElement('button');
+        eltCI.className = 'graph-toggle-btn';
         eltCI.id = 'graph_ui_ci_' + id;
-        eltCI.innerHTML = '<span>🌫️</span><span class="graph_ui_icon_label">Conf. Int.</span>';
+        eltCI.textContent = 'Confidence Bands';
+        eltCI.title = 'Show 95% confidence interval around the mean';
         eltCI.onclick = this.ToggleCIShadow.bind(this, id);
         ui.appendChild(eltCI);
       }
