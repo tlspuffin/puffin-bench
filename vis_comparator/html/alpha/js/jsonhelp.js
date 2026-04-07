@@ -1,9 +1,27 @@
+/**
+ * JSON serialisation helpers for Map and Set.
+ * JSON.stringify/parse do not support Map or Set natively.
+ * This class encodes them as { __type: 'Map'|'Set', value: [...] }
+ * so they survive a round-trip through JSON.
+ *
+ * Note: the __type key is a reserved marker — avoid using it in your own data objects.
+ */
 class JSONHelp {
 
+  /**
+   * Serialises an object (possibly containing Map/Set values) to a JSON string.
+   * @param {*} object
+   * @returns {string}
+   */
   static Stringify(object) {
     return JSON.stringify(object, this.#Replacer);
   }
 
+  /**
+   * Deserialises a JSON string, restoring any encoded Map or Set values.
+   * @param {string} jsontext
+   * @returns {*}
+   */
   static Parse(jsontext) {
     return JSON.parse(jsontext, this.#Reviver);
   }

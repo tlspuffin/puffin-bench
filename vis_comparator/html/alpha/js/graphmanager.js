@@ -1,17 +1,38 @@
+/**
+ * Manages Plotly graph instances displayed in the main area.
+ * Each graph is identified by a numeric ID issued at creation time.
+ * Supports single-commit graphs and multi-commit comparison graphs.
+ */
 class GraphManager {
   #configs;
   #document;
   #callbacks;
   static #nextid = 0;
+
+  // Four distinct colours for up to 4 commits. Beyond 4, colours cycle.
   static #PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'];
+
+  // Four distinct dash styles matching the colour palette, one per metric.
+  // Beyond 4 metrics, dash styles cycle.
   static #DASH_PALETTE = ['solid', 'dot', 'dash', 'dashdot'];
 
+  /**
+   * @param {HTMLElement} document  - Container element where graph divs are appended
+   * @param {object}      callbacks - { delete(id) } called when a graph is removed
+   */
   constructor(document, callbacks) {
     this.#configs = new Map();
     this.#document = document;
     this.#callbacks = callbacks;
   }
 
+  /**
+   * Adds a single-commit graph to the page.
+   * @param {object} config  - Graph config: { commit, metrics, type, subject, min, max, step, showRaw, showCI, splitAxes }
+   * @param {object} header  - Binary response header from LoadCommitMetricsValues
+   * @param {object} series  - Series data from LoadCommitMetricsValues
+   * @returns {Promise<number>} Numeric graph ID
+   */
   async AddGraph(config, header, series) {
     const id = GraphManager.#nextid++;
     const shortHash = config.commit.slice(0, 8);
@@ -47,6 +68,13 @@ class GraphManager {
     return id;
   }
 
+  /**
+   * Adds a multi-commit comparison graph to the page.
+   * Each commit gets a distinct colour from #PALETTE (cycles after 4).
+   * @param {object}              config      - Graph config: { compareCommits, metrics, type, subject, min, max, step, showRaw, showCI, splitAxes }
+   * @param {Map<string, object>} commitsData - Map of commitID → { header, series }
+   * @returns {Promise<number>} Numeric graph ID
+   */
   async AddCompareGraph(config, commitsData) {
     const id = GraphManager.#nextid++;
     const shortHashes = config.compareCommits.map(c => c.slice(0, 8)).join(', ');
@@ -77,6 +105,10 @@ class GraphManager {
     return id;
   }
 
+  /**
+   * Removes a graph from the page and cleans up Plotly state.
+   * @param {number} id - Graph ID from AddGraph / AddCompareGraph
+   */
   DelGraph(id) {
     const stored = this.#configs.get(id);
     Plotly.purge(stored.graphArea);
@@ -85,6 +117,7 @@ class GraphManager {
     this.#callbacks?.delete?.(id);
   }
 
+  /** Removes all graphs from the page. */
   DelAllGraph() {
     const ids = Array.from(this.#configs.keys());
     for (const id of ids) {
@@ -92,6 +125,10 @@ class GraphManager {
     }
   }
 
+  /**
+   * Toggles visibility of individual run traces on a graph.
+   * @param {number} id - Graph ID
+   */
   ToggleRawTraces(id) {
     const stored = this.#configs.get(id);
     if (!stored) return;
@@ -103,6 +140,10 @@ class GraphManager {
       : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series, stored);
   }
 
+  /**
+   * Toggles the 95% confidence interval shading on a graph.
+   * @param {number} id - Graph ID
+   */
   ToggleCIShadow(id) {
     const stored = this.#configs.get(id);
     if (!stored) return;
@@ -114,6 +155,11 @@ class GraphManager {
       : this.#DrawGraph(stored.graphArea, stored.config, stored.header, stored.series, stored);
   }
 
+  /**
+   * Toggles split Y-axes mode (one axis per metric) on a graph.
+   * Disabled automatically when a graph has only one metric.
+   * @param {number} id - Graph ID
+   */
   ToggleSplitAxes(id) {
     const stored = this.#configs.get(id);
     if (!stored) return;

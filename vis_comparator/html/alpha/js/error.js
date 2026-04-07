@@ -1,3 +1,7 @@
+/**
+ * Lightweight toast notification service.
+ * Creates a fixed-position container on first use and appends auto-dismissing toasts.
+ */
 class ErrorManager {
   #toastContainer = null;
 
@@ -7,6 +11,8 @@ class ErrorManager {
       if (!this.#toastContainer) {
         this.#toastContainer = document.createElement('div');
         this.#toastContainer.id = 'toast-container';
+        this.#toastContainer.setAttribute('role', 'alert');
+        this.#toastContainer.setAttribute('aria-live', 'polite');
         document.body.appendChild(this.#toastContainer);
       }
     }
@@ -26,15 +32,27 @@ class ErrorManager {
     }, 4000);
   }
 
+  /**
+   * Shows a red error toast and logs to console.error.
+   * @param {string} message
+   */
   Error(message) {
     console.error(message);
     this.#show(message, 'error');
   }
 
+  /**
+   * Shows a green success toast.
+   * @param {string} message
+   */
   Success(message) {
     this.#show(message, 'success');
   }
 
+  /**
+   * Shows a blue informational toast.
+   * @param {string} message
+   */
   Info(message) {
     this.#show(message, 'info');
   }

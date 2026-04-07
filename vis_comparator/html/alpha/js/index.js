@@ -5,9 +5,17 @@ import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
 const config = {
   apiBase: '/api/PR',
 };
+
+// ============================================================
+// STATE
+// ============================================================
 
 let currentModalCancelFn = null;
 function setModalCancel(fn) { currentModalCancelFn = fn; }
@@ -23,6 +31,10 @@ const state = {
   title: 'No Title_' + Date.now(),
   graphSettings: new Map(),
 };
+
+// ============================================================
+// STATE MANAGEMENT
+// ============================================================
 
 async function ResetState(state, newState) {
   graphManager.DelAllGraph();
@@ -73,6 +85,10 @@ function SetBaseInformations(state, newState) {
   UpdateHeader();
   EnableMainUI(true);
 }
+
+// ============================================================
+// MODALS
+// ============================================================
 
 function ConfigBaseInformations() {
   const currentState = { type: '', commit: '', subject: '', commits: [], subjects: [], metrics: [], title: state.title, graphSettings: new Map() };
@@ -283,7 +299,7 @@ function ConfigBaseInformations() {
   modalpage.classList.add('modalpage_visible');
 }
 
-function AddGrahique(currentState) {
+function AddGraphique(currentState) {
   let selectedCommits = [currentState.commit];
   let selectedMetrics = [];
   let metricsUIContainer = null;
@@ -694,7 +710,27 @@ function OpenInfoModal() {
   modalpage.classList.add('modalpage_visible');
 }
 
+// ============================================================
+// SAVE / LOAD
+// ============================================================
+
+const TITLE_MAX_LENGTH = 100;
+const TITLE_VALID_RE = /^[\S ]+$/;
+
+function ValidateTitle(title) {
+  if (!title || title.length === 0) return 'View name cannot be empty.';
+  if (title.length > TITLE_MAX_LENGTH) return `View name must be at most ${TITLE_MAX_LENGTH} characters.`;
+  if (!TITLE_VALID_RE.test(title)) return 'View name can only contain any printable characters and spaces';
+  return null;
+}
+
 function Save(state) {
+  const err = ValidateTitle(state.title);
+  if (err) {
+    errorManager.Error(err);
+    EnableMainUI(true);
+    return;
+  }
   apirest.SavePage(state.title, state).then(function(ok) {
     if (ok) {
       errorManager.Success('View saved: ' + state.title);
@@ -702,6 +738,10 @@ function Save(state) {
     EnableMainUI(true);
   });
 }
+
+// ============================================================
+// HEADER & DOM SETUP
+// ============================================================
 
 function EnableMainUI(state) {
   UIElt.forEach(function(element) {
@@ -779,8 +819,18 @@ header.appendChild(headerEditBtn);
 function UpdateHeader() {
   if (state.type) {
     const shortCommit = state.commit.length > 16 ? state.commit.slice(0, 16) + '\u2026' : state.commit;
-    headerConfigTooltip.innerHTML =
-      `<b>Type:</b> ${state.type}<br><b>Commit:</b> ${shortCommit}<br><b>Subject:</b> ${state.subject}`;
+    headerConfigTooltip.replaceChildren(
+      ...['Type', 'Commit', 'Subject'].map(function(label, i) {
+        const values = [state.type, shortCommit, state.subject];
+        const b = document.createElement('b');
+        b.textContent = label + ':';
+        const frag = document.createDocumentFragment();
+        frag.appendChild(b);
+        frag.appendChild(document.createTextNode(' ' + values[i]));
+        if (i < 2) frag.appendChild(document.createElement('br'));
+        return frag;
+      })
+    );
     headerConfigIcon.style.display = '';
   } else {
     headerConfigIcon.style.display = 'none';
@@ -789,6 +839,10 @@ function UpdateHeader() {
   headerEditBtn.style.display = state.type ? '' : 'none';
   if (headerEditInput) { headerEditInput.value = state.title; }
 }
+
+// ============================================================
+// INITIALISATION
+// ============================================================
 
 const errorManager = new ErrorManager();
 const apirest = new ApiREST(config.apiBase, errorManager);
@@ -799,6 +853,10 @@ const graphManager = new GraphManager(main, {
   }
 });
 
+// ============================================================
+// FLOATING ACTION BUTTONS
+// ============================================================
+
 const UIElt = [];
 const mainUI = document.createElement('div');
 mainUI.id = 'ui_icons';
@@ -808,7 +866,7 @@ uiAddGraph.className = 'ui_icons';
 uiAddGraph.innerText = '➕';
 uiAddGraph.onclick = function(event) {
   EnableMainUI(false);
-  AddGrahique(state);
+  AddGraphique(state);
 }
 UIElt.push(uiAddGraph);
 
@@ -849,6 +907,10 @@ mainUI.appendChild(uiInfo);
 main.appendChild(mainUI);
 
 const modalpage = document.getElementById('modalpage');
+
+// ============================================================
+// GLOBAL KEYBOARD / BACKDROP HANDLERS
+// ============================================================
 
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape' && currentModalCancelFn) {
