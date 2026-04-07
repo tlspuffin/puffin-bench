@@ -18,7 +18,6 @@ const state = {
   metrics: [],
   title: 'No Title_' + Date.now(),
   graphSettings: new Map(),
-  linkedCommits: new Set(),
 };
 
 async function ResetState(state, newState) {
@@ -32,21 +31,35 @@ async function ResetState(state, newState) {
   state.metrics = newState?.metrics ?? [];
   state.title = newState?.title ?? 'No Title_' + Date.now();
   state.graphSettings = newState?.graphSettings ?? new Map();
-  state.linkedCommits = newState?.linkedCommits ?? new Set();
 
   const graphSettings = new Map();
-  for(const [_, config] of state.graphSettings) {
-    const data = await apirest.LoadCommitMetricsValues(
+  for (const [_, config] of state.graphSettings) {
+    if (config.mode === 'compare') {
+      const results = await Promise.all(
+        config.compareCommits.map(c => apirest.LoadCommitMetricsValues(
+          config.type, c, config.subject, config.min, config.max, config.step, config.metrics
+        ))
+      );
+      const commitsData = new Map(
+        config.compareCommits
+          .map((c, i) => [c, results[i]])
+          .filter(([_, d]) => d != null)
+      );
+      if (commitsData.size === 0) continue;
+      const validCommits = config.compareCommits.filter((_, i) => results[i] != null);
+      const validConfig = { ...config, compareCommits: validCommits };
+      const id = await graphManager.AddCompareGraph(validConfig, commitsData);
+      graphSettings.set(id, validConfig);
+    } else {
+      const data = await apirest.LoadCommitMetricsValues(
         config.type, config.commit, config.subject, config.min, config.max, config.step, config.metrics);
-    if (data == null) {
-      continue;
+      if (data == null) continue;
+      const { header, series } = data;
+      const id = await graphManager.AddGraph(config, header, series);
+      graphSettings.set(id, config);
     }
-    const { header, series } = data;
-    const id = await graphManager.AddGraph(config, header, series);
-    graphSettings.set(id, config);
   }
   state.graphSettings = graphSettings;
-  await graphManager.LinkCommits(state.linkedCommits);
 
   header.innerText = `${state.type} (${state.commit}) : ${state.title}`;
 }
@@ -68,14 +81,14 @@ async function ConfigBaseInformations(oldState) {
   const elements = [];
 
   const container = document.createElement('div');
-  
+
   ui.Reset();
 
   container.appendChild(ui.CreateTitle("1. Select XP type", 'h3'));
   const selectType = ui.CreateSelect([
-    { value:'', text: 'Select XP...' }, 
-    { value:'Perf', selected: currentState.type == 'Perf' }, 
-    { value:'Vuln', selected: currentState.type == 'Vuln' },
+    { value:'', text: 'Select XP...' },
+    { value:'Perf', selected: currentState.type === 'Perf' },
+    { value:'Vuln', selected: currentState.type === 'Vuln' },
   ]);
   container.appendChild(selectType);
   elements.push(selectType);
@@ -84,11 +97,11 @@ async function ConfigBaseInformations(oldState) {
   const selectCommit = ui.CreateSelect(
     [ { value:'', text:'Select commit...' } ]
         .concat((currentState?.commits ?? []).map(function(commit) {
-            return { value: commit, selected: commit == currentState?.commit };
+            return { value: commit, selected: commit === currentState?.commit };
         })
     )
   );
-  if (currentState.commits.length == 0) {
+  if (currentState.commits.length === 0) {
     UI.DisableElement(selectCommit);
   }
   container.appendChild(selectCommit);
@@ -98,20 +111,20 @@ async function ConfigBaseInformations(oldState) {
   const selectSubject = ui.CreateSelect(
     [ { value:'', text:'Select subject...' } ]
         .concat((currentState?.subjects ?? []).map(function(subject) {
-            return { value: subject.value, text: subject.text, selected: subject.value == currentState?.subject };
+            return { value: subject.value, text: subject.text, selected: subject.value === currentState?.subject };
         })
     )
   );
-  if (currentState.subjects.length == 0) {
+  if (currentState.subjects.length === 0) {
     UI.DisableElement(selectSubject);
   }
   container.appendChild(selectSubject);
   elements.push(selectSubject);
 
-  const actions = ui.CreateActions(false, {
+  const actions = ui.CreateActions(true, {
     ok: {
       callback: function(event) {
-        apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject).then(function(metrics) { 
+        apirest.LoadCommitMetrics(currentState.type, currentState.commit, currentState.subject).then(function(metrics) {
             currentState.metrics = metrics;
             modalpage.classList.remove('modalpage_visible');
             SetBaseInformations(state, currentState);
@@ -125,7 +138,7 @@ async function ConfigBaseInformations(oldState) {
 
 
   selectType.onchange = function(event) {
-    if (event.target.value == currentState.type) {
+    if (event.target.value === currentState.type) {
       return;
     }
     currentState.type = '';
@@ -133,7 +146,7 @@ async function ConfigBaseInformations(oldState) {
     currentState.subject = '';
     currentState.commits = [];
     currentState.subjects = [];
-    if (event.target.value == '') {
+    if (event.target.value === '') {
       UI.EnableElement(selectType);
       UI.DisableElement(selectCommit);
       UI.DisableElement(selectSubject);
@@ -147,10 +160,10 @@ async function ConfigBaseInformations(oldState) {
       UI.EnableElement(selectType);
       currentState.type = event.target.value;
       currentState.commits = commits;
-      if (commits.length == 0) {
+      if (commits.length === 0) {
         return;
       }
-      ui.UpdateSelect(selectCommit, 
+      ui.UpdateSelect(selectCommit,
         [ { value:'', text:'Select commit...' } ].concat(
           commits.map(function(commit) {
             return { value: commit };
@@ -162,13 +175,13 @@ async function ConfigBaseInformations(oldState) {
   };
 
   selectCommit.onchange = function(event) {
-    if (event.target.value == currentState.commit) {
+    if (event.target.value === currentState.commit) {
       return;
     }
     currentState.commit = '';
     currentState.subject = '';
     currentState.subjects = [];
-    if (event.target.value == '') {
+    if (event.target.value === '') {
       UI.EnableElement(selectType);
       UI.EnableElement(selectCommit);
       UI.DisableElement(selectSubject);
@@ -183,10 +196,10 @@ async function ConfigBaseInformations(oldState) {
       UI.EnableElement(selectCommit);
       currentState.commit = event.target.value;
       currentState.subjects = subjects;
-      if (subjects.length == 0) {
+      if (subjects.length === 0) {
         return;
       }
-      ui.UpdateSelect(selectSubject, 
+      ui.UpdateSelect(selectSubject,
         [ { value:'', text:'Select subject...' } ].concat(
           subjects.map(function(subject) {
             return { value: subject.value, text: subject.text };
@@ -197,11 +210,11 @@ async function ConfigBaseInformations(oldState) {
     });
   };
   selectSubject.onchange = function(event) {
-    if (event.target.value == currentState.subject) {
+    if (event.target.value === currentState.subject) {
       return;
     }
     currentState.subject = event.target.value;
-    if (currentState.subject == '') {
+    if (currentState.subject === '') {
       UI.DisableElement(actions);
     } else {
       UI.EnableElement(actions);
@@ -213,68 +226,100 @@ async function ConfigBaseInformations(oldState) {
 }
 
 function AddGrahique(currentState) {
-  const selectedMetrics = [];
+  let selectedCommits = [currentState.commit];
+  let selectedMetrics = [];
+  let metricsUIContainer = null;
+  let btOk = null;
+
   const modalpage = document.getElementById('modalpage');
   modalpage.innerHTML = '';
 
   const container = document.createElement('div');
-  
   ui.Reset();
 
-  container.appendChild(ui.CreateTitle("Set time span (μs)", 'h3'));
+  // 1. Commit selection
+  container.appendChild(ui.CreateTitle("1. Select commit(s)", 'h3'));
+  const commitsUI = ui.CreateCommits(currentState.commits, new Set(selectedCommits), {
+    maxSelect: 4,
+    callback: function(event) {
+      if (event.target.checked) {
+        selectedCommits.push(event.target.value);
+      } else {
+        const idx = selectedCommits.indexOf(event.target.value);
+        if (idx >= 0) selectedCommits.splice(idx, 1);
+      }
+      rebuildMetricsUI();
+    }
+  });
+  container.appendChild(commitsUI);
+
+  // 2. Metrics (rebuilt dynamically when commit selection changes)
+  container.appendChild(ui.CreateTitle("2. Select metric(s)", 'h3'));
+  const metricsWrapper = document.createElement('div');
+  container.appendChild(metricsWrapper);
+
+  // 3. Time range
+  container.appendChild(ui.CreateTitle("3. Time range (μs)", 'h3'));
   const timeID = ui.ID();
   const time = ui.CreateTimeSelection(
       0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / 20_000));
   container.appendChild(time);
 
-  container.appendChild(ui.CreateTitle("Select metric(s)", 'h3'));
-  const metricsUI = ui.CreateMetrics(currentState.metrics, {
-    callback: function(event) {
-      let anyChecked = true;
-      if (event.target.checked) {
-        selectedMetrics.push(event.target.value);
-      } else {
-        const elementToRemove = function(element) { return element == event.target.value };
-        selectedMetrics.splice(selectedMetrics.findIndex(elementToRemove), 1);
-        anyChecked = metricsUI.querySelector('.metric-checkbox:checked');
-      }
-      if (anyChecked) {
-        UI.EnableElement(btOk);
-      } else {
-        UI.DisableElement(btOk);
-      }
-    }
-  });
-  container.appendChild(metricsUI);
-
-  const btOkID = 'ui_' + ui.ID();
+  // 4. Actions
+  const btOkContainerID = 'ui_' + ui.ID();
   const actions = ui.CreateActions(true, {
     ok: {
-      callback: function(event) {
-        if (selectedMetrics.length != 0) {
-          const min = document.getElementById('time_start_' + timeID).value;
-          const max = document.getElementById('time_end_' + timeID).value;
-          const step = document.getElementById('time_step_' + timeID).value;
-          apirest.LoadCommitMetricsValues(
-              currentState.type, currentState.commit, currentState.subject, min, max, step, selectedMetrics)
-          .then(function(data) {
-            if (data == null) {
-              modalpage.classList.remove('modalpage_visible');
-              EnableMainUI(true);
-              return;
-            }
+      callback: async function(event) {
+        if (selectedMetrics.length === 0 || selectedCommits.length === 0) return;
+
+        const min = document.getElementById('time_start_' + timeID).value;
+        const max = document.getElementById('time_end_' + timeID).value;
+        const step = document.getElementById('time_step_' + timeID).value;
+
+        if (selectedCommits.length >= 2) {
+          // COMPARE mode: one merged graph
+          const results = await Promise.all(
+            selectedCommits.map(c => apirest.LoadCommitMetricsValues(
+              currentState.type, c, currentState.subject, min, max, step, selectedMetrics
+            ))
+          );
+          const commitsData = new Map(
+            selectedCommits.map((c, i) => [c, results[i]]).filter(([_, d]) => d != null)
+          );
+          if (commitsData.size > 0) {
+            const validCommits = selectedCommits.filter((_, i) => results[i] != null);
+            const graphConfig = {
+              mode: 'compare',
+              compareCommits: validCommits,
+              metrics: selectedMetrics,
+              type: currentState.type,
+              subject: currentState.subject,
+              min, max, step,
+              showRaw: false
+            };
+            const id = await graphManager.AddCompareGraph(graphConfig, commitsData);
+            currentState.graphSettings.set(id, graphConfig);
+          }
+        } else {
+          // NORMAL mode: single commit graph
+          const theCommit = selectedCommits[0];
+          const data = await apirest.LoadCommitMetricsValues(
+            currentState.type, theCommit, currentState.subject, min, max, step, selectedMetrics);
+          if (data != null) {
             const { header, series } = data;
-
-            const graphSetting = { metrics: selectedMetrics, type: currentState.type, 
-                commit: currentState.commit, subject: currentState.subject, min, max, step };
-            graphManager.AddGraph(graphSetting, header, series).then(function(id) {
-                currentState.graphSettings.set(id, graphSetting);
-                modalpage.classList.remove('modalpage_visible');
-                EnableMainUI(true);
-            });
-          });
-          return;
+            const graphSetting = {
+              mode: 'normal',
+              metrics: selectedMetrics,
+              type: currentState.type,
+              commit: theCommit,
+              subject: currentState.subject,
+              min, max, step
+            };
+            const id = await graphManager.AddGraph(graphSetting, header, series);
+            currentState.graphSettings.set(id, graphSetting);
+          }
         }
+
         modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
       }
@@ -289,55 +334,43 @@ function AddGrahique(currentState) {
   container.appendChild(actions);
 
   modalpage.appendChild(container);
-  const btOk = document.getElementById(btOkID);
+
+  btOk = document.getElementById(btOkContainerID);
   UI.DisableElement(btOk);
+
+  // Build initial metrics UI after btOk is set
+  rebuildMetricsUI();
+
   modalpage.classList.add('modalpage_visible');
-}
 
-function LinkCommits(currentState) {
-  const selectedCommits = currentState.linkedCommits;
-  const modalpage = document.getElementById('modalpage');
-  modalpage.innerHTML = '';
-
-  const container = document.createElement('div');
-
-  ui.Reset();
-
-  container.appendChild(ui.CreateTitle("Select commit(s)", 'h3'));
-
-  const commitsSet = new Set(currentState.commits);
-  commitsSet.delete(currentState.commit);
-  const commitsUI = ui.CreateCommits(Array.from(commitsSet), currentState.linkedCommits, {
-    callback: function(event) {
-      if (event.target.checked) {
-        selectedCommits.add(event.target.value);
-      } else {
-        selectedCommits.delete(event.target.value);
-      }
-    }
-  });
-  container.appendChild(commitsUI);
-
-  const actions = ui.CreateActions(true, {
-    ok: {
+  function rebuildMetricsUI() {
+    selectedMetrics = [];
+    const isCompare = selectedCommits.length >= 2;
+    if (metricsUIContainer) metricsUIContainer.remove();
+    metricsUIContainer = ui.CreateMetrics(currentState.metrics, {
+      maxSelect: isCompare ? 2 : Infinity,
       callback: function(event) {
-        currentState.linkedCommits = selectedCommits;
-        graphManager.LinkCommits(selectedCommits);
-        modalpage.classList.remove('modalpage_visible');
-        EnableMainUI(true);
+        if (event.target.checked) {
+          selectedMetrics.push(event.target.value);
+        } else {
+          const idx = selectedMetrics.indexOf(event.target.value);
+          if (idx >= 0) selectedMetrics.splice(idx, 1);
+        }
+        updateOkButton();
       }
-    },
-    cancel: {
-      callback: function(event) {
-        modalpage.classList.remove('modalpage_visible');
-        EnableMainUI(true);
-      }
-    }
-  });
-  container.appendChild(actions);
+    });
+    metricsWrapper.appendChild(metricsUIContainer);
+    updateOkButton();
+  }
 
-  modalpage.appendChild(container);
-  modalpage.classList.add('modalpage_visible');
+  function updateOkButton() {
+    if (!btOk) return;
+    if (selectedMetrics.length > 0 && selectedCommits.length >= 1) {
+      UI.EnableElement(btOk);
+    } else {
+      UI.DisableElement(btOk);
+    }
+  }
 }
 
 function NewGraph() {
@@ -345,7 +378,7 @@ function NewGraph() {
   modalpage.innerHTML = '';
 
   const container = document.createElement('div');
-  
+
   ui.Reset();
   container.appendChild(ui.CreateTitle("Create / Load graph", 'h3'));
   const listFiles = ui.CreateListFiles(null, {
@@ -373,7 +406,7 @@ function NewGraph() {
     cancel: {
       callback: function(event) {
         modalpage.classList.remove('modalpage_visible');
-        if (state.commit == '') {
+        if (state.commit === '') {
           UI.EnableElement(uiLoadView)
         } else {
           EnableMainUI(true);
@@ -412,7 +445,7 @@ const main = document.getElementById('main');
 const errorManager = new ErrorManager();
 const apirest = new ApiREST(config.apiBase, errorManager);
 const ui = new UI();
-const graphManager = new GraphManager(main, apirest, {
+const graphManager = new GraphManager(main, {
   delete: function(id) {
     state.graphSettings.delete(id);
   }
@@ -421,6 +454,7 @@ const graphManager = new GraphManager(main, apirest, {
 const UIElt = [];
 const mainUI = document.createElement('div');
 mainUI.id = 'ui_icons';
+
 const uiAddGraph = document.createElement('span');
 uiAddGraph.className = 'ui_icons';
 uiAddGraph.innerText = '➕';
@@ -429,14 +463,7 @@ uiAddGraph.onclick = function(event) {
   AddGrahique(state);
 }
 UIElt.push(uiAddGraph);
-const uiManageCommits = document.createElement('span');
-uiManageCommits.className = 'ui_icons';
-uiManageCommits.innerText = '📌';
-uiManageCommits.onclick = function(event) {
-  EnableMainUI(false);
-  LinkCommits(state);
-}
-UIElt.push(uiManageCommits);
+
 const uiSaveView = document.createElement('span');
 uiSaveView.className = 'ui_icons';
 uiSaveView.innerText = '💾';

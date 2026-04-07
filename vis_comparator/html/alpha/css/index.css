@@ -113,13 +113,30 @@ div[id^="graph_ui_"] {
 }
 
 .graph_ui_icons {
-  font-size: 1.4rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 1.2rem;
   cursor: pointer;
   padding: 5px 10px;
   border-radius: 6px;
   transition: all 0.2s ease;
   user-select: none;
   background: rgba(255, 255, 255, 0.9);
+}
+
+.graph_ui_icon_label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #2c3e50;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.graph_ui_icons_active {
+  background: rgba(102, 126, 234, 0.25);
+  outline: 2px solid rgba(102, 126, 234, 0.5);
 }
 
 .graph_ui_icons:hover {

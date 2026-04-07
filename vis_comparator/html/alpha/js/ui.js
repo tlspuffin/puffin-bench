@@ -135,9 +135,18 @@ class UI {
     });
     container.appendChild(folder);
 
+    const maxSelect = options?.maxSelect ?? Infinity;
     const checkboxes = container.querySelectorAll('.metric-checkbox');
     checkboxes.forEach(cb => {
-        cb.onchange = options.callback;
+        cb.onchange = function(event) {
+            if (maxSelect !== Infinity) {
+                const checkedCount = container.querySelectorAll('.metric-checkbox:checked').length;
+                checkboxes.forEach(other => {
+                    if (!other.checked) other.disabled = checkedCount >= maxSelect;
+                });
+            }
+            options?.callback?.(event);
+        };
     });
 
     return container;
@@ -158,9 +167,18 @@ class UI {
         container.appendChild(label);
     });
 
+    const maxSelect = options?.maxSelect ?? Infinity;
     const checkboxes = container.querySelectorAll('.commit-checkbox');
     checkboxes.forEach(cb => {
-        cb.onchange = options.callback;
+        cb.onchange = function(event) {
+            if (maxSelect !== Infinity) {
+                const checkedCount = container.querySelectorAll('.commit-checkbox:checked').length;
+                checkboxes.forEach(other => {
+                    if (!other.checked) other.disabled = checkedCount >= maxSelect;
+                });
+            }
+            options?.callback?.(event);
+        };
     });
 
     return container;
