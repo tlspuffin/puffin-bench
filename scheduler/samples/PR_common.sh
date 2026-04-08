@@ -400,6 +400,10 @@ ExperimentEndCommon() {
 }
 
 ExperimentRun() {
+  if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
+    echo "Missing global variable AFL_CORES_GRAMMAR"
+    return 1;
+  fi
   if [ -z "$1" ]; then
     echo "Missing reference parameter tlspuffin_pid"
     return 1;
@@ -438,8 +442,9 @@ ExperimentRun() {
   local binary="";
   local last_core=0;
   ExperimentSetup binary last_core "${features}" || return 1;
-
-  nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  local cores="";
+  (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
+  nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
@@ -452,6 +457,11 @@ ExperimentRun() {
 }
 
 ExperimentRunWithCargo() {
+  if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
+    echo "Missing global variable AFL_CORES_GRAMMAR"
+    return 1;
+  fi
+
   if [ -z "$1" ]; then
     echo "Missing reference parameter tlspuffin_pid"
     return 1;
@@ -488,8 +498,10 @@ ExperimentRunWithCargo() {
 
   local last_core=0;
   ExperimentSetupForCargo last_core "${features}" || return 1;
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores 0-${last_core} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  local cores="";
+  (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -548,7 +560,11 @@ Init () {
     patch --dry-run "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch" &&
     patch "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch"
 
-  nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
+  #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
+  LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
+  AFL_CORES_GRAMMAR=$?
+  AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"
 
   return 0;
 }
