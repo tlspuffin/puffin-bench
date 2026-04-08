@@ -436,6 +436,36 @@ select:focus {
   font-family: 'Courier New', monospace;
 }
 
+/* Commit dropdown (searchable) */
+.commit-dropdown-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+.commit-dropdown-search:focus {
+  border-color: var(--color-primary);
+}
+.commit-dropdown-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 4px 0;
+}
+.commit-dropdown-list .checkbox-label-inline {
+  display: flex;
+  margin: 2px 4px;
+  width: calc(100% - 8px);
+  box-sizing: border-box;
+}
+
 /* Metrics folder structure */
 .metrics_toggle {
   cursor: pointer;

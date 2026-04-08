@@ -14,6 +14,7 @@ struct Config {
   std::filesystem::path CA_;
   std::filesystem::path html_;
   std::filesystem::path userdata_;
+  std::string git_history_url_;
 
   Config();
   void Load(std::string const& name, rapidjson::Value& doc);

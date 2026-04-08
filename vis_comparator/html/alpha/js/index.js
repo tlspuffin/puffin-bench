@@ -102,36 +102,35 @@ function ConfigBaseInformations() {
 
   ui.Reset();
 
-  container.appendChild(ui.CreateTitle("1. Select XP type", 'h3'));
+  const gitHistory = apirest.LoadGitHistory();
+
+  container.appendChild(ui.CreateTitle("1. Select XP type", 'h3', null));
   const selectType = ui.CreateSelect([
     { value:'', text: 'Select XP...' },
     { value:'Perf', selected: currentState.type === 'Perf' },
     { value:'Vuln', selected: currentState.type === 'Vuln' },
-  ]);
+  ], null);
   container.appendChild(selectType);
   elements.push(selectType);
 
-  container.appendChild(ui.CreateTitle("2. Select commit", 'h3'));
-  const selectCommit = ui.CreateSelect(
-    [ { value:'', text:'Select commit...' } ]
-        .concat((currentState?.commits ?? []).map(function(commit) {
-            return { value: commit, selected: commit === currentState?.commit };
-        })
-    )
-  );
+  container.appendChild(ui.CreateTitle("2. Select commit", 'h3', null));
+  const selectCommit = ui.CreateCommitDropdown(currentState.commits, gitHistory, {
+    maxSelect: 1,
+  });
   if (currentState.commits.length === 0) {
     UI.DisableElement(selectCommit);
   }
   container.appendChild(selectCommit);
   elements.push(selectCommit);
 
-  container.appendChild(ui.CreateTitle("3. Select subject", 'h3'));
+  container.appendChild(ui.CreateTitle("3. Select subject", 'h3', null));
   const selectSubject = ui.CreateSelect(
     [ { value:'', text:'Select subject...' } ]
         .concat((currentState?.subjects ?? []).map(function(subject) {
             return { value: subject.value, text: subject.text, selected: subject.value === currentState?.subject };
         })
-    )
+    ),
+      null
   );
   if (currentState.subjects.length === 0) {
     UI.DisableElement(selectSubject);
@@ -139,7 +138,7 @@ function ConfigBaseInformations() {
   container.appendChild(selectSubject);
   elements.push(selectSubject);
 
-  container.appendChild(ui.CreateTitle("4. View name", 'h3'));
+  container.appendChild(ui.CreateTitle("4. View name", 'h3', null));
   const titleInput = document.createElement('input');
   titleInput.type = 'text';
   titleInput.className = 'modal_text_input';
@@ -227,19 +226,17 @@ function ConfigBaseInformations() {
       if (commits.length === 0) {
         return;
       }
-      ui.UpdateSelect(selectCommit,
-        [ { value:'', text:'Select commit...' } ].concat(
-          commits.map(function(commit) {
-            return { value: commit };
-          })
-        )
-      );
+      ui.UpdateCommitDropdown(selectCommit, currentState.commits, gitHistory, {
+        maxSelect: 1,
+      });
       UI.EnableElement(selectCommit);
     });
   };
 
   selectCommit.onchange = function(event) {
-    if (event.target.value === currentState.commit) {
+    const checked = selectCommit.querySelector('.commit-checkbox:checked');
+    const commitValue = checked?.value ?? '';
+    if (commitValue === currentState.commit) {
       return;
     }
     currentState.commit = '';
@@ -248,7 +245,7 @@ function ConfigBaseInformations() {
     titleWasEdited = false;
     titleInput.disabled = true;
     titleInput.value = '';
-    if (event.target.value === '') {
+    if (commitValue === '') {
       UI.EnableElement(selectType);
       UI.EnableElement(selectCommit);
       UI.DisableElement(selectSubject);
@@ -258,10 +255,10 @@ function ConfigBaseInformations() {
     elements.forEach(function(element) {
       UI.DisableElement(element);
     });
-    apirest.LoadCommitSubjects(currentState.type, event.target.value).then(function(subjects) {
+    apirest.LoadCommitSubjects(currentState.type, commitValue).then(function(subjects) {
       UI.EnableElement(selectType);
       UI.EnableElement(selectCommit);
-      currentState.commit = event.target.value;
+      currentState.commit = commitValue;
       currentState.subjects = subjects;
       if (subjects.length === 0) {
         return;
@@ -301,7 +298,9 @@ function ConfigBaseInformations() {
 
 const DEFAULT_STEP_DIVISOR = 20_000;
 
-function AddGraphique(currentState) {
+async function AddGraphique(currentState) {
+  const gitHistory = apirest.LoadGitHistory();
+
   let selectedSubject = currentState.subject;
   let currentMetrics = currentState.metrics;
   let selectedCommits = [currentState.commit];
@@ -316,18 +315,20 @@ function AddGraphique(currentState) {
   ui.Reset();
 
   // 1. PUT selection
-  container.appendChild(ui.CreateTitle("1. Select PUT", 'h3'));
+  container.appendChild(ui.CreateTitle("1. Select PUT", 'h3', null));
   const selectSubject = ui.CreateSelect(
     (currentState.subjects ?? []).map(function(s) {
       return { value: s.value, text: s.text, selected: s.value === currentState.subject };
-    })
+    }),
+      null
   );
   container.appendChild(selectSubject);
 
   // 2. Commit selection
-  container.appendChild(ui.CreateTitle("2. Select commit(s)", 'h3'));
-  const commitsUI = ui.CreateCommits(currentState.commits, new Set(selectedCommits), {
+  container.appendChild(ui.CreateTitle("2. Select commit(s)", 'h3', null));
+  const commitsUI = ui.CreateCommitDropdown(currentState.commits, gitHistory, {
     maxSelect: 4,
+    selected: new Set(selectedCommits),
     callback: function(event) {
       if (event.target.checked) {
         selectedCommits.push(event.target.value);
@@ -341,15 +342,18 @@ function AddGraphique(currentState) {
   container.appendChild(commitsUI);
 
   // 3. Metrics (rebuilt dynamically when commit or PUT selection changes)
-  container.appendChild(ui.CreateTitle("3. Select metric(s)", 'h3'));
+  container.appendChild(ui.CreateTitle("3. Select metric(s)", 'h3', null));
   const metricsWrapper = document.createElement('div');
   container.appendChild(metricsWrapper);
 
   // 4. Time range
-  container.appendChild(ui.CreateTitle("4. Time range (\u03bcs)", 'h3'));
+  container.appendChild(ui.CreateTitle("4. Time range (\u03bcs)", 'h3', null));
   const timeID = ui.ID();
   const time = ui.CreateTimeSelection(
-      0, currentState.metrics.maxTimeMicroS, Math.floor(currentState.metrics.maxTimeMicroS / DEFAULT_STEP_DIVISOR));
+      0,
+      currentState.metrics.maxTimeMicroS,
+      Math.floor(currentState.metrics.maxTimeMicroS / DEFAULT_STEP_DIVISOR),
+      null);
   container.appendChild(time);
 
   setModalCancel(function() {

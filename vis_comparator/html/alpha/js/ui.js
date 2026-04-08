@@ -1,3 +1,5 @@
+import {CommitHelp} from "./commithelp.js";
+
 /**
  * DOM component factory for modal forms.
  * Uses an internal counter (#id) to generate unique element IDs.
@@ -255,6 +257,114 @@ class UI {
     });
 
     return container;
+  }
+
+  /**
+   * Creates a searchable commit dropdown with optional git history enrichment.
+   * Entries show `[date] hash7 — branch` when gitHistory is available, otherwise `hash7`.
+   * Sorted by date descending; commits not found in history appear last.
+   * @param {string[]}      commits     - Full commit hashes
+   * @param {Promise<object|null>}   gitHistory  - pesto-calc history object with `commits` and `PR` arrays
+   * @param {object}        options
+   * @param {object}        [options.container] - #ApplyOptions for the outer container
+   * @param {number}        [options.maxSelect] - Max simultaneous selections (default: Infinity)
+   * @param {Set<string>}   [options.selected]  - Pre-selected commit hashes
+   * @param {Function}      [options.callback]  - Called on each checkbox change event
+   * @returns {HTMLDivElement}
+   */
+  CreateCommitDropdown(commits, gitHistory, options) {
+    const container = document.createElement('div');
+    this.#ApplyOptions(container, options?.container);
+
+    // Search input
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Rechercher un commit…';
+    searchInput.className = 'commit-dropdown-search';
+    container.appendChild(searchInput);
+
+    // Scrollable list
+    const listDiv = document.createElement('div');
+    listDiv.className = 'commit-dropdown-list';
+    container.appendChild(listDiv);
+
+    // Build rows
+    this.UpdateCommitDropdown(container, commits, gitHistory, options);
+
+    // Search filter — query DOM at input time (rows are populated asynchronously)
+    searchInput.oninput = () => {
+      const q = searchInput.value.toLowerCase();
+      listDiv.querySelectorAll('label.checkbox-label-inline').forEach(label => {
+        label.style.display = label.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    };
+
+    return container;
+  }
+
+  /**
+   * Replaces the options in an existing commit dropdown element.
+   * @param {HTMLDivElement} element
+   * @param {string[]}      commits
+   * @param {Promise<object|null>}   gitHistory
+   * @param {object|null}        options
+   * @param {Set<string>}   [options.selected]  - Pre-selected commit hashes
+   * @param {number}        [options.maxSelect] - Max simultaneous selections (default: Infinity)
+   * @param {Function}      [options.callback]  - Called on each checkbox change event
+   */
+  UpdateCommitDropdown(element, commits, gitHistory, options) {
+    gitHistory.then(history => {
+      let enrichedCommits = CommitHelp.Enrich(commits, history);
+
+      const maxSelect = options?.maxSelect ?? Infinity;
+      const preSelected = options?.selected ?? new Set();
+
+      let divList = element.querySelector('.commit-dropdown-list');
+
+      // Build rows
+      const rows = enrichedCommits.map((commit) => {
+        const rowLabel = document.createElement('label');
+        rowLabel.className = 'checkbox-label-inline';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'commit-checkbox';
+        cb.value = commit.hash;
+        cb.checked = preSelected.has(commit.hash);
+
+        const span = document.createElement('span');
+        span.textContent = commit.label;
+
+        rowLabel.appendChild(cb);
+        rowLabel.appendChild(span);
+        return { el: rowLabel, cb, label: commit.label.toLowerCase() };
+      });
+
+      divList.replaceChildren(); // remove all elements before adding new ones
+      rows.forEach(r => divList.appendChild(r.el));
+
+      // Enforce maxSelect
+      const updateDisabled = () => {
+        if (maxSelect === Infinity) return;
+        const checkedCount = divList.querySelectorAll('.commit-checkbox:checked').length;
+        rows.forEach(r => {
+          if (!r.cb.checked) {
+            r.cb.disabled = checkedCount >= maxSelect;
+            checkedCount >= maxSelect ? UI.DisableElement(r.el) : UI.EnableElement(r.el);
+          }
+        });
+      };
+      updateDisabled();
+
+      // Checkbox change
+      rows.forEach(r => {
+        r.cb.onchange = (event) => {
+          updateDisabled();
+          options?.callback?.(event);
+          element.dispatchEvent(new Event('change'));
+        };
+      });
+    })
   }
 
   /**

@@ -10,6 +10,10 @@
 #include <Poco/Base64Encoder.h>
 #include <Poco/StreamCopier.h>
 #include <Poco/URI.h>
+#include <Poco/Net/HTTPClientSession.h>
+#include <Poco/Net/HTTPSClientSession.h>
+#include <Poco/Net/HTTPRequest.h>
+#include <Poco/Net/HTTPResponse.h>
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
 
@@ -535,6 +539,67 @@ void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
   rapidjson::Document doc;
   SendJSONResponse(response, doc);
 }
+
+// Get GIT history
+void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& url = config_->git_history_url_;
+  if (url.empty()) {
+    response.setContentType("application/json");
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send() << "[]";
+    return;
+  }
+
+  try {
+    Poco::URI uri(url);
+    std::string path = uri.getPathAndQuery();
+    if (path.empty()) path = "/";
+
+    std::unique_ptr<Poco::Net::HTTPClientSession> session;
+    if (uri.getScheme() == "https") {
+      session = std::make_unique<Poco::Net::HTTPSClientSession>(
+          uri.getHost(), uri.getPort());
+    } else {
+      session = std::make_unique<Poco::Net::HTTPClientSession>(
+          uri.getHost(), uri.getPort());
+    }
+
+    Poco::Net::HTTPRequest req(
+        Poco::Net::HTTPRequest::HTTP_GET, path,
+        Poco::Net::HTTPMessage::HTTP_1_1);
+    req.setHost(uri.getHost());
+    session->setTimeout(Poco::Timespan(10, 0));
+    session->sendRequest(req);
+
+    Poco::Net::HTTPResponse resp;
+    std::istream& bodyStream = session->receiveResponse(resp);
+
+    if (resp.getStatus() < 200 || resp.getStatus() >= 300) {
+      response.setContentType("application/json");
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+      response.send() << "[]";
+      return;
+    }
+
+    std::stringstream ss;
+    ss << bodyStream.rdbuf();
+
+    response.setContentType("application/json");
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send() << ss.str();
+  } catch (std::exception const& e) {
+    std::cerr << "[git/history proxy] " << e.what() << std::endl;
+    response.setContentType("application/json");
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send() << "[]";
+  }
+}
+
 
 // POST /api/refresh
 /*void ns_Server::RequestHandlerAPIRefresh::handleRequest(

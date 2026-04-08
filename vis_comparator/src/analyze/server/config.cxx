@@ -1,12 +1,14 @@
 #include "config.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "Poco/Exception.h"
+#include "Poco/URI.h"
 
 static ns_Server::Config defaultConfig;
 
 ns_Server::Config::Config()
-    : port_(8080), secure_(false), key_("security/site.key"), 
-    cert_("security/site.pem"), CA_("security/CA.pem"), html_("html"), 
-    userdata_("userdata")
+    : port_(8080), secure_(false), key_("security/site.key"),
+    cert_("security/site.pem"), CA_("security/CA.pem"), html_("html"),
+    userdata_("userdata"), git_history_url_("")
 {}
 
 void ns_Server::Config::Load(std::string const& name, rapidjson::Value& doc) {
@@ -27,6 +29,7 @@ void ns_Server::Config::Load(std::string const& name, rapidjson::Value& doc) {
 
   html_ = GetOrDefault<std::string>(*srv, "html", defaultConfig.html_);
   userdata_ = GetOrDefault<std::string>(*srv, "userdata", defaultConfig.userdata_);
+  git_history_url_ = GetOrDefault<std::string>(*srv, "git_history_url", "");
 }
 
 void ns_Server::Config::Save(std::string const& name, rapidjson::Value& doc, 
@@ -39,6 +42,7 @@ void ns_Server::Config::Save(std::string const& name, rapidjson::Value& doc,
   node.AddMember("port", port_, alloc);
   node.AddMember("html", rapidjson::Value(html_.c_str(), alloc), alloc);
   node.AddMember("userdata", rapidjson::Value(userdata_.c_str(), alloc), alloc);
+  node.AddMember("git_history_url", rapidjson::Value(git_history_url_.c_str(), alloc), alloc);
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
@@ -49,5 +53,16 @@ void ns_Server::Config::Validate() const {
     discard = std::filesystem::canonical(key_);
     discard = std::filesystem::canonical(cert_);
     discard = std::filesystem::canonical(CA_);
+  }
+
+  if (!git_history_url_.empty()) {
+    try {
+      const Poco::URI uri(git_history_url_);
+      const std::string& scheme = uri.getScheme();
+      if (scheme != "http" && scheme != "https")
+        throw std::runtime_error("git_history_url must use http or https scheme");
+    } catch (Poco::SyntaxException const& e) {
+      throw std::runtime_error(std::string("git_history_url is not a valid URL: ") + e.what());
+    }
   }
 }

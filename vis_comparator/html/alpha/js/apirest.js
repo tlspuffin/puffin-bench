@@ -129,6 +129,20 @@ class ApiREST {
   }
   
   /**
+   * Loads git commit history from the configured git_history_url proxy.
+   * @returns {Promise<object|null>} pesto-calc history object, or null on failure/unavailable
+   */
+  async LoadGitHistory() {
+    try {
+      const response = await fetch(`${this.#apiURI}/git/history`);
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
    * Loads the list of test subjects (benchmark names) for a given commit.
    * @param {string} commitType - Dataset type, e.g. 'Perf'
    * @param {string} commitID   - Commit hash
