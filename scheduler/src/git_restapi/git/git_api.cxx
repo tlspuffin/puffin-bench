@@ -8,23 +8,27 @@ ns_GIT::GitAPI::GitAPI(Config const config, std::string const& name, std::string
     : directory_(config.storage_ / name), scriptsPath_(config.scriptsPath_)
 {
   char buffer[1024]{0};
+  std::string outputStr;
   std::string repoPath = directory_ / "repo";
   std::string commandLine = "git -C \"" + (directory_ / "repo").string() + 
       "\" fetch --all >/dev/null 2>&1 || git clone --filter=blob:none " + 
       url + " \"" + repoPath + "\" 2>&1 1>/dev/null";
-  FILE* stdout = popen(commandLine.c_str(), "r");
-  if (stdout == nullptr) {
+  FILE* output = popen(commandLine.c_str(), "r");
+  if (output == nullptr) {
     throw std::runtime_error("Unable to fetch/clone " + url + " in " + repoPath);
   }
-  size_t retSize = fread(buffer, 1, 1024, stdout);
-  if (ferror(stdout)) {
-    throw std::runtime_error("Error while fetch/clone " + url + ": " + 
-        (retSize == 0 ? "unknown error" : buffer));
+  size_t bytesRead = 0;
+  while((bytesRead = fread(buffer, 1, 1024, output)) > 0) {
+    outputStr.append(buffer, bytesRead);
   }
-  int retInt = pclose(stdout);
+  if (ferror(output)) {
+    throw std::runtime_error("Error while fetch/clone " + url + ": " + 
+        (outputStr.empty() ? "unknown error" : outputStr));
+  }
+  int retInt = pclose(output);
   if ((!WIFEXITED(retInt)) || (WEXITSTATUS(retInt) != 0)) {
     throw std::runtime_error("Error while fetch/clone " + url + ": " + 
-        (retSize == 0 ? "unknown error" : buffer));
+        (outputStr.empty() ? "unknown error" : outputStr));
   }
 }
 
