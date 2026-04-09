@@ -101,15 +101,20 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
 
   std::string tasksList;
   {
-    auto const nbRetryIt = runtimeConfig.find("RUNTIME_NB_RUN");
-    auto const nbCoreIt = runtimeConfig.find("RUNTIME_NB_CORES");
-    auto const timeoutIt = runtimeConfig.find("RUNTIME_TIMEOUT");
-    auto const runsSelectIt = runtimeConfig.find("RUNTIME_RUN_SELECT");
-    auto const runsConfigIt = runtimeConfig.find("RUNTIME_RUN_CONFIG");
+    auto const nbRetryIt = runtimeConfig.find("NB_RUN");
+    auto const nbCoreIt = runtimeConfig.find("NB_CORES");
+    auto const timeoutIt = runtimeConfig.find("TIMEOUT");
+    auto const memoryCoreIt = runtimeConfig.find("MEMORY_CORE");
+    auto const memoryConsumptionIT = runtimeConfig.find("MEMORY_CONSUMPTION");
+    auto const runsSelectIt = runtimeConfig.find("RUN_SELECT");
+    auto const runsConfigIt = runtimeConfig.find("RUN_CONFIG");
     tasksList = ResolveVariables(tasksListPattern, {
       { "RUNTIME_NB_RUN", nbRetryIt != runtimeConfig.end() ? nbRetryIt->second : "1" },
       { "RUNTIME_NB_CORES", nbCoreIt != runtimeConfig.end() ? nbCoreIt->second : "1" },
       { "RUNTIME_TIMEOUT", timeoutIt != runtimeConfig.end() ? timeoutIt->second : "3h" },
+      { "RUNTIME_MEMORY_CORE", memoryCoreIt != runtimeConfig.end() ? memoryCoreIt->second : "0" },
+      { "RUNTIME_MEMORY_CONSUMPTION", 
+          memoryConsumptionIT != runtimeConfig.end() ? memoryConsumptionIT->second : "0" },
       { "RUNTIME_RUN_SELECT", runsSelectIt != runtimeConfig.end() ? runsSelectIt->second : "" },
       { "RUNTIME_RUN_CONFIG", runsConfigIt != runtimeConfig.end() ? runsConfigIt->second : "" },
     });

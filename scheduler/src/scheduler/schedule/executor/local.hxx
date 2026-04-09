@@ -94,6 +94,7 @@ private:
   ns_Executor::LocalConfig const& config_;
   ns_System::Linux& os_;
   uint64_t nbCoresFree_;
+  uint64_t nbCoresMax_;
   std::vector<bool> coresFree_;
   uint64_t nbChild_;
   uint16_t cachePort_;

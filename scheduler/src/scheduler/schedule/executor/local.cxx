@@ -166,8 +166,9 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
     uint16_t cachePort, ns_System::Linux& os)
     : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
-      coresFree_(config_.cores_), nbChild_(0), cachePort_(cachePort), 
-      cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0), cgroupDisableUpdateSliceUser_(false)
+      nbCoresMax_(config_.nbCores_), coresFree_(config_.cores_), nbChild_(0), 
+      cachePort_(cachePort), cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0), 
+      cgroupDisableUpdateSliceUser_(false)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -196,7 +197,6 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     }
   }
 
-
   if (nbCoresFree_ == 0) {
     coresFree_ = config_.cores_;
     for(size_t i=0; i<coresFree_.size(); ++i) {
@@ -204,6 +204,7 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
         ++nbCoresFree_;
       }
     }
+    nbCoresMax_ = nbCoresFree_;
   }
 }
 
@@ -775,6 +776,7 @@ void ns_Executor::Local::UpdateStepStats(ExecutorData* data) const {
 
 void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const {
   root.AddMember("name", rapidjson::Value(Name().c_str(), alloc), alloc);
+  root.AddMember("nb_cores", nbCoresMax_, alloc);
   rapidjson::Value stats(rapidjson::kObjectType);
   stats.AddMember("load_memory", stats_.memory, alloc);
   stats.AddMember("load_cores", stats_.cores, alloc);

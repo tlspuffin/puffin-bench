@@ -97,7 +97,7 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       if ((name.find("runtime[") != 0) || (name.rfind("]") != (name.size()-1))) {
         continue;
       }
-      std::string key = name.substr(5, name.size() - 6);
+      std::string key = name.substr(16, name.size() - 17);
       if (key.empty()) {
         throw std::runtime_error("Empty key in runtime[]");
       }
