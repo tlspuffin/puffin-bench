@@ -10,7 +10,7 @@ function EnrichedCommit(hash, branch, date) {
   this.hash = hash;
   this.branch = branch;
   this.date = date ?? '';
-  const short = hash.slice(0, 8);
+  const short = CommitHelp.ShortHash(hash);
   if (branch && date) {
     this.label = `[${date}] ${short} — ${branch}`
   } else if (branch) {

@@ -81,9 +81,11 @@ class UI {
    */
   CreateActions(cancelSupport, options) {
     const container = document.createElement('div');
+    container.className = 'modal_actions';
 
     const btOK = document.createElement('button');
     this.#ApplyOptions(btOK, options?.ok);
+    btOK.classList.add('modal_button_ok');
     btOK.innerText = options?.ok?.text ?? 'Ok';
     btOK.onclick = options?.ok?.callback ?? null;
     container.appendChild(btOK);
@@ -94,6 +96,7 @@ class UI {
 
     const btCancel = document.createElement('button');
     this.#ApplyOptions(btCancel, options?.cancel);
+    btCancel.classList.add('modal_button_cancel');
     btCancel.innerText = 'Cancel';
     btCancel.onclick = options?.cancel?.callback ?? null;
     container.appendChild(btCancel);
@@ -102,34 +105,57 @@ class UI {
   }
 
   /**
-   * Creates three number inputs for Start / End / Step time values.
-   * Inputs are labelled with IDs like `time_start_<id>` for later retrieval.
+   * Creates four number inputs for Start / End / Delta / Steps time values.
+   * Delta and Steps are linked: changing one recalculates the other.
+   * Inputs are labelled with IDs like `time_start_<id>`, `time_delta_<id>` for later retrieval.
+   * Note: the backend API URL still uses the term "step" — only the UI label changes.
    * @param {number} min    - Initial start value (µs)
    * @param {number} max    - Initial end value (µs)
-   * @param {number} step   - Initial step value (µs)
+   * @param {number} delta  - Initial delta value (µs)
    * @param {object} options - #ApplyOptions options for the container
    * @returns {HTMLDivElement}
    */
-  CreateTimeSelection(min, max, step, options) {
+  CreateTimeSelection(min, max, delta, options) {
     const container = document.createElement('div');
     const id = this.#id;
     this.#ApplyOptions(container, options);
 
-    [ { label:'Start', value: min },
-      { label:'End', value: max },
-      { label:'Step', value: step } ].forEach(function(data) {
-        const label = document.createElement('label');
-        const span = document.createElement('span');
-        span.textContent = data.label;
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.size = 10;
-        input.value = data.value;
-        input.id = 'time_' + data.label.toLocaleLowerCase() + '_' + id;
-        label.appendChild(span);
-        label.appendChild(input);
-        container.appendChild(label);
+    const initialSteps = delta > 0 ? Math.floor((max - min) / delta) : 0;
+    const inputs = {};
+
+    [ { key: 'start', label: 'Start', value: min },
+      { key: 'end',   label: 'End',   value: max },
+      { key: 'delta', label: 'Delta', value: delta },
+      { key: 'steps', label: 'Steps', value: initialSteps },
+    ].forEach(function(data) {
+      const label = document.createElement('label');
+      const span = document.createElement('span');
+      span.textContent = data.label;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.size = 10;
+      input.value = data.value;
+      input.id = 'time_' + data.key + '_' + id;
+      inputs[data.key] = input;
+      label.appendChild(span);
+      label.appendChild(input);
+      container.appendChild(label);
     });
+
+    // Linked recalculation: Delta ↔ Steps
+    const recalcSteps = () => {
+      const d = +inputs.delta.value;
+      if (d > 0) inputs.steps.value = Math.floor((+inputs.end.value - +inputs.start.value) / d);
+    };
+    const recalcDelta = () => {
+      const s = +inputs.steps.value;
+      if (s > 0) inputs.delta.value = Math.floor((+inputs.end.value - +inputs.start.value) / s);
+    };
+    inputs.start.addEventListener('input', recalcSteps);
+    inputs.end.addEventListener('input', recalcSteps);
+    inputs.delta.addEventListener('input', recalcSteps);
+    inputs.steps.addEventListener('input', recalcDelta);
+
     return container;
   }
 
@@ -141,6 +167,7 @@ class UI {
    * @param {object}          options.container  - #ApplyOptions for the outer container
    * @param {number}          [options.maxSelect] - Max simultaneous selections (default: Infinity)
    * @param {Function}        [options.callback]  - Called on each checkbox change event
+   * @param {Set<string>}     [options.absent]    - Dot-paths of metrics absent from some experiments (OR mode)
    * @returns {HTMLDivElement}
    */
   CreateMetrics(metrics, options) {
@@ -148,48 +175,59 @@ class UI {
     const container = document.createElement('div');
     this.#ApplyOptions(container, options?.container);
     let folder = document.createElement('div');
-    folder.style.display = 'none';
+
     this.#OrganizeMetrics(metrics).forEach(metric => {
         if (currentPath != metric.parentPath) {
           currentPath = metric.parentPath;
           if (folder.children.length > 0) {
             container.appendChild(folder);
             folder = document.createElement('div');
-            folder.style.display = 'none';
           }
-          folder.id = 'folder_'+currentPath;
+          folder.id = 'folder_' + currentPath;
 
           const separator = document.createElement('div');
-          
+
           const toggle = document.createElement('span');
-          toggle.id = 'toggle_'+currentPath;
+          toggle.id = 'toggle_' + currentPath;
           toggle.className = 'metrics_toggle';
           toggle.innerText = '➕';
           toggle.dataset.open = 'false';
           separator.appendChild(toggle);
-    
+
           const label = document.createElement('span');
           label.innerText = currentPath || 'Root';
           separator.appendChild(label);
 
+          // Toggle: show/hide only the UNCHECKED metric rows.
+          // Checked (selected) rows are always visible regardless of open/close state.
           const currentFolder = folder;
-          separator.onclick = function(event) {
-              const isOpen = toggle.dataset.open === 'true';
-              currentFolder.style.display = isOpen ? 'none' : 'block';
-              toggle.innerText = isOpen ? '➕' : '➖';
-              toggle.dataset.open = isOpen ? 'false' : 'true';
+          separator.onclick = function() {
+            const isOpen = toggle.dataset.open === 'true';
+            const nowOpen = !isOpen;
+            currentFolder.querySelectorAll('.metric-checkbox:not(:checked)').forEach(function(cb) {
+              cb.closest('.checkbox-label').style.display = nowOpen ? '' : 'none';
+            });
+            toggle.innerText = nowOpen ? '➖' : '➕';
+            toggle.dataset.open = nowOpen ? 'true' : 'false';
           };
 
           container.appendChild(separator);
         }
         const label = document.createElement('label');
         label.className = 'checkbox-label';
+        // Unchecked metrics start hidden (folder is closed by default).
+        // They become visible when the folder is opened, or when the metric is selected.
+        label.style.display = 'none';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'metric-checkbox';
         cb.value = metric.path;
         const span = document.createElement('span');
         span.textContent = metric.name;
+        if (options?.absent?.has(metric.path)) {
+          cb.classList.add('metric-absent-cb');
+          span.classList.add('metric-absent');
+        }
         label.appendChild(cb);
         label.appendChild(span);
         folder.appendChild(label);
@@ -198,16 +236,25 @@ class UI {
 
     const maxSelect = options?.maxSelect ?? Infinity;
     const checkboxes = container.querySelectorAll('.metric-checkbox');
-    checkboxes.forEach(cb => {
-        cb.onchange = function(event) {
-            if (maxSelect !== Infinity) {
-                const checkedCount = container.querySelectorAll('.metric-checkbox:checked').length;
-                checkboxes.forEach(other => {
-                    if (!other.checked) other.disabled = checkedCount >= maxSelect;
-                });
-            }
-            options?.callback?.(event);
-        };
+    checkboxes.forEach(function(cb) {
+      cb.onchange = function(event) {
+        // When unchecked: hide the row if the folder is currently closed.
+        // Checked rows are always kept visible.
+        if (!cb.checked) {
+          const parentFolder = cb.closest('[id^="folder_"]');
+          const toggleEl = parentFolder?.previousElementSibling?.querySelector('.metrics_toggle');
+          if (toggleEl && toggleEl.dataset.open !== 'true') {
+            cb.closest('.checkbox-label').style.display = 'none';
+          }
+        }
+        if (maxSelect !== Infinity) {
+          const checkedCount = container.querySelectorAll('.metric-checkbox:checked').length;
+          checkboxes.forEach(function(other) {
+            if (!other.checked) other.disabled = checkedCount >= maxSelect;
+          });
+        }
+        options?.callback?.(event);
+      };
     });
 
     return container;

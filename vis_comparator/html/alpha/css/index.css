@@ -177,7 +177,11 @@ body {
 
 .graph_icon_btn:hover {
   background: rgba(255, 255, 255, 0.3);
-  transform: none;
+}
+
+.graph_icon_btn:active {
+  background: rgba(255, 255, 255, 0.48);
+  transform: scale(0.92);
 }
 
 .graph_icon_btn_delete {
@@ -187,6 +191,10 @@ body {
 
 .graph_icon_btn.graph_icon_btn_delete:hover {
   background: rgba(255, 100, 100, 0.25);
+}
+
+.graph_icon_btn.graph_icon_btn_edit:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Toggle bar (white band below title) */
@@ -244,7 +252,7 @@ div[id^="graph_area_"] {
   background: white;
   border-radius: 16px;
   padding: 30px 40px;
-  max-width: 600px;
+  max-width: 1200px;
   width: 90%;
   max-height: 80vh;
   overflow-y: auto;
@@ -476,14 +484,12 @@ select:focus {
 
 div[id^="folder_"] {
   padding-left: 30px;
-  margin-bottom: 10px;
 }
 
 /* =================================================================
-   Buttons
+   Buttons — base reset only
    ================================================================= */
 
-.modal_button,
 button {
   padding: 12px 30px;
   font-size: 1rem;
@@ -491,44 +497,53 @@ button {
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  font-family: inherit;
+}
+
+/* Disabled buttons */
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =================================================================
+   Modal Action Buttons (OK / Cancel) — explicit classes set by ui.js
+   ================================================================= */
+
+.modal_button_ok,
+.modal_button_cancel {
   margin-right: 10px;
   margin-top: 20px;
 }
 
-.modal_button:first-child,
-button:first-child {
+.modal_button_ok {
   background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
   color: white;
 }
 
-.modal_button:first-child:hover,
-button:first-child:hover {
+.modal_button_ok:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
 }
 
-.modal_button:first-child:active,
-button:first-child:active {
+.modal_button_ok:active {
   transform: translateY(0);
 }
 
-.modal_button:last-child,
-button:last-child {
+.modal_button_ok:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal_button_cancel {
   background: #e0e0e0;
   color: #555;
 }
 
-.modal_button:last-child:hover,
-button:last-child:hover {
+.modal_button_cancel:hover {
   background: #d0d0d0;
-}
-
-/* Disabled buttons */
-button:disabled,
-.modal_button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* =================================================================
@@ -692,6 +707,10 @@ button:disabled,
 .graph-toggle-btn.active:hover {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
+}
+
+.graph-toggle-btn:not(:disabled):active {
+  transform: scale(0.95);
 }
 
 .graph-toggle-btn:disabled {
@@ -910,6 +929,12 @@ button:disabled,
   transform: none !important;
 }
 
+.view-list-row.selected .view-list-name-btn {
+  background: #e8eeff !important;
+  color: var(--color-primary) !important;
+  font-weight: 600;
+}
+
 .view-list-empty {
   text-align: center;
   color: #999;
@@ -947,4 +972,134 @@ input:disabled {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* =================================================================
+   Experiment rows (Phase B — Add Graph modal)
+   ================================================================= */
+
+.experiment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.experiment-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.experiment-row select {
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 100px;
+  padding: 8px 10px;
+}
+
+.experiment-row-add-btn {
+  background: none;
+  border: 2px dashed var(--color-primary);
+  color: var(--color-primary);
+  border-radius: 8px;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  margin: 0;
+  width: 100%;
+  font-size: 0.9rem;
+  font-family: inherit;
+  transition: background 0.2s ease;
+}
+
+.experiment-row-add-btn:hover {
+  background: rgba(102, 126, 234, 0.07);
+}
+
+.experiment-row-add-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.experiment-remove-btn {
+  background: none !important;
+  border: 1px solid #ddd !important;
+  color: #999 !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin: 0 !important;
+  flex-shrink: 0;
+  line-height: 1.4;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.experiment-remove-btn:hover {
+  color: var(--color-delete) !important;
+  border-color: var(--color-delete) !important;
+  background: none !important;
+  transform: none !important;
+}
+
+.experiment-var-toggle {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  background: rgba(102, 126, 234, 0.1) !important;
+  color: var(--color-primary) !important;
+  border: 1px solid rgba(102, 126, 234, 0.3) !important;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 0 !important;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: inherit;
+  line-height: 1.4;
+  transition: background 0.15s ease;
+}
+
+.experiment-var-toggle:hover {
+  background: rgba(102, 126, 234, 0.2) !important;
+  transform: none !important;
+}
+
+/* =================================================================
+   Metrics AND/OR toggle row
+   ================================================================= */
+
+.metrics-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.metrics-mode-row span {
+  font-weight: 600;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.metrics-mode-row .graph-toggle-btn {
+  margin: 0;
+  padding: 4px 14px;
+}
+
+/* =================================================================
+   Absent metrics (OR mode)
+   ================================================================= */
+
+.metric-absent {
+  color: #e67e22;
+  font-style: italic;
+}
+
+.metric-absent-cb {
+  accent-color: #e67e22;
 }
