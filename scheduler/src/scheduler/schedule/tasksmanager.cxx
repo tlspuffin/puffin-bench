@@ -26,6 +26,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
     rapidjson::Value const& rootJSON, std::string const& functions, 
     std::unordered_map<std::string, std::vector<uint8_t>>& files, 
     std::unordered_map<std::string, std::string>& args, 
+    std::string const& user, std::string const& jobType, 
     ns_Schedule::Schedule const& schedule) {
 
   uint64_t task_id = 0;
@@ -70,7 +71,8 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
 
   ns_Schedule::Task* task = new ns_Schedule::Task(
     task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
-    config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, md5, schedule);
+    config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, 
+    user, jobType, md5, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);

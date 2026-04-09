@@ -20,6 +20,7 @@ public:
       rapidjson::Value const& rootJSON, std::string const& functionsPath, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files, 
       std::unordered_map<std::string, std::string>& args, 
+      std::string const& user, std::string const& jobType, 
       ns_Schedule::Schedule const& schedule);
   void DeleteTask(ns_Schedule::Task* task);
   void DeleteTasks();

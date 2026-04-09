@@ -59,6 +59,17 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       return;
     }
 
+    std::string user = "anonymous";
+    auto userIT = parts.find("user");
+    if (userIT != parts.end()) {
+      user = userIT->second.content[0];
+    }
+    std::string jobType = "unknown";
+    auto jobTypeIT = parts.find("job_type");
+    if (jobTypeIT != parts.end()) {
+      jobType = jobTypeIT->second.content[0];
+    }
+
     std::unordered_map<std::string, std::vector<uint8_t>> files;
     auto range = parts.equal_range("files[]");
     for (auto it = range.first; it != range.second; ++it) {
@@ -97,7 +108,7 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
     }
 
     uint64_t taskID = apis_->scheduleAPI_.AddTask(name, flow->second.content, 
-        functions->second.content, files, args, runtimeConfig);
+        functions->second.content, files, args, runtimeConfig, user, jobType);
 
     out << R"({"success": true, "task_id": ")" << taskID << R"("})";
   } catch (const std::exception& e) {
@@ -240,6 +251,107 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
     out = &(response.send());
     *out << R"({"success": true})";
   } catch(std::runtime_error const& e) {
+    out = &(response.send());
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+  out->flush();
+}
+
+void ns_Server::RequestHandlerUsersList::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json; charset=utf-8");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream* out = nullptr;
+  try {
+    std::vector<std::string> users = apis_->usersAPI_.Users();
+    out = &(response.send());
+    *out << R"({"success": true, "data": [)";
+    for (size_t i = 0; i < users.size(); ++i) {
+      if (i > 0) {
+        *out << ",";
+      }
+      *out << R"(")" << users[i] << R"(")";
+    }
+    *out << "]}";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    out = &(response.send());
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+  out->flush();
+}
+
+void ns_Server::RequestHandlerUserJobsTypeList::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json; charset=utf-8");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream* out = nullptr;
+  std::string user = std::get<0>(args_);
+  try {
+    std::vector<std::string> jobsType;
+    if (!apis_->usersAPI_.UserJobTypes(user, jobsType)) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      throw std::runtime_error("step cancel failed");
+    }
+    out = &(response.send());
+    *out << R"({"success": true, "data": [)";
+    for (size_t i = 0; i < jobsType.size(); ++i) {
+      if (i > 0) {
+        *out << ",";
+      }
+      *out << R"(")" << jobsType[i] << R"(")";
+    }
+    *out << "]}";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    out = &(response.send());
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  }
+  out->flush();
+}
+
+void ns_Server::RequestHandlerUserTasksList::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json; charset=utf-8");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  std::ostream* out = nullptr;
+  std::string user = std::get<0>(args_);
+  std::string jobType = std::get<1>(args_);
+  try {
+    std::vector<struct ns_API::UsersAPI::TaskInfos> tasks;
+    if (!apis_->usersAPI_.UserTasks(user, jobType, tasks)) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      throw std::runtime_error("step cancel failed");
+    }
+    out = &(response.send());
+    *out << R"({"success": true, "data": [)";
+    for (size_t i = 0; i < tasks.size(); ++i) {
+      if (i > 0) {
+        *out << ",";
+      }
+      *out << tasks[i].ToJSON();
+    }
+    *out << "]}";
+  } catch(std::runtime_error const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out = &(response.send());
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }

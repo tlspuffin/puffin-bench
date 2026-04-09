@@ -71,7 +71,7 @@ set(SRV_SRC
   src/scheduler/schedule/executor/output_ring.cxx
   src/scheduler/system/linux_cores.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx 
   src/scheduler/system/linux.cxx
-  src/scheduler/api/schedule_api.cxx
+  src/scheduler/api/schedule_api.cxx src/scheduler/api/users_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx

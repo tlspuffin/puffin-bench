@@ -46,6 +46,12 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         requestHandler = new RequestHandlerTasksRunning;
       } else if (std::regex_match(uri, matches, std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))"))) {
         requestHandler = new RequestHandlerCacheGet(matches[1].str());
+      } else if (std::regex_match(uri, matches, std::regex(R"(/api/users$)"))) {
+        requestHandler = new RequestHandlerUsersList();
+      } else if (std::regex_match(uri, matches, std::regex(R"(/api/user/([a-zA-Z0-9_-]+)/job_types$)"))) {
+        requestHandler = new RequestHandlerUserJobsTypeList(matches[1].str());
+      } else if (std::regex_match(uri, matches, std::regex(R"(/api/user/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)/tasks$)"))) {
+        requestHandler = new RequestHandlerUserTasksList(matches[1].str(), matches[2].str());
       } else if (uri.find("/files/") == 0) {
         requestHandler = new RequestHandlerFiles("/files");
       }

@@ -44,6 +44,9 @@ REQUESTHANDLER(TaskOutputs, std::string const, uint64_t,
     std::string const, std::string const, size_t , ssize_t);
 REQUESTHANDLER(TaskCancel, uint64_t);
 REQUESTHANDLER(TaskCancelStep, uint64_t, uint64_t);
+REQUESTHANDLER(UsersList);
+REQUESTHANDLER(UserJobsTypeList, std::string const);
+REQUESTHANDLER(UserTasksList, std::string const, std::string const);
 REQUESTHANDLER(CachePut, std::string const);
 REQUESTHANDLER(CacheGet, std::string const);
 REQUESTHANDLER(Files, std::string const);

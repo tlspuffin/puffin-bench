@@ -1,7 +1,8 @@
 #include "schedule_api.hxx"
 
-ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cache_port)
-    : config_(config), schedule_(config, os, cache_port)
+ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
+    ns_System::Linux& os, uint16_t cache_port)
+    : config_(config), schedule_(config, users, os, cache_port)
 {
 }
 
@@ -10,10 +11,12 @@ uint64_t ns_API::ScheduleAPI::AddTask(std::string const& name,
     std::vector<uint8_t> const& functions, 
     std::unordered_map<std::string, std::vector<uint8_t>>& files, 
     std::unordered_map<std::string, std::string>& args, 
-    std::unordered_map<std::string, std::string>& runtimeConfig) {
+    std::unordered_map<std::string, std::string>& runtimeConfig, 
+    std::string const& user, std::string const& jobType) {
   std::string flowStr(flow.begin(), flow.end());
   std::string functionstr(functions.begin(), functions.end());
-  return schedule_.AddTask(name, flowStr, functionstr, files, args, runtimeConfig);
+  return schedule_.AddTask(name, flowStr, functionstr, files, args, runtimeConfig, 
+      user, jobType);
 }
 
 void ns_API::ScheduleAPI::GetRunningTaskSummary() {

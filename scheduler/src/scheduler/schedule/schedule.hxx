@@ -7,6 +7,7 @@
 #include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
 #include "monitor/monitor.hxx"
+#include "../api/users_api.hxx"
 #include "../system/linux.hxx"
 #include "../../utils/file.hxx"
 #include <vector>
@@ -21,13 +22,15 @@ namespace ns_Schedule {
 
 class Schedule : public ns_Executor::ExecutorsProvider {
 public:
-  Schedule(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cachePort);
+  Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
+      ns_System::Linux& os, uint16_t cachePort);
   ~Schedule();
   uint64_t AddTask(std::string const& name, std::string const& tasksListPattern, 
       std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args,
-      std::unordered_map<std::string, std::string>& runtimeConfig);
+      std::unordered_map<std::string, std::string>& runtimeConfig, 
+      std::string const& user, std::string const& jobType);
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
   bool CancelTask(uint64_t taskID, std::string const& source);
 
@@ -68,6 +71,8 @@ private:
   Archiver archiver_;
 
   ns_System::Linux& os_;
+
+  ns_API::UsersAPI& users_;
 
   static bool shutdownTasksAtExit__;
   static void HandlerUSR1(int sig);

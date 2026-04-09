@@ -53,6 +53,9 @@ public:
 
   std::ofstream steps_file_;
 
+  std::string user_;
+  std::string job_type_;
+
   bool request_cancel_;
   std::string cancel_source_;
 
@@ -71,6 +74,7 @@ public:
       std::filesystem::path const& monitorsRootPath, 
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
       std::unordered_map<std::string, std::string>& args, 
+      std::string const& user, std::string const& jobType, 
       std::map<std::string, std::string> md5, 
       ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 

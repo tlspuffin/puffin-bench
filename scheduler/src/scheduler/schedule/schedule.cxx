@@ -32,10 +32,11 @@
 
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
-ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cachePort) 
+ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
+    ns_System::Linux& os, uint16_t cachePort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
-      monitor_(config.monitorsPath_), archiver_(), os_(os)
+      monitor_(config.monitorsPath_), archiver_(), os_(os), users_(users)
 {
   static int installHandler = InstallSigUSRHandler();
 
@@ -95,7 +96,8 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
     std::string const& functions, 
     std::unordered_map<std::string, std::vector<uint8_t>>& files,
     std::unordered_map<std::string, std::string>& args, 
-    std::unordered_map<std::string, std::string>& runtimeConfig) {
+    std::unordered_map<std::string, std::string>& runtimeConfig, 
+    std::string const& user, std::string const& jobType) {
 
   std::string tasksList;
   {
@@ -125,7 +127,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
   }
 
   ns_Schedule::Task* task = 
-      tasksManager_.CreateTask(name, stepsJSON, functions, files, args, *this);
+      tasksManager_.CreateTask(name, stepsJSON, functions, files, args, user, jobType, *this);
 
   std::string taskFilePath = (config_.userPath_ / std::to_string(task->id_) / 
       std::string(std::to_string(task->id_) + ".json")).string();
@@ -140,6 +142,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
 
   lockThread_.lock();
 
+  users_.Add(task, true);
   SaveStatus(false);
 
   for(ns_Schedule::Step* step : task->root_steps_) {
@@ -386,6 +389,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
   if (step->TaskLastStep()) {
     step->SetUserRunState(
         step->task_->request_cancel_ ? "flow cancelled" : "flow ended");
+    users_.Add(step->task_, false);
     uint64_t task_id = step->TaskID();
     ArchiveJob archiveJob = step->FinalizeAndArchive(
         step->task_->request_cancel_ ? config_.exportCanceledPath_ : config_.exportPath_);

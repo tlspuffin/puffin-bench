@@ -20,6 +20,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::filesystem::path const& monitorsRootPath,
     std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     std::unordered_map<std::string, std::string>& args, 
+    std::string const& user, std::string const& jobType, 
     std::map<std::string, std::string> md5, 
     ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
@@ -32,12 +33,22 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     artefacts_path_(run_root_path_ / "artefacts"),
     monitors_path_(monitorsRootPath),
     args_(args), configurations_(), executor_data_(nullptr), 
-    root_steps_(), steps_file_(), request_cancel_(false), cancel_source_(),
+    root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
+    request_cancel_(false), cancel_source_(),
     publish_(), md5_(std::move(md5))
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
   }
+  std::unordered_map<std::string, std::string> variables;
+  for (const auto& [key, value] : args_) {
+    variables.emplace(key, value);
+  }
+  variables.emplace("task_id", std::to_string(id_));
+  name_ = ResolveVariables(name_, variables);
+  name_.erase(std::remove_if(name_.begin(), name_.end(), [](char c) {
+    return !std::isalnum(c) && c != '-' && c != '_' && c != '.';
+  }), name_.end());
 
   executor_name_ = GetOrDefault<std::string>(
       configJSON, "executor_name", "default");
@@ -184,6 +195,9 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
         stepsFile.string());
   }
 
+  user_ = GetOrDefault<std::string>(config, "user", "anonymous");
+  job_type_ = GetOrDefault<std::string>(config, "job_type", "unknown");
+
   request_cancel_ = Get<bool>(config, "request_cancel");
   cancel_source_ = Get<std::string>(config, "cancel_source");
 
@@ -218,13 +232,6 @@ void ns_Schedule::Task::Cancel(std::string const& source) {
 }
 
 bool ns_Schedule::Task::PrepareToRun() {
-  std::unordered_map<std::string, std::string> variables;
-  for (const auto& [key, value] : args_) {
-    variables.emplace(key, value);
-  }
-  variables.emplace("task_id", std::to_string(id_));
-  name_ = ResolveVariables(name_, variables);
-
   executor_->TaskPrepareToRun(this);
 
   CreateRunFolders();
@@ -324,6 +331,9 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
 
   out.AddMember("monitors_path", rapidjson::Value(monitors_path_.c_str(), alloc), alloc);
+
+  out.AddMember("user", rapidjson::Value(user_.c_str(), alloc), alloc);
+  out.AddMember("job_type", rapidjson::Value(job_type_.c_str(), alloc), alloc);
 
   out.AddMember("request_cancel", request_cancel_, alloc);
   out.AddMember("cancel_source", rapidjson::Value(cancel_source_.c_str(), alloc), alloc);

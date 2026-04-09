@@ -12,14 +12,16 @@ namespace ns_API {
 
 class ScheduleAPI {
 public:
-  ScheduleAPI(ns_Schedule::Config const& config, ns_System::Linux& os, uint16_t cache_port);
+  ScheduleAPI(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
+      ns_System::Linux& os, uint16_t cache_port);
 
   uint64_t AddTask(std::string const& name, 
       std::vector<uint8_t> const& flow, 
       std::vector<uint8_t> const & functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
       std::unordered_map<std::string, std::string>& args, 
-      std::unordered_map<std::string, std::string>& runtimeConfig);
+      std::unordered_map<std::string, std::string>& runtimeConfig, 
+      std::string const& user, std::string const& jobType);
   void GetRunningTaskSummary();
   void GetTaskInfos(uint64_t task_id);
   std::filesystem::path ExportPath();
