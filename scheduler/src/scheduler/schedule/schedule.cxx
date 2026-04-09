@@ -3,6 +3,8 @@
 #include "executor/local.hxx"
 #include "../../utils/file.hxx"
 #include "../../utils/variables.hxx"
+#include "../../utils/file_tgz.hxx"
+#include "../../utils/logs.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -221,14 +223,32 @@ void ns_Schedule::Schedule::GetOutput(
     return;
   }
 
-  std::filesystem::path outputPath = config_.exportPath_;
-  outputPath = outputPath / taskID / "logs";
-  std::stringstream oss;
-  oss << type << '.' << stepID << ".txt";
-  outputPath = outputPath / oss.str();
-
+  std::string archiveName = config_.exportPath_ / (taskID + ".tgz");
+  if (!std::filesystem::exists(archiveName)) {
+    archiveName = config_.exportCanceledPath_ / (taskID + ".tgz");
+    if (!std::filesystem::exists(archiveName)) {
+      return;
+    }
+  }
+  FileTGZ fileTGZ(archiveName);
+  std::string outputFile = "logs/" + type + "." + stepID + ".txt";
+  data.buffer.resize(data.requestReadOffset + data.requestReadSize);
+  data.supportSeek = false;
   data.partialFile = false;
-  FileExtractText(outputPath, data);
+  try {
+    int64_t readSize = fileTGZ.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), &data.filesize);
+    data.buffer.resize(readSize);
+    if (data.buffer.size() > data.requestReadOffset) {
+      data.buffer.erase(0, data.requestReadOffset);
+    }
+    data.startOffset = data.requestReadOffset;
+    data.state = data.buffer.size() == data.requestReadSize ? FileReadState::Ok : FileReadState::EndOfFile;
+  } catch(...) {
+    LOGE("GetOutput error: unable to find " << outputFile << " in " << archiveName);
+    data.buffer.resize(0);
+    data.state = FileReadState::Error_Access;
+    return;
+  }
 }
 
 

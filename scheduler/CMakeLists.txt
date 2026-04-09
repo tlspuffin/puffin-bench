@@ -58,12 +58,24 @@ else()
   target_link_libraries(Poco INTERFACE ssl crypto)
 endif()
 
+if (DEFINED LIBARCHIVE_PATH)
+    GetLibs(LibArchive STATIC ${LIBARCHIVE_PATH} "archive" LibArchiveInfos)
+    CreateExternalLib(LibArchive "${LibArchiveInfos}" DEPLOYTARGET setupDLL)
+    set(ZLIB_USE_STATIC_LIBS ON)
+    find_package(ZLIB)
+    target_link_libraries(LibArchive INTERFACE ZLIB::ZLIB)
+    target_compile_definitions(LibArchive INTERFACE LIBARCHIVE_STATIC)
+    add_library(LibArchive::LibArchive ALIAS LibArchive)
+else()
+    find_package(LibArchive)
+endif()
+
 EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/executor.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/executor_sh.h" Executor_Script)
 EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/functions_sh.h" Functions_Script)
 
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
-  src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx 
+  src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_tgz.cxx
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
@@ -80,12 +92,12 @@ set(SRV_SRC
 )
 
 add_executable(srv ${SRV_SRC} ${RESERVE_PORT_BLOB_H})
-target_link_libraries(srv PRIVATE Poco)
+target_link_libraries(srv PRIVATE Poco LibArchive::LibArchive)
 target_include_directories(srv PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
 add_dependencies(srv reserve_port_blob_h)
 
 add_executable(srv-static ${SRV_SRC} ${RESERVE_PORT-STATIC_BLOB_H})
-target_link_libraries(srv-static PRIVATE Poco)
+target_link_libraries(srv-static PRIVATE Poco LibArchive::LibArchive)
 target_include_directories(srv-static PRIVATE ${RAPIDJSON_PATH} ${CMAKE_CURRENT_BINARY_DIR})
 target_link_options(srv-static PRIVATE -static)
 target_compile_definitions(srv-static PRIVATE STATIC)
