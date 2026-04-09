@@ -844,8 +844,7 @@ function main() {
   document.getElementById('modal-close').onclick = CloseModal;
 
   const launcher = new JobLauncher({
-      commitsUrl: `http://${window.location.hostname}:10083/api/git/history`,
-      launchUrl:  '/api/job/launch',
+      commitsUrl: `http://${window.location.hostname}:10083/api/git/history/tlspuffin`
   });
   document.getElementById('new-task').onclick = () => { launcher.open() };
 }
