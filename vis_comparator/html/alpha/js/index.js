@@ -47,6 +47,7 @@ async function ResetState(state, newState) {
   if (newState?.graphSettings?.size > 0) {
     await restoreGraphs(newState.graphSettings);
   }
+  BuildSidebar(state);
 }
 
 /**
@@ -172,6 +173,35 @@ function ConfigBaseInformations(restoreUI = false) {
 
 const DEFAULT_DELTA_DIVISOR = 20_000;
 const MAX_EXPERIMENTS = 4;
+
+// Flatten a nested metric Map ({ metrics: Map }) to a Set of leaf dot-paths.
+function flattenMetricPaths(metricsObj) {
+  const paths = new Set();
+  if (!metricsObj?.metrics) return paths;
+  function walk(map, prefix) {
+    map.forEach((child, key) => {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (child.size === 0) paths.add(path);
+      else walk(child, path);
+    });
+  }
+  walk(metricsObj.metrics, '');
+  return paths;
+}
+
+// Build a nested Map from a flat Set of dot-paths, as expected by ui.CreateMetrics.
+function buildSyntheticMetrics(paths) {
+  const root = new Map();
+  paths.forEach(path => {
+    const parts = path.split('.');
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {
+      if (!node.has(parts[i])) node.set(parts[i], new Map());
+      node = node.get(parts[i]);
+    }
+  });
+  return { metrics: root, maxTimeMicroS: 0 };
+}
 
 async function AddGraphique(prefill = null, editId = null) {
   const gitHistory = gitHistoryPromise;
@@ -318,18 +348,38 @@ async function AddGraphique(prefill = null, editId = null) {
         const max   = +document.getElementById('time_end_'   + timeID).value;
         const delta = +document.getElementById('time_delta_' + timeID).value;
 
-        // Register new commits into commitRegistry
+        // Register new experiments into commitRegistry (keyed by commit:type:subject)
         for (const exp of resolved) {
-          if (!state.commitRegistry.has(exp.commit)) {
+          const expKey = `${exp.commit}:${exp.type}:${exp.subject}`;
+          if (!state.commitRegistry.has(expKey)) {
             const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
-            state.commitRegistry.set(exp.commit, { color, displayName: null });
+            state.commitRegistry.set(expKey, { color, displayName: null });
           }
+        }
+
+        // Resolve metric variable references before fetching (keep selectedMetrics as-is for storage)
+        const fetchMetrics = selectedMetrics.map(m => {
+          if (typeof m === 'string') {
+            try {
+              const parsed = JSON.parse(m);
+              if (parsed?.variable) return state.variables.metrics.get(parsed.variable) ?? null;
+            } catch (_) {}
+          }
+          return m;
+        }).filter(m => m != null);
+
+        if (fetchMetrics.length === 0) {
+          BuildSidebar(state);
+          clearModalCancel();
+          modalpage.classList.remove('modalpage_visible');
+          EnableMainUI(true);
+          return;
         }
 
         // Fetch data for all resolved experiments in parallel
         const results = await Promise.all(
           resolved.map(exp => apirest.LoadCommitMetricsValues(
-            exp.type, exp.commit, exp.subject, min, max, delta, selectedMetrics))
+            exp.type, exp.commit, exp.subject, min, max, delta, fetchMetrics))
         );
         const validPairs = resolved
           .map((exp, i) => ({ exp, data: results[i] }))
@@ -369,6 +419,7 @@ async function AddGraphique(prefill = null, editId = null) {
           }
         }
 
+        BuildSidebar(state);
         clearModalCancel();
         modalpage.classList.remove('modalpage_visible');
         EnableMainUI(true);
@@ -579,36 +630,6 @@ async function AddGraphique(prefill = null, editId = null) {
     row.appendChild(manualBtn);
   }
 
-  // Flatten a nested metric Map ({ metrics: Map }) to a Set of leaf dot-paths.
-  // Mirrors the tree construction in apirest.LoadCommitMetrics (reverse direction).
-  function flattenMetricPaths(metricsObj) {
-    const paths = new Set();
-    if (!metricsObj?.metrics) return paths;
-    function walk(map, prefix) {
-      map.forEach((child, key) => {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (child.size === 0) paths.add(path);
-        else walk(child, path);
-      });
-    }
-    walk(metricsObj.metrics, '');
-    return paths;
-  }
-
-  // Build a nested Map from a flat Set of dot-paths, as expected by ui.CreateMetrics.
-  function buildSyntheticMetrics(paths) {
-    const root = new Map();
-    paths.forEach(path => {
-      const parts = path.split('.');
-      let node = root;
-      for (let i = 0; i < parts.length; i++) {
-        if (!node.has(parts[i])) node.set(parts[i], new Map());
-        node = node.get(parts[i]);
-      }
-    });
-    return { metrics: root, maxTimeMicroS: 0 };
-  }
-
   function onExperimentChange() {
     rebuildMetricsUI();
     updateOkButton();
@@ -750,6 +771,577 @@ async function EditGraph(id) {
   if (!existingConfig) return;
   EnableMainUI(false);
   await AddGraphique(existingConfig, id);
+}
+
+// ============================================================
+// SIDEBAR
+// ============================================================
+
+// Returns true if any graph's experiments or metrics reference the given variable name.
+function isVarReferenced(state, varName) {
+  for (const [, config] of state.graphSettings) {
+    if (config.experiments.some(s => s.variable === varName)) return true;
+    if (config.metrics.some(m => {
+      if (typeof m === 'string') {
+        try { return JSON.parse(m)?.variable === varName; } catch (_) {}
+      }
+      return false;
+    })) return true;
+  }
+  return false;
+}
+
+function BuildSidebar(state) {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  sidebar.innerHTML = '';
+
+  sidebar.appendChild(buildVariableSection(
+    'Experiments',
+    state.variables.experiments,
+    (name, def) => openExperimentVarModal(name, def, state),
+    (name) => {
+      state.variables.experiments.set(name, null);
+      BuildSidebar(state);
+    },
+    (name) => {
+      if (isVarReferenced(state, name)) {
+        errorManager.Error(`Variable "${name}" est utilisée par un ou plusieurs graphes — retirez-la des graphes avant de la supprimer.`);
+        return;
+      }
+      state.variables.experiments.delete(name);
+      BuildSidebar(state);
+    },
+    'e',
+    (def) => def ? `${def.commit.substring(0, 7)} \u00b7 ${def.type} \u00b7 ${def.subject}` : '(undefined)'
+  ));
+
+  sidebar.appendChild(buildVariableSection(
+    'Métriques',
+    state.variables.metrics,
+    (name, val) => openMetricVarModal(name, val, state),
+    (name) => {
+      state.variables.metrics.set(name, null);
+      BuildSidebar(state);
+    },
+    (name) => {
+      if (isVarReferenced(state, name)) {
+        errorManager.Error(`Variable "${name}" est utilisée par un ou plusieurs graphes — retirez-la des graphes avant de la supprimer.`);
+        return;
+      }
+      state.variables.metrics.delete(name);
+      BuildSidebar(state);
+    },
+    'm',
+    (val) => val || '(undefined)'
+  ));
+
+  sidebar.appendChild(buildExperimentLegend(state));
+}
+
+function buildVariableSection(title, varMap, onEdit, onAdd, onDelete, prefix, formatValue) {
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-title';
+  header.textContent = title;
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'sidebar-add-btn';
+  addBtn.textContent = '+';
+  addBtn.title = `Ajouter une variable ${prefix}`;
+  addBtn.addEventListener('click', () => {
+    let n = 1;
+    while (varMap.has(`${prefix}${n}`)) n++;
+    onAdd(`${prefix}${n}`);
+  });
+  header.appendChild(addBtn);
+  section.appendChild(header);
+
+  for (const [name, value] of varMap) {
+    const card = document.createElement('div');
+    card.className = 'sidebar-variable-card';
+
+    const cardHeader = document.createElement('div');
+    cardHeader.className = 'sidebar-variable-header';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'sidebar-variable-name';
+    nameSpan.textContent = name;
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'sidebar-delete-btn';
+    delBtn.textContent = '\u2715';
+    delBtn.title = 'Supprimer la variable';
+    delBtn.addEventListener('click', () => onDelete(name));
+
+    cardHeader.appendChild(nameSpan);
+    cardHeader.appendChild(delBtn);
+
+    const pill = document.createElement('button');
+    pill.className = `sidebar-pill${value === null ? ' undefined' : ''}`;
+    pill.textContent = formatValue(value);
+    pill.title = 'Cliquer pour modifier';
+    pill.addEventListener('click', () => onEdit(name, value));
+
+    card.appendChild(cardHeader);
+    card.appendChild(pill);
+    section.appendChild(card);
+  }
+
+  return section;
+}
+
+// Returns the set of experiment keys ("commit:type:subject") currently used in graphs.
+// Resolves variable slots; ignores unresolved variables.
+function getActiveExperimentKeys(state) {
+  const keys = new Set();
+  for (const [, config] of state.graphSettings) {
+    for (const slot of config.experiments) {
+      let def = slot;
+      if ('variable' in slot) def = state.variables.experiments.get(slot.variable) ?? null;
+      if (def?.commit && def.type && def.subject) {
+        keys.add(`${def.commit}:${def.type}:${def.subject}`);
+      }
+    }
+  }
+  return keys;
+}
+
+function buildExperimentLegend(state) {
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-title';
+  header.textContent = 'Légende experiments';
+  section.appendChild(header);
+
+  const activeKeys = getActiveExperimentKeys(state);
+
+  if (activeKeys.size === 0) {
+    const empty = document.createElement('p');
+    empty.style.cssText = 'font-size:0.75rem;color:#aaa;font-style:italic;margin:0';
+    empty.textContent = 'Aucun experiment chargé';
+    section.appendChild(empty);
+    return section;
+  }
+
+  for (const expKey of activeKeys) {
+    const entry = state.commitRegistry.get(expKey);
+    if (!entry) continue;
+    // expKey format: "commitHash:type:subject"
+    const parts = expKey.split(':');
+    const commitShort = parts[0].substring(0, 7);
+    const type    = parts[1] ?? '';
+    const subject = parts.slice(2).join(':');  // subject may contain colons
+
+    const row = document.createElement('div');
+    row.className = 'commit-legend-row';
+
+    const topLine = document.createElement('div');
+    topLine.className = 'commit-legend-top';
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = entry.color;
+    colorInput.className = 'commit-legend-color';
+    colorInput.title = 'Changer la couleur';
+    colorInput.addEventListener('input', (e) => {
+      entry.color = e.target.value;
+      refreshGraphsUsingExperiment(state, expKey);
+    });
+
+    const identSpan = document.createElement('span');
+    identSpan.className = 'commit-legend-ident';
+    identSpan.title = expKey;
+    identSpan.textContent = `${commitShort} · ${type} · ${subject}`;
+
+    topLine.appendChild(colorInput);
+    topLine.appendChild(identSpan);
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'commit-legend-name';
+    nameInput.placeholder = 'Nom d\'affichage\u2026';
+    nameInput.value = entry.displayName || '';
+    nameInput.addEventListener('change', (e) => {
+      entry.displayName = e.target.value.trim() || null;
+      refreshGraphsUsingExperiment(state, expKey);
+    });
+
+    row.appendChild(topLine);
+    row.appendChild(nameInput);
+    section.appendChild(row);
+  }
+
+  return section;
+}
+
+// Returns graph IDs whose resolved experiments match the given expKey ("commit:type:subject").
+function getGraphIDsUsingExperiment(state, expKey) {
+  const ids = [];
+  for (const [id, config] of state.graphSettings) {
+    for (const slot of config.experiments) {
+      let def = slot;
+      if ('variable' in slot) {
+        def = state.variables.experiments.get(slot.variable) ?? null;
+      }
+      if (def && `${def.commit}:${def.type}:${def.subject}` === expKey) { ids.push(id); break; }
+    }
+  }
+  return ids;
+}
+
+// Re-colours/renames traces for all graphs using the given experiment (no re-fetch).
+function refreshGraphsUsingExperiment(state, expKey) {
+  for (const id of getGraphIDsUsingExperiment(state, expKey)) {
+    graphManager.RefreshGraphAppearance(id);
+  }
+}
+
+// Re-fetches and redraws all graphs that reference the given variable name.
+function refreshGraphsUsingVariable(state, varName) {
+  for (const [id, config] of state.graphSettings) {
+    const usesVar = config.experiments.some(s => s.variable === varName)
+      || config.metrics.some(m => {
+        if (typeof m === 'string') {
+          try { const p = JSON.parse(m); return p?.variable === varName; } catch (_) {}
+        }
+        return false;
+      });
+    if (usesVar) {
+      refetchAndRedrawGraph(state, id, config).catch(err => console.error('[sidebar] refetch error:', err));
+    }
+  }
+}
+
+// Resolves variables and re-fetches data for a graph, then redraws it in place.
+async function refetchAndRedrawGraph(state, id, config) {
+  const resolved = config.experiments
+    .map(slot => {
+      if ('variable' in slot) return state.variables.experiments.get(slot.variable) ?? null;
+      return (slot.commit && slot.type && slot.subject) ? slot : null;
+    })
+    .filter(Boolean);
+  if (resolved.length === 0) return;
+
+  const resolvedMetrics = config.metrics
+    .map(m => {
+      if (typeof m === 'string') {
+        try {
+          const parsed = JSON.parse(m);
+          if (parsed?.variable) return state.variables.metrics.get(parsed.variable) ?? null;
+        } catch (_) {}
+      }
+      return m;
+    })
+    .filter(m => m != null);
+  if (resolvedMetrics.length === 0) return;
+
+  const results = await Promise.all(
+    resolved.map(exp => apirest.LoadCommitMetricsValues(
+      exp.type, exp.commit, exp.subject,
+      config.min, config.max, config.delta,
+      resolvedMetrics
+    ))
+  );
+
+  const dataMap = new Map(
+    resolved
+      .map((exp, i) => ({ exp, data: results[i] }))
+      .filter(p => p.data != null)
+      .map(p => [`${p.exp.commit}:${p.exp.type}:${p.exp.subject}`, p.data])
+  );
+
+  if (dataMap.size === 0) return;
+  await graphManager.UpdateGraph(id, config, dataMap);
+}
+
+// Opens a mini-modal to define or edit an experiment variable.
+async function openExperimentVarModal(name, currentDef, state) {
+  EnableMainUI(false);
+
+  const [perfCommits, vulnCommits] = await Promise.all([
+    apirest.LoadCommits('Perf'),
+    apirest.LoadCommits('Vuln'),
+  ]);
+  const allCommits = [...new Set([...perfCommits, ...vulnCommits])];
+  const gitHistory = gitHistoryPromise;
+
+  const slot = currentDef
+    ? { commit: currentDef.commit, type: currentDef.type, subjects: [], subject: currentDef.subject }
+    : { commit: '', type: '', subjects: [], subject: '' };
+
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+  const container = document.createElement('div');
+  ui.Reset();
+
+  container.appendChild(ui.CreateTitle(`Variable\u00a0: ${name}`, 'h3', null));
+
+  const row = document.createElement('div');
+  row.className = 'experiment-row';
+
+  const commitSelect = ui.CreateSelect(
+    [{ value: '', text: 'Commit\u2026' }].concat(
+      allCommits.map(c => ({ value: c, text: CommitHelp.ShortHash(c), selected: c === slot.commit }))
+    ), null
+  );
+  row.appendChild(commitSelect);
+
+  gitHistory.then(function(history) {
+    if (!history) return;
+    const enriched = CommitHelp.Enrich(allCommits, history);
+    ui.UpdateSelect(commitSelect,
+      [{ value: '', text: 'Commit\u2026' }].concat(
+        enriched.map(e => ({ value: e.hash, text: e.label, selected: e.hash === slot.commit }))
+      )
+    );
+  });
+
+  const typeSelect = ui.CreateSelect([
+    { value: '', text: 'Type\u2026' },
+    { value: 'Perf', selected: slot.type === 'Perf' },
+    { value: 'Vuln', selected: slot.type === 'Vuln' },
+  ], null);
+  if (!slot.commit) UI.DisableElement(typeSelect);
+  row.appendChild(typeSelect);
+
+  const subjectSelect = ui.CreateSelect(
+    [{ value: '', text: 'Subject\u2026' }].concat(
+      slot.subjects.map(s => ({ value: s.value, text: s.text, selected: s.value === slot.subject }))
+    ), null
+  );
+  if (!slot.type || slot.subjects.length === 0) UI.DisableElement(subjectSelect);
+  row.appendChild(subjectSelect);
+
+  let btOk = null;
+
+  function updateOk() {
+    if (!btOk) return;
+    if (slot.commit && slot.type && slot.subject) UI.EnableElement(btOk);
+    else UI.DisableElement(btOk);
+  }
+
+  commitSelect.onchange = function() {
+    slot.commit = commitSelect.value;
+    slot.type = '';
+    slot.subjects = [];
+    slot.subject = '';
+    ui.UpdateSelect(typeSelect, [
+      { value: '', text: 'Type\u2026' },
+      { value: 'Perf' },
+      { value: 'Vuln' },
+    ]);
+    UI.DisableElement(typeSelect);
+    ui.UpdateSelect(subjectSelect, [{ value: '', text: 'Subject\u2026' }]);
+    UI.DisableElement(subjectSelect);
+    if (slot.commit) UI.EnableElement(typeSelect);
+    updateOk();
+  };
+
+  typeSelect.onchange = async function() {
+    slot.type = typeSelect.value;
+    slot.subjects = [];
+    slot.subject = '';
+    ui.UpdateSelect(subjectSelect, [{ value: '', text: 'Subject\u2026' }]);
+    UI.DisableElement(subjectSelect);
+    updateOk();
+    if (!slot.type || !slot.commit) return;
+    UI.DisableElement(typeSelect);
+    try {
+      const subjects = await apirest.LoadCommitSubjects(slot.type, slot.commit);
+      slot.subjects = subjects;
+      if (subjects.length === 0) return;
+      ui.UpdateSelect(subjectSelect,
+        [{ value: '', text: 'Subject\u2026' }].concat(subjects.map(s => ({ value: s.value, text: s.text })))
+      );
+      UI.EnableElement(subjectSelect);
+    } finally {
+      UI.EnableElement(typeSelect);
+    }
+  };
+
+  subjectSelect.onchange = function() {
+    slot.subject = subjectSelect.value;
+    updateOk();
+  };
+
+  // Pre-fill subjects if editing an existing def
+  if (slot.commit && slot.type && slot.subjects.length === 0 && slot.subject) {
+    UI.DisableElement(typeSelect);
+    apirest.LoadCommitSubjects(slot.type, slot.commit).then(function(subjects) {
+      slot.subjects = subjects;
+      if (subjects.length > 0) {
+        ui.UpdateSelect(subjectSelect,
+          [{ value: '', text: 'Subject\u2026' }].concat(
+            subjects.map(s => ({ value: s.value, text: s.text, selected: s.value === slot.subject }))
+          )
+        );
+        UI.EnableElement(subjectSelect);
+      }
+    }).finally(() => UI.EnableElement(typeSelect));
+  }
+
+  container.appendChild(row);
+
+  setModalCancel(function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+    EnableMainUI(true);
+  });
+
+  const actions = ui.CreateActions(true, {
+    ok: {
+      callback: function() {
+        if (!slot.commit || !slot.type || !slot.subject) return;
+        // Register experiment in registry (keyed by commit:type:subject)
+        const expKey = `${slot.commit}:${slot.type}:${slot.subject}`;
+        if (!state.commitRegistry.has(expKey)) {
+          const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
+          state.commitRegistry.set(expKey, { color, displayName: null });
+        }
+        state.variables.experiments.set(name, { commit: slot.commit, type: slot.type, subject: slot.subject });
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        EnableMainUI(true);
+      },
+      className: 'exp-var-ok-btn',
+    },
+    cancel: {
+      callback: function() {
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        EnableMainUI(true);
+      }
+    }
+  });
+  container.appendChild(actions);
+
+  modalpage.appendChild(container);
+  btOk = container.querySelector('.exp-var-ok-btn');
+  UI.DisableElement(btOk);
+  updateOk();
+  modalpage.classList.add('modalpage_visible');
+}
+
+// Opens a mini-modal to define or edit a metric variable (single selection).
+async function openMetricVarModal(name, currentVal, state) {
+  EnableMainUI(false);
+
+  // Collect all unique resolved experiments across all graphs and variables
+  const uniqueExps = new Map();
+  for (const [, config] of state.graphSettings) {
+    for (const slot of config.experiments) {
+      let def = slot;
+      if ('variable' in slot) def = state.variables.experiments.get(slot.variable) ?? null;
+      if (def?.commit && def.type && def.subject) {
+        uniqueExps.set(`${def.commit}:${def.type}:${def.subject}`, def);
+      }
+    }
+  }
+  for (const [, def] of state.variables.experiments) {
+    if (def?.commit && def.type && def.subject) {
+      uniqueExps.set(`${def.commit}:${def.type}:${def.subject}`, def);
+    }
+  }
+
+  const experiments = Array.from(uniqueExps.values());
+  const metricsResults = experiments.length > 0
+    ? await Promise.all(experiments.map(exp => apirest.LoadCommitMetrics(exp.type, exp.commit, exp.subject)))
+    : [];
+
+  const union = new Set();
+  for (const mr of metricsResults) flattenMetricPaths(mr).forEach(p => union.add(p));
+
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+  const container = document.createElement('div');
+  ui.Reset();
+
+  container.appendChild(ui.CreateTitle(`Variable m\u00e9trique\u00a0: ${name}`, 'h3', null));
+
+  let selectedMetric = currentVal;
+  let btOk = null;
+
+  function updateOk() {
+    if (!btOk) return;
+    if (selectedMetric) UI.EnableElement(btOk);
+    else UI.DisableElement(btOk);
+  }
+
+  if (union.size === 0) {
+    const msg = document.createElement('p');
+    msg.style.cssText = 'color:#aaa;font-style:italic;font-size:0.9rem;margin:8px 0;';
+    msg.textContent = 'Aucune m\u00e9trique disponible. Ajoutez d\u2019abord des graphes avec des experiments r\u00e9solus.';
+    container.appendChild(msg);
+  } else {
+    const syntheticMetrics = buildSyntheticMetrics(union);
+    const metricsTree = ui.CreateMetrics(syntheticMetrics, {
+      callback: function(event) {
+        if (event.target.checked) {
+          // Single selection: uncheck all others
+          container.querySelectorAll('.metric-checkbox').forEach(cb => {
+            if (cb !== event.target) cb.checked = false;
+          });
+          selectedMetric = event.target.value;
+        } else {
+          selectedMetric = null;
+        }
+        updateOk();
+      }
+    });
+    container.appendChild(metricsTree);
+
+    // Pre-select currentVal if set
+    if (currentVal) {
+      container.querySelectorAll('.metric-checkbox').forEach(cb => {
+        if (cb.value === currentVal) {
+          cb.checked = true;
+          const label = cb.closest('.checkbox-label');
+          if (label) label.style.display = '';
+        }
+      });
+    }
+  }
+
+  setModalCancel(function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+    EnableMainUI(true);
+  });
+
+  const actions = ui.CreateActions(true, {
+    ok: {
+      callback: function() {
+        if (!selectedMetric) return;
+        state.variables.metrics.set(name, selectedMetric);
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        EnableMainUI(true);
+      },
+      className: 'metric-var-ok-btn',
+    },
+    cancel: {
+      callback: function() {
+        clearModalCancel();
+        modalpage.classList.remove('modalpage_visible');
+        EnableMainUI(true);
+      }
+    }
+  });
+  container.appendChild(actions);
+
+  modalpage.appendChild(container);
+  btOk = container.querySelector('.metric-var-ok-btn');
+  updateOk();
+  modalpage.classList.add('modalpage_visible');
 }
 
 function OpenView(restoreUI = false) {
@@ -1030,9 +1622,9 @@ function Save(state) {
 // HEADER & DOM SETUP
 // ============================================================
 
-function EnableMainUI(state) {
+function EnableMainUI(enabled) {
   UIElt.forEach(function(element) {
-    if (state) {
+    if (enabled) {
       UI.EnableElement(element);
     } else {
       UI.DisableElement(element);
@@ -1120,7 +1712,7 @@ const apirest = new ApiREST(config.apiBase, errorManager);
 const gitHistoryPromise = apirest.LoadGitHistory();
 const ui = new UI();
 const graphManager = new GraphManager(main, {
-  delete:    function(id) { state.graphSettings.delete(id); },
+  delete:    function(id) { state.graphSettings.delete(id); BuildSidebar(state); },
   getState:  function()   { return state; },
   editGraph: function(id) { EditGraph(id); },
 });
@@ -1162,6 +1754,14 @@ uiNewView.onclick = function() {
   ConfigBaseInformations(restoreUI);
 };
 headerToolbar.appendChild(uiNewView);
+
+const btnSidebar = UI.CreateToolbarBtn('\u229e Variables', 'Panneau Variables & Légende');
+btnSidebar.addEventListener('click', () => {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('collapsed');
+});
+headerToolbar.appendChild(btnSidebar);
+UIElt.push(btnSidebar);
 
 const uiInfo = UI.CreateToolbarBtn('Aide', 'Help');
 uiInfo.onclick = OpenInfoModal;

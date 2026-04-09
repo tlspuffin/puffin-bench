@@ -50,19 +50,20 @@ class GraphManager {
   async AddGraph(graphConfig, dataMap) {
     const id = GraphManager.#nextid++;
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
-    const title = this.#BuildTitle(graphConfig, resolvedEntries);
 
     const { container: graphContainer, graphArea } = this.#BuildGraphContainer(id, {
-      showIcons:     true,
+      showIcons:      true,
       showAxesToggle: true,
       showRawToggle:  true,
       showCIToggle:   true,
-      title,
     });
     this.#document.appendChild(graphContainer);
 
     const stored = { graphConfig, dataMap, graphContainer, graphArea, hiddenGroups: new Set() };
     this.#configs.set(id, stored);
+
+    const titleSpan = graphContainer.querySelector('.graph_title_text');
+    if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries);
 
     await this.#Draw(graphArea, graphConfig, dataMap, stored);
 
@@ -114,9 +115,8 @@ class GraphManager {
     const stored = this.#configs.get(id);
     if (!stored) return;
     const resolvedEntries = this.#ResolveExperiments(stored.graphConfig);
-    const newTitle = this.#BuildTitle(stored.graphConfig, resolvedEntries);
     const titleSpan = stored.graphContainer.querySelector('.graph_title_text');
-    if (titleSpan) titleSpan.textContent = newTitle;
+    if (titleSpan) this.#UpdateTitleDom(titleSpan, stored.graphConfig, resolvedEntries);
     await this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
   }
 
@@ -135,9 +135,8 @@ class GraphManager {
 
     // Update DOM title
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
-    const newTitle = this.#BuildTitle(graphConfig, resolvedEntries);
     const titleSpan = stored.graphContainer.querySelector('.graph_title_text');
-    if (titleSpan) titleSpan.textContent = newTitle;
+    if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries);
 
     // Update toggle button states
     const eltSplit = document.getElementById('graph_ui_split_' + id);
@@ -212,21 +211,53 @@ class GraphManager {
   }
 
   /**
-   * Builds the display title for the graph container header.
-   * Uses commitRegistry displayName when available.
+   * Populates the graph title span with experiment + metric labels.
+   * Variable-sourced entries get a pill badge showing the variable name (e.g. "e1").
    */
-  #BuildTitle(graphConfig, resolvedEntries) {
+  #UpdateTitleDom(titleSpan, graphConfig, resolvedEntries) {
+    titleSpan.innerHTML = '';
     const state = this.#callbacks?.getState?.();
-    const expLabels = resolvedEntries.map(({ resolved, isVar, varName }) => {
-      if (!resolved) return isVar ? `${varName}(?)` : '(?)';
-      const displayName = state?.commitRegistry?.get(resolved.commit)?.displayName;
-      const short = CommitHelp.ShortHash(resolved.commit);
-      return displayName ?? `${short}/${resolved.type}/${resolved.subject}`;
+
+    // ── Experiment labels ───────────────────────────────────────
+    resolvedEntries.forEach(({ resolved, isVar, varName }, i) => {
+      if (i > 0) titleSpan.appendChild(document.createTextNode(', '));
+
+      if (isVar) {
+        const badge = document.createElement('span');
+        badge.className = 'graph_title_var_badge';
+        badge.textContent = varName;
+        titleSpan.appendChild(badge);
+        titleSpan.appendChild(document.createTextNode('\u00a0'));
+      }
+
+      let label;
+      if (!resolved) {
+        label = '?';
+      } else {
+        const expKey = `${resolved.commit}:${resolved.type}:${resolved.subject}`;
+        const displayName = state?.commitRegistry?.get(expKey)?.displayName;
+        label = displayName ?? `${CommitHelp.ShortHash(resolved.commit)}/${resolved.type}/${resolved.subject}`;
+      }
+      titleSpan.appendChild(document.createTextNode(label));
     });
-    const metricStr = graphConfig.metrics.join(' \u2022 ');
-    return expLabels.length === 1
-      ? `[${expLabels[0]}] ${metricStr}`
-      : `[${expLabels.join(', ')}] ${metricStr}`;
+
+    // ── Metric labels ────────────────────────────────────────────
+    titleSpan.appendChild(document.createTextNode(' '));
+    graphConfig.metrics.forEach((m, i) => {
+      if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
+      let varName = null;
+      if (typeof m === 'string') {
+        try { const p = JSON.parse(m); if (p?.variable) varName = p.variable; } catch (_) {}
+      }
+      if (varName) {
+        const badge = document.createElement('span');
+        badge.className = 'graph_title_var_badge';
+        badge.textContent = varName;
+        titleSpan.appendChild(badge);
+      } else {
+        titleSpan.appendChild(document.createTextNode(typeof m === 'string' ? m : '?'));
+      }
+    });
   }
 
   /**
@@ -300,10 +331,10 @@ class GraphManager {
       }
 
       const { series } = data;
-      const color = state?.commitRegistry?.get(resolved.commit)?.color
-        ?? GraphManager.#PALETTE[idx % GraphManager.#PALETTE.length];
+      const regEntry = state?.commitRegistry?.get(expKey);
+      const color     = regEntry?.color ?? GraphManager.#PALETTE[idx % GraphManager.#PALETTE.length];
       const fillColor = GraphManager.#HexToRgba(color, 0.2);
-      const expLabel  = state?.commitRegistry?.get(resolved.commit)?.displayName
+      const expLabel  = regEntry?.displayName
         ?? `${CommitHelp.ShortHash(resolved.commit)}/${resolved.type}/${resolved.subject}`;
 
       // ── Render: mean + CI per experiment ───────────────────────
