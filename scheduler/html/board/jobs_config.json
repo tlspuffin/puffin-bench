@@ -1,0 +1,69 @@
+{
+  "jobs": [
+    {
+      "value":    "vuln-a",
+      "label":    "Vuln group A",
+      "job_type": "vuln-a",
+      "color":    "#FF9800",
+      "campaign": false,
+      "config":   "/files/jobs_scripts/PR_vulnerabilities-groupA_cargo.json",
+      "script":   "/files/jobs_scripts/PR_vulnerabilities_full.sh",
+      "files":    [
+        "/files/jobs_scripts/shell.nix",
+        "/files/jobs_scripts/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":    "vuln-b",
+      "label":    "Vuln group B",
+      "job_type": "vuln-b",
+      "color":    "#45D0D4",
+      "campaign": false,
+      "config":   "/files/jobs_scripts/PR_vulnerabilities-groupB_cargo.json",
+      "script":   "/files/jobs_scripts/PR_vulnerabilities_full.sh",
+      "files":    [
+        "/files/jobs_scripts/shell.nix",
+        "/files/jobs_scripts/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":    "perf",
+      "label":    "Perf",
+      "job_type": "perf",
+      "color":    "#4CAF50",
+      "campaign": false,
+      "config":   "/files/jobs_scripts/PR_perf.json",
+      "script":   "/files/jobs_scripts/PR_perf.sh",
+      "files":    [
+        "/files/jobs_scripts/shell.nix",
+        "/files/jobs_scripts/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":    "validatePR",
+      "label":    "Evaluate PR",
+      "job_type": "validatePR",
+      "color":    "#FACC15",
+      "campaign": false,
+      "config":   "/files/jobs_scripts/PR_perf.json",
+      "script":   "/files/jobs_scripts/PR_perf.sh",
+      "files":    [
+        "/files/jobs_scripts/shell.nix",
+        "/files/jobs_scripts/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":    "campaign",
+      "label":    "Campaign",
+      "job_type": "campaign",
+      "color":    "#a78bfa",
+      "campaign": true,
+      "config":   "/files/jobs_scripts/PR_campaign.json",
+      "script":   "/files/jobs_scripts/test_PR_campaign.sh",
+      "files":    [
+        "/files/jobs_scripts/shell.nix",
+        "/files/jobs_scripts/wolfssl_put.c.patch"
+      ]
+    }
+  ]
+}

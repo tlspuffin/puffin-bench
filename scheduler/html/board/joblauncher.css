@@ -5,6 +5,7 @@
   --jl-border:       #404040;
   --jl-border-light: #555;
   --jl-text:         #e0e0e0;
+  --jl-text-label:   #cecece;
   --jl-text-muted:   #888;
   --jl-accent:       #667eea;
   --jl-radius:       12px;
@@ -32,7 +33,7 @@
   border: 1px solid var(--jl-border-light);
   border-radius: var(--jl-radius);
   width: 100%;
-  max-width: 520px;
+  max-width: 650px;
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -99,7 +100,7 @@
   display: block;
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--jl-text-muted);
+  color: var(--jl-text-label);
   font-weight: 500;
   letter-spacing: 0.05em;
   margin-bottom: 10px;
@@ -140,11 +141,12 @@
   flex-shrink: 0;
 }
 
-/* chip accent colors */
-#jl-chip-vuln-a:checked + label   { border-color: #FF9800; color: #FF9800; background: rgba(255,152,0,0.1); }
-#jl-chip-vuln-b:checked + label   { border-color: #45D0D4; color: #45D0D4; background: rgba(69,208,212,0.1); }
-#jl-chip-perf:checked + label     { border-color: #4CAF50; color: #4CAF50; background: rgba(76,175,80,0.1); }
-#jl-chip-campaign:checked + label { border-color: #a78bfa; color: #a78bfa; background: rgba(167,139,250,0.1); }
+/* chip accent colors — driven by --jl-chip-color set inline from jobs_config.json */
+.jl-chip-input:checked + label {
+  border-color: var(--jl-chip-color, #888);
+  color:        var(--jl-chip-color, #888);
+  background:   color-mix(in srgb, var(--jl-chip-color, #888) 10%, transparent);
+}
 
 /* ── Commit input ── */
 .jl-commit-input {
@@ -308,14 +310,47 @@
 .jl-list::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
 .jl-list::-webkit-scrollbar-thumb:hover { background: #555; }
 
-/* ── Timeout (Campaign only) ── */
-.jl-timeout {
+/* ── Campaign-only fields ── */
+.jl-campaign-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   visibility: hidden;
   pointer-events: none;
 }
-.jl-timeout.visible {
+.jl-campaign-extra.visible {
   visibility: visible;
   pointer-events: auto;
+}
+.jl-campaign-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.jl-mem-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.jl-mem-sublabel {
+  font-size: 11px;
+  color: var(--jl-text-muted);
+}
+.jl-timeout-unit + .jl-mem-sublabel {
+  margin-left: 10px;
+}
+.jl-field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.jl-field-row .jl-label {
+  margin-bottom: 0;
+  width: 90px;
+  flex-shrink: 0;
+}
+.jl-field-row .jl-commit-input {
+  flex: 1;
 }
 
 .jl-timeout-row {
@@ -344,6 +379,31 @@
   border: none;
   border-top: 1px solid var(--jl-border);
   margin: 4px 0 0;
+}
+
+/* ── Unknown commit confirmation ── */
+.jl-confirm-unknown {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(244, 67, 54, 0.08);
+  border: 1px solid rgba(244, 67, 54, 0.35);
+}
+.jl-confirm-unknown.visible { display: flex; }
+.jl-confirm-unknown input[type="checkbox"] {
+  accent-color: #f44336;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.jl-confirm-unknown label {
+  font-size: 12px;
+  color: #e57373;
+  cursor: pointer;
+  user-select: none;
 }
 
 /* ── Launch button ── */

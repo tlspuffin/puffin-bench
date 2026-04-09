@@ -1,0 +1,48 @@
+{
+  "publish": {
+    "server": "default",
+    "storage_path": "${PUBLISHER_STORAGE}/campaign/PR/${COMMIT_ID}/",
+    "goal": "Campaign - Commit ${COMMIT_ID}"
+  },
+  "configurations": ${RUNTIME_RUN_CONFIG},
+  "name" : "Campaign - Commit ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init",
+      "configuration": {
+          "nb_cores": ${RUNTIME_NB_CORES}
+        }
+    },
+    [
+      {
+        "run": []
+      },
+      {
+        "step": "ForcedBuild"
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "timeout": "${RUNTIME_TIMEOUT}",
+          "memory_core": ${RUNTIME_MEMORY_CORE},
+          "memory_consumption": ${RUNTIME_MEMORY_CONSUMPTION}
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
+      },
+      {
+        "step": "ExperimentEnd"
+      }
+    ],
+    {
+      "step": "SummaryRun"
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}
+
