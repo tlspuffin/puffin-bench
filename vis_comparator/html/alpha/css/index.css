@@ -1116,6 +1116,24 @@ button:disabled {
   transform: none !important;
 }
 
+.view-list-action-btn {
+  background: none !important;
+  border: none !important;
+  color: var(--color-primary);
+  font-size: 1.1rem;
+  padding: 8px 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+
+.view-list-action-btn:hover {
+  background: #f0f4ff !important;
+  transform: none !important;
+}
+
 .view-list-row.selected .view-list-name-btn {
   background: #e8eeff !important;
   color: var(--color-primary) !important;

@@ -41,14 +41,18 @@ public:
     std::vector<uint64_t> indexes(runs.size());
      std::vector<std::string> metricsRequired = metrics;
     for(std::string const& metric: metricsRequired) {
+      auto const it = data.find(metric);
+      if (it == data.end() || it->second.empty()) {
+        continue;
+      }
       bool acrossRun = metric.find("global.") == 0;
       if (acrossRun && (runs.size() < 2)) {
         continue;
       } else {
-        acrossRun = data[metric].size() == (runs.size());
+        acrossRun = it->second.size() == runs.size();
       }
 
-      data.merge(ns_Analyze::Statistics::ComputeStats(metric, data[metric], acrossRun ? nullptr : &runs));
+      data.merge(ns_Analyze::Statistics::ComputeStats(metric, it->second, acrossRun ? nullptr : &runs));
     }
     return data;
   }

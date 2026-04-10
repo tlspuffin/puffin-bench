@@ -43,6 +43,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       "^/api/PR/values/([^/]+)/([^/]+)/([^/]+)/([0-9]+)/([0-9]+)/([0-9]+)$");
   static const std::regex regSaveLoadUserData("^/api/PR/userdata/([^/]+)$");
   static const std::regex regListUserData("^/api/PR/userdata/*$");
+  static const std::regex regSaveLoadTemplate("^/api/PR/userdata/templates/([^/]+)$");
+  static const std::regex regListTemplates("^/api/PR/userdata/templates/*$");
   static const std::regex regGetGitHistory("^/api/PR/git/history$");
 
   std::smatch match;
@@ -60,17 +62,25 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
               match[1].str(), match[2].str(), match[3].str());
         } else if (std::regex_search(path, match, regGetGitHistory)) {
           requestHandler = new RequestHandlerAPIGetGitHistory();
+        } else if (std::regex_search(path, match, regSaveLoadTemplate)) {
+          requestHandler = new RequestHandlerAPILoadTemplate(match[1].str());
+        } else if (std::regex_search(path, match, regListTemplates)) {
+          requestHandler = new RequestHandlerAPIListTemplates();
         } else if (std::regex_search(path, match, regSaveLoadUserData)) {
           requestHandler = new RequestHandlerAPILoadUserData(match[1].str());
         } else if (std::regex_search(path, match, regListUserData)) {
           requestHandler = new RequestHandlerAPIListUserData();
         }
       } else if (method == "DELETE") {
-        if (std::regex_search(path, match, regSaveLoadUserData)) {
+        if (std::regex_search(path, match, regSaveLoadTemplate)) {
+          requestHandler = new RequestHandlerAPIDeleteTemplate(match[1].str());
+        } else if (std::regex_search(path, match, regSaveLoadUserData)) {
           requestHandler = new RequestHandlerAPIDeleteUserData(match[1].str());
         }
       } else if (method == "POST") {
-        if (std::regex_search(path, match, regGetCommitMetricsValues)) {
+        if (std::regex_search(path, match, regSaveLoadTemplate)) {
+          requestHandler = new RequestHandlerAPISaveTemplate(match[1].str());
+        } else if (std::regex_search(path, match, regGetCommitMetricsValues)) {
           requestHandler = new RequestHandlerAPIGetCommitMetricsValues(
               match[1].str(), match[2].str(), match[3].str(), 
               std::strtoull(match[4].str().c_str(), nullptr, 10), 

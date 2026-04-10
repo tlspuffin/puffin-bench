@@ -105,6 +105,88 @@ class ApiREST {
   }
 
   /**
+   * Persists a template to the server (variables are stored as null).
+   * @param {string} name - Template filename (no extension)
+   * @param {object} data - Serialisable template state
+   * @returns {Promise<boolean>} true on success
+   */
+  async SaveTemplate(name, data) {
+    try {
+      const encodedName = encodeURIComponent(name);
+      const response = await fetch(`${this.#apiURI}/userdata/templates/${encodedName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSONHelp.Stringify(data),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return true;
+    } catch (error) {
+      this.#errorManager.Error('Failed to save template: ' + error.message);
+    }
+    return false;
+  }
+
+  /**
+   * Loads a previously saved template from the server.
+   * @param {string} name - Template filename (no extension)
+   * @returns {Promise<object|null>} Deserialised template state, or null on failure
+   */
+  async LoadTemplate(name) {
+    try {
+      const encodedName = encodeURIComponent(name);
+      const response = await fetch(`${this.#apiURI}/userdata/templates/${encodedName}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.text();
+      return JSONHelp.Parse(data);
+    } catch (error) {
+      this.#errorManager.Error('Failed to load template: ' + error.message);
+    }
+    return null;
+  }
+
+  /**
+   * Lists all saved templates on the server.
+   * @returns {Promise<{files: string[]}|null>} Object with a `files` array, or null on failure
+   */
+  async ListTemplates() {
+    try {
+      const response = await fetch(`${this.#apiURI}/userdata/templates`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      this.#errorManager.Error('Failed to list templates: ' + error.message);
+    }
+    return null;
+  }
+
+  /**
+   * Deletes a saved template from the server.
+   * @param {string} name - Template filename (no extension)
+   * @returns {Promise<boolean>} true on success
+   */
+  async DeleteTemplate(name) {
+    try {
+      const encodedName = encodeURIComponent(name);
+      const response = await fetch(`${this.#apiURI}/userdata/templates/${encodedName}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return true;
+    } catch (error) {
+      this.#errorManager.Error('Failed to delete template: ' + error.message);
+    }
+    return false;
+  }
+
+  /**
    * Loads the list of available commit IDs for a given experiment type.
    * @param {string} commitType - Dataset type, e.g. 'Perf' or 'Vuln'
    * @returns {Promise<string[]>} Sorted commit IDs, or [] on failure

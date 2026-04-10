@@ -368,11 +368,18 @@ ns_Analyze::DataManager::CommitValues(
       if (doAggregate) {
         memset(sumValues.data(), 0, sumValues.size());
       }
-      DataType dataType = metricsSummaries.runSummary_[runIndex].summary_[clientsMetric ? 1 : 0][metric].type_;
+      auto const& refSummary = metricsSummaries.runSummary_[runIndex].summary_[clientsMetric ? 1 : 0];
+      if (refSummary.count(metric) == 0) {
+        LOGW("Metric not found in run, skipping | type: " << type << " | commit: " << commitID
+            << " | subject: " << subject << " | metric: " << metricFullname << " | runID: " << runID);
+        continue;
+      }
+      DataType dataType = refSummary.at(metric).type_;
       for(uint64_t index: indexes) {
         //LOGI(metric << " " << runIndex << " (" << metricsSummaries.runSummary_[runIndex].id_ << ") " << index);
-        if (dataType != metricsSummaries.runSummary_[runIndex].summary_[index][metric].type_) {
-          LOGE("Fatal request error, 2 diffrent kind of data for the same serie");
+        auto const& indexSummary = metricsSummaries.runSummary_[runIndex].summary_[index];
+        if (indexSummary.count(metric) == 0 || dataType != indexSummary.at(metric).type_) {
+          LOGE("Fatal request error, 2 different kind of data for the same serie");
           return {};
         }
         if (timestamps[runID][index].empty()) {
@@ -406,7 +413,11 @@ ns_Analyze::DataManager::CommitValues(
             }
             break;
           default:
-            LOGE("Fatal request error, serie of data have an unmanaged kind: "+ DataTypeToString(dataType));
+            LOGE("Fatal request error, serie of data have an unmanaged kind: " << DataTypeToString(dataType)
+                << " | type: " << type << " | commit: " << commitID << " | subject: " << subject
+                << " | metric: " << metricFullname
+                << " | file: " << filename
+                << " | runID: " << runID << " index: " << index);
             return {};
             break;
         }
@@ -424,7 +435,10 @@ ns_Analyze::DataManager::CommitValues(
             }
             break;
           default:
-            LOGE("Fatal request error, serie of data have an unmanaged kind: "+ DataTypeToString(dataType));
+            LOGE("Fatal request error, serie of data have an unmanaged kind: " << DataTypeToString(dataType)
+                << " | type: " << type << " | commit: " << commitID << " | subject: " << subject
+                << " | metric: " << metricFullname
+                << " | runID: " << runID);
             return {};
             break;
         }

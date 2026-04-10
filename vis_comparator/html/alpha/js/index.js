@@ -65,7 +65,13 @@ async function restoreGraphs(savedSettings) {
       })
       .filter(Boolean);
 
-    if (resolved.length === 0) continue;
+    if (resolved.length === 0) {
+      // All experiment variables unresolved (template with null vars) — render placeholders
+      // so the config is tracked in state.graphSettings for later variable resolution.
+      const id = await graphManager.AddGraph(graphConfig, new Map());
+      state.graphSettings.set(id, graphConfig);
+      continue;
+    }
 
     // Resolve MetricVarRef entries before fetching
     const resolvedMetrics = graphConfig.metrics
@@ -83,7 +89,12 @@ async function restoreGraphs(savedSettings) {
       })
       .filter(Boolean);
 
-    if (resolvedMetrics.length === 0) continue;
+    if (resolvedMetrics.length === 0) {
+      // All metric variables unresolved — render placeholders.
+      const id = await graphManager.AddGraph(graphConfig, new Map());
+      state.graphSettings.set(id, graphConfig);
+      continue;
+    }
 
     const results = await Promise.all(
       resolved.map(exp => apirest.LoadCommitMetricsValues(
@@ -1344,22 +1355,34 @@ async function openMetricVarModal(name, currentVal, state) {
   modalpage.classList.add('modalpage_visible');
 }
 
-function OpenView(restoreUI = false) {
+/**
+ * Builds and opens a filterable/sortable file-list modal.
+ * @param {boolean} restoreUI - whether to re-enable the main UI on dismiss
+ * @param {{
+ *   title: string,
+ *   filterPlaceholder: string,
+ *   emptyText: {empty: string, filtered: string, failed: string},
+ *   fetchFiles: () => Promise<{files: string[]}|null>,
+ *   onLoad: (name: string, closeModal: () => void) => void,
+ *   onDelete: (name: string, rerender: () => void) => void,
+ *   extraRowBtns?: (name: string) => HTMLElement[],
+ * }} opts
+ */
+function buildFileListModal(restoreUI, opts) {
   const modalpage = document.getElementById('modalpage');
   modalpage.innerHTML = '';
 
   const container = document.createElement('div');
   ui.Reset();
-  container.appendChild(ui.CreateTitle("Ouvrir une vue", 'h3'));
+  container.appendChild(ui.CreateTitle(opts.title, 'h3'));
 
-  // Sort + filter controls
   const viewControls = document.createElement('div');
   viewControls.className = 'view-controls';
 
   const filterInput = document.createElement('input');
   filterInput.type = 'text';
   filterInput.className = 'modal_text_input view-filter-input';
-  filterInput.placeholder = 'Filter views\u2026';
+  filterInput.placeholder = opts.filterPlaceholder;
   viewControls.appendChild(filterInput);
 
   const sortBtn = document.createElement('button');
@@ -1370,7 +1393,6 @@ function OpenView(restoreUI = false) {
   viewControls.appendChild(sortBtn);
   container.appendChild(viewControls);
 
-  // View list
   const listContainer = document.createElement('div');
   listContainer.className = 'view-list-container';
   const loadingSpan = document.createElement('span');
@@ -1381,6 +1403,18 @@ function OpenView(restoreUI = false) {
 
   let allFiles = [];
 
+  function closeModal() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+    EnableMainUI(true);
+  }
+
+  function dismissModal() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage_visible');
+    EnableMainUI(restoreUI);
+  }
+
   function renderList() {
     listContainer.innerHTML = '';
     const filterText = filterInput.value.toLowerCase();
@@ -1390,7 +1424,7 @@ function OpenView(restoreUI = false) {
     if (files.length === 0) {
       const empty = document.createElement('p');
       empty.className = 'view-list-empty';
-      empty.textContent = filterText ? 'No views match your filter.' : 'No saved views yet.';
+      empty.textContent = filterText ? opts.emptyText.filtered : opts.emptyText.empty;
       listContainer.appendChild(empty);
       return;
     }
@@ -1408,36 +1442,22 @@ function OpenView(restoreUI = false) {
         });
         row.classList.add('selected');
       };
-
-      nameBtn.ondblclick = function() {
-        apirest.LoadPage(name).then(function(newstate) {
-          if (newstate == null) return;
-          ResetState(state, newstate).then(function() {
-            modalpage.classList.remove('modalpage_visible');
-            clearModalCancel();
-            EnableMainUI(true);
-            errorManager.Success('View loaded: ' + name);
-          });
-        });
-      };
+      nameBtn.ondblclick = function() { opts.onLoad(name, closeModal); };
 
       const delBtn = document.createElement('button');
       delBtn.className = 'view-list-delete-btn';
       delBtn.textContent = '\u{1F5D1}';
-      delBtn.title = 'Delete this view';
+      delBtn.title = 'Delete';
       delBtn.onclick = function(e) {
         e.stopPropagation();
-        if (!confirm(`Delete view \u201c${name}\u201d? This cannot be undone.`)) return;
-        apirest.DeletePage(name).then(function(ok) {
-          if (ok) {
-            allFiles = allFiles.filter(f => f !== name);
-            renderList();
-            errorManager.Success('View deleted: ' + name);
-          }
+        opts.onDelete(name, function() {
+          allFiles = allFiles.filter(f => f !== name);
+          renderList();
         });
       };
 
       row.appendChild(nameBtn);
+      if (opts.extraRowBtns) opts.extraRowBtns(name).forEach(btn => row.appendChild(btn));
       row.appendChild(delBtn);
       listContainer.appendChild(row);
     });
@@ -1450,24 +1470,13 @@ function OpenView(restoreUI = false) {
     renderList();
   };
 
-  setModalCancel(function() {
-    clearModalCancel();
-    modalpage.classList.remove('modalpage_visible');
-    EnableMainUI(restoreUI);
-  });
+  setModalCancel(dismissModal);
 
   container.appendChild(ui.CreateActions(false, {
-    ok: {
-      text: 'Close',
-      callback: function() {
-        clearModalCancel();
-        modalpage.classList.remove('modalpage_visible');
-        EnableMainUI(restoreUI);
-      }
-    }
+    ok: { text: 'Close', callback: dismissModal }
   }));
 
-  apirest.ListPages().then(function(answer) {
+  opts.fetchFiles().then(function(answer) {
     if (answer?.files) {
       allFiles = answer.files;
       renderList();
@@ -1475,13 +1484,161 @@ function OpenView(restoreUI = false) {
       listContainer.innerHTML = '';
       const p = document.createElement('p');
       p.className = 'view-list-empty';
-      p.textContent = 'Failed to load views.';
+      p.textContent = opts.emptyText.failed;
       listContainer.appendChild(p);
     }
   });
 
   modalpage.appendChild(container);
   modalpage.classList.add('modalpage_visible');
+}
+
+function OpenView(restoreUI = false) {
+  buildFileListModal(restoreUI, {
+    title: 'Ouvrir une vue',
+    filterPlaceholder: 'Filter views\u2026',
+    emptyText: {
+      empty:    'No saved views yet.',
+      filtered: 'No views match your filter.',
+      failed:   'Failed to load views.',
+    },
+    fetchFiles: () => apirest.ListPages(),
+    onLoad: function(name, closeModal) {
+      apirest.LoadPage(name).then(function(newstate) {
+        if (newstate == null) return;
+        ResetState(state, newstate).then(function() {
+          closeModal();
+          errorManager.Success('View loaded: ' + name);
+        });
+      });
+    },
+    onDelete: function(name, rerender) {
+      if (!confirm(`Delete view \u201c${name}\u201d? This cannot be undone.`)) return;
+      apirest.DeletePage(name).then(function(ok) {
+        if (ok) {
+          rerender();
+          errorManager.Success('View deleted: ' + name);
+        }
+      });
+    },
+  });
+}
+
+// ============================================================
+// TEMPLATES
+// ============================================================
+
+function buildTemplateURL(templateName, state) {
+  const params = new URLSearchParams({ template: templateName });
+  for (const [name, def] of state.variables.experiments) {
+    if (def) params.set(name, `${def.commit}:${def.type}:${def.subject}`);
+  }
+  for (const [name, val] of state.variables.metrics) {
+    if (val) params.set(name, val);
+  }
+  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+}
+
+function OpenTemplate(restoreUI = false) {
+  buildFileListModal(restoreUI, {
+    title: 'Ouvrir un template',
+    filterPlaceholder: 'Filter templates\u2026',
+    emptyText: {
+      empty:    'No saved templates yet.',
+      filtered: 'No templates match your filter.',
+      failed:   'Failed to load templates.',
+    },
+    fetchFiles: () => apirest.ListTemplates(),
+    onLoad: function(name, closeModal) {
+      apirest.LoadTemplate(name).then(function(tpl) {
+        if (tpl == null) return;
+        ResetState(state, tpl).then(function() {
+          closeModal();
+          errorManager.Success('Template loaded: ' + name);
+        });
+      });
+    },
+    onDelete: function(name, rerender) {
+      if (!confirm(`Delete template \u201c${name}\u201d? This cannot be undone.`)) return;
+      apirest.DeleteTemplate(name).then(function(ok) {
+        if (ok) {
+          rerender();
+          errorManager.Success('Template deleted: ' + name);
+        }
+      });
+    },
+    extraRowBtns: function(name) {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'view-list-action-btn';
+      copyBtn.textContent = '\uD83D\uDD17';
+      copyBtn.title = 'Copy shareable URL (uses current variable values)';
+      copyBtn.onclick = function(e) {
+        e.stopPropagation();
+        const url = buildTemplateURL(name, state);
+        navigator.clipboard.writeText(url).then(function() {
+          copyBtn.textContent = '\u2713';
+          setTimeout(function() { copyBtn.textContent = '\uD83D\uDD17'; }, 2000);
+        });
+      };
+      return [copyBtn];
+    },
+  });
+}
+
+async function SaveAsTemplate(state) {
+  const name = prompt('Nom du template :');
+  if (!name?.trim()) return;
+  const trimmedName = name.trim();
+
+  const tpl = {
+    title: state.title,
+    variables: {
+      experiments: new Map([...state.variables.experiments.keys()].map(k => [k, null])),
+      metrics:     new Map([...state.variables.metrics.keys()].map(k => [k, null])),
+    },
+    graphSettings:  state.graphSettings,
+    commitRegistry: state.commitRegistry,
+  };
+
+  const ok = await apirest.SaveTemplate(trimmedName, tpl);
+  if (ok) errorManager.Success('Template saved: ' + trimmedName);
+}
+
+async function tryLoadTemplateFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const templateName = params.get('template');
+  if (!templateName) return;
+
+  // Clean URL immediately so a failed load doesn't loop on every reload.
+  history.replaceState(null, '', window.location.pathname);
+
+  const tpl = await apirest.LoadTemplate(templateName);
+  if (!tpl) return;
+
+  if (tpl.variables?.experiments instanceof Map) {
+    for (const [name] of tpl.variables.experiments) {
+      const raw = params.get(name);
+      if (!raw) continue;
+      // Split on first two colons only — subject may itself contain ':'
+      const firstColon  = raw.indexOf(':');
+      const secondColon = raw.indexOf(':', firstColon + 1);
+      if (firstColon !== -1 && secondColon !== -1) {
+        const commit  = raw.slice(0, firstColon);
+        const type    = raw.slice(firstColon + 1, secondColon);
+        const subject = raw.slice(secondColon + 1);
+        tpl.variables.experiments.set(name, { commit, type, subject });
+      }
+    }
+  }
+  if (tpl.variables?.metrics instanceof Map) {
+    for (const [name] of tpl.variables.metrics) {
+      const raw = params.get(name);
+      if (raw) tpl.variables.metrics.set(name, raw);
+    }
+  }
+
+  await ResetState(state, tpl);
+  EnableMainUI(true);
 }
 
 function OpenInfoModal() {
@@ -1763,6 +1920,23 @@ btnSidebar.addEventListener('click', () => {
 headerToolbar.appendChild(btnSidebar);
 UIElt.push(btnSidebar);
 
+const uiOpenTpl = UI.CreateToolbarBtn('Ouvrir template', 'Open a saved template');
+uiOpenTpl.onclick = function() {
+  const restoreUI = !uiAddGraph.classList.contains('is-disabled');
+  EnableMainUI(false);
+  OpenTemplate(restoreUI);
+};
+headerToolbar.appendChild(uiOpenTpl);
+UIElt.push(uiOpenTpl);
+
+const uiSaveTpl = UI.CreateToolbarBtn('Sauvegarder template', 'Save current view as template');
+uiSaveTpl.onclick = function() {
+  EnableMainUI(false);
+  SaveAsTemplate(state).finally(() => EnableMainUI(true));
+};
+headerToolbar.appendChild(uiSaveTpl);
+UIElt.push(uiSaveTpl);
+
 const uiInfo = UI.CreateToolbarBtn('Aide', 'Help');
 uiInfo.onclick = OpenInfoModal;
 headerToolbar.appendChild(uiInfo);
@@ -1793,4 +1967,5 @@ modalpage.addEventListener('click', function(e) {
   }
 });
 
+tryLoadTemplateFromURL();
 console.log('done');

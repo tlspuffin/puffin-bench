@@ -348,9 +348,15 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     return;
   }
 
-  std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values = 
-      apis_->analyzeAPI_.GetCommitValues(type, commitID, subject, min, max, step,
-          runs, clients, metrics, aggregate);
+  std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;
+  try {
+    values = apis_->analyzeAPI_.GetCommitValues(type, commitID, subject, min, max, step,
+        runs, clients, metrics, aggregate);
+  } catch (std::exception const& e) {
+    std::cerr << "[GetCommitValues] exception: " << e.what() << std::endl;
+    SendErrorResponse(response, 500, std::string("Internal error: ") + e.what());
+    return;
+  }
 
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
@@ -537,6 +543,114 @@ void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
   }
 
   rapidjson::Document doc;
+  SendJSONResponse(response, doc);
+}
+
+// ── Template helpers ──────────────────────────────────────────────────────────
+
+static std::filesystem::path getTemplatesDir(ns_Server::Config const* config) {
+  return config->userdata_ / "templates";
+}
+
+void ns_Server::RequestHandlerAPISaveTemplate::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const dir = getTemplatesDir(config_);
+  std::filesystem::create_directories(dir);
+  std::filesystem::path const filePath = dir / (std::get<0>(args_) + ".dat");
+
+  std::istream& stream = request.stream();
+  std::ofstream ofs(filePath, std::ios::binary);
+  if (!ofs.is_open()) {
+    SendErrorResponse(response, 500, "Unable to create template " + filePath.string());
+    return;
+  }
+  ofs << stream.rdbuf();
+  if (ofs.fail()) {
+    SendErrorResponse(response, 500, "Failed to write template data");
+    return;
+  }
+  ofs.close();
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  doc.AddMember("status", "ok", doc.GetAllocator());
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPILoadTemplate::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const filePath =
+      getTemplatesDir(config_) / (std::get<0>(args_) + ".dat");
+
+  rapidjson::Document doc;
+  try {
+    ReadJSONFile(filePath.string(), doc);
+  } catch (...) {
+    SendErrorResponse(response, 404, "Template not found: " + filePath.string());
+    return;
+  }
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIListTemplates::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const dir = getTemplatesDir(config_);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  auto& allocator = doc.GetAllocator();
+  rapidjson::Value files(rapidjson::kArrayType);
+
+  if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) {
+    for (auto const& entry : std::filesystem::directory_iterator(dir)) {
+      if (!entry.is_regular_file()) continue;
+      if (entry.path().extension().string() != ".dat") continue;
+      std::string filename = entry.path().stem().string();
+      rapidjson::Value filenameVal;
+      filenameVal.SetString(filename.c_str(), filename.length(), allocator);
+      files.PushBack(filenameVal, allocator);
+    }
+  }
+
+  doc.AddMember("files", files, allocator);
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const filePath =
+      getTemplatesDir(config_) / (std::get<0>(args_) + ".dat");
+
+  if (!std::filesystem::exists(filePath)) {
+    SendErrorResponse(response, 404, "Template not found: " + filePath.string());
+    return;
+  }
+  try {
+    std::filesystem::remove(filePath);
+  } catch (std::exception const& e) {
+    SendErrorResponse(response, 500,
+        std::string("Failed to delete template: ") + e.what());
+    return;
+  }
+
+  rapidjson::Document doc;
+  doc.SetObject();
   SendJSONResponse(response, doc);
 }
 

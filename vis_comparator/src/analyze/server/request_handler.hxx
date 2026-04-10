@@ -50,6 +50,11 @@ REQUESTHANDLER(APISaveUserData, std::string const);
 REQUESTHANDLER(APIDeleteUserData, std::string const);
 REQUESTHANDLER(APIListUserData);
 
+REQUESTHANDLER(APILoadTemplate, std::string const);
+REQUESTHANDLER(APISaveTemplate, std::string const);
+REQUESTHANDLER(APIDeleteTemplate, std::string const);
+REQUESTHANDLER(APIListTemplates);
+
 REQUESTHANDLER(APIGetGitHistory);
 
 };
