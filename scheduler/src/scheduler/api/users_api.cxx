@@ -48,16 +48,17 @@ bool ns_API::UsersAPI::Add(ns_Schedule::Task* task, bool running) {
       throw std::runtime_error("users JSON fatal error, " + task->user_ + "." + task->job_type_ + " is not an object");
     }
 
-    rapidjson::Value valueEmpty(rapidjson::kObjectType);
-    rapidjson::Value& value = valueEmpty;
     std::string taskID = std::to_string(task->id_);
-    if (jobType.HasMember(taskID.c_str())) {
-      value = jobType[taskID.c_str()];
-    } else {
-      jobType.AddMember(rapidjson::Value(taskID.c_str(), alloc_), value, alloc_);
+    if (!jobType.HasMember(taskID.c_str())) {
+      rapidjson::Value valueEmpty(rapidjson::kObjectType);
+      jobType.AddMember(rapidjson::Value(taskID.c_str(), alloc_), valueEmpty, alloc_);
     }
+    rapidjson::Value& value = jobType[taskID.c_str()];
+    value.RemoveMember("name");
     value.AddMember("name", rapidjson::Value(task->name_.c_str(), alloc_), alloc_);
+    value.RemoveMember("running");
     value.AddMember("running", running, alloc_);
+    value.RemoveMember("cancelled");
     value.AddMember("cancelled", task->request_cancel_, alloc_);
   }
   return Save();
