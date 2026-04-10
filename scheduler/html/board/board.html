@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Experiment Manager</title>
   <link rel="stylesheet" href="board.css">
+  <link rel="stylesheet" href="taskcard.css">
   <link rel="stylesheet" href="joblauncher.css">
 </head>
 <body>
@@ -39,31 +40,8 @@
 
   <div id="container-running-steps" class="container-running-steps"></div>
 
-  <div class="modal-overlay" id="logs-modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>Step Logs - <span id="step-name"></span></h3>
-        <button class="modal-close" id="modal-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="logs-tabs">
-          <button class="tab-btn active" id="log-stdout">STDOUT</button>
-          <button class="tab-btn" id="log-stderr">STDERR</button>
-        </div>
-        <div class="logs-content">
-          <div class="logs-container active" id="stdout-container">
-            <div class="logs-scroll-overlay" id="stdout-scroll-overlay"></div>
-            <pre id="stdout-content"></pre>
-          </div>
-          <div class="logs-container" id="stderr-container">
-            <div class="logs-scroll-overlay" id="stderr-scroll-overlay"></div>
-            <pre id="stderr-content"></pre>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
   <div id="exec-tooltip" class="exec-tooltip"></div>
+
   <button class="new-task" id="new-task">+</button>
 
   <script type="module" src="board.js"></script>
