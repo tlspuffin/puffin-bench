@@ -251,6 +251,22 @@ void ns_Schedule::Schedule::GetOutput(
   }
 }
 
+bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id, 
+    std::string& fileStateJSON, std::string& fileArtefacts) const {
+  fileStateJSON = config_.exportPath_ / (task_id + ".json");
+  fileArtefacts = config_.exportPath_ / (task_id + ".tgz");
+  if (std::filesystem::exists(fileStateJSON) && std::filesystem::exists(fileArtefacts)) {
+    return true;
+  }
+  fileStateJSON = config_.exportCanceledPath_ / (task_id + ".json");
+  fileArtefacts = config_.exportCanceledPath_ / (task_id + ".tgz");
+  if (std::filesystem::exists(fileStateJSON) && std::filesystem::exists(fileArtefacts)) {
+    return true;
+  }
+  fileStateJSON.clear();
+  fileArtefacts.clear();
+  return false;
+}
 
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
   std::list<ns_Schedule::Step*> result;
@@ -470,7 +486,7 @@ void ns_Schedule::Schedule::SaveStatus(bool exportRunningSteps) {
     executorsJSON.PushBack(executorJSON, alloc);
   }
   doc.AddMember("executors", executorsJSON, alloc);
-  std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
+  std::string filename = TaskManagerStateFile();
   FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
   if (!fp) {
     throw std::system_error(errno, std::generic_category(), "Unable to open " + filename);

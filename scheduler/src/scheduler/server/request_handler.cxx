@@ -14,7 +14,7 @@ inline static bool ToBool(std::string const& v) {
   return v == "1" || v == "true" || v == "on" || v == "yes";
 };
 
-static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
+bool ns_Server::RequestHandler::ManageCORS(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.set("Access-Control-Allow-Origin", "*");
   response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -26,6 +26,49 @@ static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
     return true;
   }
   return false;
+}
+
+bool ns_Server::RequestHandler::SendFile(std::filesystem::path const& filename,
+    Poco::Net::HTTPServerResponse& response, std::ostream*& responseStream) {
+  responseStream = nullptr;
+
+  static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
+      mimeType {
+          {".txt", {"text/text", std::ios_base::in}},
+          {".html", {"text/html", std::ios_base::in}}, 
+          {".css", {"text/css", std::ios_base::in}},
+          {".json", {"application/json; charset=utf-8", std::ios_base::in}},
+          {".js", {"text/javascript", std::ios_base::in}}, 
+          {".jpg", {"image/jpeg", std::ios_base::binary}}, 
+          {".jpeg", {"image/jpeg", std::ios_base::binary}}, 
+          {".png", {"image/png", std::ios_base::binary}}, 
+          {".svg", {"image/svg+xml", std::ios_base::in}}, 
+      };
+  std::string extension = filename.extension().string();
+
+  std::string contentType = "application/octet-stream";
+  std::ios_base::openmode openmode = std::ios_base::in;
+  auto const& mimeTypeIT = mimeType.find(extension);
+  if (mimeTypeIT != mimeType.end()) {
+    contentType = mimeTypeIT->second.first;
+    openmode = mimeTypeIT->second.second;
+  }
+
+  std::ifstream file(filename, openmode);
+  if (!file.is_open()) {
+    //detectHostileIP_.RecordFailedRequest(srcIP);
+    //char cwd[4096] = {};
+    //getcwd(cwd, 4096);
+    ///LOGWARNING("[%s][%s] unable to access %s cwd: %s", GenerateHumanTS().c_str(), srcIP.c_str(), filename.c_str(), cwd);
+    throw std::runtime_error("file open failed");
+  }
+
+  response.setContentType(contentType);
+  response.setContentLength(std::filesystem::file_size(filename));
+  responseStream = &response.send();
+  Poco::StreamCopier::copyStream(file, *responseStream);
+  responseStream->flush();
+  return true;
 }
 
 void ns_Server::RequestHandlerError::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -131,7 +174,7 @@ void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerR
 
   std::ostream& out = response.send();
   try {
-    std::ifstream ifs(apis_->scheduleAPI_.ExportPath() / "tasksmanager.json");
+    std::ifstream ifs(apis_->scheduleAPI_.TaskManagerStateFile());
     if (!ifs.is_open()) {
       throw std::runtime_error("Server can't read schedule status");
     }
@@ -255,6 +298,58 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
   out->flush();
+}
+
+void ns_Server::RequestHandlerTaskGetArtefacts::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  Poco::Net::HTTPResponse::HTTPStatus status = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
+  try {
+    std::string taskID = std::get<0>(args_);
+    std::string fileStateJSON;
+    std::string fileArtefacts;
+    if (!apis_->scheduleAPI_.GetTaskFinalData(taskID, fileStateJSON, fileArtefacts)) {
+      status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
+      throw std::runtime_error("task does not exist");
+    }
+    SendFile(fileArtefacts, response, out);
+  } catch(std::runtime_error const& e) {
+    if (out == nullptr) {
+      response.setStatus(status);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
+}
+
+void ns_Server::RequestHandlerTaskGetFinalState::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  Poco::Net::HTTPResponse::HTTPStatus status = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
+  try {
+    std::string taskID = std::get<0>(args_);
+    std::string fileStateJSON;
+    std::string fileArtefacts;
+    if (!apis_->scheduleAPI_.GetTaskFinalData(taskID, fileStateJSON, fileArtefacts)) {
+      status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
+      throw std::runtime_error("task does not exist");
+    }
+    SendFile(fileStateJSON, response, out);
+  } catch(std::runtime_error const& e) {
+    if (out == nullptr) {
+      response.setStatus(status);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
 }
 
 void ns_Server::RequestHandlerUsersList::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -425,9 +520,6 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
 
 void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
-
-  response.setChunkedTransferEncoding(true);
-
   std::string const& prefix = std::get<0>(args_);
 
   std::ostream* out = nullptr;
@@ -462,42 +554,7 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
       return;
     }
 
-    static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
-        mimeType {
-            {".txt", {"text/text", std::ios_base::in}},
-            {".html", {"text/html", std::ios_base::in}}, 
-            {".css", {"text/css", std::ios_base::in}},
-            {".json", {"application/json; charset=utf-8", std::ios_base::in}},
-            {".js", {"text/javascript", std::ios_base::in}}, 
-            {".jpg", {"image/jpeg", std::ios_base::binary}}, 
-            {".jpeg", {"image/jpeg", std::ios_base::binary}}, 
-            {".png", {"image/png", std::ios_base::binary}}, 
-            {".svg", {"image/svg+xml", std::ios_base::in}}, 
-    };
-    std::string extension = filename.extension().string();
-
-    std::string contentType = "application/octet-stream";
-    std::ios_base::openmode openmode = std::ios_base::in;
-    auto const& mimeTypeIT = mimeType.find(extension);
-    if (mimeTypeIT != mimeType.end()) {
-      contentType = mimeTypeIT->second.first;
-      openmode = mimeTypeIT->second.second;
-    }
-
-    std::ifstream file(filename, openmode);
-    if (!file.is_open()) {
-      //detectHostileIP_.RecordFailedRequest(srcIP);
-      //char cwd[4096] = {};
-      //getcwd(cwd, 4096);
-      ///LOGWARNING("[%s][%s] unable to access %s cwd: %s", GenerateHumanTS().c_str(), srcIP.c_str(), filename.c_str(), cwd);
-      throw std::runtime_error("file open failed");
-    }
-
-    response.setContentType(contentType);
-    response.setChunkedTransferEncoding(true);
-    out = &response.send();
-    Poco::StreamCopier::copyStream(file, *out);
-    out->flush();
+    SendFile(filename, response, out);
   } catch (const std::exception& e) {
     std::cerr << "File server error: " << e.what() << std::endl;
     if (out != nullptr) {

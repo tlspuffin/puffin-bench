@@ -26,6 +26,11 @@ public:
   void Configure(ns_Server::Config const& config, 
       ns_API::APIS& apis);
 
+  static bool ManageCORS(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response);
+  static bool SendFile(std::filesystem::path const& filename,
+    Poco::Net::HTTPServerResponse& response, std::ostream*& responseStream);
+
 protected:
   ns_Server::Config const* config_;
   ns_API::APIS* apis_;
@@ -44,6 +49,8 @@ REQUESTHANDLER(TaskOutputs, std::string const, uint64_t,
     std::string const, std::string const, size_t , ssize_t);
 REQUESTHANDLER(TaskCancel, uint64_t);
 REQUESTHANDLER(TaskCancelStep, uint64_t, uint64_t);
+REQUESTHANDLER(TaskGetArtefacts, std::string const);
+REQUESTHANDLER(TaskGetFinalState, std::string const);
 REQUESTHANDLER(UsersList);
 REQUESTHANDLER(UserJobsTypeList, std::string const);
 REQUESTHANDLER(UserTasksList, std::string const, std::string const);

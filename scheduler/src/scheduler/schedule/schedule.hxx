@@ -25,6 +25,7 @@ public:
   Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
       ns_System::Linux& os, uint16_t cachePort);
   ~Schedule();
+  std::string TaskManagerStateFile() const;
   uint64_t AddTask(std::string const& name, std::string const& tasksListPattern, 
       std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
@@ -39,6 +40,8 @@ public:
       std::string const& type, std::string const& taskID,
       uint64_t stepUUID, std::string const& stepID, 
       struct FileExtractedText& data);
+  bool GetTaskFinalData(std::string const& task_id, 
+    std::string& fileStateJSON, std::string& fileArtefacts) const;
 
 private:
   void ScheduleLoop();
@@ -78,5 +81,9 @@ private:
   static void HandlerUSR1(int sig);
   static int InstallSigUSRHandler();
 };
+
+inline std::string Schedule::TaskManagerStateFile() const {
+  return config_.exportPath_ / "tasksmanager.json";
+}
 
 };

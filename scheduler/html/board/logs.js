@@ -110,7 +110,7 @@ class Logs {
     const type = this.#type;
 
     var response = await fetch(
-        `http://${window.location.host}/api/task/output/${taskID}/${stepUUID}/${stepID}/${type}/${size}/${this.#infos[type].offset}`);
+        `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${this.#infos[type].offset}`);
 
     if ((!response.ok) || signal.aborted) {
       return [false, null];

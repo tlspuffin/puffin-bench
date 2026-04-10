@@ -144,7 +144,7 @@ async function RetrieveStepLogs(logsInfos, size) {
 
   console.log('query');
   var response = await fetch(
-      `http://${window.location.host}/api/task/output/${taskID}/${stepUUID}/${stepID}/${type}/${size}/${logsInfos[type].lastoffset}`);
+      `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${logsInfos[type].lastoffset}`);
 
   if (!response.ok) {
     return [false, 0, null];
