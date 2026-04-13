@@ -31,6 +31,7 @@ const state = {
     metrics: new Map(),
   },
   commitRegistry: new Map(),
+  metricLegend:   new Map(),  // metricPath → { displayName: string|null, dash: string|null }
 };
 
 // ============================================================
@@ -43,6 +44,7 @@ async function ResetState(state, newState) {
   state.graphSettings  = new Map();
   state.variables      = newState?.variables      ?? { experiments: new Map(), metrics: new Map() };
   state.commitRegistry = newState?.commitRegistry ?? new Map();
+  state.metricLegend   = newState?.metricLegend   ?? new Map();
   UpdateHeader();
   if (newState?.graphSettings?.size > 0) {
     await restoreGraphs(newState.graphSettings);
@@ -73,8 +75,8 @@ async function restoreGraphs(savedSettings) {
       continue;
     }
 
-    // Resolve MetricVarRef entries before fetching
-    const resolvedMetrics = graphConfig.metrics
+    // Resolve MetricVarRef entries before fetching (deduplicate: same path from two variables)
+    const resolvedMetrics = [...new Set(graphConfig.metrics
       .map(m => {
         if (typeof m === 'object' && m !== null && 'variable' in m) {
           return state.variables.metrics.get(m.variable) ?? null;
@@ -87,7 +89,7 @@ async function restoreGraphs(savedSettings) {
         }
         return m;
       })
-      .filter(Boolean);
+      .filter(Boolean))];
 
     if (resolvedMetrics.length === 0) {
       // All metric variables unresolved — render placeholders.
@@ -369,7 +371,8 @@ async function AddGraphique(prefill = null, editId = null) {
         }
 
         // Resolve metric variable references before fetching (keep selectedMetrics as-is for storage)
-        const fetchMetrics = selectedMetrics.map(m => {
+        // Deduplicate: two variables may resolve to the same path
+        const fetchMetrics = [...new Set(selectedMetrics.map(m => {
           if (typeof m === 'string') {
             try {
               const parsed = JSON.parse(m);
@@ -377,7 +380,7 @@ async function AddGraphique(prefill = null, editId = null) {
             } catch (_) {}
           }
           return m;
-        }).filter(m => m != null);
+        }).filter(m => m != null))];
 
         if (fetchMetrics.length === 0) {
           BuildSidebar(state);
@@ -808,7 +811,7 @@ function BuildSidebar(state) {
   sidebar.innerHTML = '';
 
   sidebar.appendChild(buildVariableSection(
-    'Experiments',
+    'Variables : experiments',
     state.variables.experiments,
     (name, def) => openExperimentVarModal(name, def, state),
     (name) => {
@@ -823,12 +826,17 @@ function BuildSidebar(state) {
       state.variables.experiments.delete(name);
       BuildSidebar(state);
     },
+    (name) => {
+      state.variables.experiments.set(name, null);
+      refreshGraphsUsingVariable(state, name);
+      BuildSidebar(state);
+    },
     'e',
     (def) => def ? `${def.commit.substring(0, 7)} \u00b7 ${def.type} \u00b7 ${def.subject}` : '(undefined)'
   ));
 
   sidebar.appendChild(buildVariableSection(
-    'Métriques',
+    'Variables : métriques',
     state.variables.metrics,
     (name, val) => openMetricVarModal(name, val, state),
     (name) => {
@@ -843,14 +851,20 @@ function BuildSidebar(state) {
       state.variables.metrics.delete(name);
       BuildSidebar(state);
     },
+    (name) => {
+      state.variables.metrics.set(name, null);
+      refreshGraphsUsingVariable(state, name);
+      BuildSidebar(state);
+    },
     'm',
     (val) => val || '(undefined)'
   ));
 
   sidebar.appendChild(buildExperimentLegend(state));
+  sidebar.appendChild(buildMetricLegend(state));
 }
 
-function buildVariableSection(title, varMap, onEdit, onAdd, onDelete, prefix, formatValue) {
+function buildVariableSection(title, varMap, onEdit, onAdd, onDelete, onReset, prefix, formatValue) {
   const section = document.createElement('div');
   section.className = 'sidebar-section';
 
@@ -881,13 +895,23 @@ function buildVariableSection(title, varMap, onEdit, onAdd, onDelete, prefix, fo
     nameSpan.className = 'sidebar-variable-name';
     nameSpan.textContent = name;
 
+    if (value !== null) {
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'sidebar-reset-btn';
+      resetBtn.textContent = '\u21ba';  // ↺
+      resetBtn.title = 'Remettre en undefined';
+      resetBtn.addEventListener('click', () => onReset(name));
+      cardHeader.appendChild(nameSpan);
+      cardHeader.appendChild(resetBtn);
+    } else {
+      cardHeader.appendChild(nameSpan);
+    }
+
     const delBtn = document.createElement('button');
     delBtn.className = 'sidebar-delete-btn';
     delBtn.textContent = '\u2715';
     delBtn.title = 'Supprimer la variable';
     delBtn.addEventListener('click', () => onDelete(name));
-
-    cardHeader.appendChild(nameSpan);
     cardHeader.appendChild(delBtn);
 
     const pill = document.createElement('button');
@@ -969,8 +993,20 @@ function buildExperimentLegend(state) {
     identSpan.title = expKey;
     identSpan.textContent = `${commitShort} · ${type} · ${subject}`;
 
+    const eyeBtn = document.createElement('button');
+    eyeBtn.className = 'legend-eye-btn';
+    eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
+    eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+    eyeBtn.addEventListener('click', () => {
+      entry.visible = entry.visible === false ? true : false;
+      eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
+      eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+      refreshGraphsUsingExperiment(state, expKey);
+    });
+
     topLine.appendChild(colorInput);
     topLine.appendChild(identSpan);
+    topLine.appendChild(eyeBtn);
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
@@ -983,6 +1019,156 @@ function buildExperimentLegend(state) {
     });
 
     row.appendChild(topLine);
+    row.appendChild(nameInput);
+    section.appendChild(row);
+  }
+
+  return section;
+}
+
+// Returns the effective dash style for a metric path as actually rendered on the first graph
+// that uses it (i.e. the palette default for its deduped index). Used to seed the legend select.
+const _DASH_PALETTE = ['solid', 'dot', 'dash', 'dashdot'];
+function getMetricDefaultDash(state, metricPath) {
+  for (const [, config] of state.graphSettings) {
+    const seen = new Set();
+    let idx = 0;
+    for (const m of config.metrics) {
+      let path = m;
+      if (typeof m === 'string') {
+        try { const p = JSON.parse(m); if (p?.variable) path = state.variables.metrics.get(p.variable) ?? null; } catch (_) {}
+      }
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      if (path === metricPath) return _DASH_PALETTE[idx % _DASH_PALETTE.length];
+      idx++;
+    }
+  }
+  return 'solid';
+}
+
+// Returns the set of resolved metric paths currently active across all graphs.
+function getActiveMetrics(state) {
+  const paths = new Set();
+  for (const [, config] of state.graphSettings) {
+    for (const m of config.metrics) {
+      if (typeof m === 'string') {
+        let path = m;
+        try {
+          const p = JSON.parse(m);
+          if (p?.variable) path = state.variables.metrics.get(p.variable) ?? null;
+        } catch (_) {}
+        if (path) paths.add(path);
+      }
+    }
+  }
+  return paths;
+}
+
+// Returns graph IDs whose resolved metrics include the given metricPath.
+function getGraphIDsUsingMetric(state, metricPath) {
+  const ids = [];
+  for (const [id, config] of state.graphSettings) {
+    const uses = config.metrics.some(m => {
+      if (typeof m === 'string') {
+        let path = m;
+        try {
+          const p = JSON.parse(m);
+          if (p?.variable) path = state.variables.metrics.get(p.variable) ?? null;
+        } catch (_) {}
+        return path === metricPath;
+      }
+      return false;
+    });
+    if (uses) ids.push(id);
+  }
+  return ids;
+}
+
+// Re-renders traces for all graphs using the given metric (no re-fetch).
+function refreshGraphsUsingMetric(state, metricPath) {
+  for (const id of getGraphIDsUsingMetric(state, metricPath)) {
+    graphManager.RefreshGraphAppearance(id);
+  }
+}
+
+function buildMetricLegend(state) {
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-title';
+  header.textContent = 'Légende métriques';
+  section.appendChild(header);
+
+  const activePaths = getActiveMetrics(state);
+
+  if (activePaths.size === 0) {
+    const empty = document.createElement('p');
+    empty.style.cssText = 'font-size:0.75rem;color:#aaa;font-style:italic;margin:0';
+    empty.textContent = 'Aucune métrique chargée';
+    section.appendChild(empty);
+    return section;
+  }
+
+  for (const metricPath of activePaths) {
+    if (!state.metricLegend.has(metricPath)) {
+      state.metricLegend.set(metricPath, { displayName: null, dash: null });
+    }
+    const entry = state.metricLegend.get(metricPath);
+
+    const row = document.createElement('div');
+    row.className = 'commit-legend-row';
+
+    const topLine = document.createElement('div');
+    topLine.className = 'commit-legend-top';
+
+    const dashSelect = document.createElement('select');
+    dashSelect.className = 'metric-legend-dash-select';
+    dashSelect.title = 'Style de trait';
+    const effectiveDash = entry.dash ?? getMetricDefaultDash(state, metricPath);
+    for (const style of ['solid', 'dot', 'dash', 'dashdot']) {
+      const opt = document.createElement('option');
+      opt.value = style;
+      opt.textContent = style;
+      if (effectiveDash === style) opt.selected = true;
+      dashSelect.appendChild(opt);
+    }
+    dashSelect.addEventListener('change', (e) => {
+      entry.dash = e.target.value;  // store explicitly (including 'solid' as override)
+      refreshGraphsUsingMetric(state, metricPath);
+    });
+    topLine.appendChild(dashSelect);
+
+    const identSpan = document.createElement('span');
+    identSpan.className = 'commit-legend-ident';
+    identSpan.title = metricPath;
+    identSpan.textContent = metricPath;
+    topLine.appendChild(identSpan);
+
+    const eyeBtn = document.createElement('button');
+    eyeBtn.className = 'legend-eye-btn';
+    eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
+    eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+    eyeBtn.addEventListener('click', () => {
+      entry.visible = entry.visible === false ? true : false;
+      eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
+      eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+      refreshGraphsUsingMetric(state, metricPath);
+    });
+    topLine.appendChild(eyeBtn);
+
+    row.appendChild(topLine);
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'commit-legend-name';
+    nameInput.placeholder = 'Nom d\'affichage\u2026';
+    nameInput.value = entry.displayName || '';
+    nameInput.addEventListener('change', (e) => {
+      entry.displayName = e.target.value.trim() || null;
+      refreshGraphsUsingMetric(state, metricPath);
+    });
     row.appendChild(nameInput);
     section.appendChild(row);
   }
@@ -1038,7 +1224,8 @@ async function refetchAndRedrawGraph(state, id, config) {
     .filter(Boolean);
   if (resolved.length === 0) return;
 
-  const resolvedMetrics = config.metrics
+  // Deduplicate: two variables may resolve to the same path
+  const resolvedMetrics = [...new Set(config.metrics
     .map(m => {
       if (typeof m === 'string') {
         try {
@@ -1048,7 +1235,7 @@ async function refetchAndRedrawGraph(state, id, config) {
       }
       return m;
     })
-    .filter(m => m != null);
+    .filter(m => m != null))];
   if (resolvedMetrics.length === 0) return;
 
   const results = await Promise.all(
@@ -1598,6 +1785,7 @@ async function SaveAsTemplate(state) {
     },
     graphSettings:  state.graphSettings,
     commitRegistry: state.commitRegistry,
+    metricLegend:   state.metricLegend,
   };
 
   const ok = await apirest.SaveTemplate(trimmedName, tpl);
@@ -1811,12 +1999,13 @@ function commitTitleEdit() {
   headerTitle.style.display = '';
   headerEditInput.remove();
   headerEditInput = null;
-  headerEditBtn.textContent = '\u270F Edit';
+  headerEditBtn.style.display = '';
   headerEditBtn.dataset.editing = 'false';
 }
 
 headerEditBtn.onclick = function() {
   if (headerEditBtn.dataset.editing === 'true') {
+    if (headerEditInput) headerEditInput.onblur = null; // avoid double commit
     commitTitleEdit();
   } else {
     // Start editing
@@ -1825,20 +2014,25 @@ headerEditBtn.onclick = function() {
     headerEditInput.className = 'header-edit-input';
     headerEditInput.value = state.title;
     headerEditInput.onkeydown = function(e) {
-      if (e.key === 'Enter') { headerEditBtn.onclick(); }
+      if (e.key === 'Enter') {
+        headerEditInput.onblur = null;
+        commitTitleEdit();
+      }
       if (e.key === 'Escape') {
+        headerEditInput.onblur = null; // prevent commit on blur when cancelling
         headerTitle.style.display = '';
         headerEditInput.remove();
         headerEditInput = null;
-        headerEditBtn.textContent = '\u270F Edit';
+        headerEditBtn.style.display = '';
         headerEditBtn.dataset.editing = 'false';
       }
     };
     headerTitle.style.display = 'none';
+    headerEditBtn.style.display = 'none';
     headerTitle.insertAdjacentElement('afterend', headerEditInput);
     headerEditInput.focus();
     headerEditInput.select();
-    headerEditBtn.textContent = '\u2714 Done';
+    headerEditInput.onblur = function() { commitTitleEdit(); };
     headerEditBtn.dataset.editing = 'true';
   }
 };
@@ -1912,13 +2106,74 @@ uiNewView.onclick = function() {
 };
 headerToolbar.appendChild(uiNewView);
 
-const btnSidebar = UI.CreateToolbarBtn('\u229e Variables', 'Panneau Variables & Légende');
-btnSidebar.addEventListener('click', () => {
-  const sidebar = document.getElementById('sidebar');
-  sidebar.classList.toggle('collapsed');
-});
-headerToolbar.appendChild(btnSidebar);
-UIElt.push(btnSidebar);
+// Sidebar toggle is handled by the vertical tab (#sidebar-tab), not a header button.
+// Wire up the tab click here so it has access to the UIElt enable/disable flow.
+const sidebarTab = document.getElementById('sidebar-tab');
+const sidebarResizeHandle = document.getElementById('sidebar-resize');
+const sidebarWrapperEl = document.getElementById('sidebar-wrapper');
+const sidebarPanelEl = document.getElementById('sidebar');
+
+// Position the resize handle right after the sidebar-tab (absolute inside sticky wrapper)
+function positionSidebarHandle() {
+  if (!sidebarResizeHandle || !sidebarTab) return;
+  sidebarResizeHandle.style.left = sidebarTab.offsetWidth + 'px';
+}
+positionSidebarHandle();
+
+let sidebarSavedWidth = null; // custom width set by drag, saved across collapse/expand
+
+if (sidebarTab) {
+  sidebarTab.addEventListener('click', () => {
+    if (sidebarWrapperEl.classList.contains('collapsed')) {
+      // Expanding: restore dragged width if any
+      sidebarWrapperEl.classList.remove('collapsed');
+      if (sidebarSavedWidth !== null) {
+        sidebarPanelEl.style.width = sidebarSavedWidth;
+      }
+    } else {
+      // Collapsing: save then clear inline width so CSS width:0 applies
+      sidebarSavedWidth = sidebarPanelEl.style.width || null;
+      sidebarPanelEl.style.width = '';
+      sidebarWrapperEl.classList.add('collapsed');
+    }
+  });
+}
+
+// Resize sidebar by dragging the handle
+if (sidebarResizeHandle && sidebarPanelEl) {
+  let isResizing = false;
+  let resizeStartX = 0;
+  let resizeStartWidth = 0;
+
+  sidebarResizeHandle.addEventListener('mousedown', function(e) {
+    if (sidebarWrapperEl.classList.contains('collapsed')) return;
+    isResizing = true;
+    resizeStartX = e.clientX;
+    resizeStartWidth = sidebarPanelEl.offsetWidth;
+    sidebarResizeHandle.classList.add('is-dragging');
+    sidebarPanelEl.style.transition = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!isResizing) return;
+    const delta = resizeStartX - e.clientX;
+    const newWidth = Math.max(160, Math.min(600, resizeStartWidth + delta));
+    sidebarPanelEl.style.width = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!isResizing) return;
+    isResizing = false;
+    sidebarResizeHandle.classList.remove('is-dragging');
+    sidebarPanelEl.style.transition = '';
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    graphManager.ResizeAll();
+  });
+}
 
 const uiOpenTpl = UI.CreateToolbarBtn('Ouvrir template', 'Open a saved template');
 uiOpenTpl.onclick = function() {
@@ -1927,7 +2182,7 @@ uiOpenTpl.onclick = function() {
   OpenTemplate(restoreUI);
 };
 headerToolbar.appendChild(uiOpenTpl);
-UIElt.push(uiOpenTpl);
+// Not pushed to UIElt — remains enabled at page load so templates can be opened without a view.
 
 const uiSaveTpl = UI.CreateToolbarBtn('Sauvegarder template', 'Save current view as template');
 uiSaveTpl.onclick = function() {

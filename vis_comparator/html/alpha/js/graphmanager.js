@@ -106,6 +106,13 @@ class GraphManager {
     }
   }
 
+  /** Notifies Plotly of a container size change for all graphs. */
+  ResizeAll() {
+    for (const { graphArea } of this.#configs.values()) {
+      if (graphArea.style.display !== 'none') Plotly.Plots.resize(graphArea);
+    }
+  }
+
   /**
    * Recolours/renames traces without re-fetching data.
    * Call after modifying state.commitRegistry (colour or displayName).
@@ -211,6 +218,65 @@ class GraphManager {
   }
 
   /**
+   * Resolves metric entries (JSON-encoded VarRefs or plain strings) to concrete metric paths.
+   * VarRefs are looked up in state.variables.metrics; undefined → filtered out.
+   * @returns {string[]}
+   */
+  #ResolveMetrics(graphConfig) {
+    const state = this.#callbacks?.getState?.();
+    const seen  = new Set();
+    return graphConfig.metrics.map(m => {
+      if (typeof m === 'object' && m !== null && 'variable' in m) {
+        return state?.variables?.metrics?.get(m.variable) ?? null;
+      }
+      if (typeof m === 'string') {
+        try {
+          const p = JSON.parse(m);
+          if (p?.variable) return state?.variables?.metrics?.get(p.variable) ?? null;
+        } catch (_) {}
+      }
+      return m;
+    }).filter(path => {
+      if (!path) return false;
+      if (seen.has(path)) return false;  // deduplicate: first occurrence wins
+      seen.add(path);
+      return true;
+    });
+  }
+
+  /** Returns true if any resolved metric path appears more than once in graphConfig.metrics. */
+  #HasDuplicateMetrics(graphConfig) {
+    const state = this.#callbacks?.getState?.();
+    const seen  = new Set();
+    for (const m of graphConfig.metrics) {
+      let path = m;
+      if (typeof m === 'string') {
+        try {
+          const p = JSON.parse(m);
+          if (p?.variable) path = state?.variables?.metrics?.get(p.variable) ?? null;
+        } catch (_) {}
+      }
+      if (!path) continue;
+      if (seen.has(path)) return true;
+      seen.add(path);
+    }
+    return false;
+  }
+
+  /** Returns the display name for a resolved metric path (falls back to the raw path). */
+  #MetricDisplayName(metricPath) {
+    const state = this.#callbacks?.getState?.();
+    return state?.metricLegend?.get(metricPath)?.displayName ?? metricPath;
+  }
+
+  /** Returns the dash style for a resolved metric path (falls back to palette by index). */
+  #MetricDash(metricPath, fallbackIdx) {
+    const state = this.#callbacks?.getState?.();
+    return state?.metricLegend?.get(metricPath)?.dash
+      ?? GraphManager.#DASH_PALETTE[fallbackIdx % GraphManager.#DASH_PALETTE.length];
+  }
+
+  /**
    * Populates the graph title span with experiment + metric labels.
    * Variable-sourced entries get a pill badge showing the variable name (e.g. "e1").
    */
@@ -220,7 +286,7 @@ class GraphManager {
 
     // ── Experiment labels ───────────────────────────────────────
     resolvedEntries.forEach(({ resolved, isVar, varName }, i) => {
-      if (i > 0) titleSpan.appendChild(document.createTextNode(', '));
+      if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
 
       if (isVar) {
         const badge = document.createElement('span');
@@ -230,19 +296,26 @@ class GraphManager {
         titleSpan.appendChild(document.createTextNode('\u00a0'));
       }
 
-      let label;
       if (!resolved) {
-        label = '?';
+        const u = document.createElement('span');
+        u.className = 'graph_title_undefined';
+        u.textContent = 'undefined';
+        titleSpan.appendChild(u);
       } else {
         const expKey = `${resolved.commit}:${resolved.type}:${resolved.subject}`;
         const displayName = state?.commitRegistry?.get(expKey)?.displayName;
-        label = displayName ?? `${CommitHelp.ShortHash(resolved.commit)}/${resolved.type}/${resolved.subject}`;
+        const label = displayName ?? `${CommitHelp.ShortHash(resolved.commit)}/${resolved.type}/${resolved.subject}`;
+        titleSpan.appendChild(document.createTextNode(label));
       }
-      titleSpan.appendChild(document.createTextNode(label));
     });
 
+    // ── Separator between experiments and metrics ────────────────
+    const sep = document.createElement('span');
+    sep.className = 'graph_title_section_sep';
+    sep.textContent = '\u2502';  // │
+    titleSpan.appendChild(sep);
+
     // ── Metric labels ────────────────────────────────────────────
-    titleSpan.appendChild(document.createTextNode(' '));
     graphConfig.metrics.forEach((m, i) => {
       if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
       let varName = null;
@@ -254,10 +327,31 @@ class GraphManager {
         badge.className = 'graph_title_var_badge';
         badge.textContent = varName;
         titleSpan.appendChild(badge);
+        // Show resolved metric name (or display name if set) after the badge
+        const resolvedPath = state?.variables?.metrics?.get(varName);
+        titleSpan.appendChild(document.createTextNode('\u00a0'));
+        if (resolvedPath) {
+          titleSpan.appendChild(document.createTextNode(this.#MetricDisplayName(resolvedPath)));
+        } else {
+          const u = document.createElement('span');
+          u.className = 'graph_title_undefined';
+          u.textContent = 'undefined';
+          titleSpan.appendChild(u);
+        }
       } else {
-        titleSpan.appendChild(document.createTextNode(typeof m === 'string' ? m : '?'));
+        const metricPath = typeof m === 'string' ? m : '?';
+        titleSpan.appendChild(document.createTextNode(this.#MetricDisplayName(metricPath)));
       }
     });
+
+    // ── Duplicate-metric warning ─────────────────────────────────
+    if (this.#HasDuplicateMetrics(graphConfig)) {
+      const warn = document.createElement('span');
+      warn.className = 'graph_title_warn_badge';
+      warn.textContent = '\u26a0';
+      warn.title = 'Métriques en double — seule la première occurrence est affichée';
+      titleSpan.appendChild(warn);
+    }
   }
 
   /**
@@ -273,18 +367,7 @@ class GraphManager {
     const { splitAxes, metricsMode, showCI, showRaw } = graphConfig;
 
     // Resolve MetricVarRef entries (stored as JSON-encoded {variable:name} strings)
-    const metrics = graphConfig.metrics.map(m => {
-      if (typeof m === 'object' && m !== null && 'variable' in m) {
-        return state?.variables?.metrics?.get(m.variable) ?? null;
-      }
-      if (typeof m === 'string') {
-        try {
-          const parsed = JSON.parse(m);
-          if (parsed?.variable) return state?.variables?.metrics?.get(parsed.variable) ?? null;
-        } catch (_) {}
-      }
-      return m;
-    }).filter(Boolean);
+    const metrics = this.#ResolveMetrics(graphConfig);
 
     // Compute timestamps from first available data entry
     let timestamps = [];
@@ -319,19 +402,23 @@ class GraphManager {
 
       // ── Placeholder: resolved experiment but data unavailable ─────
       if (!data) {
-        const short = CommitHelp.ShortHash(resolved.commit);
+        const short    = CommitHelp.ShortHash(resolved.commit);
+        const regEntry = state?.commitRegistry?.get(expKey);
         traces.push({
           x: [], y: [],
           mode: 'lines',
           name: `\u2717 ${short}/${resolved.type}/${resolved.subject} (no data)`,
           line: { color: '#ff7f0e', width: 2, dash: 'dot' },
           showlegend: true,
+          visible: regEntry?.visible === false ? 'legendonly' : true,
         });
         return;
       }
 
       const { series } = data;
-      const regEntry = state?.commitRegistry?.get(expKey);
+      const regEntry  = state?.commitRegistry?.get(expKey);
+      const expHidden = regEntry?.visible === false;
+
       const color     = regEntry?.color ?? GraphManager.#PALETTE[idx % GraphManager.#PALETTE.length];
       const fillColor = GraphManager.#HexToRgba(color, 0.2);
       const expLabel  = regEntry?.displayName
@@ -339,11 +426,15 @@ class GraphManager {
 
       // ── Render: mean + CI per experiment ───────────────────────
       metrics.forEach((metricName, metricIdx) => {
+        const metricHidden   = state?.metricLegend?.get(metricName)?.visible === false;
+        const traceVisible   = (expHidden || metricHidden) ? 'legendonly' : true;
+
         const yAxis = splitAxes
           ? (metricIdx === 0 ? 'y' : 'y' + (metricIdx + 1))
           : 'y';
-        const dash  = GraphManager.#DASH_PALETTE[metricIdx % GraphManager.#DASH_PALETTE.length];
+        const dash  = this.#MetricDash(metricName, metricIdx);
         const group = `e${idx}_m${metricIdx}`;
+        const metricLabel = this.#MetricDisplayName(metricName);
 
         const meanKey  = `${metricName}.mean`;
         const lowerKey = `${metricName}.ci_lower`;
@@ -353,7 +444,7 @@ class GraphManager {
         if (!meanData) {
           // OR mode: absent metric → zero-value trace with ⚠ marker
           if (metricsMode === 'OR') {
-            const traceName = metrics.length === 1 ? expLabel : `${expLabel}/${metricName}`;
+            const traceName = graphConfig.metrics.length === 1 ? expLabel : `${expLabel} \u00b7 ${metricLabel}`;
             traces.push({
               x: timestamps,
               y: Array(timestamps.length).fill(0),
@@ -363,22 +454,23 @@ class GraphManager {
               opacity: 0.4,
               yaxis: yAxis,
               legendgroup: group,
+              visible: traceVisible,
             });
           }
           return;
         }
 
         const meanArr   = Array.isArray(meanData[0]) ? meanData[0] : meanData;
-        const traceName = metrics.length === 1 ? expLabel : `${expLabel}/${metricName}`;
+        const traceName = graphConfig.metrics.length === 1 ? expLabel : `${expLabel} \u00b7 ${metricLabel}`;
 
         if (showCI === true && series[lowerKey] && series[upperKey]) {
           const ciLower = Array.isArray(series[lowerKey][0]) ? series[lowerKey][0] : series[lowerKey];
           const ciUpper = Array.isArray(series[upperKey][0]) ? series[upperKey][0] : series[upperKey];
-          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group });
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group });
-          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group });
+          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
         } else {
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group });
+          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group, visible: traceVisible });
         }
 
         if (showRaw) {
@@ -394,6 +486,7 @@ class GraphManager {
                 showlegend: false,
                 yaxis: yAxis,
                 legendgroup: group,
+                visible: traceVisible,
               });
             });
           }
@@ -411,12 +504,13 @@ class GraphManager {
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
     const traces = this.#PrepareTraces(graphConfig, dataMap, resolvedEntries);
 
-    const { metrics, splitAxes } = graphConfig;
-    const splitActive = splitAxes && metrics.length > 1;
+    const resolvedMetrics = this.#ResolveMetrics(graphConfig);
+    const { splitAxes } = graphConfig;
+    const splitActive = splitAxes && resolvedMetrics.length > 1;
 
     const layout = {
       xaxis:     { title: 'Time (s)', type: 'linear', ticksuffix: 's' },
-      yaxis:     { title: splitActive ? metrics[0] : 'Value', type: 'linear' },
+      yaxis:     { title: splitActive ? this.#MetricDisplayName(resolvedMetrics[0]) : 'Value', type: 'linear' },
       hovermode: 'x unified',
       hoverlabel: { namelength: -1 },
       showlegend: true,
@@ -429,7 +523,8 @@ class GraphManager {
     };
 
     if (splitActive) {
-      const { xDomain, axes } = GraphManager.#BuildSplitAxisLayout(metrics);
+      const metricLabels = resolvedMetrics.map(m => this.#MetricDisplayName(m));
+      const { xDomain, axes } = GraphManager.#BuildSplitAxisLayout(metricLabels);
       layout.xaxis.domain = xDomain;
       Object.assign(layout, axes);
     }

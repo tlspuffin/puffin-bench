@@ -123,6 +123,71 @@ body {
   padding: 20px;
 }
 
+/* Resize handle between sidebar-tab and sidebar panel */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 5;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.is-dragging {
+  background: var(--color-primary);
+  opacity: 0.35;
+}
+
+.sidebar-wrapper.collapsed .sidebar-resize-handle {
+  display: none;
+}
+
+
+/* Wrapper flex contenant le tab vertical + le panneau sidebar */
+.sidebar-wrapper {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+  position: sticky;
+  top: 50px;
+  height: calc(100vh - 50px);
+  align-self: flex-start;
+}
+
+/* Tab vertical cliquable sur le bord gauche du wrapper */
+.sidebar-tab {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  cursor: pointer;
+  background: #e8eaf0;
+  border-left: 1px solid #e0e0e0;
+  padding: 16px 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-dark);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  transition: background 0.15s ease;
+}
+
+.sidebar-tab:hover {
+  background: #d6d9e6;
+}
+
+/* Highlight tab when panel is open */
+.sidebar-wrapper:not(.collapsed) .sidebar-tab {
+  color: var(--color-primary);
+}
+
 .sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -130,12 +195,13 @@ body {
   overflow-y: auto;
   padding: 12px;
   background: #fafafa;
-  position: sticky;
-  top: 50px; /* colle sous le header */
   max-height: calc(100vh - 50px);
+  min-height: calc(100vh - 50px);
+  transition: width 0.2s ease, padding 0.2s ease;
+  writing-mode: horizontal-tb; /* isolate from sidebar-tab's vertical writing-mode */
 }
 
-.sidebar.collapsed {
+.sidebar-wrapper.collapsed .sidebar {
   width: 0;
   padding: 0;
   overflow: hidden;
@@ -219,6 +285,22 @@ body {
   flex-shrink: 0;
 }
 
+.sidebar-reset-btn {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-right: auto;
+}
+
+.sidebar-reset-btn:hover {
+  color: var(--color-primary);
+}
+
 .sidebar-add-btn {
   background: none;
   border: 1px dashed var(--color-primary);
@@ -248,7 +330,7 @@ body {
 
 .commit-legend-top {
   display: flex;
-  align-items: center;
+  align-items: baseline; /* aligns text baselines across select + span */
   gap: 6px;
 }
 
@@ -260,6 +342,7 @@ body {
   padding: 0;
   cursor: pointer;
   flex-shrink: 0;
+  align-self: center; /* color input has no text baseline — center it explicitly */
 }
 
 .commit-legend-ident {
@@ -269,6 +352,37 @@ body {
   white-space: normal;
   word-break: break-all;
   line-height: 1.35;
+  flex: 1;
+  min-width: 0;
+}
+
+.metric-legend-dash-select {
+  font-size: 0.72rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 1px 3px;
+  background: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  width: 76px;
+  margin-bottom: 0;
+}
+
+.legend-eye-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  color: #888;
+  margin-left: auto;
+  align-self: center; /* eye button has no text baseline — center it explicitly */
+}
+
+.legend-eye-btn:hover {
+  color: var(--color-primary);
 }
 
 .commit-legend-name {
@@ -335,10 +449,41 @@ body {
   font-family: monospace;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 999px;
   vertical-align: middle;
   line-height: 1.5;
   letter-spacing: 0.02em;
+}
+
+/* Warning badge in graph titles for duplicate metrics */
+.graph_title_warn_badge {
+  display: inline-block;
+  margin-left: 6px;
+  background: rgba(255, 200, 0, 0.9);
+  color: #4a3000;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  vertical-align: middle;
+  cursor: default;
+  line-height: 1.5;
+}
+
+/* "undefined" indicator in graph titles (pale red, italic) */
+.graph_title_undefined {
+  color: rgba(255, 160, 140, 0.95);
+  font-style: italic;
+  font-size: 0.85em;
+}
+
+/* Separator between the experiment block and metric block in the graph title */
+.graph_title_section_sep {
+  display: inline-block;
+  margin: 0 8px;
+  opacity: 0.6;
+  font-weight: 300;
+  vertical-align: middle;
 }
 
 .graph_title_controls {
