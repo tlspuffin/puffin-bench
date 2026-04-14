@@ -84,7 +84,7 @@ EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE
 
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
-  src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_tgz.cxx
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_tgz.cxx
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
@@ -117,7 +117,7 @@ add_dependencies(srv-static reserve_port-static_blob_h)
 
 add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 
-add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx)
+add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 target_link_options(testFilesRing PRIVATE -static)
 target_compile_definitions(testFilesRing PRIVATE STATIC)
 
@@ -125,7 +125,7 @@ EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/tlspuffin_history.sh" "${CMAKE_
 
 set(GIT_RESTAPI_SRC 
   src/git_restapi/main.cxx src/git_restapi/config.cxx 
-  src/utils/rapidjson.cxx src/utils/variables.cxx 
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/variables.cxx 
   src/git_restapi/api/api.cxx src/git_restapi/git/git_api.cxx src/git_restapi/git/config.cxx
   src/git_restapi/server/config.cxx src/git_restapi/server/server.cxx src/git_restapi/server/parts_handler.cxx src/git_restapi/server/request_handler.cxx 
   src/embeded/git_restapi/tlspuffin_history_sh.h

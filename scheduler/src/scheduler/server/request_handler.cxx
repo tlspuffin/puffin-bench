@@ -1,5 +1,6 @@
 #include "request_handler.hxx"
 #include "parts_handler.hxx"
+#include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include <fstream>
 #include <unordered_map>
@@ -556,7 +557,7 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
 
     SendFile(filename, response, out);
   } catch (const std::exception& e) {
-    std::cerr << "File server error: " << e.what() << std::endl;
+    LOGW << "File server error: " << e.what() << Log::Flags::End;
     if (out != nullptr) {
       out->flush();
     } else if (!response.sent()) {

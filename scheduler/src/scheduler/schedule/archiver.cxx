@@ -21,8 +21,8 @@ ns_Schedule::Archiver::~Archiver() {
   if (thread_.joinable()) {
     thread_.join();
   }
-  LOGI("[Archiver] Shutdown - Processed: " << jobsProcessed_.load() 
-      << ", Failed: " << jobsFailed_.load());
+  LOGI << "[Archiver] Shutdown - Processed: " << jobsProcessed_.load() 
+      << ", Failed: " << jobsFailed_.load() << Log::Flags::End;
 }
 
 void ns_Schedule::Archiver::AddJob(struct ArchiveJob& job) {
@@ -31,8 +31,8 @@ void ns_Schedule::Archiver::AddJob(struct ArchiveJob& job) {
     jobs_.push(job);
   }
   queueCV_.notify_one();
-  LOGI("[Archiver] Job queued: " << job.archivePath_ 
-      << " (" << job.sources_.size() << " sources)");
+  LOGI << "[Archiver] Job queued: " << job.archivePath_ 
+      << " (" << job.sources_.size() << " sources)" << Log::Flags::End;
 }
 
 size_t ns_Schedule::Archiver::PendingJobs() {
@@ -50,13 +50,13 @@ void ns_Schedule::Archiver::WaitForCompletion() {
         break;
       }
     }
-    LOGW("[Archiver] close wait " << nbJobs << "job(s)");
+    LOGI << "[Archiver] close wait " << nbJobs << "job(s)" << Log::Flags::End;
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 }
 
 void ns_Schedule::Archiver::ThreadLoop() {
-  LOGI("[Archiver] Thread started");
+  LOGI << "[Archiver] Thread started" << Log::Flags::End;
   while (threadRunning_.load()) {
     ArchiveJob job;
     {
@@ -72,41 +72,41 @@ void ns_Schedule::Archiver::ThreadLoop() {
         continue;
       }
     }
-    LOGI("[Archiver] Processing: " << job.archivePath_);
+    LOGI << "[Archiver] Processing: " << job.archivePath_ << Log::Flags::End;
     if (ProcessJob(job)) {
       jobsProcessed_++;
-      LOGI("[Archiver] Success: " << job.archivePath_);
+      LOGI << "[Archiver] Success: " << job.archivePath_ << Log::Flags::End;
 
       if (job.doPublish_) {
         try {
           job.publish_.PublishResults(job.variables_, job.sources_[0], { job.archivePath_ });
         } catch(std::runtime_error const& e) {
-          LOGW("Error while moving resultats from save to user save storage\n" <<
-              "All keep in " << job.baseDir_ << "\n\t" << e.what());
+          LOGW << "Error while moving resultats from save to user save storage\n" <<
+              "All keep in " << job.baseDir_ << "\n\t" << e.what() << Log::Flags::End;
         } catch(...) {
-          LOGW("Unknown Error while moving resultats from save to user save storage\n" <<
-              "All keep in " << job.baseDir_);
+          LOGW <<"Unknown Error while moving resultats from save to user save storage\n" <<
+              "All keep in " << job.baseDir_ << Log::Flags::End;
         }
       } else {
-        LOGI("Not publishing " << job.archivePath_);
+        LOGI << "Not publishing " << job.archivePath_ << Log::Flags::End;
       }
 
     } else {
       jobsFailed_++;
-      LOGW("[Archiver] Failed: " << job.archivePath_);
+      LOGW << "[Archiver] Failed: " << job.archivePath_ << Log::Flags::End;
     }
   }    
-  LOGI("[Archiver] Thread stopped");
+  LOGI << "[Archiver] Thread stopped" << Log::Flags::End;
 }
 
 bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
   if (job.sources_.size() < 1) {
-    LOGW("[Archiver] Error: required at least the task json");
+    LOGW << "[Archiver] Error: required at least the task json" << Log::Flags::End;
     return false;
   }
   for (auto const& source : job.sources_) {
     if (!std::filesystem::exists(source)) {
-      LOGW("[Archiver] Error: source not found: " << source);
+      LOGW << "[Archiver] Error: source not found: " << source << Log::Flags::End;
       return false;
     }
   }   
@@ -115,7 +115,7 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
     std::error_code ec;
     std::filesystem::create_directories(archivePath.parent_path(), ec);
     if (ec) {
-      LOGW("[Archiver] Error creating directory: " << ec.message());
+      LOGW <<"[Archiver] Error creating directory: " << ec.message() << Log::Flags::End;
       return false;
     }
   }
@@ -134,11 +134,11 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
    }
   }
   cmd << " 2>&1";
-  LOGI("[Archiver] Command: " << cmd.str());
+  LOGI << "[Archiver] Command: " << cmd.str() << Log::Flags::End;
     
   FILE* pipe = popen(cmd.str().c_str(), "r");
   if (!pipe) {
-    LOGW("[Archiver] Error: failed to execute tar command");
+    LOGW << "[Archiver] Error: failed to execute tar command" << Log::Flags::End;
     return false;
   }
   char buffer[256];
@@ -148,7 +148,7 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
   }
   int exitCode = pclose(pipe);
   if (exitCode != 0) {
-    LOGW("[Archiver] tar failed with code " << exitCode << " out:" << output);
+    LOGW << "[Archiver] tar failed with code " << exitCode << " out:" << output << Log::Flags::End;
     return false;
   }
 
@@ -156,12 +156,12 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
       (std::filesystem::file_size(job.archivePath_) == 0)) {
     std::error_code ec;
     std::filesystem::remove(job.archivePath_, ec);
-    LOGW("[Archiver] Error: archive not created");
+    LOGW << "[Archiver] Error: archive not created" << Log::Flags::End;
     return false;
   }
 
   if (!job.deleteDir_.empty()) {
-    LOGI("[Archiver] remove directory " << job.deleteDir_);
+    LOGI << "[Archiver] remove directory " << job.deleteDir_ << Log::Flags::End;
     std::error_code ec;
     std::filesystem::remove_all(job.deleteDir_, ec);
   }

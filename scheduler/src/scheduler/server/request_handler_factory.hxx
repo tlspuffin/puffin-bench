@@ -2,6 +2,7 @@
 
 #include "config.hxx"
 #include "request_handler.hxx"
+#include "../../utils/logs.hxx"
 #include <iostream>
 #include <regex>
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
@@ -83,7 +84,7 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       requestHandler->Configure(config_, apis_);
     }
   } catch(std::runtime_error const& e) {
-    std::cerr << e.what() << std::endl;
+    LOGE << e.what() << Log::Flags::End;
   }
 
   if (requestHandler == nullptr) {

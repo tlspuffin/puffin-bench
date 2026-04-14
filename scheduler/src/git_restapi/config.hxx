@@ -3,6 +3,7 @@
 #include "git/config.hxx"
 
 typedef struct Config {
+  unsigned int logsLevel_;
   ns_Server::Config server_;
   ns_GIT::Config git_;
   Config(std::string const& tmpStorage);

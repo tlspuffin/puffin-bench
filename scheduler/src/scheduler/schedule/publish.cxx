@@ -84,9 +84,9 @@ void ns_Schedule::Publish::PublishResults(
     }
     PublishToServer(files, finalStoragePath);
   } catch(std::runtime_error const& e) {
-    LOGW("Error with publish server " << server_ << "\n\t" << e.what());
+    LOGW << "Error with publish server " << server_ << "\n\t" << e.what() << Log::Flags::End;
   } catch(...) {
-    LOGW("Unknown Error with publish server " << server_);
+    LOGW << "Unknown Error with publish server " << server_ << Log::Flags::End;
   }
 }
 
@@ -120,7 +120,7 @@ void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files
     form.set("dst", archivePath);
     form.prepareSubmit(request);
 
-    LOGI("Sending notify request to " << path);
+    LOGD << "Sending notify request to " << path << Log::Flags::End;
     std::ostream& requestStream = session->sendRequest(request);
     form.write(requestStream);
     requestStream.flush();
@@ -131,12 +131,12 @@ void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files
     if (response.getStatus() != Poco::Net::HTTPResponse::HTTP_OK) {
       std::string responseBody;
       Poco::StreamCopier::copyToString(responseStream, responseBody);
-      LOGE("Notify report error " << responseBody);
+      LOGW << "Notify report error " << responseBody << Log::Flags::End;
       throw std::runtime_error("Server returned status " + 
           std::to_string(response.getStatus()) + 
           ": " + responseBody);
     }
-    LOGI("Sending notify was successful");
+    LOGI << "Sending notify was successful" << Log::Flags::End;
 
   } catch (const Poco::Exception& e) {
     throw std::runtime_error("HTTP[S] request failed: " + e.displayText());

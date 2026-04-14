@@ -1,6 +1,7 @@
 #include "../../version.h"
 #include "server.hxx"
 #include "request_handler_factory.hxx"
+#include "../../utils/logs.hxx"
 #include <iostream>
 #include <Poco/Net/HTTPServer.h>
 #include <Poco/Net/SecureServerSocket.h>
@@ -28,7 +29,7 @@ int ns_Server::MyServerApp::main(const std::vector<std::string>& args) {
       *serverSocket, new Poco::Net::HTTPServerParams);
 
   server.start();
-  std::cout << "Server started on port " << config_.port_ << "..." << std::endl;
+  LOGA << "Server started on port " << config_.port_ << "..." << Log::Flags::End;
   waitForTerminationRequest();
   server.stop();
   delete serverSocket;

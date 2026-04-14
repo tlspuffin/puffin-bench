@@ -83,7 +83,7 @@ bool ns_Monitor::Monitor::GetChange() {
 }
 
 void ns_Monitor::Monitor::Main(int fd, int wd) {
-  LOGI("Monitoring: " << path_);
+  LOGI << "Monitoring: " << path_ << Log::Flags::End;
 
   std::vector<char> buffer(1024 * (sizeof(struct inotify_event) + NAME_MAX + 1), 0);
 
@@ -148,7 +148,7 @@ void ns_Monitor::Monitor::InitINotify(int& fd, int& wd) {
 std::string ns_Monitor::Monitor::GetMessage(std::filesystem::path const& filePath) {
   std::ifstream file(filePath);
   if (!file.is_open()) {
-    LOGE("Monitor can not extract run message from " << filePath);
+    LOGE << "Monitor can not extract run message from " << filePath << Log::Flags::End;
     return "";
   }
   std::ostringstream buffer;

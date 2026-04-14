@@ -1,5 +1,6 @@
 #include "tasksmanager.hxx"
 #include "schedule.hxx"
+#include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/md5_poco.hxx"
 #include <unordered_set>
@@ -100,10 +101,10 @@ void ns_Schedule::TasksManager::DeleteTasks() {
     try {
       DeleteTaskInternal(task);
     } catch(std::runtime_error const& e) {
-      std::cerr << "DeleteTask exception on id: " << task->id_ << 
-          " : " << e.what() << std::endl;
+      LOGE << "DeleteTask exception on id: " << task->id_ << 
+          " : " << e.what() << Log::Flags::End;
     } catch(...) {
-      std::cerr << "DeleteTask exception on id: " << task->id_ << std::endl;
+      LOGE << "DeleteTask exception on id: " << task->id_ << Log::Flags::End;
     }
   }
 }
@@ -118,7 +119,7 @@ void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
 void ns_Schedule::TasksManager::GetRunningOutput(
     std::string const& type, uint64_t taskID, uint64_t stepUUID, 
     struct FileExtractedText& data) {
-  //std::cerr << "Look for task: " << taskID << std::endl;
+  //LOGD << "Look for task: " << taskID << Log::Flags::End;
   std::lock_guard<std::mutex> lock(lock_);
   for(auto const& task: tasks_) {
     if (task->id_ != taskID) {
@@ -133,11 +134,11 @@ void ns_Schedule::TasksManager::GetRunningOutput(
       }
       step = firstStep;
       do {
-        /*std::cerr << "Check step: " << step->ID()  <<
-            " uuid: " << step->uuid_ << std::endl;*/
+        /*LOGD << "Check step: " << step->ID()  <<
+            " uuid: " << step->uuid_ << Log::Flags::End;*/
 
         if (step->uuid_ == stepUUID) {
-          //std::cerr << "\tFound " << std::endl;
+          //LOGD << "\tFound " << Log::Flags::End;
           data.partialFile = true;
           return step->task_->executor_->GetRunningOutput(
               *step, type, data);
@@ -156,8 +157,8 @@ ns_Schedule::TasksManager::LoadStatus(rapidjson::Value const& tasksmanager,
   /*std::string filename = (config_.exportPath_ / "tasksmanager.json").string();
   std::ifstream statusFile(filename);
   if (!statusFile.is_open()) {
-    std::cerr << "Warning: Unable to open tasksmanager status file " << 
-        filename << ". Tasksmanager start stateless." << std::endl;
+    LOGW << "Warning: Unable to open tasksmanager status file " << 
+        filename << ". Tasksmanager start stateless." << Log::Flags::End;
     return std::make_tuple<>(
         std::list<ns_Schedule::Step*>(), std::list<ns_Schedule::Step*>(), std::list<ns_Schedule::Step*>());
   }

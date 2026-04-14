@@ -1,4 +1,5 @@
 #include "config.hxx"
+#include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../embeded/git_restapi/tlspuffin_history_sh.h"
 #include <iostream>
@@ -28,12 +29,12 @@ void ns_GIT::Config::Load(std::string const& name, rapidjson::Value& doc) {
   }
   for(auto it = repositories.MemberBegin(); it != repositories.MemberEnd(); ++it) {
     if (!it->name.IsString()) {
-      std::cerr << "Ignoring invalid configuration" << std::endl;
+      LOGW << "Ignoring invalid configuration" << Log::Flags::End;
       continue;
     }
     std::string const& name = it->name.GetString();
     if ((!(it->value.HasMember("url"))) || (!(it->value["url"].IsString()))) {
-      std::cerr << "Ignoring mal formed configuration " << name << std::endl;
+      LOGW << "Ignoring mal formed configuration " << name << Log::Flags::End;
       continue;
     }
     std::string const& url = it->value["url"].GetString();
@@ -72,7 +73,7 @@ void ns_GIT::Config::Validate(bool forceInstall) const {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(scriptsPath_ / file);
     if (forceInstall || (!std::filesystem::exists(filePath))) {
-      std::cerr << "Creating missing required file " << filePath << std::endl;
+      LOGI << "Creating missing required file " << filePath << Log::Flags::End;
       std::ofstream ofs(filePath, std::ios::binary);
       ofs.write(data, size);
       ofs.close();

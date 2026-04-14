@@ -1,4 +1,5 @@
 #include "cache.hxx"
+#include "../../utils/logs.hxx"
 #include <iostream>
 #include <fstream>
 #include <list>
@@ -94,7 +95,7 @@ void ns_Cache::Cache::CacheLoop() {
 
     for(auto const& it : dataToAdd) {
       try {
-        std::cerr << "[cache] copying " << it.srcPath_ << " to " << config_.storagePath_ / it.id_ << std::endl;
+        LOGI << "[cache] copying " << it.srcPath_ << " to " << config_.storagePath_ / it.id_ << Log::Flags::End;
         std::filesystem::copy_file(it.srcPath_, config_.storagePath_ / it.id_, 
             std::filesystem::copy_options::overwrite_existing);
         {
@@ -107,7 +108,7 @@ void ns_Cache::Cache::CacheLoop() {
           std::lock_guard<std::shared_mutex> lock(dataLock_);
           data_.erase(it.id_);
         }
-        std::cerr << "Error while copying: " << e.what() << std::endl;
+        LOGE << "Error while copying: " << e.what() << Log::Flags::End;
       }
     }
 
@@ -140,26 +141,26 @@ void ns_Cache::Cache::SaveData() const {
   rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
 
   if (!doc.Accept(writer)) {
-      std::cerr << "Error: failed to create JSON data" << std::endl;
+      LOGE << "Error: failed to create JSON data" << Log::Flags::End;
       return;
   }
 
   std::string tmpFile = config_.mappingFile_.string() + ".tmp";
   std::ofstream ofs(tmpFile, std::ios::trunc);
   if (!ofs.is_open()) {
-      std::cerr << "Error: unable to open writable file " << tmpFile << std::endl;
+      LOGE << "Error: unable to open writable file " << tmpFile << Log::Flags::End;
       return;
   }
   ofs << buffer.GetString();
   if (!ofs) {
-      std::cerr << "Error: write error in " << tmpFile << std::endl;
+      LOGE << "Error: write error in " << tmpFile << Log::Flags::End;
       std::filesystem::remove(tmpFile);
       ofs.close();
       return;
   }
   ofs.close();
 
-  std::cerr << "[cache] rename " << tmpFile << " in " << config_.mappingFile_ << std::endl;
+  LOGI << "[cache] rename " << tmpFile << " in " << config_.mappingFile_ << Log::Flags::End;
   std::filesystem::rename(tmpFile, config_.mappingFile_);
 }
 
@@ -168,7 +169,7 @@ void ns_Cache::Cache::SaveCopyLog(std::string const& id, std::string const& path
   std::string copyLogFile = config_.mappingFile_.string() + ".copy";
   std::ofstream ofs(copyLogFile, std::ios::app);
   if (!ofs.is_open()) {
-      std::cerr << "Error: unable to open writable file " << copyLogFile << std::endl;
+      LOGE << "Error: unable to open writable file " << copyLogFile << Log::Flags::End;
       return;
   }
   ofs << id << '\n' << path << '\n' << md5 << '\n';
@@ -176,7 +177,7 @@ void ns_Cache::Cache::SaveCopyLog(std::string const& id, std::string const& path
 }
 
 inline void ns_Cache::Cache::DeleteCopyLog() {
-  std::cerr << "[cache] delete copy log " << config_.mappingFile_.string() + ".copy" << std::endl;
+  LOGI << "[cache] delete copy log " << config_.mappingFile_.string() + ".copy" << Log::Flags::End;
   std::filesystem::remove(config_.mappingFile_.string() + ".copy");
 }
 
@@ -184,8 +185,8 @@ bool ns_Cache::Cache::LoadData() {
   data_.clear();
   std::ifstream ifs(config_.mappingFile_);
   if (!ifs.is_open()) {
-    std::cerr << "Warning: Unable to open cache info file " << 
-        config_.mappingFile_.string() << ". Cache is empty." << std::endl;
+    LOGW << "Warning: Unable to open cache info file " << 
+        config_.mappingFile_.string() << ". Cache is empty." << Log::Flags::End;
     return true;
   }
 
@@ -241,14 +242,14 @@ bool ns_Cache::Cache::LoadData() {
     std::error_code ec;
     bool exist = std::filesystem::exists(info.path_, ec);
     if (exist && info.full_) {
-      std::cerr << "[cache] add " << id << " as " << info.path_ << std::endl;
+      LOGI << "[cache] add " << id << " as " << info.path_ << Log::Flags::End;
       data_[id] = info;
     } else if (exist && copiedFile.find(id) != copiedFile.end()) {
-      std::cerr << "[cache] add " << id << " as " << copiedFile[id].path_ << std::endl;
+      LOGI << "[cache] add " << id << " as " << copiedFile[id].path_ << Log::Flags::End;
       data_[id] = copiedFile[id];
     } else {
       noCleaning = false;
-      std::cerr << "[cache] delete unclean file " << info.path_ << std::endl;
+      LOGI << "[cache] delete unclean file " << info.path_ << Log::Flags::End;
       std::filesystem::remove(info.path_);
     }
   }

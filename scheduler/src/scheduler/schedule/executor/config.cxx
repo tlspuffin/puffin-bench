@@ -78,7 +78,7 @@ void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(scriptPath_ / file);
     if (forceInstall || (!std::filesystem::exists(filePath))) {
-      LOGE("Creating missing required file " << filePath);
+      LOGI << "Creating missing required file " << filePath << Log::Flags::End;
       std::ofstream ofs(filePath, std::ios::binary);
       ofs.write(data, size);
       ofs.close();

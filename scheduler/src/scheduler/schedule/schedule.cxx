@@ -28,8 +28,8 @@
 #define DEBUG_STEP_MSG(label, step) {\
   std::stringstream oss;\
   oss << label << ": " << step->task_->id_ << " / " << step->ID()  << \
-      " uuid: " << step->uuid_ << std::endl;\
-  std::cerr << oss.str();\
+      " uuid: " << step->uuid_;\
+  LOGE << oss.str() << Log::Flags::End;\
 }
 
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
@@ -83,7 +83,7 @@ ns_Schedule::Schedule::~Schedule() {
   try {
     tasksManager_.DeleteTasks();
   } catch(std::exception const& e) {
-    std::cerr << "DeleteTasks exception: " << e.what() << std::endl;
+    LOGE << "DeleteTasks exception: " << e.what() << Log::Flags::End;
   }
 
   for(auto& executor : executors_) {
@@ -203,7 +203,7 @@ ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& nam
     if (executorIT != executors_.end()) {
       return executorIT->second;
     }
-    std::cerr << "Unable to retrieve default executor " << defaultExecutor_ << std::endl;
+    LOGE << "Unable to retrieve default executor " << defaultExecutor_ << Log::Flags::End;
     return nullptr;
   }
   return executorIT->second;
@@ -244,7 +244,7 @@ void ns_Schedule::Schedule::GetOutput(
     data.startOffset = data.requestReadOffset;
     data.state = data.buffer.size() == data.requestReadSize ? FileReadState::Ok : FileReadState::EndOfFile;
   } catch(...) {
-    LOGE("GetOutput error: unable to find " << outputFile << " in " << archiveName);
+    LOGW << "GetOutput error: unable to find " << outputFile << " in " << archiveName << Log::Flags::End;
     data.buffer.resize(0);
     data.state = FileReadState::Error_Access;
     return;
@@ -439,7 +439,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
       archiver_.AddJob(archiveJob);
     }
     tasksManager_.TaskEnded(step->task_);
-    std::cout << "Tasks " << task_id << " done" << std::endl;
+    LOGI << "Tasks " << task_id << " done" << Log::Flags::End;
   }
 
   SaveStatus(false);
@@ -554,9 +554,8 @@ void ns_Schedule::Schedule::HandlerUSR1(int sig) {
   shutdownTasksAtExit__ = !shutdownTasksAtExit__;
   std::stringstream oss;
   oss << "ctl + c will shutdown tasks at exit: " << 
-      (shutdownTasksAtExit__ ? "true" : "false") <<
-      std::endl;
-  std::cerr << oss.str();
+      (shutdownTasksAtExit__ ? "true" : "false");
+  LOGE << oss.str() << Log::Flags::End;
 }
 
 int ns_Schedule::Schedule::InstallSigUSRHandler() {

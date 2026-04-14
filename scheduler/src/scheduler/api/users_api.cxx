@@ -1,5 +1,6 @@
 #include "users_api.hxx"
 #include "../schedule/task.hxx"
+#include "../../utils/logs.hxx"
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/error/en.h"
@@ -10,8 +11,8 @@ ns_API::UsersAPI::UsersAPI(ns_Schedule::Config const& config)
   std::string filename = (storagePath_ / "users.json").string();
   std::ifstream statusFile(filename);
   if (!statusFile.is_open()) {
-    std::cerr << "Warning: Unable to open users db file " << 
-        filename << ". Users DB is empty start stateless." << std::endl;
+    LOGW << "Warning: Unable to open users db file " << 
+        filename << ". Users DB is empty start stateless." << Log::Flags::End;
     return;
   }
   std::stringstream buffer;

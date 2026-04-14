@@ -6,12 +6,12 @@
 void ReadJSONFile(std::string const& file, rapidjson::Document& doc) {
   std::ifstream ifs(file);
   if (!ifs.is_open()) {
-    LOGE("Unable to open " << file);
+    LOGE << "Unable to open " << file << Log::Flags::End;;
     throw std::runtime_error("Unable to open JSON file: " + file);
   }
   rapidjson::IStreamWrapper isw(ifs);
   if (doc.ParseStream(isw).HasParseError()) {
-    LOGE("Error JSON file corrupted " << file);
+    LOGE << "Error JSON file corrupted " << file << Log::Flags::End;
     throw std::runtime_error("Error JSON file corrupted: " + file);
   }
 }

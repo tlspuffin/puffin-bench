@@ -2,9 +2,9 @@
 #include "step.hxx"
 #include "schedule.hxx"
 #include "executor/executor.hxx"
+#include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/variables.hxx"
-#include "../../utils/logs.hxx"
 #include <unordered_set>
 #include <fstream>
 #include <regex>
@@ -116,7 +116,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     for (rapidjson::SizeType i = 0; i < argsArray.Size(); i++) {
       rapidjson::Value const& argObject = argsArray[i];
       if (!argObject.IsObject()) {
-        std::cerr << "Warning: Invalid arg object at index " << i << std::endl;
+        LOGE << "Warning: Invalid arg object at index " << i << Log::Flags::End;
         continue;
       }
       try {
@@ -126,8 +126,8 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
           args_[key] = value;
         }
       } catch (const std::exception& e) {
-        std::cerr << "Warning: Failed to parse arg at index " << i 
-            << ": " << e.what() << std::endl;
+        LOGE << "Warning: Failed to parse arg at index " << i 
+            << ": " << e.what() << Log::Flags::End;
       }
     }
   }
@@ -176,7 +176,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     const rapidjson::Value& rootStepsArray = config["root_steps"];
     for (rapidjson::SizeType i = 0; i < rootStepsArray.Size(); i++) {
       if (!rootStepsArray[i].IsUint64()) {
-        std::cerr << "Warning: Invalid root_step UUID at index " << i << std::endl;
+        LOGW << "Warning: Invalid root_step UUID at index " << i << Log::Flags::End;
         continue;
       }
       uint64_t stepUUID = rootStepsArray[i].GetUint64();
@@ -228,7 +228,7 @@ void ns_Schedule::Task::Cancel(std::string const& source) {
     cancel_source_ = source;
   }
   request_cancel_ = true;
-  LOGE("Cancel task " << id_ << " 1st source:" << cancel_source_);
+  LOGI << "Cancel task " << id_ << " 1st source:" << cancel_source_ << Log::Flags::End;
 }
 
 bool ns_Schedule::Task::PrepareToRun() {
@@ -276,19 +276,19 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
       doc.Accept(writer);
       ofs.close();
     } else {
-      std::cerr << "Error while saving task informations in save storage: " << taskJSONfile << std::endl;
+      LOGE << "Error while saving task informations in save storage: " << taskJSONfile << Log::Flags::End;
     }
 
     std::filesystem::rename(artefacts_path_, finalSavePath / "artefacts");
     //std::filesystem::rename(outputs_path_, finalSavePath / "output");
     std::filesystem::rename(logs_path_, finalSavePath / "logs");
   } catch(std::runtime_error const& e) {
-    std::cerr << "Error while moving resultats from running to save storage\n" <<
-        "All keep in " << run_root_path_ << "\n\t" << e.what() << std::endl;
+    LOGE << "Error while moving resultats from running to save storage\n" <<
+        "All keep in " << run_root_path_ << "\n\t" << e.what() << Log::Flags::End;
     return ArchiveJob();
   } catch(...) {
-    std::cerr << "Unknown Error while moving resultats from running to save storage\n" <<
-        "All keep in " << run_root_path_ << std::endl;
+    LOGE << "Unknown Error while moving resultats from running to save storage\n" <<
+        "All keep in " << run_root_path_ << Log::Flags::End;
     return ArchiveJob();
   }
 
@@ -304,8 +304,8 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
       { run_root_path_, functions_path_, files_path_ }) {
     std::error_code ec;
     if (std::filesystem::remove_all(path, ec) == -1) {
-      std::cerr << "Error while removing " << path << "\n" << 
-          "\t" << ec.value() << ": " << ec.message() << std::endl;
+      LOGE << "Error while removing " << path << "\n" << 
+          "\t" << ec.value() << ": " << ec.message() << Log::Flags::End;
     }
   }
 

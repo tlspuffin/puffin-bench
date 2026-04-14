@@ -4,6 +4,7 @@
 #else
 #include "reserve_port.h"
 #endif
+#include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include <iostream>
 #include <fstream>
@@ -101,7 +102,7 @@ void ns_Schedule::Config::Validate(bool forceInstall) const {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(toolsPath_ / file);
     if (!std::filesystem::exists(filePath)) {
-      std::cerr << "Creating missing required file " << filePath << std::endl;
+      LOGI << "Creating missing required file " << filePath << Log::Flags::End;
       std::ofstream ofs(filePath, std::ios::binary);
       ofs.write(data, size);
       ofs.close();

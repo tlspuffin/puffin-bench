@@ -69,13 +69,13 @@ ns_Executor::FileRing::~FileRing() {
 
     std::ifstream in(previousFile, std::ios::binary);
     if (!in) {
-      LOGE("Unable to open file " << previousFile);
+      LOGE << "Unable to open file " << previousFile << Log::Flags::End;
       return;
     }
     std::string tmpFile = file_ + ".tmp";
     std::ofstream out(tmpFile, std::ios::binary);
     if (!out) {
-      LOGE("Unable to create file " << tmpFile);
+      LOGE << "Unable to create file " << tmpFile << Log::Flags::End;
       return;
     }
     in.seekg(offset);
@@ -83,7 +83,7 @@ ns_Executor::FileRing::~FileRing() {
     in.close();
     std::ifstream current(file_, std::ios::binary);
     if (!current) {
-      LOGE("Unable to open file " << file_);
+      LOGE << "Unable to open file " << file_ << Log::Flags::End;
       return;
     }
     out << current.rdbuf();
@@ -92,7 +92,7 @@ ns_Executor::FileRing::~FileRing() {
     std::error_code ec;
     std::filesystem::rename(tmpFile, file_, ec);
     if (ec) {
-      LOGE("Failed to rename " << tmpFile << " in " << file_);
+      LOGE << "Failed to rename " << tmpFile << " in " << file_ << Log::Flags::End;
     }
   }
   CleanRotationFiles();
@@ -127,7 +127,7 @@ bool ns_Executor::FileRing::RotateFile() {
     if (std::filesystem::exists(file)) {
       std::filesystem::rename(file, file_ + '.' + std::to_string(i + 1), ec);
       if (ec) {
-        LOGE("Failed to rename " << file << " in " << file_ << '.' << (i+1));
+        LOGE << "Failed to rename " << file << " in " << file_ << '.' << (i+1) << Log::Flags::End;
       }
     }
   }
@@ -135,13 +135,13 @@ bool ns_Executor::FileRing::RotateFile() {
     std::filesystem::rename(file_, file_ + ".0", ec);
   }
   if (ec) {
-    LOGE("Failed to rename " << file_ << " in " << file_ << ".0");
+    LOGE << "Failed to rename " << file_ << " in " << file_ << ".0" << Log::Flags::End;
   }
 
   fileSize_ = 0;
   fd_ = open(file_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
   if (fd_ < 0) {
-    LOGE("Failed to open " << file_);
+    LOGE << "Failed to open " << file_ << Log::Flags::End;
     return false;
   }
   return true;
@@ -155,7 +155,7 @@ bool ns_Executor::FileRing::WriteBytes(uint8_t const* data, uint64_t size) {
       if (errno == EAGAIN || errno == EINTR) {
         continue;
       }
-      LOGE("Fatal error when writing on " << file_ << " errno " << errno);
+      LOGE << "Fatal error when writing on " << file_ << " errno " << errno << Log::Flags::End;
       return false;
     }
     written += ret;
@@ -172,7 +172,7 @@ bool ns_Executor::FileRing::CleanRotationFiles() {
     std::filesystem::remove(file, ec);
     if (ec) {
       success = false;
-      LOGE("Failed to remove " << file);
+      LOGE << "Failed to remove " << file << Log::Flags::End;
     }
   }
   return success;
@@ -268,13 +268,13 @@ ns_Executor::MemoryRing::~MemoryRing() {
 
   std::ofstream ofs(file_, std::ios::trunc);
   if (!ofs.is_open()) {
-    LOGE("Unable to open file " << file_);
+    LOGE << "Unable to open file " << file_ << Log::Flags::End;
     return;
   }
   ofs.write((char const*)data.buffer.data(), data.buffer.size());
   ofs.close();
   if (ofs.fail()) {
-    LOGE("Error while writing " << file_);
+    LOGE << "Error while writing " << file_ << Log::Flags::End;
     return;
   }
 }
@@ -343,11 +343,11 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(
     int fd, std::shared_ptr<ns_Executor::OutputBuffer> outputBuffer) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
-    LOGE("Unable to retrieve flags on fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to retrieve flags on fd: " << fd << " errno: " << errno << Log::Flags::End;
     return false;
   }
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    LOGE("Unable to set O_NONBLOCK on fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to set O_NONBLOCK on fd: " << fd << " errno: " << errno << Log::Flags::End;
     return false;
   }
 
@@ -356,7 +356,7 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(
   std::pair<std::unordered_map<int, std::shared_ptr<OutputBuffer>>::iterator, bool> storage;
   storage = fds_.insert({fd, std::shared_ptr<ns_Executor::OutputBuffer>(outputBuffer)});
   if (!storage.second) {
-    LOGE("Unable to store fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to store fd: " << fd << " errno: " << errno << Log::Flags::End;
     return false;
   }
 
@@ -377,13 +377,13 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFD(int fd) {
   std::lock_guard<std::mutex> lock(lockFDs_);
   auto it = fds_.find(fd);
   if (it == fds_.end()) {
-    LOGE("Unable to remove no existing fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to remove no existing fd: " << fd << " errno: " << errno << Log::Flags::End;
     close(fd);
     return false;
   }
   bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
   if (!success) {
-    LOGE("Unable to remove fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to remove fd: " << fd << " errno: " << errno << Log::Flags::End;
   }
   fds_.erase(it);
 
@@ -420,7 +420,7 @@ void ns_Executor::FDCaptureThread::FDCaptureThreadImpl::threadMain() {
       if (errno == EINTR) {
         continue;
       }
-      LOGE("Fatal Error epoll_wait failed errno: " << errno);
+      LOGE << "Fatal Error epoll_wait failed errno: " << errno << Log::Flags::End;
       return;
     }
 
@@ -434,7 +434,7 @@ void ns_Executor::FDCaptureThread::FDCaptureThreadImpl::threadMain() {
 
       uint32_t event = events[i].events;
       if (event & (EPOLLERR | EPOLLHUP)) {
-        LOGE("Close " << fd << " for EPOLLERR | EPOLLHUP");
+        LOGD << "Close " << fd << " for EPOLLERR | EPOLLHUP" << Log::Flags::End;
         RemoveFD(fd);
       } else if (event & (EPOLLIN | EPOLLPRI)) {
         std::lock_guard<std::mutex> lock(lockFDs_);
@@ -447,7 +447,7 @@ void ns_Executor::FDCaptureThread::FDCaptureThreadImpl::threadMain() {
           if (readBytes > 0) {
             it->second->Write(buffers.data(), readBytes);
           } else if (readBytes == 0) {
-            LOGE("Close " << fd << " for read == 0");
+            LOGD << "Close " << fd << " for read == 0" << Log::Flags::End;
             RemoveFDNoLock(fd);
             break;
           } else {
@@ -457,7 +457,7 @@ void ns_Executor::FDCaptureThread::FDCaptureThreadImpl::threadMain() {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
               break;
             }
-            LOGE("Fatal Error on reading on fd: " << fd);
+            LOGE << "Fatal Error on reading on fd: " << fd << Log::Flags::End;
             RemoveFDNoLock(fd);
             break;
           }
@@ -472,7 +472,7 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(int fd) {
   epollEvent.events = EPOLLIN | EPOLLPRI;
   epollEvent.data.fd = fd;
   if (epoll_ctl(epollID_, EPOLL_CTL_ADD, fd, &epollEvent) != 0) {
-    LOGE("Unable to add fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to add fd: " << fd << " errno: " << errno << Log::Flags::End;
     return false;
   }
   return true;
@@ -487,13 +487,13 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFDNoLock(int fd) {
 
   auto it = fds_.find(fd);
   if (it == fds_.end()) {
-    LOGE("Unable to remove no existing fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to remove no existing fd: " << fd << " errno: " << errno << Log::Flags::End;
     close(fd);
     return false;
   }
   bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
   if (!success) {
-    LOGE("Unable to remove fd: " << fd << " errno: " << errno);
+    LOGE << "Unable to remove fd: " << fd << " errno: " << errno << Log::Flags::End;
   }
   fds_.erase(it);
 
