@@ -312,7 +312,58 @@ body {
   margin-top: 4px;
 }
 
-/* Légende experiments */
+/* Pill-select inside variable cards (commit / subtask selectors) */
+.sidebar-pill-select {
+  display: block;
+  width: 100%;
+  font-size: 0.78rem;
+  font-family: monospace;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 3px 4px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  background: var(--color-bg);
+  color: var(--color-text-dark);
+}
+
+.sidebar-pill-select.undefined-value {
+  color: #aaa;
+  font-style: italic;
+  font-family: inherit;
+}
+
+/* Alias row inside variable cards */
+.sidebar-alias-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-alias-label {
+  font-size: 0.72rem;
+  color: #888;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sidebar-alias-input {
+  flex: 1;
+  font-size: 0.78rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 2px 5px;
+  min-width: 0;
+  background: var(--color-bg);
+  color: var(--color-text-dark);
+}
+
+.sidebar-alias-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* Experiment Legend */
 .commit-legend-row {
   display: flex;
   flex-direction: column;
@@ -1396,6 +1447,13 @@ input:disabled {
   border-color: var(--color-delete) !important;
   background: none !important;
   transform: none !important;
+}
+
+.experiment-slot-warn {
+  color: #e67e22;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .experiment-var-toggle {

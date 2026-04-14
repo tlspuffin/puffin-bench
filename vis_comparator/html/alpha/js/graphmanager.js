@@ -63,7 +63,7 @@ class GraphManager {
     this.#configs.set(id, stored);
 
     const titleSpan = graphContainer.querySelector('.graph_title_text');
-    if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries);
+    if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries, dataMap);
 
     await this.#Draw(graphArea, graphConfig, dataMap, stored);
 
@@ -123,7 +123,7 @@ class GraphManager {
     if (!stored) return;
     const resolvedEntries = this.#ResolveExperiments(stored.graphConfig);
     const titleSpan = stored.graphContainer.querySelector('.graph_title_text');
-    if (titleSpan) this.#UpdateTitleDom(titleSpan, stored.graphConfig, resolvedEntries);
+    if (titleSpan) this.#UpdateTitleDom(titleSpan, stored.graphConfig, resolvedEntries, stored.dataMap);
     await this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
   }
 
@@ -143,7 +143,7 @@ class GraphManager {
     // Update DOM title
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
     const titleSpan = stored.graphContainer.querySelector('.graph_title_text');
-    if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries);
+    if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries, dataMap);
 
     // Update toggle button states
     const eltSplit = document.getElementById('graph_ui_split_' + id);
@@ -202,18 +202,41 @@ class GraphManager {
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   /**
-   * Resolves experiment slots to concrete ExperimentDef objects.
-   * VarRefs are looked up in state.variables.experiments; undefined → null.
-   * @returns {Array<{ resolved: object|null, slot, idx, isVar, varName }>}
+   * Resolves experiment slots to concrete { commit, tasktype, subtask } objects.
+   * commitVar/subtaskVar refs are looked up in state.variables; null values → unresolved.
+   * @returns {Array<{ resolved: object|null, slot, idx, commitVarName: string|null, subtaskVarName: string|null }>}
    */
   #ResolveExperiments(graphConfig) {
     const state = this.#callbacks?.getState?.();
+    const vars  = state?.variables;
     return graphConfig.experiments.map((slot, idx) => {
-      if ('variable' in slot) {
-        const def = state?.variables?.experiments?.get(slot.variable) ?? null;
-        return { resolved: def, slot, idx, isVar: true, varName: slot.variable };
+      let commit   = null;
+      let tasktype = null;
+      let subtask  = null;
+      let commitVarName  = null;
+      let subtaskVarName = null;
+
+      if (slot.commitVar) {
+        commitVarName = slot.commitVar;
+        commit = vars?.commits?.get(slot.commitVar)?.value ?? null;
+      } else {
+        commit = slot.commit ?? null;
       }
-      return { resolved: slot, slot, idx, isVar: false, varName: null };
+
+      if (slot.subtaskVar) {
+        subtaskVarName = slot.subtaskVar;
+        const val = vars?.subtasks?.get(slot.subtaskVar)?.value ?? null;
+        if (val) { tasktype = val.tasktype; subtask = val.subtask; }
+      } else {
+        tasktype = slot.tasktype ?? null;
+        subtask  = slot.subtask  ?? null;
+      }
+
+      const resolved = (commit && tasktype && subtask)
+        ? { commit, tasktype, subtask }
+        : null;
+
+      return { resolved, slot, idx, commitVarName, subtaskVarName };
     });
   }
 
@@ -266,7 +289,66 @@ class GraphManager {
   /** Returns the display name for a resolved metric path (falls back to the raw path). */
   #MetricDisplayName(metricPath) {
     const state = this.#callbacks?.getState?.();
-    return state?.metricLegend?.get(metricPath)?.displayName ?? metricPath;
+    const override = state?.metricLegend?.get(metricPath)?.displayName;
+    if (override) return override;
+    const fmt = state?.legendFormat?.metric;
+    if (fmt) return GraphManager.#InterpolateMetric(fmt, metricPath);
+    return metricPath;
+  }
+
+  /**
+   * Returns the display name for a resolved experiment.
+   * Priority (lowest → highest):
+   *   1. Default: shortHash/tasktype/subtask
+   *   2. legendFormat.experiment template
+   *   3. commitRegistry[key].displayName (individual override)
+   */
+  #ExperimentDisplayName(resolved, slot, state) {
+    const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+    const entry  = state?.commitRegistry?.get(expKey);
+    if (entry?.displayName) return entry.displayName;
+    const fmt = state?.legendFormat?.experiment;
+    if (fmt) return GraphManager.#InterpolateExperiment(fmt, resolved, slot, state);
+    return `${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`;
+  }
+
+  /**
+   * Interpolates a legend format template for an experiment.
+   * Available tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}
+   */
+  static #InterpolateExperiment(fmt, resolved, slot, state) {
+    const shortHash = CommitHelp.ShortHash(resolved.commit);
+
+    let commitAlias = shortHash;
+    if (slot?.commitVar) {
+      const entry = state?.variables?.commits?.get(slot.commitVar);
+      commitAlias = entry?.alias || shortHash;
+    }
+
+    let subtaskAlias = `${resolved.subtask}`;
+    if (slot?.subtaskVar) {
+      const entry = state?.variables?.subtasks?.get(slot.subtaskVar);
+      subtaskAlias = entry?.alias || subtaskAlias;
+    }
+
+    return fmt
+      .replace(/\$\{COMMIT\}/g,        shortHash)
+      .replace(/\$\{TASKTYPE\}/g,       resolved.tasktype)
+      .replace(/\$\{SUBTASK\}/g,        resolved.subtask)
+      .replace(/\$\{COMMIT_ALIAS\}/g,   commitAlias)
+      .replace(/\$\{SUBTASK_ALIAS\}/g,  subtaskAlias);
+  }
+
+  /**
+   * Interpolates a legend format template for a metric.
+   * Available tokens: ${METRIC} with optional :uppercase / :lowercase transforms.
+   */
+  static #InterpolateMetric(fmt, metricPath) {
+    return fmt.replace(/\$\{METRIC(?::([a-z]+))?\}/g, (_, transform) => {
+      if (transform === 'uppercase') return metricPath.toUpperCase();
+      if (transform === 'lowercase') return metricPath.toLowerCase();
+      return metricPath;
+    });
   }
 
   /** Returns the dash style for a resolved metric path (falls back to palette by index). */
@@ -278,20 +360,29 @@ class GraphManager {
 
   /**
    * Populates the graph title span with experiment + metric labels.
-   * Variable-sourced entries get a pill badge showing the variable name (e.g. "e1").
+   * Variable-sourced entries get pill badges showing the variable name(s).
+   * @param {Map<string,object>|null} dataMap - current data; used to show ⚠ when data is missing
    */
-  #UpdateTitleDom(titleSpan, graphConfig, resolvedEntries) {
+  #UpdateTitleDom(titleSpan, graphConfig, resolvedEntries, dataMap) {
     titleSpan.innerHTML = '';
     const state = this.#callbacks?.getState?.();
 
     // ── Experiment labels ───────────────────────────────────────
-    resolvedEntries.forEach(({ resolved, isVar, varName }, i) => {
+    resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName }, i) => {
       if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
 
-      if (isVar) {
+      // Show variable name badges for any variable-sourced sides
+      if (commitVarName) {
         const badge = document.createElement('span');
         badge.className = 'graph_title_var_badge';
-        badge.textContent = varName;
+        badge.textContent = commitVarName;
+        titleSpan.appendChild(badge);
+        titleSpan.appendChild(document.createTextNode('\u00a0'));
+      }
+      if (subtaskVarName) {
+        const badge = document.createElement('span');
+        badge.className = 'graph_title_var_badge';
+        badge.textContent = subtaskVarName;
         titleSpan.appendChild(badge);
         titleSpan.appendChild(document.createTextNode('\u00a0'));
       }
@@ -302,9 +393,7 @@ class GraphManager {
         u.textContent = 'undefined';
         titleSpan.appendChild(u);
       } else {
-        const expKey = `${resolved.commit}:${resolved.type}:${resolved.subject}`;
-        const displayName = state?.commitRegistry?.get(expKey)?.displayName;
-        const label = displayName ?? `${CommitHelp.ShortHash(resolved.commit)}/${resolved.type}/${resolved.subject}`;
+        const label = this.#ExperimentDisplayName(resolved, slot, state);
         titleSpan.appendChild(document.createTextNode(label));
       }
     });
@@ -349,7 +438,20 @@ class GraphManager {
       const warn = document.createElement('span');
       warn.className = 'graph_title_warn_badge';
       warn.textContent = '\u26a0';
-      warn.title = 'Métriques en double — seule la première occurrence est affichée';
+      warn.title = 'Duplicate metrics — only the first occurrence is displayed';
+      titleSpan.appendChild(warn);
+    }
+
+    // ── Missing-data warning ──────────────────────────────────────
+    // Show ⚠ if any resolved experiment has no data available (fetch failed or combination unknown)
+    const missingExps = resolvedEntries
+      .filter(({ resolved }) => resolved && !dataMap?.get(`${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`))
+      .map(({ resolved }) => `${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`);
+    if (missingExps.length > 0) {
+      const warn = document.createElement('span');
+      warn.className = 'graph_title_warn_badge';
+      warn.textContent = '\u26a0';
+      warn.title = `No data: ${missingExps.join(', ')}`;
       titleSpan.appendChild(warn);
     }
   }
@@ -373,7 +475,7 @@ class GraphManager {
     let timestamps = [];
     for (const { resolved } of resolvedEntries) {
       if (!resolved) continue;
-      const expKey = `${resolved.commit}:${resolved.type}:${resolved.subject}`;
+      const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
       const data = dataMap?.get(expKey);
       if (data?.header) {
         const { min, max, step } = data.header;
@@ -384,20 +486,21 @@ class GraphManager {
 
     const traces = [];
 
-    resolvedEntries.forEach(({ resolved, isVar, varName, idx }) => {
+    resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName, idx }) => {
+      const anyVarName = commitVarName ?? subtaskVarName;
       // ── Placeholder: undefined variable ──────────────────────────
       if (!resolved) {
         traces.push({
           x: [], y: [],
           mode: 'lines',
-          name: `\u2717 ${isVar ? varName : `exp${idx + 1}`} (undefined)`,
+          name: `\u2717 ${anyVarName ? anyVarName : `exp${idx + 1}`} (undefined)`,
           line: { color: '#d62728', width: 2, dash: 'dot' },
           showlegend: true,
         });
         return;
       }
 
-      const expKey = `${resolved.commit}:${resolved.type}:${resolved.subject}`;
+      const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
       const data   = dataMap?.get(expKey);
 
       // ── Placeholder: resolved experiment but data unavailable ─────
@@ -407,7 +510,7 @@ class GraphManager {
         traces.push({
           x: [], y: [],
           mode: 'lines',
-          name: `\u2717 ${short}/${resolved.type}/${resolved.subject} (no data)`,
+          name: `\u2717 ${short}/${resolved.tasktype}/${resolved.subtask} (no data)`,
           line: { color: '#ff7f0e', width: 2, dash: 'dot' },
           showlegend: true,
           visible: regEntry?.visible === false ? 'legendonly' : true,
@@ -421,8 +524,7 @@ class GraphManager {
 
       const color     = regEntry?.color ?? GraphManager.#PALETTE[idx % GraphManager.#PALETTE.length];
       const fillColor = GraphManager.#HexToRgba(color, 0.2);
-      const expLabel  = regEntry?.displayName
-        ?? `${CommitHelp.ShortHash(resolved.commit)}/${resolved.type}/${resolved.subject}`;
+      const expLabel  = this.#ExperimentDisplayName(resolved, slot, state);
 
       // ── Render: mean + CI per experiment ───────────────────────
       metrics.forEach((metricName, metricIdx) => {

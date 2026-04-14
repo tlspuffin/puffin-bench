@@ -22,13 +22,21 @@ let currentModalCancelFn = null;
 function setModalCancel(fn) { currentModalCancelFn = fn; }
 function clearModalCancel() { currentModalCancelFn = null; }
 
+// Populated in the INITIALISATION section after apirest is created.
+let allCommitsPromise = Promise.resolve([]);
+const globalDynamicSubtasks = [];
 
 const state = {
   title: 'No Title_' + Date.now(),
   graphSettings: new Map(),
   variables: {
-    experiments: new Map(),
-    metrics: new Map(),
+    commits:  new Map(),  // name → { value: commitID | null, alias: string | null }
+    subtasks: new Map(),  // name → { value: { tasktype, subtask } | null, alias: string | null }
+    metrics:  new Map(),  // name → metricPath | null
+  },
+  legendFormat: {
+    experiment: null,  // template string | null  (e.g. "${COMMIT_ALIAS} − ${SUBTASK_ALIAS}")
+    metric:     null,  // template string | null  (e.g. "${METRIC:uppercase}")
   },
   commitRegistry: new Map(),
   metricLegend:   new Map(),  // metricPath → { displayName: string|null, dash: string|null }
@@ -38,16 +46,117 @@ const state = {
 // STATE MANAGEMENT
 // ============================================================
 
+/**
+ * Migrates a loaded state object from the old experiment-variable format
+ * (variables.experiments) to the new split format (variables.commits / variables.subtasks).
+ * Also ensures legendFormat is present.
+ * @param {object|null} loadedState
+ * @returns {object|null}
+ */
+function migrateStateIfNeeded(loadedState) {
+  if (!loadedState) return loadedState;
+
+  // ── Old format: variables.experiments exists ─────────────────────────────
+  if (loadedState.variables?.experiments instanceof Map) {
+    const oldExps    = loadedState.variables.experiments;
+    const newCommits  = new Map();
+    const newSubtasks = new Map();
+
+    for (const [ename, def] of oldExps) {
+      newCommits.set(`c_${ename}`, {
+        value: def ? def.commit : null,
+        alias: null,
+      });
+      newSubtasks.set(`s_${ename}`, {
+        value: def ? { tasktype: def.type, subtask: def.subject } : null,
+        alias: null,
+      });
+    }
+
+    loadedState.variables = {
+      commits:  newCommits,
+      subtasks: newSubtasks,
+      metrics:  loadedState.variables.metrics ?? new Map(),
+    };
+
+    // Migrate graph experiment slots
+    if (loadedState.graphSettings instanceof Map) {
+      for (const [, config] of loadedState.graphSettings) {
+        if (!Array.isArray(config.experiments)) continue;
+        config.experiments = config.experiments.map(slot => {
+          if ('variable' in slot) {
+            // Old { variable: "e1" } → { commitVar: "c_e1", subtaskVar: "s_e1" }
+            return { commitVar: `c_${slot.variable}`, subtaskVar: `s_${slot.variable}` };
+          }
+          // Old manual { commit, type, subject } → { commit, tasktype, subtask }
+          if (slot.commit !== undefined) {
+            return { commit: slot.commit, tasktype: slot.type, subtask: slot.subject };
+          }
+          return slot;
+        });
+      }
+    }
+  } else if (loadedState.variables && !loadedState.variables.commits) {
+    // Partial new state without commits/subtasks — initialise empty
+    loadedState.variables.commits  = loadedState.variables.commits  ?? new Map();
+    loadedState.variables.subtasks = loadedState.variables.subtasks ?? new Map();
+  }
+
+  // ── Ensure legendFormat exists ────────────────────────────────────────────
+  if (!loadedState.legendFormat) {
+    loadedState.legendFormat = { experiment: null, metric: null };
+  }
+
+  return loadedState;
+}
+
+/**
+ * Resolves a graph-config experiment slot to a concrete { commit, tasktype, subtask } object.
+ * Returns null if either side (commit or subtask) is unresolved.
+ * @param {object} slot      - Experiment slot (may contain commitVar/subtaskVar for variable refs,
+ *                             or commit/tasktype/subtask for manual values)
+ * @param {object} variables - state.variables ({ commits, subtasks })
+ * @returns {{ commit: string, tasktype: string, subtask: string } | null}
+ */
+function resolveExperimentSlot(slot, variables) {
+  let commit   = null;
+  let tasktype = null;
+  let subtask  = null;
+
+  if (slot.commitVar) {
+    const entry = variables?.commits?.get(slot.commitVar);
+    commit = entry?.value ?? null;
+  } else {
+    commit = slot.commit ?? null;
+  }
+
+  if (slot.subtaskVar) {
+    const entry = variables?.subtasks?.get(slot.subtaskVar);
+    const val   = entry?.value ?? null;
+    if (val) { tasktype = val.tasktype; subtask = val.subtask; }
+  } else {
+    tasktype = slot.tasktype ?? null;
+    subtask  = slot.subtask  ?? null;
+  }
+
+  if (commit && tasktype && subtask) return { commit, tasktype, subtask };
+  return null;
+}
+
 async function ResetState(state, newState) {
+  const migrated = migrateStateIfNeeded(newState);
   graphManager.DelAllGraph();
-  state.title          = newState?.title          ?? 'Vue_' + Date.now();
+  state.title          = migrated?.title          ?? 'Vue_' + Date.now();
   state.graphSettings  = new Map();
-  state.variables      = newState?.variables      ?? { experiments: new Map(), metrics: new Map() };
-  state.commitRegistry = newState?.commitRegistry ?? new Map();
-  state.metricLegend   = newState?.metricLegend   ?? new Map();
+  state.variables      = migrated?.variables      ?? {
+    commits: new Map(), subtasks: new Map(), metrics: new Map(),
+  };
+  state.legendFormat   = migrated?.legendFormat   ?? { experiment: null, metric: null };
+  state.commitRegistry = migrated?.commitRegistry ?? new Map();
+  state.metricLegend   = migrated?.metricLegend   ?? new Map();
   UpdateHeader();
-  if (newState?.graphSettings?.size > 0) {
-    await restoreGraphs(newState.graphSettings);
+  if (migrated?.graphSettings?.size > 0) {
+    await restoreGraphs(migrated.graphSettings);
   }
   BuildSidebar(state);
 }
@@ -59,12 +168,9 @@ async function ResetState(state, newState) {
  */
 async function restoreGraphs(savedSettings) {
   for (const [, graphConfig] of savedSettings) {
-    // Resolve concrete ExperimentDef entries (skip unresolvable VarRefs)
+    // Resolve concrete experiment entries (skip unresolvable slots)
     const resolved = graphConfig.experiments
-      .map(slot => {
-        if ('variable' in slot) return state.variables.experiments.get(slot.variable) ?? null;
-        return (slot.commit && slot.type && slot.subject) ? slot : null;
-      })
+      .map(slot => resolveExperimentSlot(slot, state.variables))
       .filter(Boolean);
 
     if (resolved.length === 0) {
@@ -100,7 +206,7 @@ async function restoreGraphs(savedSettings) {
 
     const results = await Promise.all(
       resolved.map(exp => apirest.LoadCommitMetricsValues(
-        exp.type, exp.commit, exp.subject,
+        exp.tasktype, exp.commit, exp.subtask,
         graphConfig.min, graphConfig.max, graphConfig.delta,
         resolvedMetrics
       ))
@@ -110,7 +216,7 @@ async function restoreGraphs(savedSettings) {
       resolved
         .map((exp, i) => ({ exp, data: results[i] }))
         .filter(p => p.data != null)
-        .map(p => [`${p.exp.commit}:${p.exp.type}:${p.exp.subject}`, p.data])
+        .map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
     );
 
     if (dataMap.size === 0) continue;
@@ -218,49 +324,32 @@ function buildSyntheticMetrics(paths) {
 
 async function AddGraphique(prefill = null, editId = null) {
   const gitHistory = gitHistoryPromise;
+  const allCommits = await allCommitsPromise;
 
-  // Pre-load all available commits (both Perf and Vuln) for the commit dropdown
-  const [perfCommits, vulnCommits] = await Promise.all([
-    apirest.LoadCommits('Perf'),
-    apirest.LoadCommits('Vuln'),
-  ]);
-  const allCommits = [...new Set([...perfCommits, ...vulnCommits])];
+  // Slots use the same format as graphConfig.experiments:
+  // { commitVar, commit, subtaskVar, tasktype, subtask }
+  function createEmptySlot() {
+    return { commitVar: null, commit: null, subtaskVar: null, tasktype: null, subtask: null };
+  }
 
-  // Each slot: { mode: 'manual'|'variable', commit, type, subjects, subject, varName }
-  const slots = prefill
-    ? prefill.experiments.map(expSlot =>
-        'variable' in expSlot
-          ? { mode: 'variable', varName: expSlot.variable, commit: '', type: '', subjects: [], subject: '' }
-          : { mode: 'manual', commit: expSlot.commit, type: expSlot.type, subjects: [], subject: expSlot.subject }
-      )
-    : [createEmptySlot()];
+  function resolveSlot(slot) {
+    return resolveExperimentSlot(slot, state.variables);
+  }
+
+  function resolvedSlots() {
+    return slots.map(resolveSlot).filter(Boolean);
+  }
+
+  const slots = prefill ? prefill.experiments.map(s => ({ ...s })) : [createEmptySlot()];
   let metricsMode = prefill?.metricsMode ?? 'AND';
   let selectedMetrics = [];
   let metricsPrefilled = false;
   let metricsUIContainer = null;
   let timeID = null;
   let btOk = null;
-  let metricsRebuildGen = 0;  // incremented each call; stale async results are discarded
-
-  function createEmptySlot() {
-    return { mode: 'manual', commit: '', type: '', subjects: [], subject: '' };
-  }
-
-  // Returns ExperimentDef for a slot, or null if incomplete
-  function resolveSlot(slot) {
-    if (slot.mode === 'variable') {
-      const def = state.variables.experiments.get(slot.varName) ?? null;
-      return def;
-    }
-    if (slot.commit && slot.type && slot.subject) {
-      return { commit: slot.commit, type: slot.type, subject: slot.subject };
-    }
-    return null;
-  }
-
-  function resolvedSlots() {
-    return slots.map(resolveSlot).filter(Boolean);
-  }
+  let metricsRebuildGen = 0;
+  // Indices of slots that resolved but had no data (for ⚠ badge in slot rows)
+  let invalidSlotIndices = new Set();
 
   const modalpage = document.getElementById('modalpage');
   modalpage.innerHTML = '';
@@ -269,7 +358,10 @@ async function AddGraphique(prefill = null, editId = null) {
   ui.Reset();
 
   // ── Section 1: Experiments ──────────────────────────────────────
-  container.appendChild(ui.CreateTitle(editId !== null ? 'Edit graph' : '1. Experiments', 'h3', null));
+  if (editId !== null) {
+    container.appendChild(ui.CreateTitle('Edit graph', 'h3', null));
+  }
+  container.appendChild(ui.CreateTitle('1. Experiments', 'h3', null));
   const experimentList = document.createElement('div');
   experimentList.className = 'experiment-list';
   container.appendChild(experimentList);
@@ -331,8 +423,6 @@ async function AddGraphique(prefill = null, editId = null) {
   const time = ui.CreateTimeSelection(0, 0, 0, null);
   container.appendChild(time);
 
-  // Pre-fill time range when editing an existing graph.
-  // Use querySelector on `time` directly: `container` is not yet in the document at this point.
   if (prefill) {
     const s = time.querySelector('#time_start_' + timeID);
     const e = time.querySelector('#time_end_'   + timeID);
@@ -361,17 +451,14 @@ async function AddGraphique(prefill = null, editId = null) {
         const max   = +document.getElementById('time_end_'   + timeID).value;
         const delta = +document.getElementById('time_delta_' + timeID).value;
 
-        // Register new experiments into commitRegistry (keyed by commit:type:subject)
         for (const exp of resolved) {
-          const expKey = `${exp.commit}:${exp.type}:${exp.subject}`;
+          const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
           if (!state.commitRegistry.has(expKey)) {
             const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
             state.commitRegistry.set(expKey, { color, displayName: null });
           }
         }
 
-        // Resolve metric variable references before fetching (keep selectedMetrics as-is for storage)
-        // Deduplicate: two variables may resolve to the same path
         const fetchMetrics = [...new Set(selectedMetrics.map(m => {
           if (typeof m === 'string') {
             try {
@@ -390,44 +477,33 @@ async function AddGraphique(prefill = null, editId = null) {
           return;
         }
 
-        // Fetch data for all resolved experiments in parallel
         const results = await Promise.all(
           resolved.map(exp => apirest.LoadCommitMetricsValues(
-            exp.type, exp.commit, exp.subject, min, max, delta, fetchMetrics))
+            exp.tasktype, exp.commit, exp.subtask, min, max, delta, fetchMetrics))
         );
         const validPairs = resolved
           .map((exp, i) => ({ exp, data: results[i] }))
           .filter(p => p.data != null);
 
-        if (validPairs.length === 0) {
-          // All fetches failed — nothing to render
-        } else {
-          // When editing, preserve existing toggle states; for new graphs use defaults
+        if (validPairs.length > 0) {
           const graphConfig = {
-            experiments: slots
-              .filter(s => s.mode === 'variable' || (s.commit && s.type && s.subject))
-              .map(s => s.mode === 'variable'
-                ? { variable: s.varName }
-                : { commit: s.commit, type: s.type, subject: s.subject }
-              ),
+            experiments: slots.filter(s => s.commitVar || s.commit || s.subtaskVar || s.tasktype),
             metricsMode,
             metrics: selectedMetrics,
             min, max, delta,
-            showRaw: prefill ? prefill.showRaw : (validPairs.length === 1),
-            showCI:  prefill ? prefill.showCI  : false,   // off by default for new graphs
+            showRaw:   prefill ? prefill.showRaw   : (validPairs.length === 1),
+            showCI:    prefill ? prefill.showCI    : false,
             splitAxes: prefill ? prefill.splitAxes : true,
           };
 
           const dataMap = new Map(
-            validPairs.map(p => [`${p.exp.commit}:${p.exp.type}:${p.exp.subject}`, p.data])
+            validPairs.map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
           );
 
           if (editId !== null) {
-            // Editing an existing graph: update in place
             state.graphSettings.set(editId, graphConfig);
             await graphManager.UpdateGraph(editId, graphConfig, dataMap);
           } else {
-            // Creating a new graph
             const id = await graphManager.AddGraph(graphConfig, dataMap);
             state.graphSettings.set(id, graphConfig);
           }
@@ -469,13 +545,8 @@ async function AddGraphique(prefill = null, editId = null) {
       const row = document.createElement('div');
       row.className = 'experiment-row';
 
-      if (slot.mode === 'manual') {
-        renderManualRow(row, slot, idx);
-      } else {
-        renderVariableRow(row, slot, idx);
-      }
+      renderSlotRow(row, slot, idx);
 
-      // Remove button (always shown; disabled when only 1 slot)
       const removeBtn = document.createElement('button');
       removeBtn.className = 'experiment-remove-btn';
       removeBtn.textContent = '\u2715';
@@ -492,156 +563,188 @@ async function AddGraphique(prefill = null, editId = null) {
     });
   }
 
-  function renderManualRow(row, slot, idx) {
-    // All three elements declared first; cross-referencing callbacks attached below.
+  function buildCommitOptions(selectedHash, selectedVar) {
+    const options = [{ value: '', text: '(—)' }];
+    // Commit variables first
+    if (state.variables.commits.size > 0) {
+      for (const [name, entry] of state.variables.commits) {
+        const val = `_var_${name}`;
+        const label = entry?.value
+          ? `${name} = ${CommitHelp.ShortHash(entry.value)}${entry.alias ? ` (${entry.alias})` : ''}`
+          : `${name} (undefined)`;
+        options.push({ value: val, text: label, selected: selectedVar === name });
+      }
+      options.push({ value: '__sep__', text: '─────────', disabled: true });
+    }
+    // Raw commits
+    for (const c of allCommits) {
+      options.push({ value: c, text: CommitHelp.ShortHash(c), selected: !selectedVar && selectedHash === c });
+    }
+    return options;
+  }
 
-    // Commit select (simple <select>, single-selection per slot)
-    const commitSelect = ui.CreateSelect(
-      [{ value: '', text: 'Commit\u2026' }].concat(
-        allCommits.map(c => ({ value: c, text: CommitHelp.ShortHash(c), selected: c === slot.commit }))
-      ), null
+  function buildSubtaskOptions(selectedTasktype, selectedSubtask, selectedVar, dynamicKnown = null) {
+    const options = [{ value: '', text: '(—)' }];
+    // Subtask variables first
+    if (state.variables.subtasks.size > 0) {
+      for (const [name, entry] of state.variables.subtasks) {
+        const val = `_var_${name}`;
+        const label = entry?.value
+          ? `${name} = ${entry.value.tasktype}/${entry.value.subtask}${entry.alias ? ` (${entry.alias})` : ''}`
+          : `${name} (undefined)`;
+        options.push({ value: val, text: label, selected: selectedVar === name });
+      }
+      options.push({ value: '__sep__', text: '─────────', disabled: true });
+    }
+
+    const allKnown = [];
+    const seen = new Set();
+    
+    // Always include the currently selected subtask so the UI doesn't lose it if it hasn't loaded yet
+    if (selectedTasktype && selectedSubtask) {
+      const token = `${selectedTasktype}:${selectedSubtask}`;
+      seen.add(token);
+      allKnown.push({ tasktype: selectedTasktype, subtask: selectedSubtask });
+    }
+
+    if (dynamicKnown !== null) {
+      for (const dk of dynamicKnown) {
+        const token = `${dk.tasktype}:${dk.subtask}`;
+        if (!seen.has(token)) { seen.add(token); allKnown.push(dk); }
+      }
+    }
+
+    for (const { tasktype, subtask } of allKnown) {
+      const val = `${tasktype}:${subtask}`;
+      options.push({
+        value: val,
+        text: `${tasktype}/${subtask}`,
+        selected: !selectedVar && selectedTasktype === tasktype && selectedSubtask === subtask,
+      });
+    }
+    if (allKnown.length === 0) {
+      options.push({ value: '__hint__', text: 'No subtasks loaded yet', disabled: true });
+    }
+    return options;
+  }
+
+  function renderSlotRow(row, slot, slotIdx) {
+    // Commit selector
+    const commitSel = ui.CreateSelect(
+      buildCommitOptions(slot.commit, slot.commitVar), null
     );
-    row.appendChild(commitSelect);
+    commitSel.title = 'Commit';
 
-    // Enrich labels once git history resolves (shows branch + date)
+    // Enrich commit labels with git history once resolved
     gitHistory.then(function(history) {
       if (!history) return;
       const enriched = CommitHelp.Enrich(allCommits, history);
-      const labelMap = new Map(enriched.map(e => [e.hash, e.label]));
-      ui.UpdateSelect(commitSelect,
-        [{ value: '', text: 'Commit\u2026' }].concat(
-          enriched.map(e => ({ value: e.hash, text: e.label, selected: e.hash === slot.commit }))
-        )
-      );
+      // Rebuild options using enriched labels
+      const current = commitSel.value;
+      const options = [{ value: '', text: '(—)' }];
+      if (state.variables.commits.size > 0) {
+        for (const [name, entry] of state.variables.commits) {
+          const val = `_var_${name}`;
+          const label = entry?.value
+            ? `${name} = ${CommitHelp.ShortHash(entry.value)}${entry.alias ? ` (${entry.alias})` : ''}`
+            : `${name} (undefined)`;
+          options.push({ value: val, text: label });
+        }
+        options.push({ value: '__sep__', text: '─────────', disabled: true });
+      }
+      for (const e of enriched) {
+        options.push({ value: e.hash, text: e.label, selected: e.hash === current });
+      }
+      ui.UpdateSelect(commitSel, options);
+      // Restore selection (UpdateSelect resets it)
+      commitSel.value = current;
     });
 
-    // Type select
-    const typeSelect = ui.CreateSelect([
-      { value: '', text: 'Type\u2026' },
-      { value: 'Perf', selected: slot.type === 'Perf' },
-      { value: 'Vuln', selected: slot.type === 'Vuln' },
-    ], null);
-    if (!slot.commit) UI.DisableElement(typeSelect);
+    commitSel.onchange = function() {
+      const val = commitSel.value;
+      if (!val || val === '__sep__') {
+        slot.commitVar = null; slot.commit = null;
+      } else if (val.startsWith('_var_')) {
+        slot.commitVar = val.slice(5); slot.commit = null;
+      } else {
+        slot.commitVar = null; slot.commit = val;
+      }
+      onExperimentChange();
+      loadDynamicSubtasks();
+    };
 
-    // Subject select
-    const subjectSelect = ui.CreateSelect(
-      [{ value: '', text: 'Subject\u2026' }].concat(
-        slot.subjects.map(s => ({ value: s.value, text: s.text, selected: s.value === slot.subject }))
-      ), null
+    // Subtask selector
+    const subtaskSel = ui.CreateSelect(
+      buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar), null
     );
-    if (!slot.type || slot.subjects.length === 0) UI.DisableElement(subjectSelect);
+    subtaskSel.title = 'Subtask';
 
-    // Commit change
-    commitSelect.onchange = function() {
-      const newCommit = commitSelect.value;
-      if (newCommit === slot.commit) return;
-      slot.commit = newCommit;
-      slot.type = '';
-      slot.subjects = [];
-      slot.subject = '';
-      ui.UpdateSelect(typeSelect, [
-        { value: '', text: 'Type\u2026' },
-        { value: 'Perf' },
-        { value: 'Vuln' },
+    async function loadDynamicSubtasks() {
+      let resolvedCommit = slot.commit;
+      if (slot.commitVar) {
+        resolvedCommit = state.variables.commits.get(slot.commitVar)?.value;
+      }
+      if (!resolvedCommit) {
+        const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, []);
+        const current = subtaskSel.value;
+        ui.UpdateSelect(subtaskSel, options);
+        subtaskSel.value = current;
+        return;
+      }
+
+      // Fetch subjects for standard task types
+      const dynamicKnown = [];
+      const [perfSubjs, vulnSubjs] = await Promise.all([
+        apirest.LoadCommitSubjects('Perf', resolvedCommit),
+        apirest.LoadCommitSubjects('Vuln', resolvedCommit)
       ]);
-      UI.DisableElement(typeSelect);
-      ui.UpdateSelect(subjectSelect, [{ value: '', text: 'Subject\u2026' }]);
-      UI.DisableElement(subjectSelect);
-      if (newCommit) UI.EnableElement(typeSelect);
-      onExperimentChange();
-    };
+      perfSubjs.forEach(s => dynamicKnown.push({ tasktype: 'Perf', subtask: s.value }));
+      vulnSubjs.forEach(s => dynamicKnown.push({ tasktype: 'Vuln', subtask: s.value }));
 
-    typeSelect.onchange = async function() {
-      const newType = typeSelect.value;
-      if (newType === slot.type) return;
-      slot.type = newType;
-      slot.subjects = [];
-      slot.subject = '';
-      ui.UpdateSelect(subjectSelect, [{ value: '', text: 'Subject\u2026' }]);
-      UI.DisableElement(subjectSelect);
-      onExperimentChange();
-      if (!newType || !slot.commit) return;
-      UI.DisableElement(typeSelect);
-      const subjects = await apirest.LoadCommitSubjects(newType, slot.commit);
-      UI.EnableElement(typeSelect);
-      slot.subjects = subjects;
-      if (subjects.length === 0) return;
-      ui.UpdateSelect(subjectSelect,
-        [{ value: '', text: 'Subject\u2026' }].concat(subjects.map(s => ({ value: s.value, text: s.text })))
-      );
-      UI.EnableElement(subjectSelect);
-    };
-
-    subjectSelect.onchange = function() {
-      slot.subject = subjectSelect.value;
-      onExperimentChange();
-    };
-
-    row.appendChild(typeSelect);
-    row.appendChild(subjectSelect);
-
-    // Pre-fill: if slot has commit+type but subjects not yet loaded, trigger async load
-    if (slot.commit && slot.type && slot.subjects.length === 0 && slot.subject) {
-      UI.DisableElement(typeSelect);
-      apirest.LoadCommitSubjects(slot.type, slot.commit).then(function(subjects) {
-        UI.EnableElement(typeSelect);
-        slot.subjects = subjects;
-        if (subjects.length > 0) {
-          ui.UpdateSelect(subjectSelect,
-            [{ value: '', text: 'Subject\u2026' }].concat(
-              subjects.map(s => ({ value: s.value, text: s.text, selected: s.value === slot.subject }))
-            )
-          );
-          UI.EnableElement(subjectSelect);
+      // Add to global cache
+      dynamicKnown.forEach(entry => {
+        if (!globalDynamicSubtasks.some(g => g.tasktype === entry.tasktype && g.subtask === entry.subtask)) {
+          globalDynamicSubtasks.push(entry);
         }
       });
+
+      const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, dynamicKnown);
+      const current = subtaskSel.value;
+      ui.UpdateSelect(subtaskSel, options);
+      subtaskSel.value = current;
     }
 
-    // Switch to variable mode (only if variables exist)
-    if (state.variables.experiments.size > 0) {
-      const varBtn = document.createElement('button');
-      varBtn.className = 'experiment-var-toggle';
-      varBtn.textContent = 'Var';
-      varBtn.title = 'Switch to variable mode';
-      varBtn.onclick = function() {
-        slot.mode = 'variable';
-        slot.varName = state.variables.experiments.keys().next().value;
-        renderExperiments();
-        onExperimentChange();
-      };
-      row.appendChild(varBtn);
+    loadDynamicSubtasks();
+
+    subtaskSel.onchange = function() {
+      const val = subtaskSel.value;
+      if (!val || val === '__sep__' || val === '__hint__') {
+        slot.subtaskVar = null; slot.tasktype = null; slot.subtask = null;
+      } else if (val.startsWith('_var_')) {
+        slot.subtaskVar = val.slice(5); slot.tasktype = null; slot.subtask = null;
+      } else {
+        const fc = val.indexOf(':');
+        slot.subtaskVar = null;
+        slot.tasktype = val.slice(0, fc);
+        slot.subtask  = val.slice(fc + 1);
+      }
+      onExperimentChange();
+    };
+
+    row.appendChild(commitSel);
+    row.appendChild(subtaskSel);
+
+    // ⚠ badge: resolved combination has no data from the server
+    if (invalidSlotIndices.has(slotIdx)) {
+      const resolved = resolveSlot(slot);
+      const warn = document.createElement('span');
+      warn.className = 'experiment-slot-warn';
+      warn.textContent = '\u26a0';
+      warn.title = resolved
+        ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
+        : 'No data';
+      row.appendChild(warn);
     }
-  }
-
-  function renderVariableRow(row, slot, idx) {
-    const varSelect = ui.CreateSelect(
-      Array.from(state.variables.experiments.entries()).map(([name, def]) => ({
-        value: name,
-        text: def ? `${name} (= ${def.commit.slice(0, 7)}/${def.type}/${def.subject})` : `${name} (undefined)`,
-        selected: name === slot.varName,
-      })), null
-    );
-    varSelect.onchange = function() {
-      slot.varName = varSelect.value;
-      onExperimentChange();
-    };
-    row.appendChild(varSelect);
-
-    // Switch back to manual mode
-    const manualBtn = document.createElement('button');
-    manualBtn.className = 'experiment-var-toggle';
-    manualBtn.textContent = 'Manuel';
-    manualBtn.title = 'Switch to manual mode';
-    manualBtn.onclick = function() {
-      slot.mode = 'manual';
-      slot.commit = '';
-      slot.type = '';
-      slot.subjects = [];
-      slot.subject = '';
-      renderExperiments();
-      onExperimentChange();
-    };
-    row.appendChild(manualBtn);
   }
 
   function onExperimentChange() {
@@ -650,43 +753,88 @@ async function AddGraphique(prefill = null, editId = null) {
   }
 
   async function rebuildMetricsUI() {
-    const previousMetrics = [...selectedMetrics];  // preserve across experiment changes
+    const previousMetrics = [...selectedMetrics];
     selectedMetrics = [];
-    if (metricsUIContainer) {
-      metricsUIContainer.remove();
-      metricsUIContainer = null;
-    }
+    // Don't remove metricsUIContainer yet — keep it in place to prevent modal jitter
+    // while the async fetch is in flight.
     updateOkButton();
 
-    const resolved = resolvedSlots();
-    if (resolved.length === 0) return;
+    // Preserve original slot indices so we can mark invalid combinations
+    const slotResolutions = slots.map((slot, idx) => ({ idx, resolved: resolveSlot(slot) }));
+    const resolvedWithIdx = slotResolutions.filter(r => r.resolved);
+    if (resolvedWithIdx.length === 0) {
+      if (metricsUIContainer) {
+        metricsUIContainer.remove();
+        metricsUIContainer = null;
+      }
+      return;
+    }
 
     const gen = ++metricsRebuildGen;
 
-    // Load metrics for each resolved experiment
     const metricsResults = await Promise.all(
-      resolved.map(exp => apirest.LoadCommitMetrics(exp.type, exp.commit, exp.subject))
+      resolvedWithIdx.map(({ resolved }) => apirest.LoadCommitMetrics(resolved.tasktype, resolved.commit, resolved.subtask))
     );
 
-    if (gen !== metricsRebuildGen) return;  // a newer call was started; discard this result
+    if (gen !== metricsRebuildGen) return;
 
+    // Mark slots whose combination has no data; update badges if the set changed
+    const newInvalid = new Set(
+      resolvedWithIdx
+        .filter((_, i) => !metricsResults[i]?.metrics || metricsResults[i].metrics.size === 0)
+        .map(r => r.idx)
+    );
+    const invalidChanged = newInvalid.size !== invalidSlotIndices.size
+      || [...newInvalid].some(i => !invalidSlotIndices.has(i));
+    invalidSlotIndices = newInvalid;
+    if (invalidChanged) {
+      const rows = experimentList.querySelectorAll('.experiment-row');
+      slots.forEach((slot, idx) => {
+        const row = rows[idx];
+        if (!row) return;
+        const existingWarn = row.querySelector('.experiment-slot-warn');
+        if (invalidSlotIndices.has(idx)) {
+          if (!existingWarn) {
+            const resolved = resolveSlot(slot);
+            const warn = document.createElement('span');
+            warn.className = 'experiment-slot-warn';
+            warn.textContent = '\u26a0';
+            warn.title = resolved
+              ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
+              : 'No data';
+            const removeBtn = row.querySelector('.experiment-remove-btn');
+            if (removeBtn) {
+              row.insertBefore(warn, removeBtn);
+            } else {
+              row.appendChild(warn);
+            }
+          }
+        } else if (existingWarn) {
+          existingWarn.remove();
+        }
+      });
+    }
+
+    const resolved = resolvedWithIdx.map(r => r.resolved);
     const pathSets = metricsResults.map(flattenMetricPaths);
 
-    // Build union and intersection
     const union = new Set();
     for (const s of pathSets) s.forEach(p => union.add(p));
     const intersection = pathSets.reduce((acc, s) => {
       return new Set([...acc].filter(p => s.has(p)));
     }, new Set(union));
 
-    // Metrics absent from at least one experiment (union \ intersection)
     const absentPaths = new Set([...union].filter(p => !intersection.has(p)));
-
-    // Build a synthetic metrics object for CreateMetrics
     const displayPaths = metricsMode === 'AND' ? intersection : union;
     const syntheticMetrics = buildSyntheticMetrics(displayPaths);
 
-    if (!syntheticMetrics.metrics || syntheticMetrics.metrics.size === 0) return;
+    if (!syntheticMetrics.metrics || syntheticMetrics.metrics.size === 0) {
+      if (metricsUIContainer) { metricsUIContainer.remove(); metricsUIContainer = null; }
+      return;
+    }
+
+    // Remove stale metrics UI now that fresh content is ready (avoids layout jitter)
+    if (metricsUIContainer) { metricsUIContainer.remove(); metricsUIContainer = null; }
 
     const metricsTree = ui.CreateMetrics(syntheticMetrics, {
       absent: metricsMode === 'OR' ? absentPaths : new Set(),
@@ -701,7 +849,6 @@ async function AddGraphique(prefill = null, editId = null) {
       }
     });
 
-    // Variable metrics section (if any) — wrapped together with metricsTree for easy cleanup
     if (state.variables.metrics.size > 0) {
       const varSection = document.createElement('div');
       const varHeader = document.createElement('div');
@@ -737,7 +884,6 @@ async function AddGraphique(prefill = null, editId = null) {
       metricsUIContainer = metricsTree;
     }
 
-    // Update time range from first resolved experiment — skip if prefill already set it
     if (!prefill) {
       const firstMetrics = metricsResults[0];
       if (firstMetrics?.maxTimeMicroS > 0) {
@@ -754,14 +900,12 @@ async function AddGraphique(prefill = null, editId = null) {
       }
     }
 
-    // Restore metrics: prefill on first call, or keep previously selected ones.
-    // Making the label visible is required because all labels start hidden (folder closed).
     const toRestore = (prefill && !metricsPrefilled) ? prefill.metrics : previousMetrics;
     if (toRestore.length > 0) {
       metricsWrapper.querySelectorAll('.metric-checkbox').forEach(function(cb) {
         if (toRestore.includes(cb.value) && !cb.checked) {
           cb.checked = true;
-          cb.closest('.checkbox-label').style.display = '';  // always show selected metrics
+          cb.closest('.checkbox-label').style.display = '';
           selectedMetrics.push(cb.value);
         }
       });
@@ -791,11 +935,12 @@ async function EditGraph(id) {
 // SIDEBAR
 // ============================================================
 
-// Returns true if any graph's experiments or metrics reference the given variable name.
-function isVarReferenced(state, varName) {
+// Returns true if any graph's configuration references the given variable name depending on the type.
+function isVarReferenced(state, varName, type) {
   for (const [, config] of state.graphSettings) {
-    if (config.experiments.some(s => s.variable === varName)) return true;
-    if (config.metrics.some(m => {
+    if (type === 'commit' && config.experiments.some(s => s.commitVar === varName)) return true;
+    if (type === 'subtask' && config.experiments.some(s => s.subtaskVar === varName)) return true;
+    if (type === 'metric' && config.metrics.some(m => {
       if (typeof m === 'string') {
         try { return JSON.parse(m)?.variable === varName; } catch (_) {}
       }
@@ -810,118 +955,340 @@ function BuildSidebar(state) {
   if (!sidebar) return;
   sidebar.innerHTML = '';
 
-  sidebar.appendChild(buildVariableSection(
-    'Variables : experiments',
-    state.variables.experiments,
-    (name, def) => openExperimentVarModal(name, def, state),
-    (name) => {
-      state.variables.experiments.set(name, null);
-      BuildSidebar(state);
-    },
-    (name) => {
-      if (isVarReferenced(state, name)) {
-        errorManager.Error(`Variable "${name}" est utilisée par un ou plusieurs graphes — retirez-la des graphes avant de la supprimer.`);
-        return;
-      }
-      state.variables.experiments.delete(name);
-      BuildSidebar(state);
-    },
-    (name) => {
-      state.variables.experiments.set(name, null);
-      refreshGraphsUsingVariable(state, name);
-      BuildSidebar(state);
-    },
-    'e',
-    (def) => def ? `${def.commit.substring(0, 7)} \u00b7 ${def.type} \u00b7 ${def.subject}` : '(undefined)'
-  ));
-
-  sidebar.appendChild(buildVariableSection(
-    'Variables : métriques',
-    state.variables.metrics,
-    (name, val) => openMetricVarModal(name, val, state),
-    (name) => {
-      state.variables.metrics.set(name, null);
-      BuildSidebar(state);
-    },
-    (name) => {
-      if (isVarReferenced(state, name)) {
-        errorManager.Error(`Variable "${name}" est utilisée par un ou plusieurs graphes — retirez-la des graphes avant de la supprimer.`);
-        return;
-      }
-      state.variables.metrics.delete(name);
-      BuildSidebar(state);
-    },
-    (name) => {
-      state.variables.metrics.set(name, null);
-      refreshGraphsUsingVariable(state, name);
-      BuildSidebar(state);
-    },
-    'm',
-    (val) => val || '(undefined)'
-  ));
-
+  sidebar.appendChild(buildCommitVariableSection(state));
+  sidebar.appendChild(buildSubtaskVariableSection(state));
+  sidebar.appendChild(buildMetricVariableSection(state));
   sidebar.appendChild(buildExperimentLegend(state));
   sidebar.appendChild(buildMetricLegend(state));
 }
 
-function buildVariableSection(title, varMap, onEdit, onAdd, onDelete, onReset, prefix, formatValue) {
+// Re-renders traces for all graphs (appearance only, no re-fetch).
+// Called when aliases or display names change.
+function refreshAllGraphAppearances(state) {
+  for (const id of state.graphSettings.keys()) {
+    graphManager.RefreshGraphAppearance(id);
+  }
+}
+
+// Returns all known { tasktype, subtask } pairs across commitRegistry and subtask variables.
+function getKnownSubtasks(state) {
+  const seen   = new Set();
+  const result = [];
+  for (const key of state.commitRegistry.keys()) {
+    const parts = key.split(':');
+    if (parts.length < 3) continue;
+    const tasktype = parts[1];
+    const subtask  = parts.slice(2).join(':');
+    const token    = `${tasktype}:${subtask}`;
+    if (!seen.has(token)) { seen.add(token); result.push({ tasktype, subtask }); }
+  }
+  for (const [, entry] of state.variables.subtasks) {
+    if (!entry?.value) continue;
+    const token = `${entry.value.tasktype}:${entry.value.subtask}`;
+    if (!seen.has(token)) { seen.add(token); result.push(entry.value); }
+  }
+  for (const entry of globalDynamicSubtasks) {
+    const token = `${entry.tasktype}:${entry.subtask}`;
+    if (!seen.has(token)) { seen.add(token); result.push(entry); }
+  }
+  return result;
+}
+
+/** Builds and appends the card header (name + optional reset + delete) to a card element. */
+function buildVarCardHeader(card, name, hasValue, onReset, onDelete) {
+  const cardHeader = document.createElement('div');
+  cardHeader.className = 'sidebar-variable-header';
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'sidebar-variable-name';
+  nameSpan.textContent = name;
+  cardHeader.appendChild(nameSpan);
+
+  if (hasValue) {
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'sidebar-reset-btn';
+    resetBtn.textContent = '\u21ba';
+    resetBtn.title = 'Reset to undefined';
+    resetBtn.addEventListener('click', onReset);
+    cardHeader.appendChild(resetBtn);
+  }
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'sidebar-delete-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.title = 'Delete variable';
+  delBtn.addEventListener('click', onDelete);
+  cardHeader.appendChild(delBtn);
+
+  card.appendChild(cardHeader);
+}
+
+/** Builds and appends an alias row (label + text input) to a card element. */
+function buildAliasRow(card, currentAlias, onAliasChange) {
+  const row = document.createElement('div');
+  row.className = 'sidebar-alias-row';
+
+  const label = document.createElement('span');
+  label.className = 'sidebar-alias-label';
+  label.textContent = 'Alias:';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'sidebar-alias-input';
+  input.placeholder = 'e.g. DEV';
+  input.value = currentAlias ?? '';
+  input.addEventListener('change', () => onAliasChange(input.value.trim() || null));
+
+  row.appendChild(label);
+  row.appendChild(input);
+  card.appendChild(row);
+}
+
+function buildCommitVariableSection(state) {
   const section = document.createElement('div');
   section.className = 'sidebar-section';
 
   const header = document.createElement('div');
   header.className = 'sidebar-section-title';
-  header.textContent = title;
+  header.textContent = 'Variables: Commits';
 
   const addBtn = document.createElement('button');
   addBtn.className = 'sidebar-add-btn';
   addBtn.textContent = '+';
-  addBtn.title = `Ajouter une variable ${prefix}`;
+  addBtn.title = 'Add commit variable';
   addBtn.addEventListener('click', () => {
     let n = 1;
-    while (varMap.has(`${prefix}${n}`)) n++;
-    onAdd(`${prefix}${n}`);
+    while (state.variables.commits.has(`c${n}`)) n++;
+    state.variables.commits.set(`c${n}`, { value: null, alias: null });
+    BuildSidebar(state);
   });
   header.appendChild(addBtn);
   section.appendChild(header);
 
-  for (const [name, value] of varMap) {
+  for (const [name, entry] of state.variables.commits) {
     const card = document.createElement('div');
     card.className = 'sidebar-variable-card';
 
-    const cardHeader = document.createElement('div');
-    cardHeader.className = 'sidebar-variable-header';
+    buildVarCardHeader(card, name, entry?.value !== null && entry?.value !== undefined,
+      () => {
+        state.variables.commits.set(name, { value: null, alias: entry?.alias ?? null });
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+      },
+      () => {
+        if (isVarReferenced(state, name, 'commit')) {
+          errorManager.Error(`Variable "${name}" is used by one or more graphs — remove it from the graphs before deleting.`);
+          return;
+        }
+        state.variables.commits.delete(name);
+        BuildSidebar(state);
+      }
+    );
 
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'sidebar-variable-name';
-    nameSpan.textContent = name;
+    // Commit select — initially shows current value; all commits loaded asynchronously
+    const select = document.createElement('select');
+    select.className = `sidebar-pill-select${!entry?.value ? ' undefined-value' : ''}`;
 
-    if (value !== null) {
-      const resetBtn = document.createElement('button');
-      resetBtn.className = 'sidebar-reset-btn';
-      resetBtn.textContent = '\u21ba';  // ↺
-      resetBtn.title = 'Remettre en undefined';
-      resetBtn.addEventListener('click', () => onReset(name));
-      cardHeader.appendChild(nameSpan);
-      cardHeader.appendChild(resetBtn);
-    } else {
-      cardHeader.appendChild(nameSpan);
+    const buildOptions = (allCommits) => {
+      select.innerHTML = '';
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = '(undefined)';
+      none.selected = !entry?.value;
+      select.appendChild(none);
+      for (const commit of allCommits) {
+        const opt = document.createElement('option');
+        opt.value   = commit;
+        opt.textContent = CommitHelp.ShortHash(commit);
+        opt.selected    = commit === entry?.value;
+        select.appendChild(opt);
+      }
+    };
+    // Show current value immediately (without full list)
+    buildOptions(entry?.value ? [entry.value] : []);
+    // Populate full list once fetched
+    allCommitsPromise.then(buildOptions);
+
+    select.addEventListener('change', () => {
+      const newValue = select.value || null;
+      state.variables.commits.set(name, { value: newValue, alias: entry?.alias ?? null });
+      refreshGraphsUsingVariable(state, name);
+      BuildSidebar(state);
+
+      if (newValue) {
+        Promise.all([
+          apirest.LoadCommitSubjects('Perf', newValue),
+          apirest.LoadCommitSubjects('Vuln', newValue)
+        ]).then(([p, v]) => {
+          let added = false;
+          p.forEach(s => {
+            if (!globalDynamicSubtasks.some(g => g.tasktype === 'Perf' && g.subtask === s.value)) {
+              globalDynamicSubtasks.push({tasktype: 'Perf', subtask: s.value});
+              added = true;
+            }
+          });
+          v.forEach(s => {
+            if (!globalDynamicSubtasks.some(g => g.tasktype === 'Vuln' && g.subtask === s.value)) {
+              globalDynamicSubtasks.push({tasktype: 'Vuln', subtask: s.value});
+              added = true;
+            }
+          });
+          if (added) BuildSidebar(state);
+        });
+      }
+    });
+    card.appendChild(select);
+
+    buildAliasRow(card, entry?.alias, (newAlias) => {
+      const cur = state.variables.commits.get(name) ?? { value: null, alias: null };
+      state.variables.commits.set(name, { value: cur.value, alias: newAlias });
+      refreshAllGraphAppearances(state);
+    });
+
+    section.appendChild(card);
+  }
+
+  return section;
+}
+
+function buildSubtaskVariableSection(state) {
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-title';
+  header.textContent = 'Variables: Subtasks';
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'sidebar-add-btn';
+  addBtn.textContent = '+';
+  addBtn.title = 'Add subtask variable';
+  addBtn.addEventListener('click', () => {
+    let n = 1;
+    while (state.variables.subtasks.has(`s${n}`)) n++;
+    state.variables.subtasks.set(`s${n}`, { value: null, alias: null });
+    BuildSidebar(state);
+  });
+  header.appendChild(addBtn);
+  section.appendChild(header);
+
+  for (const [name, entry] of state.variables.subtasks) {
+    const card = document.createElement('div');
+    card.className = 'sidebar-variable-card';
+
+    buildVarCardHeader(card, name, entry?.value !== null && entry?.value !== undefined,
+      () => {
+        state.variables.subtasks.set(name, { value: null, alias: entry?.alias ?? null });
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+      },
+      () => {
+        if (isVarReferenced(state, name, 'subtask')) {
+          errorManager.Error(`Variable "${name}" is used by one or more graphs — remove it from the graphs before deleting.`);
+          return;
+        }
+        state.variables.subtasks.delete(name);
+        BuildSidebar(state);
+      }
+    );
+
+    const knownSubtasks = getKnownSubtasks(state);
+    const currentToken  = entry?.value ? `${entry.value.tasktype}:${entry.value.subtask}` : null;
+
+    const select = document.createElement('select');
+    select.className = `sidebar-pill-select${!entry?.value ? ' undefined-value' : ''}`;
+
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = knownSubtasks.length === 0 ? '(no subtasks loaded yet)' : '(undefined)';
+    none.selected = !entry?.value;
+    select.appendChild(none);
+
+    for (const { tasktype, subtask } of knownSubtasks) {
+      const token = `${tasktype}:${subtask}`;
+      const opt   = document.createElement('option');
+      opt.value       = token;
+      opt.textContent = `${tasktype}/${subtask}`;
+      opt.selected    = token === currentToken;
+      select.appendChild(opt);
     }
 
-    const delBtn = document.createElement('button');
-    delBtn.className = 'sidebar-delete-btn';
-    delBtn.textContent = '\u2715';
-    delBtn.title = 'Supprimer la variable';
-    delBtn.addEventListener('click', () => onDelete(name));
-    cardHeader.appendChild(delBtn);
+    select.addEventListener('change', () => {
+      const token = select.value;
+      let newValue = null;
+      if (token) {
+        const firstColon = token.indexOf(':');
+        newValue = {
+          tasktype: token.slice(0, firstColon),
+          subtask:  token.slice(firstColon + 1),
+        };
+      }
+      state.variables.subtasks.set(name, { value: newValue, alias: entry?.alias ?? null });
+      refreshGraphsUsingVariable(state, name);
+      BuildSidebar(state);
+    });
+    card.appendChild(select);
+
+    buildAliasRow(card, entry?.alias, (newAlias) => {
+      const cur = state.variables.subtasks.get(name) ?? { value: null, alias: null };
+      state.variables.subtasks.set(name, { value: cur.value, alias: newAlias });
+      refreshAllGraphAppearances(state);
+    });
+
+    section.appendChild(card);
+  }
+
+  return section;
+}
+
+function buildMetricVariableSection(state) {
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-title';
+  header.textContent = 'Variables: Metrics';
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'sidebar-add-btn';
+  addBtn.textContent = '+';
+  addBtn.title = 'Add metric variable';
+  addBtn.addEventListener('click', () => {
+    let n = 1;
+    while (state.variables.metrics.has(`m${n}`)) n++;
+    state.variables.metrics.set(`m${n}`, null);
+    BuildSidebar(state);
+  });
+  header.appendChild(addBtn);
+  section.appendChild(header);
+
+  for (const [name, value] of state.variables.metrics) {
+    const card = document.createElement('div');
+    card.className = 'sidebar-variable-card';
+
+    buildVarCardHeader(card, name, value !== null,
+      () => {
+        state.variables.metrics.set(name, null);
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+      },
+      () => {
+        if (isVarReferenced(state, name, 'metric')) {
+          errorManager.Error(`Variable "${name}" is used by one or more graphs — remove it from the graphs before deleting.`);
+          return;
+        }
+        state.variables.metrics.delete(name);
+        BuildSidebar(state);
+      }
+    );
 
     const pill = document.createElement('button');
     pill.className = `sidebar-pill${value === null ? ' undefined' : ''}`;
-    pill.textContent = formatValue(value);
-    pill.title = 'Cliquer pour modifier';
-    pill.addEventListener('click', () => onEdit(name, value));
-
-    card.appendChild(cardHeader);
+    pill.textContent = value || '(undefined)';
+    pill.title = 'Click to edit';
+    pill.addEventListener('click', () => openMetricVarModal(name, value, state));
     card.appendChild(pill);
+
     section.appendChild(card);
   }
 
@@ -934,11 +1301,8 @@ function getActiveExperimentKeys(state) {
   const keys = new Set();
   for (const [, config] of state.graphSettings) {
     for (const slot of config.experiments) {
-      let def = slot;
-      if ('variable' in slot) def = state.variables.experiments.get(slot.variable) ?? null;
-      if (def?.commit && def.type && def.subject) {
-        keys.add(`${def.commit}:${def.type}:${def.subject}`);
-      }
+      const def = resolveExperimentSlot(slot, state.variables);
+      if (def) keys.add(`${def.commit}:${def.tasktype}:${def.subtask}`);
     }
   }
   return keys;
@@ -950,22 +1314,46 @@ function buildExperimentLegend(state) {
 
   const header = document.createElement('div');
   header.className = 'sidebar-section-title';
-  header.textContent = 'Légende experiments';
+  header.textContent = 'Experiment Legend';
   section.appendChild(header);
+
+  // Format template input
+  const fmtRow = document.createElement('div');
+  fmtRow.className = 'sidebar-alias-row';
+  const fmtLabel = document.createElement('span');
+  fmtLabel.className = 'sidebar-alias-label';
+  fmtLabel.textContent = 'Format:';
+  const fmtInput = document.createElement('input');
+  fmtInput.type = 'text';
+  fmtInput.className = 'sidebar-alias-input';
+  fmtInput.placeholder = '\${COMMIT_ALIAS} \u2212 \${SUBTASK_ALIAS}';
+  fmtInput.value = state.legendFormat.experiment ?? '';
+  fmtInput.title = 'Template tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}';
+  fmtInput.addEventListener('change', () => {
+    state.legendFormat.experiment = fmtInput.value.trim() || null;
+    refreshAllGraphAppearances(state);
+  });
+  fmtRow.appendChild(fmtLabel);
+  fmtRow.appendChild(fmtInput);
+  section.appendChild(fmtRow);
 
   const activeKeys = getActiveExperimentKeys(state);
 
   if (activeKeys.size === 0) {
     const empty = document.createElement('p');
     empty.style.cssText = 'font-size:0.75rem;color:#aaa;font-style:italic;margin:0';
-    empty.textContent = 'Aucun experiment chargé';
+    empty.textContent = 'No experiments loaded';
     section.appendChild(empty);
     return section;
   }
 
   for (const expKey of activeKeys) {
-    const entry = state.commitRegistry.get(expKey);
-    if (!entry) continue;
+    let entry = state.commitRegistry.get(expKey);
+    if (!entry) {
+      const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
+      entry = { color, displayName: null, visible: true };
+      state.commitRegistry.set(expKey, entry);
+    }
     // expKey format: "commitHash:type:subject"
     const parts = expKey.split(':');
     const commitShort = parts[0].substring(0, 7);
@@ -982,7 +1370,7 @@ function buildExperimentLegend(state) {
     colorInput.type = 'color';
     colorInput.value = entry.color;
     colorInput.className = 'commit-legend-color';
-    colorInput.title = 'Changer la couleur';
+    colorInput.title = 'Change color';
     colorInput.addEventListener('input', (e) => {
       entry.color = e.target.value;
       refreshGraphsUsingExperiment(state, expKey);
@@ -996,11 +1384,11 @@ function buildExperimentLegend(state) {
     const eyeBtn = document.createElement('button');
     eyeBtn.className = 'legend-eye-btn';
     eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
-    eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+    eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
     eyeBtn.addEventListener('click', () => {
       entry.visible = entry.visible === false ? true : false;
       eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
-      eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+      eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
       refreshGraphsUsingExperiment(state, expKey);
     });
 
@@ -1011,7 +1399,7 @@ function buildExperimentLegend(state) {
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'commit-legend-name';
-    nameInput.placeholder = 'Nom d\'affichage\u2026';
+    nameInput.placeholder = 'Display name\u2026';
     nameInput.value = entry.displayName || '';
     nameInput.addEventListener('change', (e) => {
       entry.displayName = e.target.value.trim() || null;
@@ -1098,15 +1486,35 @@ function buildMetricLegend(state) {
 
   const header = document.createElement('div');
   header.className = 'sidebar-section-title';
-  header.textContent = 'Légende métriques';
+  header.textContent = 'Metric Legend';
   section.appendChild(header);
+
+  // Format template input
+  const fmtRow = document.createElement('div');
+  fmtRow.className = 'sidebar-alias-row';
+  const fmtLabel = document.createElement('span');
+  fmtLabel.className = 'sidebar-alias-label';
+  fmtLabel.textContent = 'Format:';
+  const fmtInput = document.createElement('input');
+  fmtInput.type = 'text';
+  fmtInput.className = 'sidebar-alias-input';
+  fmtInput.placeholder = '\${METRIC}';
+  fmtInput.value = state.legendFormat.metric ?? '';
+  fmtInput.title = 'Template tokens: ${METRIC}, ${METRIC:uppercase}, ${METRIC:lowercase}';
+  fmtInput.addEventListener('change', () => {
+    state.legendFormat.metric = fmtInput.value.trim() || null;
+    refreshAllGraphAppearances(state);
+  });
+  fmtRow.appendChild(fmtLabel);
+  fmtRow.appendChild(fmtInput);
+  section.appendChild(fmtRow);
 
   const activePaths = getActiveMetrics(state);
 
   if (activePaths.size === 0) {
     const empty = document.createElement('p');
     empty.style.cssText = 'font-size:0.75rem;color:#aaa;font-style:italic;margin:0';
-    empty.textContent = 'Aucune métrique chargée';
+    empty.textContent = 'No metrics loaded';
     section.appendChild(empty);
     return section;
   }
@@ -1125,7 +1533,7 @@ function buildMetricLegend(state) {
 
     const dashSelect = document.createElement('select');
     dashSelect.className = 'metric-legend-dash-select';
-    dashSelect.title = 'Style de trait';
+    dashSelect.title = 'Line style';
     const effectiveDash = entry.dash ?? getMetricDefaultDash(state, metricPath);
     for (const style of ['solid', 'dot', 'dash', 'dashdot']) {
       const opt = document.createElement('option');
@@ -1149,11 +1557,11 @@ function buildMetricLegend(state) {
     const eyeBtn = document.createElement('button');
     eyeBtn.className = 'legend-eye-btn';
     eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
-    eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+    eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
     eyeBtn.addEventListener('click', () => {
       entry.visible = entry.visible === false ? true : false;
       eyeBtn.textContent = entry.visible !== false ? '\u25cf' : '\u25cb';
-      eyeBtn.title = entry.visible !== false ? 'Cacher' : 'Afficher';
+      eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
       refreshGraphsUsingMetric(state, metricPath);
     });
     topLine.appendChild(eyeBtn);
@@ -1163,7 +1571,7 @@ function buildMetricLegend(state) {
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'commit-legend-name';
-    nameInput.placeholder = 'Nom d\'affichage\u2026';
+    nameInput.placeholder = 'Display name\u2026';
     nameInput.value = entry.displayName || '';
     nameInput.addEventListener('change', (e) => {
       entry.displayName = e.target.value.trim() || null;
@@ -1181,11 +1589,8 @@ function getGraphIDsUsingExperiment(state, expKey) {
   const ids = [];
   for (const [id, config] of state.graphSettings) {
     for (const slot of config.experiments) {
-      let def = slot;
-      if ('variable' in slot) {
-        def = state.variables.experiments.get(slot.variable) ?? null;
-      }
-      if (def && `${def.commit}:${def.type}:${def.subject}` === expKey) { ids.push(id); break; }
+      const def = resolveExperimentSlot(slot, state.variables);
+      if (def && `${def.commit}:${def.tasktype}:${def.subtask}` === expKey) { ids.push(id); break; }
     }
   }
   return ids;
@@ -1201,7 +1606,7 @@ function refreshGraphsUsingExperiment(state, expKey) {
 // Re-fetches and redraws all graphs that reference the given variable name.
 function refreshGraphsUsingVariable(state, varName) {
   for (const [id, config] of state.graphSettings) {
-    const usesVar = config.experiments.some(s => s.variable === varName)
+    const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName)
       || config.metrics.some(m => {
         if (typeof m === 'string') {
           try { const p = JSON.parse(m); return p?.variable === varName; } catch (_) {}
@@ -1217,10 +1622,7 @@ function refreshGraphsUsingVariable(state, varName) {
 // Resolves variables and re-fetches data for a graph, then redraws it in place.
 async function refetchAndRedrawGraph(state, id, config) {
   const resolved = config.experiments
-    .map(slot => {
-      if ('variable' in slot) return state.variables.experiments.get(slot.variable) ?? null;
-      return (slot.commit && slot.type && slot.subject) ? slot : null;
-    })
+    .map(slot => resolveExperimentSlot(slot, state.variables))
     .filter(Boolean);
   if (resolved.length === 0) return;
 
@@ -1240,7 +1642,7 @@ async function refetchAndRedrawGraph(state, id, config) {
 
   const results = await Promise.all(
     resolved.map(exp => apirest.LoadCommitMetricsValues(
-      exp.type, exp.commit, exp.subject,
+      exp.tasktype, exp.commit, exp.subtask,
       config.min, config.max, config.delta,
       resolvedMetrics
     ))
@@ -1250,182 +1652,13 @@ async function refetchAndRedrawGraph(state, id, config) {
     resolved
       .map((exp, i) => ({ exp, data: results[i] }))
       .filter(p => p.data != null)
-      .map(p => [`${p.exp.commit}:${p.exp.type}:${p.exp.subject}`, p.data])
+      .map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
   );
 
   if (dataMap.size === 0) return;
   await graphManager.UpdateGraph(id, config, dataMap);
 }
 
-// Opens a mini-modal to define or edit an experiment variable.
-async function openExperimentVarModal(name, currentDef, state) {
-  EnableMainUI(false);
-
-  const [perfCommits, vulnCommits] = await Promise.all([
-    apirest.LoadCommits('Perf'),
-    apirest.LoadCommits('Vuln'),
-  ]);
-  const allCommits = [...new Set([...perfCommits, ...vulnCommits])];
-  const gitHistory = gitHistoryPromise;
-
-  const slot = currentDef
-    ? { commit: currentDef.commit, type: currentDef.type, subjects: [], subject: currentDef.subject }
-    : { commit: '', type: '', subjects: [], subject: '' };
-
-  const modalpage = document.getElementById('modalpage');
-  modalpage.innerHTML = '';
-  const container = document.createElement('div');
-  ui.Reset();
-
-  container.appendChild(ui.CreateTitle(`Variable\u00a0: ${name}`, 'h3', null));
-
-  const row = document.createElement('div');
-  row.className = 'experiment-row';
-
-  const commitSelect = ui.CreateSelect(
-    [{ value: '', text: 'Commit\u2026' }].concat(
-      allCommits.map(c => ({ value: c, text: CommitHelp.ShortHash(c), selected: c === slot.commit }))
-    ), null
-  );
-  row.appendChild(commitSelect);
-
-  gitHistory.then(function(history) {
-    if (!history) return;
-    const enriched = CommitHelp.Enrich(allCommits, history);
-    ui.UpdateSelect(commitSelect,
-      [{ value: '', text: 'Commit\u2026' }].concat(
-        enriched.map(e => ({ value: e.hash, text: e.label, selected: e.hash === slot.commit }))
-      )
-    );
-  });
-
-  const typeSelect = ui.CreateSelect([
-    { value: '', text: 'Type\u2026' },
-    { value: 'Perf', selected: slot.type === 'Perf' },
-    { value: 'Vuln', selected: slot.type === 'Vuln' },
-  ], null);
-  if (!slot.commit) UI.DisableElement(typeSelect);
-  row.appendChild(typeSelect);
-
-  const subjectSelect = ui.CreateSelect(
-    [{ value: '', text: 'Subject\u2026' }].concat(
-      slot.subjects.map(s => ({ value: s.value, text: s.text, selected: s.value === slot.subject }))
-    ), null
-  );
-  if (!slot.type || slot.subjects.length === 0) UI.DisableElement(subjectSelect);
-  row.appendChild(subjectSelect);
-
-  let btOk = null;
-
-  function updateOk() {
-    if (!btOk) return;
-    if (slot.commit && slot.type && slot.subject) UI.EnableElement(btOk);
-    else UI.DisableElement(btOk);
-  }
-
-  commitSelect.onchange = function() {
-    slot.commit = commitSelect.value;
-    slot.type = '';
-    slot.subjects = [];
-    slot.subject = '';
-    ui.UpdateSelect(typeSelect, [
-      { value: '', text: 'Type\u2026' },
-      { value: 'Perf' },
-      { value: 'Vuln' },
-    ]);
-    UI.DisableElement(typeSelect);
-    ui.UpdateSelect(subjectSelect, [{ value: '', text: 'Subject\u2026' }]);
-    UI.DisableElement(subjectSelect);
-    if (slot.commit) UI.EnableElement(typeSelect);
-    updateOk();
-  };
-
-  typeSelect.onchange = async function() {
-    slot.type = typeSelect.value;
-    slot.subjects = [];
-    slot.subject = '';
-    ui.UpdateSelect(subjectSelect, [{ value: '', text: 'Subject\u2026' }]);
-    UI.DisableElement(subjectSelect);
-    updateOk();
-    if (!slot.type || !slot.commit) return;
-    UI.DisableElement(typeSelect);
-    try {
-      const subjects = await apirest.LoadCommitSubjects(slot.type, slot.commit);
-      slot.subjects = subjects;
-      if (subjects.length === 0) return;
-      ui.UpdateSelect(subjectSelect,
-        [{ value: '', text: 'Subject\u2026' }].concat(subjects.map(s => ({ value: s.value, text: s.text })))
-      );
-      UI.EnableElement(subjectSelect);
-    } finally {
-      UI.EnableElement(typeSelect);
-    }
-  };
-
-  subjectSelect.onchange = function() {
-    slot.subject = subjectSelect.value;
-    updateOk();
-  };
-
-  // Pre-fill subjects if editing an existing def
-  if (slot.commit && slot.type && slot.subjects.length === 0 && slot.subject) {
-    UI.DisableElement(typeSelect);
-    apirest.LoadCommitSubjects(slot.type, slot.commit).then(function(subjects) {
-      slot.subjects = subjects;
-      if (subjects.length > 0) {
-        ui.UpdateSelect(subjectSelect,
-          [{ value: '', text: 'Subject\u2026' }].concat(
-            subjects.map(s => ({ value: s.value, text: s.text, selected: s.value === slot.subject }))
-          )
-        );
-        UI.EnableElement(subjectSelect);
-      }
-    }).finally(() => UI.EnableElement(typeSelect));
-  }
-
-  container.appendChild(row);
-
-  setModalCancel(function() {
-    clearModalCancel();
-    modalpage.classList.remove('modalpage_visible');
-    EnableMainUI(true);
-  });
-
-  const actions = ui.CreateActions(true, {
-    ok: {
-      callback: function() {
-        if (!slot.commit || !slot.type || !slot.subject) return;
-        // Register experiment in registry (keyed by commit:type:subject)
-        const expKey = `${slot.commit}:${slot.type}:${slot.subject}`;
-        if (!state.commitRegistry.has(expKey)) {
-          const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
-          state.commitRegistry.set(expKey, { color, displayName: null });
-        }
-        state.variables.experiments.set(name, { commit: slot.commit, type: slot.type, subject: slot.subject });
-        refreshGraphsUsingVariable(state, name);
-        BuildSidebar(state);
-        clearModalCancel();
-        modalpage.classList.remove('modalpage_visible');
-        EnableMainUI(true);
-      },
-      className: 'exp-var-ok-btn',
-    },
-    cancel: {
-      callback: function() {
-        clearModalCancel();
-        modalpage.classList.remove('modalpage_visible');
-        EnableMainUI(true);
-      }
-    }
-  });
-  container.appendChild(actions);
-
-  modalpage.appendChild(container);
-  btOk = container.querySelector('.exp-var-ok-btn');
-  UI.DisableElement(btOk);
-  updateOk();
-  modalpage.classList.add('modalpage_visible');
-}
 
 // Opens a mini-modal to define or edit a metric variable (single selection).
 async function openMetricVarModal(name, currentVal, state) {
@@ -1435,22 +1668,24 @@ async function openMetricVarModal(name, currentVal, state) {
   const uniqueExps = new Map();
   for (const [, config] of state.graphSettings) {
     for (const slot of config.experiments) {
-      let def = slot;
-      if ('variable' in slot) def = state.variables.experiments.get(slot.variable) ?? null;
-      if (def?.commit && def.type && def.subject) {
-        uniqueExps.set(`${def.commit}:${def.type}:${def.subject}`, def);
-      }
+      const def = resolveExperimentSlot(slot, state.variables);
+      if (def) uniqueExps.set(`${def.commit}:${def.tasktype}:${def.subtask}`, def);
     }
   }
-  for (const [, def] of state.variables.experiments) {
-    if (def?.commit && def.type && def.subject) {
-      uniqueExps.set(`${def.commit}:${def.type}:${def.subject}`, def);
+  // Also include all commit×subtask variable combinations
+  for (const [, commitEntry] of state.variables.commits) {
+    if (!commitEntry?.value) continue;
+    for (const [, subtaskEntry] of state.variables.subtasks) {
+      if (!subtaskEntry?.value) continue;
+      const { tasktype, subtask } = subtaskEntry.value;
+      const def = { commit: commitEntry.value, tasktype, subtask };
+      uniqueExps.set(`${def.commit}:${def.tasktype}:${def.subtask}`, def);
     }
   }
 
   const experiments = Array.from(uniqueExps.values());
   const metricsResults = experiments.length > 0
-    ? await Promise.all(experiments.map(exp => apirest.LoadCommitMetrics(exp.type, exp.commit, exp.subject)))
+    ? await Promise.all(experiments.map(exp => apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask)))
     : [];
 
   const union = new Set();
@@ -1461,7 +1696,7 @@ async function openMetricVarModal(name, currentVal, state) {
   const container = document.createElement('div');
   ui.Reset();
 
-  container.appendChild(ui.CreateTitle(`Variable m\u00e9trique\u00a0: ${name}`, 'h3', null));
+  container.appendChild(ui.CreateTitle(`Metric Variable: ${name}`, 'h3', null));
 
   let selectedMetric = currentVal;
   let btOk = null;
@@ -1475,7 +1710,7 @@ async function openMetricVarModal(name, currentVal, state) {
   if (union.size === 0) {
     const msg = document.createElement('p');
     msg.style.cssText = 'color:#aaa;font-style:italic;font-size:0.9rem;margin:8px 0;';
-    msg.textContent = 'Aucune m\u00e9trique disponible. Ajoutez d\u2019abord des graphes avec des experiments r\u00e9solus.';
+    msg.textContent = 'No metrics available. First add graphs with resolved experiments.';
     container.appendChild(msg);
   } else {
     const syntheticMetrics = buildSyntheticMetrics(union);
@@ -1682,7 +1917,7 @@ function buildFileListModal(restoreUI, opts) {
 
 function OpenView(restoreUI = false) {
   buildFileListModal(restoreUI, {
-    title: 'Ouvrir une vue',
+    title: 'Open a View',
     filterPlaceholder: 'Filter views\u2026',
     emptyText: {
       empty:    'No saved views yet.',
@@ -1717,8 +1952,11 @@ function OpenView(restoreUI = false) {
 
 function buildTemplateURL(templateName, state) {
   const params = new URLSearchParams({ template: templateName });
-  for (const [name, def] of state.variables.experiments) {
-    if (def) params.set(name, `${def.commit}:${def.type}:${def.subject}`);
+  for (const [name, entry] of state.variables.commits) {
+    if (entry?.value) params.set(`c_${name}`, entry.value);
+  }
+  for (const [name, entry] of state.variables.subtasks) {
+    if (entry?.value) params.set(`s_${name}`, `${entry.value.tasktype}:${entry.value.subtask}`);
   }
   for (const [name, val] of state.variables.metrics) {
     if (val) params.set(name, val);
@@ -1728,7 +1966,7 @@ function buildTemplateURL(templateName, state) {
 
 function OpenTemplate(restoreUI = false) {
   buildFileListModal(restoreUI, {
-    title: 'Ouvrir un template',
+    title: 'Open a Template',
     filterPlaceholder: 'Filter templates\u2026',
     emptyText: {
       empty:    'No saved templates yet.',
@@ -1773,16 +2011,18 @@ function OpenTemplate(restoreUI = false) {
 }
 
 async function SaveAsTemplate(state) {
-  const name = prompt('Nom du template :');
+  const name = prompt('Template name:');
   if (!name?.trim()) return;
   const trimmedName = name.trim();
 
   const tpl = {
     title: state.title,
     variables: {
-      experiments: new Map([...state.variables.experiments.keys()].map(k => [k, null])),
-      metrics:     new Map([...state.variables.metrics.keys()].map(k => [k, null])),
+      commits:  new Map([...state.variables.commits.keys()].map(k => [k, { value: null, alias: null }])),
+      subtasks: new Map([...state.variables.subtasks.keys()].map(k => [k, { value: null, alias: null }])),
+      metrics:  new Map([...state.variables.metrics.keys()].map(k => [k, null])),
     },
+    legendFormat:   state.legendFormat,
     graphSettings:  state.graphSettings,
     commitRegistry: state.commitRegistry,
     metricLegend:   state.metricLegend,
@@ -1795,38 +2035,49 @@ async function SaveAsTemplate(state) {
 async function tryLoadTemplateFromURL() {
   const params = new URLSearchParams(window.location.search);
   const templateName = params.get('template');
-  if (!templateName) return;
+  if (!templateName) return false;
 
   // Clean URL immediately so a failed load doesn't loop on every reload.
   history.replaceState(null, '', window.location.pathname);
 
-  const tpl = await apirest.LoadTemplate(templateName);
-  if (!tpl) return;
+  const raw = await apirest.LoadTemplate(templateName);
+  if (!raw) return false;
 
-  if (tpl.variables?.experiments instanceof Map) {
-    for (const [name] of tpl.variables.experiments) {
-      const raw = params.get(name);
-      if (!raw) continue;
-      // Split on first two colons only — subject may itself contain ':'
-      const firstColon  = raw.indexOf(':');
-      const secondColon = raw.indexOf(':', firstColon + 1);
-      if (firstColon !== -1 && secondColon !== -1) {
-        const commit  = raw.slice(0, firstColon);
-        const type    = raw.slice(firstColon + 1, secondColon);
-        const subject = raw.slice(secondColon + 1);
-        tpl.variables.experiments.set(name, { commit, type, subject });
+  // Migrate to new format before applying URL params
+  const tpl = migrateStateIfNeeded(raw);
+
+  // Populate commit variables from URL params (format: c_<varName>=<commitHash>)
+  if (tpl.variables?.commits instanceof Map) {
+    for (const [name, entry] of tpl.variables.commits) {
+      const val = params.get(`c_${name}`);
+      if (val) tpl.variables.commits.set(name, { value: val, alias: entry?.alias ?? null });
+    }
+  }
+  // Populate subtask variables from URL params (format: s_<varName>=<tasktype>:<subtask>)
+  if (tpl.variables?.subtasks instanceof Map) {
+    for (const [name, entry] of tpl.variables.subtasks) {
+      const val = params.get(`s_${name}`);
+      if (val) {
+        const firstColon = val.indexOf(':');
+        if (firstColon !== -1) {
+          tpl.variables.subtasks.set(name, {
+            value: { tasktype: val.slice(0, firstColon), subtask: val.slice(firstColon + 1) },
+            alias: entry?.alias ?? null,
+          });
+        }
       }
     }
   }
   if (tpl.variables?.metrics instanceof Map) {
     for (const [name] of tpl.variables.metrics) {
-      const raw = params.get(name);
-      if (raw) tpl.variables.metrics.set(name, raw);
+      const val = params.get(name);
+      if (val) tpl.variables.metrics.set(name, val);
     }
   }
 
   await ResetState(state, tpl);
   EnableMainUI(true);
+  return true;
 }
 
 function OpenInfoModal() {
@@ -1841,81 +2092,7 @@ function OpenInfoModal() {
   const body = document.createElement('div');
   body.className = 'info-modal-body';
   body.innerHTML = `
-    <p>This dashboard visualises performance and vulnerability test results as interactive time-series graphs. Follow the steps below to explore your data.</p>
-
-    <h3>1 — Getting started</h3>
-    <p>Use the toolbar in the top-right header to manage views:</p>
-    <ul>
-      <li><strong>Ouvrir vue</strong> — open a saved view or start fresh (click <strong>New</strong> inside the dialog).</li>
-      <li><strong>Nouvelle vue</strong> — jump directly to the view creator for a blank dashboard.</li>
-    </ul>
-
-    <h3>2 — View Creator</h3>
-    <p>Select/fill four values in order — each step unlocks the next:</p>
-    <ol>
-      <li><strong>XP Type</strong> — choose <em>Perf</em> (performance) or <em>Vuln</em> (vulnerability).</li>
-      <li><strong>Commit</strong> — select the commit to base available metrics and the default selection on.</li>
-      <li><strong>Library (PUT)</strong> — pick the programme under test (benchmark name) for that commit.</li>
-      <li><strong>View name</strong> — auto-generated from your selections; edit for a custom name.</li>
-    </ol>
-    <p>Click <strong>OK</strong> to confirm. A new view with those parameters will be created.</p>
-
-    <h3>3 — Add a graph (+ Graphe)</h3>
-    <p>Click <strong>+ Graphe</strong> in the toolbar to add a new graph panel. Four steps:</p>
-    <ol>
-      <li><strong>PUT</strong> — pre-selected from the global config; change to graph a different library.</li>
-      <li><strong>Commit(s)</strong> — select one commit for a standard graph, or 2–4 commits to compare.</li>
-      <li><strong>Metric(s)</strong> — browse the metric tree (click <strong>➕</strong> to expand a folder).</li>
-      <li><strong>Time range</strong> — set Start, End, and Step in microseconds (µs). Smaller step = more detail, slower load.</li>
-    </ol>
-
-    <h3>4 — Graph controls</h3>
-    <p>Each graph panel has controls in its title bar and a toggle row below:</p>
-    <ul>
-      <li><strong>✖</strong> (red) — delete the graph.</li>
-      <li><strong>➖ / ➕</strong> — minimize or expand the plot area.</li>
-      <li><strong>Split Y-Axes</strong> — give each metric its own Y-axis (useful for different scales).</li>
-      <li><strong>All Runs</strong> — overlay individual run data as dotted lines.</li>
-      <li><strong>Confidence Bands</strong> — show 95% confidence interval shading around means.</li>
-    </ul>
-
-    <h3>5 — Save and load</h3>
-    <ul>
-      <li><strong>Sauvegarder</strong> — saves the entire dashboard (all graphs and settings) under the title shown in the header.</li>
-      <li>Click <strong>✏ Edit</strong> next to the title to rename before saving.</li>
-      <li><strong>Ouvrir vue</strong> — lists all saved views; search, sort, load, or delete them.</li>
-    </ul>
-
-    <h3>Tips</h3>
-    <ul>
-      <li>CI bands use a 95% t-distribution confidence interval (Bessel-corrected variance).</li>
-      <li>Hover over any graph for a unified tooltip showing all metric values at that time point.</li>
-      <li>Hidden legend items are preserved when you toggle All Runs / Confidence Bands / Split Y-Axes.</li>
-    </ul>
-
-    <hr style="margin: 28px 0; border: none; border-top: 2px solid #e0e0e0;">
-
-    <h3>Plain-language guide</h3>
-
-    <h4 style="margin-top:16px; color:#555;">Starting from scratch</h4>
-    <p>Click <strong>Ouvrir vue</strong> (top-right toolbar) to open a saved view, or <strong>Nouvelle vue</strong> to start a blank dashboard. The view ties together a test type, a code commit, and a benchmark library (PUT).</p>
-
-    <h4 style="margin-top:16px; color:#555;">Setting up a view</h4>
-    <p>Fill the four fields in order — each one unlocks the next. The name auto-fills once you pick a subject; change it if you want something more memorable.</p>
-
-    <h4 style="margin-top:16px; color:#555;">Adding a graph</h4>
-    <p>Click <strong>+ Graphe</strong>, choose the PUT, pick one or more commits, select your metrics, and set a time window. Two or more commits produces a comparison chart.</p>
-
-    <h4 style="margin-top:16px; color:#555;">What the toggle buttons actually show you</h4>
-    <ul>
-      <li><strong>All Runs</strong> — shows every individual benchmark run as a faint dotted line. Wide spread = inconsistent results.</li>
-      <li><strong>Confidence Bands</strong> — adds a shaded area around each mean. The wider the band, the less certain the result (95% CI).</li>
-      <li><strong>Split Y-Axes</strong> — gives each metric its own vertical scale. Useful when comparing metrics with very different units or magnitudes.</li>
-    </ul>
-    <p>Clicking a trace name in the legend hides/shows it. That hidden state is preserved when you toggle the buttons above.</p>
-
-    <h4 style="margin-top:16px; color:#555;">Saving and loading</h4>
-    <p>Click <strong>Sauvegarder</strong> to save your dashboard. Click <strong>✏ Edit</strong> in the header to rename it first. Use <strong>Ouvrir vue</strong> to manage saved views: search, sort, load, or delete.</p>
+    <p>Help content to be written later.</p>
   `;
   container.appendChild(body);
 
@@ -2061,6 +2238,35 @@ const errorManager = new ErrorManager();
 const apirest = new ApiREST(config.apiBase, errorManager);
 // Loaded once at startup; reused as a resolved Promise by all dropdowns.
 const gitHistoryPromise = apirest.LoadGitHistory();
+// Pre-fetch all available commits once for use in sidebar pill-selectors.
+allCommitsPromise = Promise.all([
+  apirest.LoadCommits('Perf'),
+  apirest.LoadCommits('Vuln'),
+]).then(async ([perf, vuln]) => {
+  const all = [...new Set([...perf, ...vuln])];
+
+  const recentPerf = perf.slice(0, 10);
+  const recentVuln = vuln.slice(0, 10);
+  
+  const fetches = [];
+  recentPerf.forEach(c => fetches.push(
+    apirest.LoadCommitSubjects('Perf', c).then(res => res.map(s => ({tasktype: 'Perf', subtask: s.value})))
+  ));
+  recentVuln.forEach(c => fetches.push(
+    apirest.LoadCommitSubjects('Vuln', c).then(res => res.map(s => ({tasktype: 'Vuln', subtask: s.value})))
+  ));
+  
+  const results = await Promise.all(fetches);
+  results.flat().forEach(entry => {
+    if (!globalDynamicSubtasks.some(g => g.tasktype === entry.tasktype && g.subtask === entry.subtask)) {
+      globalDynamicSubtasks.push(entry);
+    }
+  });
+
+  BuildSidebar(state);
+
+  return all;
+});
 const ui = new UI();
 const graphManager = new GraphManager(main, {
   delete:    function(id) { state.graphSettings.delete(id); BuildSidebar(state); },
@@ -2074,7 +2280,7 @@ const graphManager = new GraphManager(main, {
 
 const UIElt = [];
 
-const uiAddGraph = UI.CreateToolbarBtn('+ Graphe', 'Add a new graph');
+const uiAddGraph = UI.CreateToolbarBtn('+ Graph', 'Add a new graph');
 uiAddGraph.onclick = function() {
   EnableMainUI(false);
   AddGraphique();
@@ -2082,7 +2288,7 @@ uiAddGraph.onclick = function() {
 headerToolbar.appendChild(uiAddGraph);
 UIElt.push(uiAddGraph);
 
-const uiSaveView = UI.CreateToolbarBtn('Sauvegarder', 'Save the current view');
+const uiSaveView = UI.CreateToolbarBtn('Save view', 'Save the current view');
 uiSaveView.onclick = function() {
   EnableMainUI(false);
   Save(state);
@@ -2090,7 +2296,7 @@ uiSaveView.onclick = function() {
 headerToolbar.appendChild(uiSaveView);
 UIElt.push(uiSaveView);
 
-const uiOpenView = UI.CreateToolbarBtn('Ouvrir vue', 'Open a saved view');
+const uiOpenView = UI.CreateToolbarBtn('Open view', 'Open a saved view');
 uiOpenView.onclick = function() {
   const restoreUI = !uiAddGraph.classList.contains('is-disabled');
   EnableMainUI(false);
@@ -2098,7 +2304,7 @@ uiOpenView.onclick = function() {
 };
 headerToolbar.appendChild(uiOpenView);
 
-const uiNewView = UI.CreateToolbarBtn('Nouvelle vue', 'Create a new blank view');
+const uiNewView = UI.CreateToolbarBtn('New view', 'Create a new blank view');
 uiNewView.onclick = function() {
   const restoreUI = !uiAddGraph.classList.contains('is-disabled');
   EnableMainUI(false);
@@ -2175,7 +2381,7 @@ if (sidebarResizeHandle && sidebarPanelEl) {
   });
 }
 
-const uiOpenTpl = UI.CreateToolbarBtn('Ouvrir template', 'Open a saved template');
+const uiOpenTpl = UI.CreateToolbarBtn('Open template', 'Open a saved template');
 uiOpenTpl.onclick = function() {
   const restoreUI = !uiAddGraph.classList.contains('is-disabled');
   EnableMainUI(false);
@@ -2184,7 +2390,7 @@ uiOpenTpl.onclick = function() {
 headerToolbar.appendChild(uiOpenTpl);
 // Not pushed to UIElt — remains enabled at page load so templates can be opened without a view.
 
-const uiSaveTpl = UI.CreateToolbarBtn('Sauvegarder template', 'Save current view as template');
+const uiSaveTpl = UI.CreateToolbarBtn('Save template', 'Save current view as template');
 uiSaveTpl.onclick = function() {
   EnableMainUI(false);
   SaveAsTemplate(state).finally(() => EnableMainUI(true));
@@ -2192,7 +2398,7 @@ uiSaveTpl.onclick = function() {
 headerToolbar.appendChild(uiSaveTpl);
 UIElt.push(uiSaveTpl);
 
-const uiInfo = UI.CreateToolbarBtn('Aide', 'Help');
+const uiInfo = UI.CreateToolbarBtn('Help', 'Explains how this webapp works');
 uiInfo.onclick = OpenInfoModal;
 headerToolbar.appendChild(uiInfo);
 
@@ -2222,5 +2428,13 @@ modalpage.addEventListener('click', function(e) {
   }
 });
 
-tryLoadTemplateFromURL();
+tryLoadTemplateFromURL().then(function(loaded) {
+  if (!loaded) {
+    // No URL template — create a default view so the user can start immediately.
+    const defaultTitle = 'Vue_' + Date.now();
+    ResetState(state, { title: defaultTitle }).then(function() {
+      EnableMainUI(true);
+    });
+  }
+});
 console.log('done');
