@@ -59,7 +59,7 @@ void Config::Save(std::string const& filepath) const {
 }
 
 void Config::Validate(bool forceInstall) {
-  server_.Validate();
+  server_.Validate(forceInstall);
   schedule_.Validate(forceInstall);
   cache_.Validate();
 }

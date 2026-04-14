@@ -1,5 +1,6 @@
 #include "config.hxx"
 #include "../../system/linux_cores.hxx"
+#include "../../../utils/logs.hxx"
 #include "../../../utils/rapidjson.hxx"
 #include "../../../utils/variables.hxx"
 
@@ -77,7 +78,7 @@ void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(scriptPath_ / file);
     if (forceInstall || (!std::filesystem::exists(filePath))) {
-      std::cerr << "Creating missing required file " << filePath << std::endl;
+      LOGE("Creating missing required file " << filePath);
       std::ofstream ofs(filePath, std::ios::binary);
       ofs.write(data, size);
       ofs.close();

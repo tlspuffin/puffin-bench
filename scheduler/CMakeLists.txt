@@ -73,6 +73,15 @@ endif()
 EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/executor.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/executor_sh.h" Executor_Script)
 EmbedTextFileScript("${CMAKE_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_DIR}/src/embeded/scheduler/functions_sh.h" Functions_Script)
 
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/board.html" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/board_html.h" Board_HTML)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/board.css" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/board_css.h" Board_CSS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/board.js" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/board_js.h" Board_JS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/joblauncher.css" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/joblauncher_css.h" JobLauncher_CSS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/joblauncher.js" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/joblauncher_js.h" JobLauncher_JS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/taskcard.css" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/taskcard_css.h" TaskCard_CSS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/taskcard.js" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/taskcard_js.h" TaskCard_JS)
+EmbedTextFileScript("${CMAKE_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE_DIR}/src/embeded/html/board/terminal_js.h" Terminal_JS)
+
 set(SRV_SRC 
   src/scheduler/main.cxx src/scheduler/config.cxx 
   src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_tgz.cxx
@@ -88,6 +97,9 @@ set(SRV_SRC
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx
   src/embeded/scheduler/executor_sh.h src/embeded/scheduler/functions_sh.h
+  src/embeded/html/board/board_html.h src/embeded/html/board/board_css.h src/embeded/html/board/board_js.h
+  src/embeded/html/board/joblauncher_css.h src/embeded/html/board/joblauncher_js.h
+  src/embeded/html/board/taskcard_css.h src/embeded/html/board/taskcard_js.h src/embeded/html/board/terminal_js.h
   ${GENERATED_VERSION_C}
 )
 

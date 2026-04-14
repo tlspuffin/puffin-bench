@@ -37,18 +37,24 @@ int main(int argc, char *argv[]) {
 #endif
 
   bool forceInstall = false;
+  bool onlyInstall = false;
   std::string configFile = "config.json";
   for(int i=1; i<argc; i++) {
     if (argv[i][0] != '-') {
       configFile = argv[i];
     } else {
       bool used = false;
-      std::vector<std::string> parameters{"--install"};
+      std::vector<std::string> parameters{"--force-install", "--install"};
       for(size_t j=0; j<parameters.size(); ++j) {
         if (parameters[j].compare(argv[i]) == 0) {
           switch(j) {
             case 0:
               forceInstall = true;
+              used = true;
+              break;
+            case 1:
+              forceInstall = true;
+              onlyInstall = true;
               used = true;
               break;
             default:
@@ -67,6 +73,9 @@ int main(int argc, char *argv[]) {
     config.Save(configFile);
   }
   config.Validate(forceInstall);
+  if (onlyInstall) {
+    return 0;
+  }
 
   struct ns_API::APIS apis(config.schedule_, config.cache_, config.server_.port_);
 
