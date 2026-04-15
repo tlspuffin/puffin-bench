@@ -7,6 +7,13 @@
   --color-primary-dark: #764ba2;
   --color-primary-hover: #5a70d8;
   --color-text-dark: #2c3e50;
+  --color-text: #333;
+  --color-text-muted: #888;
+  --color-text-faint: #999;
+  --color-border: var(--color-border);
+  --color-bg: #ffffff;
+  --color-bg-page: #f5f5f5;
+  --color-bg-subtle: #efefef;
   --color-graph-bar: #ffd89b;
   --color-graph-bar-end: #19547b;
   --color-toast-success-start: #27ae60;
@@ -16,6 +23,7 @@
   --color-toast-info-start: #2980b9;
   --color-toast-info-end: #3498db;
   --color-delete: #e74c3c;
+  --shadow-focus: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 /* =================================================================
@@ -34,8 +42,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f5f5;
-  color: #333;
+  background-color: var(--color-bg-page);
+  color: var(--color-text);
   line-height: 1.6;
 }
 
@@ -91,12 +99,10 @@ body {
 
 .header-toolbar-btn:hover {
   background: rgba(255, 255, 255, 0.32);
-  transform: none;
 }
 
 .header-toolbar-btn:active {
   background: rgba(255, 255, 255, 0.45);
-  transform: none;
 }
 
 .header-toolbar-btn:disabled,
@@ -164,7 +170,7 @@ body {
   transform: rotate(180deg);
   cursor: pointer;
   background: #e8eaf0;
-  border-left: 1px solid #e0e0e0;
+  border-left: 1px solid var(--color-border);
   padding: 16px 6px;
   font-size: 0.75rem;
   font-weight: 700;
@@ -191,7 +197,7 @@ body {
 .sidebar {
   width: 260px;
   flex-shrink: 0;
-  border-left: 1px solid #e0e0e0;
+  border-left: 1px solid var(--color-border);
   overflow-y: auto;
   padding: 12px;
   background: #fafafa;
@@ -227,7 +233,7 @@ body {
 
 /* Variable cards */
 .sidebar-variable-card {
-  background: #efefef;
+  background: var(--color-bg-subtle);
   border-radius: 7px;
   padding: 6px 8px;
   margin-bottom: 6px;
@@ -288,7 +294,7 @@ body {
 .sidebar-reset-btn {
   background: none;
   border: none;
-  color: #999;
+  color: var(--color-text-faint);
   cursor: pointer;
   font-size: 0.9rem;
   padding: 0 2px;
@@ -342,7 +348,7 @@ body {
 
 .sidebar-alias-label {
   font-size: 0.72rem;
-  color: #888;
+  color: var(--color-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -350,7 +356,7 @@ body {
 .sidebar-alias-input {
   flex: 1;
   font-size: 0.78rem;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 2px 5px;
   min-width: 0;
@@ -375,7 +381,7 @@ body {
 
 .sidebar-format-template-label {
   font-size: 0.72rem;
-  color: #888;
+  color: var(--color-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -383,7 +389,7 @@ body {
 .sidebar-format-template-input {
   flex: 1;
   font-size: 0.78rem;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 2px 5px;
   min-width: 0;
@@ -440,7 +446,7 @@ body {
   border: 1px solid #ccc;
   border-radius: 4px;
   padding: 1px 3px;
-  background: #fff;
+  background: var(--color-bg);
   cursor: pointer;
   flex-shrink: 0;
   width: 76px;
@@ -455,7 +461,7 @@ body {
   padding: 0 2px;
   line-height: 1;
   flex-shrink: 0;
-  color: #888;
+  color: var(--color-text-muted);
   margin-left: auto;
   align-self: center; /* eye button has no text baseline — center it explicitly */
 }
@@ -475,7 +481,7 @@ body {
 
 .commit-legend-name:hover, .commit-legend-name:focus {
   border-color: var(--color-primary);
-  background: #fff;
+  background: var(--color-bg);
   outline: none;
 }
 
@@ -484,7 +490,7 @@ body {
    Graph Containers
    ================================================================= */
 
-.graph_container {
+.graph-container {
   width: 100%;
   background: white;
   border-radius: 12px;
@@ -494,12 +500,12 @@ body {
   transition: box-shadow 0.3s ease;
 }
 
-.graph_container:hover {
+.graph-container:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
 /* Graph title bar (coloured background) */
-.graph_title_bar {
+.graph-title-bar {
   background: var(--color-primary);
   padding: 7px 10px;
   display: flex;
@@ -507,7 +513,7 @@ body {
   gap: 8px;
 }
 
-.graph_title_text {
+.graph-title-text {
   flex: 1;
   text-align: center;
   font-weight: 600;
@@ -519,7 +525,7 @@ body {
 }
 
 /* Small pill badge shown in graph titles for variable-sourced entries (e.g. "e1", "m2") */
-.graph_title_var_badge {
+.graph-title-var-badge {
   display: inline-block;
   background: rgba(255, 255, 255, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.5);
@@ -535,7 +541,7 @@ body {
 }
 
 /* Warning badge in graph titles for duplicate metrics */
-.graph_title_warn_badge {
+.graph-title-warn-badge {
   display: inline-block;
   margin-left: 6px;
   background: rgba(255, 200, 0, 0.9);
@@ -550,14 +556,14 @@ body {
 }
 
 /* "undefined" indicator in graph titles (pale red, italic) */
-.graph_title_undefined {
+.graph-title-undefined {
   color: rgba(255, 160, 140, 0.95);
   font-style: italic;
   font-size: 0.85em;
 }
 
 /* Separator between the experiment block and metric block in the graph title */
-.graph_title_section_sep {
+.graph-title-section-sep {
   display: inline-block;
   margin: 0 8px;
   opacity: 0.6;
@@ -565,14 +571,14 @@ body {
   vertical-align: middle;
 }
 
-.graph_title_controls {
+.graph-title-controls {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
 }
 
-.graph_icon_btn {
+.graph-icon-btn {
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
@@ -586,30 +592,30 @@ body {
   font-family: inherit;
 }
 
-.graph_icon_btn:hover {
+.graph-icon-btn:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
-.graph_icon_btn:active {
+.graph-icon-btn:active {
   background: rgba(255, 255, 255, 0.48);
   transform: scale(0.92);
 }
 
-.graph_icon_btn_delete {
+.graph-icon-btn-delete {
   color: #ff8080;
   border-color: rgba(255, 128, 128, 0.45);
 }
 
-.graph_icon_btn.graph_icon_btn_delete:hover {
+.graph-icon-btn.graph-icon-btn-delete:hover {
   background: rgba(255, 100, 100, 0.25);
 }
 
-.graph_icon_btn.graph_icon_btn_edit:hover {
+.graph-icon-btn.graph-icon-btn-edit:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
 /* Toggle bar (white band below title) */
-.graph_toggle_bar {
+.graph-toggle-bar {
   background: white;
   padding: 6px 12px;
   display: flex;
@@ -619,7 +625,7 @@ body {
 }
 
 /* Graph area (Plotly container) */
-div[id^="graph_area_"] {
+.graph-area {
   width: 100% !important;
   height: 400px;
   padding: 10px;
@@ -654,7 +660,7 @@ div[id^="graph_area_"] {
   transition: opacity 0.3s ease, display 0.3s ease;
 }
 
-.modalpage_visible {
+.modalpage-visible {
   display: flex;
   opacity: 1;
 }
@@ -684,7 +690,7 @@ div[id^="graph_area_"] {
 
 /* Modal titles */
 .modalpage h3,
-.modal_h3 {
+.modal-h3 {
   color: var(--color-text-dark);
   margin-bottom: 15px;
   font-size: 1.3rem;
@@ -698,56 +704,56 @@ div[id^="graph_area_"] {
    ================================================================= */
 
 /* Select dropdowns */
-.modal_select,
+.modal-select,
 select {
   width: 100%;
   padding: 12px 16px;
   font-size: 1rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
-  background: white;
+  background: var(--color-bg);
   cursor: pointer;
   transition: all 0.2s ease;
   margin-bottom: 20px;
 }
 
-.modal_select:hover,
+.modal-select:hover,
 select:hover {
   border-color: var(--color-primary);
 }
 
-.modal_select:focus,
+.modal-select:focus,
 select:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  box-shadow: var(--shadow-focus);
 }
 
 /* Text inputs (e.g. dashboard title) */
-.modal_text_input {
+.modal-text-input {
   width: 100%;
   padding: 12px 16px;
   font-size: 1rem;
   font-family: inherit;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
-  background: white;
+  background: var(--color-bg);
   transition: all 0.2s ease;
   margin-bottom: 20px;
 }
 
-.modal_text_input:hover {
+.modal-text-input:hover {
   border-color: var(--color-primary);
 }
 
-.modal_text_input:focus {
+.modal-text-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  box-shadow: var(--shadow-focus);
 }
 
 /* Time selection inputs - horizontal layout */
-.modal_div:has(input[type="number"]) {
+.modal-div:has(input[type="number"]) {
   display: flex;
   gap: 15px;
   align-items: center;
@@ -755,7 +761,7 @@ select:focus {
   flex-wrap: wrap;
 }
 
-.modal_div:has(input[type="number"]) label {
+.modal-div:has(input[type="number"]) label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -763,30 +769,30 @@ select:focus {
   min-width: 150px;
 }
 
-.modal_div label span {
+.modal-div label span {
   font-weight: 600;
   color: #555;
   white-space: nowrap;
 }
 
-.modal_div input[type="number"] {
+.modal-div input[type="number"] {
   flex: 1;
   padding: 10px 14px;
   font-size: 1rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   transition: all 0.2s ease;
   min-width: 80px;
 }
 
-.modal_div input[type="number"]:hover {
+.modal-div input[type="number"]:hover {
   border-color: var(--color-primary);
 }
 
-.modal_div input[type="number"]:focus {
+.modal-div input[type="number"]:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  box-shadow: var(--shadow-focus);
 }
 
 /* =================================================================
@@ -819,7 +825,7 @@ select:focus {
 
 .checkbox-label span {
   font-size: 1rem;
-  color: #333;
+  color: var(--color-text);
 }
 
 /* Commits checkboxes - inline layout with wrapping */
@@ -834,7 +840,7 @@ select:focus {
   transition: background 0.2s ease;
   user-select: none;
   background: #f8f9fa;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--color-border);
 }
 
 .checkbox-label-inline:hover {
@@ -851,7 +857,7 @@ select:focus {
 
 .checkbox-label-inline span {
   font-size: 0.95rem;
-  color: #333;
+  color: var(--color-text);
   font-family: 'Courier New', monospace;
 }
 
@@ -863,7 +869,7 @@ select:focus {
   padding: 8px 12px;
   margin-bottom: 8px;
   font-size: 0.95rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   outline: none;
   transition: border-color 0.2s ease;
@@ -874,7 +880,7 @@ select:focus {
 .commit-dropdown-list {
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 4px 0;
 }
@@ -886,14 +892,14 @@ select:focus {
 }
 
 /* Metrics folder structure */
-.metrics_toggle {
+.metrics-toggle {
   cursor: pointer;
   padding: 5px;
   user-select: none;
   font-size: 1.2rem;
 }
 
-div[id^="folder_"] {
+.metric-folder {
   padding-left: 30px;
 }
 
@@ -922,38 +928,38 @@ button:disabled {
    Modal Action Buttons (OK / Cancel) — explicit classes set by ui.js
    ================================================================= */
 
-.modal_button_ok,
-.modal_button_cancel {
+.modal-button-ok,
+.modal-button-cancel {
   margin-right: 10px;
   margin-top: 20px;
 }
 
-.modal_button_ok {
+.modal-button-ok {
   background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
   color: white;
 }
 
-.modal_button_ok:hover {
+.modal-button-ok:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
   background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
 }
 
-.modal_button_ok:active {
+.modal-button-ok:active {
   transform: translateY(0);
 }
 
-.modal_button_ok:disabled {
+.modal-button-ok:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.modal_button_cancel {
-  background: #e0e0e0;
+.modal-button-cancel {
+  background: var(--color-border);
   color: #555;
 }
 
-.modal_button_cancel:hover {
+.modal-button-cancel:hover {
   background: #d0d0d0;
 }
 
@@ -1019,7 +1025,7 @@ button:disabled {
     width: 95%;
   }
 
-  div[id^="graph_area_"] {
+  .graph-area {
     height: 300px;
   }
 }
@@ -1038,13 +1044,7 @@ button:disabled {
   margin: 20px auto;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.graph_loading {
+.graph-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1054,7 +1054,7 @@ button:disabled {
   border-radius: 8px;
 }
 
-.graph_loading p {
+.graph-loading p {
   margin-top: 10px;
   color: #666;
   font-size: 1rem;
@@ -1201,7 +1201,7 @@ button:disabled {
   top: calc(100% + 8px);
   left: 0;
   background: white;
-  color: #333;
+  color: var(--color-text);
   border-radius: 8px;
   padding: 10px 14px;
   font-size: 0.82rem;
@@ -1228,28 +1228,28 @@ button:disabled {
   vertical-align: middle;
 }
 
-.header-edit-btn {
-  background: rgba(255, 255, 255, 0.25) !important;
-  color: white !important;
-  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+.header .header-edit-btn {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 6px;
   padding: 3px 10px;
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   margin-left: 12px;
-  margin-top: 0 !important;
+  margin-top: 0;
   transition: background 0.2s ease;
   vertical-align: middle;
 }
 
-.header-edit-btn:hover {
-  background: rgba(255, 255, 255, 0.4) !important;
+.header .header-edit-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 .header-edit-input {
   background: rgba(255, 255, 255, 0.95);
-  color: #333;
+  color: var(--color-text);
   border: none;
   border-radius: 6px;
   padding: 3px 10px;
@@ -1274,17 +1274,17 @@ button:disabled {
 
 .view-filter-input {
   flex: 1;
-  margin-bottom: 0 !important;
+  margin-bottom: 0;
 }
 
 .view-sort-btn {
   white-space: nowrap;
-  margin: 0 !important;
+  margin: 0;
   padding: 10px 16px;
 }
 
 .view-list-container {
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   max-height: 260px;
   overflow-y: auto;
@@ -1304,69 +1304,66 @@ button:disabled {
 .view-list-name-btn {
   flex: 1;
   text-align: left;
-  background: none !important;
-  border: none !important;
-  color: #333 !important;
+  background: none;
+  border: none;
+  color: var(--color-text);
   font-size: 0.95rem;
   padding: 10px 15px;
   cursor: pointer;
   transition: background 0.15s ease;
-  border-radius: 0 !important;
-  margin: 0 !important;
-  box-shadow: none !important;
+  border-radius: 0;
+  margin: 0;
+  box-shadow: none;
 }
 
 .view-list-name-btn:hover {
-  background: #f0f4ff !important;
-  color: var(--color-primary) !important;
-  transform: none !important;
+  background: #f0f4ff;
+  color: var(--color-primary);
 }
 
 .view-list-delete-btn {
-  background: none !important;
-  border: none !important;
+  background: none;
+  border: none;
   color: var(--color-delete);
   font-size: 1.1rem;
   padding: 8px 13px;
   cursor: pointer;
   transition: background 0.15s ease;
-  border-radius: 0 !important;
-  margin: 0 !important;
+  border-radius: 0;
+  margin: 0;
   flex-shrink: 0;
 }
 
 .view-list-delete-btn:hover {
-  background: #fde8e8 !important;
-  transform: none !important;
+  background: #fde8e8;
 }
 
 .view-list-action-btn {
-  background: none !important;
-  border: none !important;
+  background: none;
+  border: none;
   color: var(--color-primary);
   font-size: 1.1rem;
   padding: 8px 13px;
   cursor: pointer;
   transition: background 0.15s ease;
-  border-radius: 0 !important;
-  margin: 0 !important;
+  border-radius: 0;
+  margin: 0;
   flex-shrink: 0;
 }
 
 .view-list-action-btn:hover {
-  background: #f0f4ff !important;
-  transform: none !important;
+  background: #f0f4ff;
 }
 
 .view-list-row.selected .view-list-name-btn {
-  background: #e8eeff !important;
-  color: var(--color-primary) !important;
+  background: #e8eeff;
+  color: var(--color-primary);
   font-weight: 600;
 }
 
 .view-list-empty {
   text-align: center;
-  color: #999;
+  color: var(--color-text-faint);
   padding: 20px;
   font-style: italic;
   font-size: 0.9rem;
@@ -1376,14 +1373,14 @@ button:disabled {
 input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  background: #f5f5f5;
+  background: var(--color-bg-page);
 }
 
 /* =================================================================
    Rotation
    ================================================================= */
 
-.modal_wait {
+.modal-wait {
   display: inline-block;
   animation: spin 2s linear infinite;
   font-size: 3rem;
@@ -1420,7 +1417,7 @@ input:disabled {
   gap: 6px;
   flex-wrap: wrap;
   padding: 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: #fafafa;
 }
@@ -1457,24 +1454,23 @@ input:disabled {
 }
 
 .experiment-remove-btn {
-  background: none !important;
-  border: 1px solid #ddd !important;
-  color: #999 !important;
-  border-radius: 6px !important;
-  padding: 4px 8px !important;
+  background: none;
+  border: 1px solid #ddd;
+  color: var(--color-text-faint);
+  border-radius: 6px;
+  padding: 4px 8px;
   font-size: 0.8rem;
   cursor: pointer;
-  margin: 0 !important;
+  margin: 0;
   flex-shrink: 0;
   line-height: 1.4;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 
 .experiment-remove-btn:hover {
-  color: var(--color-delete) !important;
-  border-color: var(--color-delete) !important;
-  background: none !important;
-  transform: none !important;
+  color: var(--color-delete);
+  border-color: var(--color-delete);
+  background: none;
 }
 
 .experiment-slot-warn {
@@ -1487,12 +1483,12 @@ input:disabled {
 .experiment-var-toggle {
   font-size: 0.75rem;
   padding: 4px 8px;
-  background: rgba(102, 126, 234, 0.1) !important;
-  color: var(--color-primary) !important;
-  border: 1px solid rgba(102, 126, 234, 0.3) !important;
+  background: rgba(102, 126, 234, 0.1);
+  color: var(--color-primary);
+  border: 1px solid rgba(102, 126, 234, 0.3);
   border-radius: 6px;
   cursor: pointer;
-  margin: 0 !important;
+  margin: 0;
   flex-shrink: 0;
   white-space: nowrap;
   font-family: inherit;
@@ -1501,8 +1497,7 @@ input:disabled {
 }
 
 .experiment-var-toggle:hover {
-  background: rgba(102, 126, 234, 0.2) !important;
-  transform: none !important;
+  background: rgba(102, 126, 234, 0.2);
 }
 
 /* =================================================================

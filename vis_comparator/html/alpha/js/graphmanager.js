@@ -1,7 +1,6 @@
 // Shared commit colour palette — imported by index.js for commitRegistry assignment.
 import {CommitHelp} from "./commithelp.js";
-
-const COMMIT_PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'];
+import { ICONS, COMMIT_PALETTE } from './constants.js';
 
 /**
  * Manages Plotly graph instances displayed in the main area.
@@ -62,7 +61,7 @@ class GraphManager {
     const stored = { graphConfig, dataMap, graphContainer, graphArea, hiddenGroups: new Set() };
     this.#configs.set(id, stored);
 
-    const titleSpan = graphContainer.querySelector('.graph_title_text');
+    const titleSpan = graphContainer.querySelector('.graph-title-text');
     if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries, dataMap);
 
     await this.#Draw(graphArea, graphConfig, dataMap, stored);
@@ -122,7 +121,7 @@ class GraphManager {
     const stored = this.#configs.get(id);
     if (!stored) return;
     const resolvedEntries = this.#ResolveExperiments(stored.graphConfig);
-    const titleSpan = stored.graphContainer.querySelector('.graph_title_text');
+    const titleSpan = stored.graphContainer.querySelector('.graph-title-text');
     if (titleSpan) this.#UpdateTitleDom(titleSpan, stored.graphConfig, resolvedEntries, stored.dataMap);
     await this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
   }
@@ -142,7 +141,7 @@ class GraphManager {
 
     // Update DOM title
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
-    const titleSpan = stored.graphContainer.querySelector('.graph_title_text');
+    const titleSpan = stored.graphContainer.querySelector('.graph-title-text');
     if (titleSpan) this.#UpdateTitleDom(titleSpan, graphConfig, resolvedEntries, dataMap);
 
     // Update toggle button states
@@ -449,14 +448,14 @@ class GraphManager {
       // Show variable name badges for any variable-sourced sides
       if (commitVarName) {
         const badge = document.createElement('span');
-        badge.className = 'graph_title_var_badge';
+        badge.className = 'graph-title-var-badge';
         badge.textContent = commitVarName;
         titleSpan.appendChild(badge);
         titleSpan.appendChild(document.createTextNode('\u00a0'));
       }
       if (subtaskVarName) {
         const badge = document.createElement('span');
-        badge.className = 'graph_title_var_badge';
+        badge.className = 'graph-title-var-badge';
         badge.textContent = subtaskVarName;
         titleSpan.appendChild(badge);
         titleSpan.appendChild(document.createTextNode('\u00a0'));
@@ -464,7 +463,7 @@ class GraphManager {
 
       if (!resolved) {
         const u = document.createElement('span');
-        u.className = 'graph_title_undefined';
+        u.className = 'graph-title-undefined';
         u.textContent = 'undefined';
         titleSpan.appendChild(u);
       } else {
@@ -475,7 +474,7 @@ class GraphManager {
 
     // ── Separator between experiments and metrics ────────────────
     const sep = document.createElement('span');
-    sep.className = 'graph_title_section_sep';
+    sep.className = 'graph-title-section-sep';
     sep.textContent = '\u2502';  // │
     titleSpan.appendChild(sep);
 
@@ -488,7 +487,7 @@ class GraphManager {
       }
       if (varName) {
         const badge = document.createElement('span');
-        badge.className = 'graph_title_var_badge';
+        badge.className = 'graph-title-var-badge';
         badge.textContent = varName;
         titleSpan.appendChild(badge);
         // Show resolved metric name (or display name if set) after the badge
@@ -498,7 +497,7 @@ class GraphManager {
           titleSpan.appendChild(document.createTextNode(this.#MetricDisplayName(resolvedPath)));
         } else {
           const u = document.createElement('span');
-          u.className = 'graph_title_undefined';
+          u.className = 'graph-title-undefined';
           u.textContent = 'undefined';
           titleSpan.appendChild(u);
         }
@@ -511,8 +510,8 @@ class GraphManager {
     // ── Duplicate-metric warning ─────────────────────────────────
     if (this.#HasDuplicateMetrics(graphConfig)) {
       const warn = document.createElement('span');
-      warn.className = 'graph_title_warn_badge';
-      warn.textContent = '\u26a0';
+      warn.className = 'graph-title-warn-badge';
+      warn.textContent = ICONS.WARN;
       warn.title = 'Duplicate metrics — only the first occurrence is displayed';
       titleSpan.appendChild(warn);
     }
@@ -524,8 +523,8 @@ class GraphManager {
       .map(({ resolved }) => `${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`);
     if (missingExps.length > 0) {
       const warn = document.createElement('span');
-      warn.className = 'graph_title_warn_badge';
-      warn.textContent = '\u26a0';
+      warn.className = 'graph-title-warn-badge';
+      warn.textContent = ICONS.WARN;
       warn.title = `No data: ${missingExps.join(', ')}`;
       titleSpan.appendChild(warn);
     }
@@ -626,7 +625,7 @@ class GraphManager {
               x: timestamps,
               y: Array(timestamps.length).fill(0),
               mode: 'lines',
-              name: `\u26a0 ${traceName} (absent)`,
+              name: `â  ${traceName} (absent)`,
               line: { width: 1.5, color, dash: 'dot' },
               opacity: 0.4,
               yaxis: yAxis,
@@ -742,15 +741,14 @@ class GraphManager {
 
   #BuildGraphContainer(id, options) {
     const container = document.createElement('div');
-    container.id        = 'graph_container_' + id;
-    container.className = 'graph_container';
+    container.id        = 'graph-container_' + id;
+    container.className = 'graph-container';
     container.style.width = '100%';
 
     // graphArea created first so collapse button closure can reference it
     const graphArea = document.createElement('div');
-    graphArea.id           = 'graph_area_' + id;
-    graphArea.style.width  = '100%';
-    graphArea.style.height = '400px';
+    graphArea.id        = 'graph_area_' + id;
+    graphArea.className = 'graph-area';
 
     const requireUI = options?.showIcons || options?.title || options?.showRawToggle
       || options?.showCIToggle || options?.showAxesToggle;
@@ -758,23 +756,23 @@ class GraphManager {
     if (requireUI) {
       // ── Title bar ───────────────────────────────────────────────
       const titleBar = document.createElement('div');
-      titleBar.className = 'graph_title_bar';
+      titleBar.className = 'graph-title-bar';
 
       const titleSpan = document.createElement('span');
-      titleSpan.className   = 'graph_title_text';
+      titleSpan.className   = 'graph-title-text';
       titleSpan.textContent = options?.title ?? '';
       titleBar.appendChild(titleSpan);
 
       if (options?.showIcons) {
         const controlsDiv = document.createElement('div');
-        controlsDiv.className = 'graph_title_controls';
+        controlsDiv.className = 'graph-title-controls';
 
         // ⚙ Edit button (Phase E) — only when editGraph callback is provided
         if (this.#callbacks?.editGraph) {
           const eltEdit = document.createElement('button');
-          eltEdit.className   = 'graph_icon_btn graph_icon_btn_edit';
+          eltEdit.className   = 'graph-icon-btn graph-icon-btn-edit';
           eltEdit.id          = 'graph_ui_edit_' + id;
-          eltEdit.textContent = '\u2699';
+          eltEdit.textContent = ICONS.GEAR;
           eltEdit.title       = 'Edit graph settings';
           eltEdit.onclick     = () => this.#callbacks.editGraph(id);
           controlsDiv.appendChild(eltEdit);
@@ -782,17 +780,17 @@ class GraphManager {
 
         // ➖ Collapse button
         const eltCollapse = document.createElement('button');
-        eltCollapse.className   = 'graph_icon_btn';
+        eltCollapse.className   = 'graph-icon-btn';
         eltCollapse.id          = 'graph_ui_collapse_' + id;
-        eltCollapse.textContent = '\u2796';
+        eltCollapse.textContent = ICONS.MINUS;
         eltCollapse.title       = 'Minimize';
         eltCollapse.onclick = function() {
           const isVisible = graphArea.style.display !== 'none';
           graphArea.style.display = isVisible ? 'none' : '';
           // Also collapse/expand the toggle bar (Split Y-Axes / All Runs / Confidence Bands)
-          const toggleBar = container.querySelector('.graph_toggle_bar');
+          const toggleBar = container.querySelector('.graph-toggle-bar');
           if (toggleBar) toggleBar.style.display = isVisible ? 'none' : '';
-          eltCollapse.textContent = isVisible ? '\u2795' : '\u2796';
+          eltCollapse.textContent = isVisible ? ICONS.PLUS : ICONS.MINUS;
           eltCollapse.title       = isVisible ? 'Expand'  : 'Minimize';
           if (!isVisible) Plotly.Plots.resize(graphArea);
         };
@@ -800,9 +798,9 @@ class GraphManager {
 
         // ✖ Delete button
         const eltDelete = document.createElement('button');
-        eltDelete.className   = 'graph_icon_btn graph_icon_btn_delete';
+        eltDelete.className   = 'graph-icon-btn graph-icon-btn-delete';
         eltDelete.id          = 'graph_ui_delete_' + id;
-        eltDelete.textContent = '\u2716';
+        eltDelete.textContent = ICONS.CLOSE_HEAVY;
         eltDelete.title       = 'Delete graph';
         eltDelete.onclick     = this.DelGraph.bind(this, id);
         controlsDiv.appendChild(eltDelete);
@@ -816,7 +814,7 @@ class GraphManager {
       const showAnyToggle = options?.showAxesToggle || options?.showRawToggle || options?.showCIToggle;
       if (showAnyToggle) {
         const toggleBar = document.createElement('div');
-        toggleBar.className = 'graph_toggle_bar';
+        toggleBar.className = 'graph-toggle-bar';
 
         if (options?.showAxesToggle) {
           const eltSplit = document.createElement('button');
@@ -898,4 +896,4 @@ class GraphManager {
   }
 }
 
-export { GraphManager, COMMIT_PALETTE };
+export { GraphManager };

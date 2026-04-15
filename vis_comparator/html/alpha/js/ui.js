@@ -1,4 +1,5 @@
 import {CommitHelp} from "./commithelp.js";
+import { ICONS } from './constants.js';
 
 /**
  * DOM component factory for modal forms.
@@ -81,11 +82,11 @@ class UI {
    */
   CreateActions(cancelSupport, options) {
     const container = document.createElement('div');
-    container.className = 'modal_actions';
+    container.className = 'modal-actions';
 
     const btOK = document.createElement('button');
     this.#ApplyOptions(btOK, options?.ok);
-    btOK.classList.add('modal_button_ok');
+    btOK.classList.add('modal-button-ok');
     btOK.innerText = options?.ok?.text ?? 'Ok';
     btOK.onclick = options?.ok?.callback ?? null;
     container.appendChild(btOK);
@@ -96,7 +97,7 @@ class UI {
 
     const btCancel = document.createElement('button');
     this.#ApplyOptions(btCancel, options?.cancel);
-    btCancel.classList.add('modal_button_cancel');
+    btCancel.classList.add('modal-button-cancel');
     btCancel.innerText = 'Cancel';
     btCancel.onclick = options?.cancel?.callback ?? null;
     container.appendChild(btCancel);
@@ -184,13 +185,14 @@ class UI {
             folder = document.createElement('div');
           }
           folder.id = 'folder_' + currentPath;
+          folder.className = 'metric-folder';
 
           const separator = document.createElement('div');
 
           const toggle = document.createElement('span');
           toggle.id = 'toggle_' + currentPath;
-          toggle.className = 'metrics_toggle';
-          toggle.innerText = '➕';
+          toggle.className = 'metrics-toggle';
+          toggle.innerText = ICONS.FOLDER_SHUT;
           toggle.dataset.open = 'false';
           separator.appendChild(toggle);
 
@@ -207,7 +209,7 @@ class UI {
             currentFolder.querySelectorAll('.metric-checkbox:not(:checked)').forEach(function(cb) {
               cb.closest('.checkbox-label').style.display = nowOpen ? '' : 'none';
             });
-            toggle.innerText = nowOpen ? '➖' : '➕';
+            toggle.innerText = nowOpen ? ICONS.FOLDER_OPEN : ICONS.FOLDER_SHUT;
             toggle.dataset.open = nowOpen ? 'true' : 'false';
           };
 
@@ -242,7 +244,7 @@ class UI {
         // Checked rows are always kept visible.
         if (!cb.checked) {
           const parentFolder = cb.closest('[id^="folder_"]');
-          const toggleEl = parentFolder?.previousElementSibling?.querySelector('.metrics_toggle');
+          const toggleEl = parentFolder?.previousElementSibling?.querySelector('.metrics-toggle');
           if (toggleEl && toggleEl.dataset.open !== 'true') {
             cb.closest('.checkbox-label').style.display = 'none';
           }
@@ -433,8 +435,8 @@ class UI {
     }
 
     const waitSpan = document.createElement('span');
-    waitSpan.innerText = '🕛';
-    waitSpan.className = 'modal_wait';
+    waitSpan.innerText = ICONS.CLOCK;
+    waitSpan.className = 'modal-wait';
     container.append(waitSpan);
 
     return container;
@@ -490,7 +492,7 @@ class UI {
 
   #ApplyOptions(element, options) {
     element.id = options?.id ?? 'ui_' + this.#id;
-    element.className = options?.className ?? ('modal_' + element.tagName.toLowerCase());
+    element.className = options?.className ?? ('modal-' + element.tagName.toLowerCase());
     this.#id++;
   }
 
