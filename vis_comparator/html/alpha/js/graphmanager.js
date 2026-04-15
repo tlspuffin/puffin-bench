@@ -403,15 +403,15 @@ class GraphManager {
     }
 
     const tokens = {
-      COMMIT:        shortHash,
-      TASKTYPE:      resolved.tasktype,
-      SUBTASK:       resolved.subtask,
+      COMMIT_HASH:   shortHash,
+      SUBTASK_TYPE:  resolved.tasktype,
+      SUBTASK_NAME:  resolved.subtask,
       COMMIT_ALIAS:  commitAlias,
       SUBTASK_ALIAS: subtaskAlias,
     };
 
-    return fmt.replace(/\$\{(COMMIT|TASKTYPE|SUBTASK|COMMIT_ALIAS|SUBTASK_ALIAS)(?::([^}]*))?\}/g, (_, token, transform) => {
-      return GraphManager.#ApplyTransform(tokens[token] ?? '', transform);
+    return fmt.replace(/\$\{(COMMIT_HASH|SUBTASK_TYPE|SUBTASK_NAME|COMMIT_ALIAS|SUBTASK_ALIAS)(?::([^}]*))?\}/gi, (_, token, transform) => {
+      return GraphManager.#ApplyTransform(tokens[token.toUpperCase()] ?? '', transform);
     });
   }
 
@@ -420,8 +420,53 @@ class GraphManager {
    * Token: ${METRIC} with optional transform: ${METRIC:transformName} or ${METRIC:beforeFirst(regex)}
    */
   static #InterpolateMetric(fmt, metricPath) {
-    return fmt.replace(/\$\{METRIC(?::([^}]*))?\}/g, (_, transform) => {
+    return fmt.replace(/\$\{METRIC(?::([^}]*))?\}/gi, (_, transform) => {
       return GraphManager.#ApplyTransform(metricPath, transform);
+    });
+  }
+
+  /**
+   * Resolves a title format string when loading a template.
+   * Tokens (case-insensitive): ${TEMPLATE}, ${DATE} (DD-MM-YYYY),
+   *   ${<varname>_HASH}, ${<varname>_ALIAS} for commit variables,
+   *   ${<varname>_NAME}, ${<varname>_TYPE}, ${<varname>_ALIAS} for subtask variables,
+   *   ${<varname>} for metric variables.
+   * Transforms (chained with :) are the same as legend format.
+   * Unknown tokens are left as-is. Variables with no value → empty string.
+   */
+  static InterpolateTitleFormat(fmt, variables, templateName) {
+    const today = new Date();
+    const dd    = String(today.getDate()).padStart(2, '0');
+    const mm    = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy  = today.getFullYear();
+
+    const map = {
+      TEMPLATE: templateName ?? '',
+      DATE:     `${dd}-${mm}-${yyyy}`,
+    };
+
+    for (const [name, entry] of variables.commits) {
+      const k    = name.toUpperCase();
+      const hash = entry?.value ? CommitHelp.ShortHash(entry.value) : '';
+      map[`${k}_HASH`]  = hash;
+      map[`${k}_ALIAS`] = entry?.alias || hash;
+    }
+    for (const [name, entry] of variables.subtasks) {
+      const k    = name.toUpperCase();
+      const sub  = entry?.value?.subtask  ?? '';
+      const type = entry?.value?.tasktype ?? '';
+      map[`${k}_NAME`]  = sub;
+      map[`${k}_TYPE`]  = type;
+      map[`${k}_ALIAS`] = entry?.alias || sub;
+    }
+    for (const [name, path] of variables.metrics) {
+      map[name.toUpperCase()] = path ?? '';
+    }
+
+    return fmt.replace(/\$\{([^:}]+)(?::([^}]*))?\}/gi, (match, token, transform) => {
+      const val = map[token.trim().toUpperCase()];
+      if (val === undefined) return match;
+      return GraphManager.#ApplyTransform(val, transform);
     });
   }
 

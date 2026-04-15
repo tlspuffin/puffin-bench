@@ -1,5 +1,5 @@
 import {CommitHelp} from "./commithelp.js";
-import { ICONS } from './constants.js';
+import { ICONS, BRANCH_PR_PALETTE } from './constants.js';
 
 /**
  * DOM component factory for modal forms.
@@ -414,6 +414,261 @@ class UI {
         };
       });
     })
+  }
+
+  /**
+   * Creates a rich single-select commit picker:
+   * search input + scrollable list (branch badge / date / comment) + filter tabs.
+   *
+   * The returned element exposes a `.value` property (selected hash, `_var_NAME`, or `''`)
+   * and dispatches a native `change` event on each selection.
+   *
+   * @param {Promise<object|null>}       gitHistoryPromise - resolves to {commits, standalone, PR}
+   * @param {string[]|Promise<string[]>} allCommits        - valid commit hashes (or Promise of them)
+   * @param {object}                     options
+   * @param {string|null}  [options.selected]   - pre-selected value (hash or `_var_NAME`)
+   * @param {Map|null}     [options.variables]  - commit variables Map<name,{value,alias}>
+   * @param {Function}     [options.callback]   - called with new value on each selection
+   * @param {object}       [options.container]  - #ApplyOptions for the outer wrapper
+   * @returns {HTMLDivElement}
+   */
+  CreateCommitPicker(gitHistoryPromise, allCommits, options) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'commit-picker';
+    this.#ApplyOptions(wrapper, options?.container);
+
+    let _value = options?.selected ?? null;
+    let _activeTab = 'all';
+    let _rows = [];   // populated asynchronously from gitHistoryPromise
+    let _query = '';
+
+    Object.defineProperty(wrapper, 'value', {
+      get: () => _value,
+      set: (v) => { _value = v; updateTrigger(); },
+    });
+
+    // ── Trigger ───────────────────────────────────────────────
+    const trigger = document.createElement('div');
+    trigger.className = 'commit-picker-trigger';
+    trigger.tabIndex = 0;
+    wrapper.appendChild(trigger);
+
+    // ── Panel ─────────────────────────────────────────────────
+    const panel = document.createElement('div');
+    panel.className = 'commit-picker-panel hidden';
+    wrapper.appendChild(panel);
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = 'Type a hash or pick from the list…';
+    search.className = 'commit-picker-search';
+    panel.appendChild(search);
+
+    const list = document.createElement('div');
+    list.className = 'commit-picker-list';
+    panel.appendChild(list);
+
+    // ── Filter tabs ───────────────────────────────────────────
+    const tabs = document.createElement('div');
+    tabs.className = 'commit-picker-tabs';
+    [{ id: 'main', label: 'main/dev' }, { id: 'pr', label: 'PR heads' }, { id: 'all', label: 'All' }].forEach(def => {
+      const btn = document.createElement('button');
+      btn.className = 'commit-picker-tab' + (def.id === _activeTab ? ' active' : '');
+      btn.textContent = def.label;
+      btn.type = 'button';
+      btn.dataset.tab = def.id;
+      btn.onclick = () => {
+        _activeTab = def.id;
+        tabs.querySelectorAll('.commit-picker-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === _activeTab));
+        renderRows();
+      };
+      tabs.appendChild(btn);
+    });
+    panel.appendChild(tabs);
+
+    // ── Event wiring ──────────────────────────────────────────
+    trigger.addEventListener('click', () => panel.classList.contains('hidden') ? openPanel() : closePanel());
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); }
+      if (e.key === 'Escape') closePanel();
+    });
+    search.addEventListener('input', () => { _query = search.value.toLowerCase(); renderRows(); });
+
+    // Close on outside click; self-cleans when wrapper leaves the DOM.
+    const outsideHandler = (e) => {
+      if (!document.contains(wrapper)) {
+        document.removeEventListener('click', outsideHandler, true);
+        return;
+      }
+      if (!wrapper.contains(e.target)) closePanel();
+    };
+    document.addEventListener('click', outsideHandler, true);
+
+    // ── Helpers ───────────────────────────────────────────────
+    function openPanel() {
+      const rect = trigger.getBoundingClientRect();
+      const panelW = Math.max(rect.width, 480);
+      let left = rect.left;
+      if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
+      panel.style.top    = (rect.bottom + 4) + 'px';
+      panel.style.left   = left + 'px';
+      panel.style.width  = panelW + 'px';
+      panel.classList.remove('hidden');
+      search.value = '';
+      _query = '';
+      renderRows();
+      search.focus();
+    }
+    function closePanel() { panel.classList.add('hidden'); }
+
+    function updateTrigger() {
+      if (!_value) {
+        trigger.textContent = '(—)';
+        trigger.classList.add('empty');
+        return;
+      }
+      trigger.classList.remove('empty');
+      if (_value.startsWith('_var_')) {
+        const name = _value.slice(5);
+        const entry = options?.variables?.get(name);
+        trigger.textContent = entry?.value
+          ? `${name} = ${CommitHelp.ShortHash(entry.value)}`
+          : `${name} (undefined)`;
+      } else {
+        trigger.textContent = CommitHelp.ShortHash(_value);
+      }
+    }
+
+    function renderRows() {
+      list.replaceChildren();
+
+      // ── Unset + variable rows (always visible, tab-independent) ──
+      list.appendChild(buildSimpleRow('', '(—)'));
+
+      if (options?.variables?.size > 0) {
+        for (const [name, entry] of options.variables) {
+          const val = `_var_${name}`;
+          const label = entry?.value
+            ? `${name} = ${CommitHelp.ShortHash(entry.value)}${entry.alias ? ` (${entry.alias})` : ''}`
+            : `${name} (undefined)`;
+          const row = buildSimpleRow(val, label);
+          if (_query && !label.toLowerCase().includes(_query)) row.style.display = 'none';
+          list.appendChild(row);
+        }
+      }
+
+      const sep = document.createElement('div');
+      sep.className = 'commit-picker-sep';
+      list.appendChild(sep);
+
+      // ── Commit rows (filtered by tab + query) ─────────────────
+      const visible = _rows.filter(r => {
+        if (_activeTab === 'main' && r.type !== 'main') return false;
+        if (_activeTab === 'pr'   && r.type !== 'pr')   return false;
+        if (_query) {
+          const haystack = `${r.hash} ${r.branch ?? ''} ${r.comment ?? ''} ${r.date ?? ''}`.toLowerCase();
+          if (!haystack.includes(_query)) return false;
+        }
+        return true;
+      });
+
+      visible.forEach(r => list.appendChild(buildCommitRow(r)));
+
+      if (visible.length === 0 && _rows.length > 0) {
+        const empty = document.createElement('div');
+        empty.className = 'commit-picker-empty';
+        empty.textContent = 'No commits match';
+        list.appendChild(empty);
+      } else if (_rows.length === 0) {
+        const loading = document.createElement('div');
+        loading.className = 'commit-picker-empty';
+        loading.textContent = 'Loading commits…';
+        list.appendChild(loading);
+      }
+    }
+
+    function buildSimpleRow(val, label) {
+      const row = document.createElement('div');
+      row.className = 'commit-picker-row commit-picker-row-simple' + (val === _value ? ' selected' : '');
+      row.textContent = label;
+      row.onclick = () => selectValue(val);
+      return row;
+    }
+
+    function buildCommitRow(r) {
+      const row = document.createElement('div');
+      row.className = 'commit-picker-row' + (r.value === _value ? ' selected' : '');
+      row.onclick = () => selectValue(r.value);
+
+      const left = document.createElement('div');
+      left.className = 'commit-picker-row-left';
+
+      if (r.branch) {
+        const badge = document.createElement('span');
+        badge.className = 'commit-branch-badge';
+        badge.textContent = r.branch;
+        badge.style.background = branchColor(r.branch);
+        left.appendChild(badge);
+      }
+
+      const hashEl = document.createElement('span');
+      hashEl.className = 'commit-hash-label';
+      hashEl.textContent = CommitHelp.ShortHash(r.value);
+      left.appendChild(hashEl);
+
+      const mid = document.createElement('div');
+      mid.className = 'commit-picker-date';
+      mid.textContent = r.date ?? '';
+
+      const right = document.createElement('div');
+      right.className = 'commit-picker-comment';
+      right.textContent = r.comment ?? '';
+
+      row.appendChild(left);
+      row.appendChild(mid);
+      row.appendChild(right);
+      return row;
+    }
+
+    function selectValue(val) {
+      _value = val;
+      updateTrigger();
+      closePanel();
+      options?.callback?.(val);
+      wrapper.dispatchEvent(new Event('change'));
+    }
+
+    function branchColor(branch) {
+      const b = branch.toLowerCase();
+      if (b === 'dev' || b === 'develop') return '#2a9d8f';
+      if (b === 'main' || b === 'master') return '#457b9d';
+      // Deterministic color from branch name hash
+      let h = 0;
+      for (let i = 0; i < branch.length; i++) h = (h * 31 + branch.charCodeAt(i)) | 0;
+      return BRANCH_PR_PALETTE[Math.abs(h) % BRANCH_PR_PALETTE.length];
+    }
+
+    // ── Async population ──────────────────────────────────────
+    Promise.all([gitHistoryPromise, Promise.resolve(allCommits)]).then(([history, commits]) => {
+
+      if (!history) {
+        _rows = commits.map(hash => ({ value: hash, hash, branch: null, date: null, comment: null, type: 'main' }));
+      } else {
+        const entryMap = new Map();
+        (history.commits ?? []).forEach(e => entryMap.set(CommitHelp.ShortHash(e.id), { ...e, type: 'main' }));
+        (history.PR ?? []).forEach(e => entryMap.set(CommitHelp.ShortHash(e.id), { ...e, type: 'pr' }));
+        _rows = commits
+          .map(hash => {
+            const entry = entryMap.get(CommitHelp.ShortHash(hash));
+            return { value: hash, hash, branch: entry?.branch ?? null, date: entry?.date ?? null, comment: entry?.comment ?? null, type: entry?.type ?? 'main' };
+          })
+          .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+      }
+      if (!panel.classList.contains('hidden')) renderRows();
+    }).catch(err => console.error('[CommitPicker] failed to load commits', err));
+
+    updateTrigger();
+    return wrapper;
   }
 
   /**

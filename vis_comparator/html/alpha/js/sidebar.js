@@ -6,7 +6,6 @@
 
 import { ICONS, TASK_TYPES, COMMIT_PALETTE } from './constants.js';
 import { UI } from './ui.js';
-import { CommitHelp } from './commithelp.js';
 import {
   resolveExperimentSlot,
   getKnownSubtasks,
@@ -26,7 +25,8 @@ let _apirest      = null;
 let _ui           = null;
 let _enableMainUI = null;
 let _errorManager = null;
-let _allCommitsPromise = Promise.resolve([]);
+let _allCommitsPromise   = Promise.resolve([]);
+let _gitHistoryPromise   = Promise.resolve(null);
 
 /**
  * @param {{
@@ -36,6 +36,7 @@ let _allCommitsPromise = Promise.resolve([]);
  *   enableMainUI: (enabled: boolean) => void,
  *   errorManager: object,
  *   allCommitsPromise: Promise<string[]>,
+ *   gitHistoryPromise: Promise<object|null>,
  * }} deps
  */
 export function initSidebar(deps) {
@@ -45,6 +46,7 @@ export function initSidebar(deps) {
   _enableMainUI      = deps.enableMainUI;
   _errorManager      = deps.errorManager;
   _allCommitsPromise = deps.allCommitsPromise;
+  _gitHistoryPromise = deps.gitHistoryPromise ?? Promise.resolve(null);
 }
 
 // ============================================================
@@ -302,32 +304,14 @@ function buildCommitVariableSection(state) {
       }
     );
 
-    // Commit select — initially shows current value; all commits loaded asynchronously
-    const select = document.createElement('select');
-    select.className = `sidebar-pill-select${!entry?.value ? ' undefined-value' : ''}`;
-
-    const buildOptions = (allCommits) => {
-      select.innerHTML = '';
-      const none = document.createElement('option');
-      none.value = '';
-      none.textContent = '(undefined)';
-      none.selected = !entry?.value;
-      select.appendChild(none);
-      for (const commit of allCommits) {
-        const opt = document.createElement('option');
-        opt.value   = commit;
-        opt.textContent = CommitHelp.ShortHash(commit);
-        opt.selected    = commit === entry?.value;
-        select.appendChild(opt);
-      }
-    };
-    // Show current value immediately (without full list)
-    buildOptions(entry?.value ? [entry.value] : []);
-    // Populate full list once fetched
-    _allCommitsPromise.then(buildOptions);
-
-    select.addEventListener('change', () => {
-      const newValue = select.value || null;
+    // Commit picker — rich single-select with branch badge / date / comment
+    const commitPicker = _ui.CreateCommitPicker(
+      _gitHistoryPromise,
+      _allCommitsPromise,
+      { selected: entry?.value ?? null }
+    );
+    commitPicker.addEventListener('change', () => {
+      const newValue = commitPicker.value || null;
       state.variables.commits.set(name, { value: newValue, alias: entry?.alias ?? null });
       refreshGraphsUsingVariable(state, name);
       BuildSidebar(state);
@@ -338,13 +322,13 @@ function buildCommitVariableSection(state) {
           _apirest.LoadCommitSubjects(TASK_TYPES.VULN, newValue)
         ]).then(([p, v]) => {
           const before = globalDynamicSubtasks.length;
-          dedupSubtasks(globalDynamicSubtasks, p.map(s => ({ tasktype: TASK_TYPES.PERF, subtask: s.value })));
-          dedupSubtasks(globalDynamicSubtasks, v.map(s => ({ tasktype: TASK_TYPES.VULN, subtask: s.value })));
+          dedupSubtasks(globalDynamicSubtasks, (p ?? []).map(s => ({ tasktype: TASK_TYPES.PERF, subtask: s.value })));
+          dedupSubtasks(globalDynamicSubtasks, (v ?? []).map(s => ({ tasktype: TASK_TYPES.VULN, subtask: s.value })));
           if (globalDynamicSubtasks.length > before) BuildSidebar(state);
         });
       }
     });
-    card.appendChild(select);
+    card.appendChild(commitPicker);
 
     buildAliasRow(card, entry?.alias, (newAlias) => {
       const cur = state.variables.commits.get(name) ?? { value: null, alias: null };
@@ -535,7 +519,7 @@ function buildExperimentLegend(state) {
   fmtInput.className = 'sidebar-format-template-input';
   fmtInput.placeholder = '\${COMMIT_ALIAS} − \${SUBTASK_ALIAS}';
   fmtInput.value = state.legendFormat.experiment ?? '';
-  fmtInput.title = 'Tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex)\nExample: ${SUBTASK_ALIAS:afterLast(_):pascalcase}';
+  fmtInput.title = 'Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex)\nExample: ${SUBTASK_ALIAS:afterLast(_):pascalcase}';
   fmtInput.addEventListener('change', () => {
     state.legendFormat.experiment = fmtInput.value.trim() || null;
     refreshAllGraphAppearances(state);
@@ -593,7 +577,7 @@ function buildExperimentLegend(state) {
     eyeBtn.textContent = entry.visible !== false ? ICONS.BULLET_FILL : ICONS.BULLET_EMPTY;
     eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
     eyeBtn.addEventListener('click', () => {
-      entry.visible = entry.visible !== false;
+      entry.visible = entry.visible === false;
       eyeBtn.textContent = entry.visible !== false ? ICONS.BULLET_FILL : ICONS.BULLET_EMPTY;
       eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
       refreshGraphsUsingExperiment(state, expKey);
@@ -739,7 +723,7 @@ function buildMetricLegend(state) {
     eyeBtn.textContent = entry.visible !== false ? ICONS.BULLET_FILL : ICONS.BULLET_EMPTY;
     eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
     eyeBtn.addEventListener('click', () => {
-      entry.visible = entry.visible !== false;
+      entry.visible = entry.visible === false;
       eyeBtn.textContent = entry.visible !== false ? ICONS.BULLET_FILL : ICONS.BULLET_EMPTY;
       eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
       refreshGraphsUsingMetric(state, metricPath);

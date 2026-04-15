@@ -147,7 +147,7 @@ function Save(state) {
 // STATE ORCHESTRATION
 // ============================================================
 
-async function ResetState(state, newState) {
+async function ResetState(state, newState, templateName = null) {
   const migrated = migrateStateIfNeeded(newState);
   graphManager.DelAllGraph();
   state.title          = migrated?.title          ?? 'Vue_' + Date.now();
@@ -158,6 +158,14 @@ async function ResetState(state, newState) {
   state.legendFormat   = migrated?.legendFormat   ?? { experiment: null, metric: null };
   state.commitRegistry = migrated?.commitRegistry ?? new Map();
   state.metricLegend   = migrated?.metricLegend   ?? new Map();
+
+  if (migrated?.titleFormat) {
+    const resolved = GraphManager.InterpolateTitleFormat(
+      migrated.titleFormat, state.variables, templateName
+    );
+    if (resolved) state.title = resolved;
+  }
+
   UpdateHeader();
   if (migrated?.graphSettings?.size > 0) {
     await restoreGraphs(migrated.graphSettings);
@@ -278,6 +286,7 @@ initSidebar({
   enableMainUI: EnableMainUI,
   errorManager,
   allCommitsPromise,
+  gitHistoryPromise,
 });
 initDialogs({
   state,
@@ -409,7 +418,7 @@ headerToolbar.appendChild(uiOpenTpl);
 const uiSaveTpl = UI.CreateToolbarBtn('Save template', 'Save current view as template');
 uiSaveTpl.onclick = function() {
   EnableMainUI(false);
-  SaveAsTemplate(state).finally(() => EnableMainUI(true));
+  SaveAsTemplate(state);
 };
 headerToolbar.appendChild(uiSaveTpl);
 UIElt.push(uiSaveTpl);

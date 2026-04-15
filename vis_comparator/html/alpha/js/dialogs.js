@@ -70,7 +70,7 @@ export function ConfigBaseInformations(restoreUI = false) {
   const container = document.createElement('div');
   _ui.Reset();
 
-  container.appendChild(_ui.CreateTitle('1. View name', 'h3', null));
+  container.appendChild(_ui.CreateTitle('View name', 'h3', null));
   const titleInput = document.createElement('input');
   titleInput.type = 'text';
   titleInput.className = 'modal-text-input';
@@ -79,7 +79,7 @@ export function ConfigBaseInformations(restoreUI = false) {
 
   setModalCancel(function() {
     clearModalCancel();
-    modalpage.classList.remove('modalpage_²visible');
+    modalpage.classList.remove('modalpage-visible');
     _enableMainUI(restoreUI);
   });
 
@@ -633,61 +633,17 @@ export async function AddGraphique(prefill = null, editId = null) {
     });
   }
 
-  function buildCommitOptions(selectedHash, selectedVar) {
-    const options = [{ value: '', text: '(—)' }];
-    // Commit variables first
-    if (_state.variables.commits.size > 0) {
-      for (const [name, entry] of _state.variables.commits) {
-        const val = `_var_${name}`;
-        const label = entry?.value
-          ? `${name} = ${CommitHelp.ShortHash(entry.value)}${entry.alias ? ` (${entry.alias})` : ''}`
-          : `${name} (undefined)`;
-        options.push({ value: val, text: label, selected: selectedVar === name });
-      }
-      options.push({ value: '__sep__', text: '─────────', disabled: true });
-    }
-    // Raw commits
-    for (const c of allCommits) {
-      options.push({ value: c, text: CommitHelp.ShortHash(c), selected: !selectedVar && selectedHash === c });
-    }
-    return options;
-  }
-
   function renderSlotRow(row, slot, slotIdx) {
-    // Commit selector
-    const commitSel = _ui.CreateSelect(
-      buildCommitOptions(slot.commit, slot.commitVar), null
-    );
-    commitSel.title = 'Commit';
-
-    // Enrich commit labels with git history once resolved
-    gitHistory.then(function(history) {
-      if (!history) return;
-      const enriched = CommitHelp.Enrich(allCommits, history);
-      // Rebuild options using enriched labels
-      const current = commitSel.value;
-      const options = [{ value: '', text: '(—)' }];
-      if (_state.variables.commits.size > 0) {
-        for (const [name, entry] of _state.variables.commits) {
-          const val = `_var_${name}`;
-          const label = entry?.value
-            ? `${name} = ${CommitHelp.ShortHash(entry.value)}${entry.alias ? ` (${entry.alias})` : ''}`
-            : `${name} (undefined)`;
-          options.push({ value: val, text: label });
-        }
-        options.push({ value: '__sep__', text: '─────────', disabled: true });
-      }
-      for (const e of enriched) {
-        options.push({ value: e.hash, text: e.label, selected: e.hash === current });
-      }
-      _ui.UpdateSelect(commitSel, options);
-      // Restore selection (UpdateSelect resets it)
-      commitSel.value = current;
+    // Commit picker
+    const initialSelected = slot.commitVar ? `_var_${slot.commitVar}` : (slot.commit ?? null);
+    const commitSel = _ui.CreateCommitPicker(gitHistory, allCommits, {
+      selected: initialSelected,
+      variables: _state.variables.commits,
     });
 
-    commitSel.onchange = function() {
+    commitSel.addEventListener('change', function() {
       const val = commitSel.value;
-      if (!val || val === '__sep__') {
+      if (!val) {
         slot.commitVar = null; slot.commit = null;
       } else if (val.startsWith('_var_')) {
         slot.commitVar = val.slice(5); slot.commit = null;
@@ -696,7 +652,7 @@ export async function AddGraphique(prefill = null, editId = null) {
       }
       onExperimentChange();
       loadDynamicSubtasks(slot, subtaskSel);
-    };
+    });
 
     // Subtask selector
     const subtaskSel = _ui.CreateSelect(
@@ -960,7 +916,7 @@ export function OpenTemplate(restoreUI = false) {
     onLoad: function(name, closeModal) {
       _apirest.LoadTemplate(name).then(function(tpl) {
         if (tpl == null) return;
-        _resetState(_state, tpl).then(function() {
+        _resetState(_state, tpl, name).then(function() {
           closeModal();
           _errorManager.Success('Template loaded: ' + name);
         });
@@ -993,26 +949,82 @@ export function OpenTemplate(restoreUI = false) {
   });
 }
 
-export async function SaveAsTemplate(state) {
-  const name = prompt('Template name:');
-  if (!name?.trim()) return;
-  const trimmedName = name.trim();
+export function SaveAsTemplate(state) {
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+  const container = document.createElement('div');
+  _ui.Reset();
 
-  const tpl = {
-    title: state.title,
-    variables: {
-      commits:  new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-      subtasks: new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-      metrics:  new Map([...state.variables.metrics.entries()]),
-    },
-    legendFormat:   state.legendFormat,
-    graphSettings:  state.graphSettings,
-    commitRegistry: state.commitRegistry,
-    metricLegend:   state.metricLegend,
+  container.appendChild(_ui.CreateTitle('Save as Template', 'h3'));
+
+  const nameLabel = document.createElement('label');
+  nameLabel.className = 'modal-field-label';
+  nameLabel.textContent = 'Template name';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'modal-text-input';
+  nameInput.placeholder = 'Template name…';
+  container.appendChild(nameLabel);
+  container.appendChild(nameInput);
+
+  const fmtLabel = document.createElement('label');
+  fmtLabel.className = 'modal-field-label';
+  fmtLabel.textContent = 'View title format (optional)';
+  const fmtInput = document.createElement('input');
+  fmtInput.type = 'text';
+  fmtInput.className = 'modal-text-input';
+  fmtInput.placeholder = state.title;
+  fmtInput.title =
+    'Tokens: ${TEMPLATE}, ${DATE}, ${C1_HASH}, ${C1_ALIAS}, ${S1_NAME}, ${S1_TYPE}, ${S1_ALIAS}, ${M1}…\n' +
+    'Transforms (chain with :): uppercase, lowercase, camelcase, kebabcase, beforeFirst(regex), afterLast(regex)\n' +
+    'Ex: ${C1_ALIAS} − ${C2_ALIAS} (${DATE})';
+  container.appendChild(fmtLabel);
+  container.appendChild(fmtInput);
+
+  const close = function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage-visible');
+    _enableMainUI(true);
   };
 
-  const ok = await _apirest.SaveTemplate(trimmedName, tpl);
-  if (ok) _errorManager.Success('Template saved: ' + trimmedName);
+  setModalCancel(close);
+
+  const actions = _ui.CreateActions(true, {
+    ok: {
+      text: 'Save',
+      callback: async function() {
+        const trimmedName = nameInput.value.trim();
+        if (!trimmedName) { nameInput.focus(); return; }
+
+        const titleFormat = fmtInput.value.trim() || null;
+
+        close();
+
+        const tpl = {
+          title:       state.title,
+          titleFormat,
+          variables: {
+            commits:  new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+            subtasks: new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+            metrics:  new Map([...state.variables.metrics.entries()]),
+          },
+          legendFormat:   state.legendFormat,
+          graphSettings:  state.graphSettings,
+          commitRegistry: state.commitRegistry,
+          metricLegend:   state.metricLegend,
+        };
+
+        const ok = await _apirest.SaveTemplate(trimmedName, tpl);
+        if (ok) _errorManager.Success('Template saved: ' + trimmedName);
+      },
+    },
+    cancel: { callback: close },
+  });
+  container.appendChild(actions);
+
+  modalpage.appendChild(container);
+  modalpage.classList.add('modalpage-visible');
+  nameInput.focus();
 }
 
 export async function tryLoadTemplateFromURL() {
@@ -1074,7 +1086,7 @@ export async function tryLoadTemplateFromURL() {
     }
   }
 
-  await _resetState(_state, tpl);
+  await _resetState(_state, tpl, templateName);
   _enableMainUI(true);
   return true;
 }

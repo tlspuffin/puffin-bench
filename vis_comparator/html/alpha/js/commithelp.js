@@ -4,12 +4,14 @@
  * @param hash
  * @param branch
  * @param date
+ * @param comment
  * @constructor
  */
-function EnrichedCommit(hash, branch, date) {
+function EnrichedCommit(hash, branch, date, comment) {
   this.hash = hash;
   this.branch = branch;
   this.date = date ?? '';
+  this.comment = comment ?? '';
   const short = CommitHelp.ShortHash(hash);
   if (branch && date) {
     this.label = `[${date}] ${short} — ${branch}`
@@ -38,7 +40,7 @@ class CommitHelp {
     const enriched = commits.map(hash => {
       let short = this.ShortHash(hash);
       const entry = gitEntriesById.get(short);
-      return new EnrichedCommit(hash, entry?.branch, entry?.date)
+      return new EnrichedCommit(hash, entry?.branch, entry?.date, entry?.comment)
     });
 
     // Sort by date descending (entries without date go last)
