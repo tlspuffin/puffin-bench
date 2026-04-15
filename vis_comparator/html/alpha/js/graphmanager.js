@@ -313,8 +313,80 @@ class GraphManager {
   }
 
   /**
+   * Splits a transform chain on `:` while respecting parentheses depth,
+   * so that regex arguments like `afterLast(:)` are not split.
+   */
+  static #SplitTransforms(transformStr) {
+    const parts = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < transformStr.length; i++) {
+      if      (transformStr[i] === '(') depth++;
+      else if (transformStr[i] === ')') depth--;
+      else if (transformStr[i] === ':' && depth === 0) {
+        parts.push(transformStr.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(transformStr.slice(start).trim());
+    return parts.filter(Boolean);
+  }
+
+  /**
+   * Applies one or more chained transforms (separated by `:`) to a string value.
+   * Supported transforms:
+   *   uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase
+   *   beforeFirst(regex)  — substring before first match of regex
+   *   afterLast(regex)    — substring after last match of regex
+   * Example: ${METRIC:afterLast(\\.):uppercase}  →  last dot-segment, uppercased
+   */
+  static #ApplyTransform(value, transformStr) {
+    if (!transformStr) return value;
+    return GraphManager.#SplitTransforms(transformStr)
+      .reduce((v, t) => GraphManager.#ApplySingleTransform(v, t), value);
+  }
+
+  static #ApplySingleTransform(value, str) {
+    // beforeFirst(regex)
+    const bfMatch = str.match(/^beforeFirst\((.+)\)$/);
+    if (bfMatch) {
+      const idx = value.search(new RegExp(bfMatch[1]));
+      return idx === -1 ? value : value.substring(0, idx);
+    }
+
+    // afterLast(regex)
+    const alMatch = str.match(/^afterLast\((.+)\)$/);
+    if (alMatch) {
+      const re = new RegExp(alMatch[1], 'g');
+      let lastIdx = -1, lastLen = 0, m;
+      while ((m = re.exec(value)) !== null) { lastIdx = m.index; lastLen = m[0].length; }
+      return lastIdx === -1 ? value : value.substring(lastIdx + lastLen);
+    }
+
+    switch (str) {
+      case 'uppercase':  return value.toUpperCase();
+      case 'lowercase':  return value.toLowerCase();
+      case 'camelcase':  return value
+        .replace(/[\s_\-]+(.)/g, (_, c) => c.toUpperCase())
+        .replace(/^(.)/, c => c.toLowerCase());
+      case 'pascalcase': return value
+        .replace(/[\s_\-]+(.)/g, (_, c) => c.toUpperCase())
+        .replace(/^(.)/, c => c.toUpperCase());
+      case 'kebabcase':  return value
+        .replace(/([a-z])([A-Z])/g, '$1-$2')
+        .replace(/[\s_]+/g, '-')
+        .toLowerCase();
+      case 'snakecase':  return value
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/[\s\-]+/g, '_')
+        .toLowerCase();
+      default: return value;
+    }
+  }
+
+  /**
    * Interpolates a legend format template for an experiment.
-   * Available tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}
+   * Tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}
+   * Any token accepts an optional transform: ${TOKEN:transformName} or ${TOKEN:beforeFirst(regex)}
    */
   static #InterpolateExperiment(fmt, resolved, slot, state) {
     const shortHash = CommitHelp.ShortHash(resolved.commit);
@@ -331,23 +403,26 @@ class GraphManager {
       subtaskAlias = entry?.alias || subtaskAlias;
     }
 
-    return fmt
-      .replace(/\$\{COMMIT\}/g,        shortHash)
-      .replace(/\$\{TASKTYPE\}/g,       resolved.tasktype)
-      .replace(/\$\{SUBTASK\}/g,        resolved.subtask)
-      .replace(/\$\{COMMIT_ALIAS\}/g,   commitAlias)
-      .replace(/\$\{SUBTASK_ALIAS\}/g,  subtaskAlias);
+    const tokens = {
+      COMMIT:        shortHash,
+      TASKTYPE:      resolved.tasktype,
+      SUBTASK:       resolved.subtask,
+      COMMIT_ALIAS:  commitAlias,
+      SUBTASK_ALIAS: subtaskAlias,
+    };
+
+    return fmt.replace(/\$\{(COMMIT|TASKTYPE|SUBTASK|COMMIT_ALIAS|SUBTASK_ALIAS)(?::([^}]*))?\}/g, (_, token, transform) => {
+      return GraphManager.#ApplyTransform(tokens[token] ?? '', transform);
+    });
   }
 
   /**
    * Interpolates a legend format template for a metric.
-   * Available tokens: ${METRIC} with optional :uppercase / :lowercase transforms.
+   * Token: ${METRIC} with optional transform: ${METRIC:transformName} or ${METRIC:beforeFirst(regex)}
    */
   static #InterpolateMetric(fmt, metricPath) {
-    return fmt.replace(/\$\{METRIC(?::([a-z]+))?\}/g, (_, transform) => {
-      if (transform === 'uppercase') return metricPath.toUpperCase();
-      if (transform === 'lowercase') return metricPath.toLowerCase();
-      return metricPath;
+    return fmt.replace(/\$\{METRIC(?::([^}]*))?\}/g, (_, transform) => {
+      return GraphManager.#ApplyTransform(metricPath, transform);
     });
   }
 

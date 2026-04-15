@@ -363,6 +363,34 @@ body {
   border-color: var(--color-primary);
 }
 
+/* Format template row in legends */
+.sidebar-format-template-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.sidebar-format-template-label {
+  font-size: 0.72rem;
+  color: #888;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sidebar-format-template-input {
+  flex: 1;
+  font-size: 0.78rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 2px 5px;
+  min-width: 0;
+  background: var(--color-bg);
+  color: var(--color-text-dark);
+}
+
 /* Experiment Legend */
 .commit-legend-row {
   display: flex;

@@ -1319,16 +1319,16 @@ function buildExperimentLegend(state) {
 
   // Format template input
   const fmtRow = document.createElement('div');
-  fmtRow.className = 'sidebar-alias-row';
+  fmtRow.className = 'sidebar-format-template-row';
   const fmtLabel = document.createElement('span');
-  fmtLabel.className = 'sidebar-alias-label';
+  fmtLabel.className = 'sidebar-format-template-label';
   fmtLabel.textContent = 'Format:';
   const fmtInput = document.createElement('input');
   fmtInput.type = 'text';
-  fmtInput.className = 'sidebar-alias-input';
+  fmtInput.className = 'sidebar-format-template-input';
   fmtInput.placeholder = '\${COMMIT_ALIAS} \u2212 \${SUBTASK_ALIAS}';
   fmtInput.value = state.legendFormat.experiment ?? '';
-  fmtInput.title = 'Template tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}';
+  fmtInput.title = 'Tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex)\nExample: ${SUBTASK_ALIAS:afterLast(_):pascalcase}';
   fmtInput.addEventListener('change', () => {
     state.legendFormat.experiment = fmtInput.value.trim() || null;
     refreshAllGraphAppearances(state);
@@ -1491,16 +1491,16 @@ function buildMetricLegend(state) {
 
   // Format template input
   const fmtRow = document.createElement('div');
-  fmtRow.className = 'sidebar-alias-row';
+  fmtRow.className = 'sidebar-format-template-row';
   const fmtLabel = document.createElement('span');
-  fmtLabel.className = 'sidebar-alias-label';
+  fmtLabel.className = 'sidebar-format-template-label';
   fmtLabel.textContent = 'Format:';
   const fmtInput = document.createElement('input');
   fmtInput.type = 'text';
-  fmtInput.className = 'sidebar-alias-input';
+  fmtInput.className = 'sidebar-format-template-input';
   fmtInput.placeholder = '\${METRIC}';
   fmtInput.value = state.legendFormat.metric ?? '';
-  fmtInput.title = 'Template tokens: ${METRIC}, ${METRIC:uppercase}, ${METRIC:lowercase}';
+  fmtInput.title = 'Token: ${METRIC}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex)\nExample: ${METRIC:afterLast(\\.):uppercase}  →  last segment, uppercased';
   fmtInput.addEventListener('change', () => {
     state.legendFormat.metric = fmtInput.value.trim() || null;
     refreshAllGraphAppearances(state);
@@ -1953,10 +1953,12 @@ function OpenView(restoreUI = false) {
 function buildTemplateURL(templateName, state) {
   const params = new URLSearchParams({ template: templateName });
   for (const [name, entry] of state.variables.commits) {
-    if (entry?.value) params.set(`c_${name}`, entry.value);
+    if (entry?.value) params.set(name, entry.value);
+    if (entry?.alias) params.set(`${name}.alias`, entry.alias);
   }
   for (const [name, entry] of state.variables.subtasks) {
-    if (entry?.value) params.set(`s_${name}`, `${entry.value.tasktype}:${entry.value.subtask}`);
+    if (entry?.value) params.set(name, `${entry.value.tasktype}:${entry.value.subtask}`);
+    if (entry?.alias) params.set(`${name}.alias`, entry.alias);
   }
   for (const [name, val] of state.variables.metrics) {
     if (val) params.set(name, val);
@@ -2018,9 +2020,9 @@ async function SaveAsTemplate(state) {
   const tpl = {
     title: state.title,
     variables: {
-      commits:  new Map([...state.variables.commits.keys()].map(k => [k, { value: null, alias: null }])),
-      subtasks: new Map([...state.variables.subtasks.keys()].map(k => [k, { value: null, alias: null }])),
-      metrics:  new Map([...state.variables.metrics.keys()].map(k => [k, null])),
+      commits:  new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+      subtasks: new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+      metrics:  new Map([...state.variables.metrics.entries()]),
     },
     legendFormat:   state.legendFormat,
     graphSettings:  state.graphSettings,
@@ -2046,32 +2048,48 @@ async function tryLoadTemplateFromURL() {
   // Migrate to new format before applying URL params
   const tpl = migrateStateIfNeeded(raw);
 
-  // Populate commit variables from URL params (format: c_<varName>=<commitHash>)
+  // Populate commit variables from URL params (format: <varName>=<commitHash>, <varName>.alias=<alias>)
+  // An empty value (e.g. c1=) explicitly clears the default to null.
   if (tpl.variables?.commits instanceof Map) {
     for (const [name, entry] of tpl.variables.commits) {
-      const val = params.get(`c_${name}`);
-      if (val) tpl.variables.commits.set(name, { value: val, alias: entry?.alias ?? null });
+      const hasVal   = params.has(name);
+      const hasAlias = params.has(`${name}.alias`);
+      const alias = hasAlias ? (params.get(`${name}.alias`) || null) : (entry?.alias ?? null);
+      if (hasVal) {
+        tpl.variables.commits.set(name, { value: params.get(name) || null, alias });
+      } else if (hasAlias) {
+        tpl.variables.commits.set(name, { value: entry?.value ?? null, alias });
+      }
     }
   }
-  // Populate subtask variables from URL params (format: s_<varName>=<tasktype>:<subtask>)
+  // Populate subtask variables from URL params (format: <varName>=<tasktype>:<subtask>, <varName>.alias=<alias>)
+  // An empty value explicitly clears the default to null.
   if (tpl.variables?.subtasks instanceof Map) {
     for (const [name, entry] of tpl.variables.subtasks) {
-      const val = params.get(`s_${name}`);
-      if (val) {
-        const firstColon = val.indexOf(':');
-        if (firstColon !== -1) {
-          tpl.variables.subtasks.set(name, {
-            value: { tasktype: val.slice(0, firstColon), subtask: val.slice(firstColon + 1) },
-            alias: entry?.alias ?? null,
-          });
+      const hasVal   = params.has(name);
+      const hasAlias = params.has(`${name}.alias`);
+      const alias = hasAlias ? (params.get(`${name}.alias`) || null) : (entry?.alias ?? null);
+      if (hasVal) {
+        const val = params.get(name);
+        if (val) {
+          const firstColon = val.indexOf(':');
+          if (firstColon !== -1) {
+            tpl.variables.subtasks.set(name, {
+              value: { tasktype: val.slice(0, firstColon), subtask: val.slice(firstColon + 1) },
+              alias,
+            });
+          }
+        } else {
+          tpl.variables.subtasks.set(name, { value: null, alias });
         }
+      } else if (hasAlias) {
+        tpl.variables.subtasks.set(name, { value: entry?.value ?? null, alias });
       }
     }
   }
   if (tpl.variables?.metrics instanceof Map) {
     for (const [name] of tpl.variables.metrics) {
-      const val = params.get(name);
-      if (val) tpl.variables.metrics.set(name, val);
+      if (params.has(name)) tpl.variables.metrics.set(name, params.get(name) || null);
     }
   }
 
