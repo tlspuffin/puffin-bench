@@ -44,6 +44,7 @@ private:
   int fd_ = -1;
   uint64_t fileSize_ = 0;
 
+  void Close();
   bool RotateFile();
   bool WriteBytes(uint8_t const* data, uint64_t size);
   bool CleanRotationFiles();

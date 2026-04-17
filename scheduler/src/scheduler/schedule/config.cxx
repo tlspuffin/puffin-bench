@@ -13,8 +13,7 @@ static ns_Schedule::Config defaultConfig;
 
 ns_Schedule::Config::Config() 
     : toolsPath_("tools"), runPath_("runs"), 
-    exportPath_(std::filesystem::path("exports") / "schedule"), 
-    exportCanceledPath_(exportPath_ / "Canceled"), 
+    exportPath_("exports"), exportCanceledPath_(exportPath_ / "Canceled"), 
     userPath_("users_data"), executors_(), monitorsPath_(runPath_ / "monitors")
 {}
 

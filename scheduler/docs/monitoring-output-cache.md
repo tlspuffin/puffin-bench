@@ -98,8 +98,8 @@ One `FDCaptureThread` is shared across all concurrently running steps of a `Loca
 
 ```
 OutputBuffer (abstract)
-  ├─ MemoryRing   — seule implémentation instanciée (active)
-  └─ FileRing     — implémentée mais jamais instanciée (dead code)
+  ├─ MemoryRing   — only implementation currently instantiated (active)
+  └─ FileRing     — implemented but never instantiated (dead code)
 ```
 
 #### MemoryRing (active)
@@ -127,7 +127,7 @@ Fully implemented but never instantiated. Designed for rotating file-based outpu
 These are the files written by FileRing. For MemoryRing the data is held in memory only.
 
 **After archiving:**
-Logs are included in `<exportPath>/<taskID>.tgz`. The `GetOutput` API extracts them on demand via `file_tgz.cxx::ReadFileFromTgz()`.
+Logs are included in `<exportPath>/<taskID>.zip`. The `GetOutput` API extracts them on demand via `FileCompressed` (falls back to `.tgz` for legacy tasks).
 
 ---
 
@@ -230,7 +230,7 @@ After all steps of a task complete, the scheduler creates an `ArchiveJob` and ha
 struct ArchiveJob {
   Publish    publish_;         // where to publish (server URL, storage path)
   unordered_map<string,string> variables_;  // template variables for publish paths
-  path       archivePath_;     // destination .tgz path
+  path       archivePath_;     // destination archive path (.zip)
   vector<path> sources_;       // files to include (first = task.json)
   path       deleteDir_;       // directory to remove after archiving
   path       baseDir_;         // base for relative paths inside the archive
@@ -248,7 +248,7 @@ Archiver::ThreadLoop():
     ProcessJob(job)
 
 ProcessJob(job):
-  1. Open archive at job.archivePath_ with libarchive (write mode, gzip)
+  1. Open archive at job.archivePath_ with libarchive (write mode, zip)
   2. For each path in job.sources_:
        add file or directory recursively to archive
   3. Close archive
@@ -266,7 +266,7 @@ ProcessJob(job):
 **Local storage:**
 ```
 MoveFileAndCreateSymLink(archive, rootStorage_/goal_/archive_name)
-  → moves .tgz to storage, creates symlink with canonical name
+  → moves .zip archive to storage, creates symlink with canonical name
 ```
 
 **Remote HTTP:**
@@ -296,20 +296,21 @@ Schedule::ManageEndOfStep()
   → Task::FinalizeAndArchive()
       → build ArchiveJob:
            sources = [task.json, artefacts/**, logs/**]
-           archivePath = <exportPath>/<taskID>.tgz
+           archivePath = <exportPath>/<taskID>.zip
            deleteDir = <runPath>/<taskID>
       → Archiver::AddJob(job)     (non-blocking enqueue)
       → TasksManager::DeleteTask() (freed from memory)
 
 [Archiver thread]
   → ProcessJob:
-       libarchive writes <taskID>.tgz
+       libarchive writes <taskID>.zip
        Publish::PublishResults() [if configured]
          → move/symlink in local storage
          → HTTP POST to remote server
 
 [Later: GET /api/task/<taskID>/output]
   → Schedule::GetOutput()
-      → file_tgz.cxx::ReadFileFromTgz(<taskID>.tgz, "logs/stdout.<stepID>…")
+      → FileCompressed(<taskID>.zip)::ExtractFileData("logs/stdout.<stepID>…")
+           (falls back to <taskID>.tgz for legacy tasks)
       → return base64-encoded content
 ```

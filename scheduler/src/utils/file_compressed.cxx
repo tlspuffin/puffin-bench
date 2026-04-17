@@ -1,21 +1,21 @@
-#include "file_tgz.hxx"
+#include "file_compressed.hxx"
 #include "logs.hxx"
 #include <fstream>
 #include <stdexcept>
 #include <archive_entry.h>
 
-FileTGZ::FileTGZ(std::string const& filename) 
+FileCompressed::FileCompressed(std::string const& filename) 
     : filename_(filename), archive_(nullptr), inArchiveFilename_(), inArchiveFilesize_(0)
 {}
 
-FileTGZ::~FileTGZ() {
+FileCompressed::~FileCompressed() {
   StopExtractFileData();
 }
 
-std::unordered_map<std::string, uint64_t> FileTGZ::ListFiles(std::regex const& pattern) {
+std::unordered_map<std::string, uint64_t> FileCompressed::ListFiles(std::regex const& pattern) {
   struct archive* archive = archive_read_new();
-  archive_read_support_format_tar(archive);
-  archive_read_support_filter_gzip(archive);
+  archive_read_support_format_all(archive);
+  archive_read_support_filter_all(archive);
 
   if (archive_read_open_filename(archive, filename_.c_str(), 10240) != ARCHIVE_OK) {
     throw std::runtime_error("Error, unable to open file " + filename_);
@@ -35,7 +35,7 @@ std::unordered_map<std::string, uint64_t> FileTGZ::ListFiles(std::regex const& p
   return results;
 }
 
-int64_t FileTGZ::ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize) {
+int64_t FileCompressed::ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize) {
   if (filename != inArchiveFilename_) {
     if (archive_ != nullptr) {
       archive_read_free(archive_);
@@ -47,8 +47,8 @@ int64_t FileTGZ::ExtractFileData(std::string const& filename, uint64_t const rea
     }
 
     archive_ = archive_read_new();
-    archive_read_support_format_tar(archive_);
-    archive_read_support_filter_gzip(archive_);
+    archive_read_support_format_all(archive_);
+    archive_read_support_filter_all(archive_);
     if (archive_read_open_filename(archive_, filename_.c_str(), 10240) != ARCHIVE_OK) {
       throw std::runtime_error("Error, unable to open file " + filename_);
     }
@@ -66,7 +66,9 @@ int64_t FileTGZ::ExtractFileData(std::string const& filename, uint64_t const rea
       }
     }
     if (notfound) {
-      *fileSize = 0;
+      if (fileSize != nullptr) {
+        *fileSize = 0;
+      }
       return 0;
     }
   } else if (archive_ == nullptr) {
@@ -79,7 +81,7 @@ int64_t FileTGZ::ExtractFileData(std::string const& filename, uint64_t const rea
   return archive_read_data(archive_, buffer, readSize);
 }
 
-void FileTGZ::StopExtractFileData() {
+void FileCompressed::StopExtractFileData() {
   if (archive_ == nullptr) {
     return;
   }
@@ -89,7 +91,7 @@ void FileTGZ::StopExtractFileData() {
   inArchiveFilesize_ = 0;
 }
 
-void FileTGZ::ExtractFile(std::string const& srcfile, std::string const& dstFile) {
+void FileCompressed::ExtractFile(std::string const& srcfile, std::string const& dstFile) {
   std::ofstream ofs(dstFile, std::ios::binary);
   if (!ofs.is_open()) {
     throw std::runtime_error("Unable to create file " + dstFile);

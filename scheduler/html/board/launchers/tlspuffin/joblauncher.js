@@ -1,30 +1,42 @@
+import { config } from './config.js'
+
+const link = document.createElement('link');
+link.rel  = 'stylesheet';
+link.href = new URL('./joblauncher.css', import.meta.url);
+document.head.appendChild(link);
+
 export class JobLauncher {
   #config;
-  #data = { dev: [], pr: [], all: [] };
+  #data = { dev: [], pr_open: [], pr: [], all: [] };
+  #prApiInfos = null;
   #jobDefs = [];
   #activeTab  = 'dev';
   #selectedType   = null;
   #selectedCommit = null;
   #skipNextModalClose = false;
   #titleModified = false;
+  #isLoading = false;
 
   // DOM refs
-  #overlay        = null;
-  #chipsWrap      = null;
-  #taskNameInput  = null;
-  #commitInput    = null;
-  #listEl         = null;
-  #tablistEl      = null;
-  #campaignExtra   = null;
-  #timeoutSection  = null;
+  #overlay           = null;
+  #chipsWrap         = null;
+  #taskNameInput     = null;
+  #commitInput       = null;
+  #commitInputRowEl  = null;
+  #refreshBtn        = null;
+  #listEl            = null;
+  #tablistEl         = null;
+  #campaignExtra    = null;
+  #campaignIdInput  = null;
+  #timeoutSection   = null;
   #timeoutDayInput = null;
   #timeoutInput    = null;
   #timeoutMinInput = null;
+  #vendorImpl      = 'c';   // 'c' | 'rust'
   #featuresInput   = null;
   #parametersInput = null;
   #nbAttemptsInput = null;
   #nbCoreInput     = null;
-  #memBaseInput    = null;
   #memMaxInput     = null;
   #vendorInput     = null;
   #usernameInput  = null;
@@ -35,11 +47,15 @@ export class JobLauncher {
   #toast               = null;
   #tabBtns             = {};
 
-  constructor(config = {}) {
+  constructor() {
+    if (config?.commitsUrl == null) {
+      console.error('Fatal error, missing commitsUrl in config.js')
+      return;
+    }
     this.#config = {
-      commitsUrl:    config.commitsUrl    ?? './git.json',
-      jobsConfigUrl: config.jobsConfigUrl ?? './jobs_config.json',
-      launchUrl:     config.launchUrl     ?? '/api/task/new',
+      commitsUrl:    config.commitsUrl,
+      jobsConfigUrl: new URL('./jobsconfig.json', import.meta.url).href,
+      launchUrl:     '/api/task/new',
     };
     this.#buildDOM();
   }
@@ -79,11 +95,13 @@ export class JobLauncher {
     this.#taskNameInput.spellcheck = false;
     this.#taskNameInput.autocomplete = 'off';
     this.#taskNameInput.addEventListener('input', () => { this.#titleModified = true; });
+    const editIcon = this.#el('span', 'jl-edit-icon');
+    editIcon.textContent = '✏️';
     const closeBtn = this.#el('button', 'jl-close');
     closeBtn.textContent = '×';
     closeBtn.title = 'Close';
     closeBtn.addEventListener('click', () => this.close());
-    hdr.append(this.#taskNameInput, closeBtn);
+    hdr.append(editIcon, this.#taskNameInput, closeBtn);
     return hdr;
   }
 
@@ -134,16 +152,30 @@ export class JobLauncher {
     });
     this.#commitInput.addEventListener('focus', () => this.#openTablist());
     this.#commitInput.addEventListener('blur',  () => this.#closeTablist());
-    this.#commitInput.addEventListener('wheel', e => {
-      if (this.#tablistEl.classList.contains('open')) {
-        e.preventDefault();
-        this.#listEl.scrollTop += e.deltaY;
-      }
-    }, { passive: false });
+
+    const clearBtn = this.#el('button', 'jl-icon-btn');
+    clearBtn.type  = 'button';
+    clearBtn.title = 'Clear';
+    clearBtn.textContent = '🧹';
+    clearBtn.addEventListener('mousedown', e => e.preventDefault());
+    clearBtn.addEventListener('click', () => this.#clearCommit());
+
+    this.#refreshBtn = this.#el('button', 'jl-icon-btn', 'jl-refresh-btn');
+    this.#refreshBtn.type  = 'button';
+    this.#refreshBtn.title = 'Refresh commit list';
+    this.#refreshBtn.textContent = '↻';
+    this.#refreshBtn.addEventListener('mousedown', e => e.preventDefault());
+    this.#refreshBtn.addEventListener('click', () => this.#refreshCommits());
+
+    const inputWrap = this.#el('div', 'jl-commit-input-wrap');
+    inputWrap.append(this.#commitInput, this.#refreshBtn);
+
+    this.#commitInputRowEl = this.#el('div', 'jl-commit-input-row');
+    this.#commitInputRowEl.append(clearBtn, inputWrap);
 
     this.#commitInfoEl = this.#el('div', 'jl-commit-info');
     const commitWrapper = this.#el('div', 'jl-commit-wrapper');
-    commitWrapper.append(this.#commitInput, this.#buildTablist());
+    commitWrapper.append(this.#commitInputRowEl, this.#buildTablist());
     commitSection.append(commitLabel, commitWrapper, this.#commitInfoEl);
     body.appendChild(commitSection);
 
@@ -231,12 +263,17 @@ export class JobLauncher {
 
     // prevent blur on commit input when interacting with the tablist
     this.#tablistEl.addEventListener('mousedown', e => e.preventDefault());
+    this.#tablistEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      this.#listEl.scrollTop += e.deltaY;
+    }, { passive: false });
 
     const footer = this.#el('div', 'jl-tabs-footer');
     const tabs = [
-      { key: 'dev', label: 'main/dev' },
-      { key: 'pr',  label: 'PR heads' },
-      { key: 'all', label: 'All' },
+      { key: 'dev',     label: 'main/dev' },
+      { key: 'pr_open', label: 'PR' },
+      { key: 'pr',      label: 'branches' },
+      { key: 'all',     label: 'All' },
     ];
     for (const t of tabs) {
       const btn = this.#el('button', 'jl-tab-btn');
@@ -249,6 +286,7 @@ export class JobLauncher {
         btn.classList.add('active');
         this.#renderList();
         this.#applyFilter(this.#commitInput.value.trim());
+        this.#updateRefreshBtnStyle();
       });
       this.#tabBtns[t.key] = btn;
       footer.appendChild(btn);
@@ -258,13 +296,19 @@ export class JobLauncher {
   }
 
   #openTablist() {
-    const rect = this.#commitInput.getBoundingClientRect();
+    const rect = this.#commitInputRowEl.getBoundingClientRect();
     this.#tablistEl.style.top   = (rect.bottom + 4) + 'px';
     this.#tablistEl.style.left  = rect.left + 'px';
     this.#tablistEl.style.width = rect.width + 'px';
     this.#tablistEl.classList.add('open');
+    this.#refreshBtn.classList.add('visible');
+    this.#updateRefreshBtnStyle();
   }
-  #closeTablist() { this.#tablistEl.classList.remove('open'); }
+  #closeTablist() {
+    if (this.#isLoading) return;
+    this.#tablistEl.classList.remove('open');
+    this.#refreshBtn.classList.remove('visible');
+  }
 
   #buildTimeout() {
     const row = this.#el('div', 'jl-timeout-row');
@@ -302,6 +346,41 @@ export class JobLauncher {
   #buildCampaignFields() {
     const wrap = this.#el('div', 'jl-campaign-fields');
 
+    const campaignIdRow = this.#el('div', 'jl-field-row');
+    const campaignIdLabel = this.#el('span', 'jl-label');
+    campaignIdLabel.textContent = 'Campaign ID';
+    this.#campaignIdInput = this.#el('input', 'jl-commit-input');
+    this.#campaignIdInput.type = 'text';
+    this.#campaignIdInput.placeholder = 'e.g. my-campaign-2025';
+    this.#campaignIdInput.spellcheck = false;
+    this.#campaignIdInput.autocomplete = 'off';
+    this.#campaignIdInput.addEventListener('input', () => this.#validate());
+    campaignIdRow.append(campaignIdLabel, this.#campaignIdInput);
+
+    const implRow = this.#el('div', 'jl-field-row');
+    const implLabel = this.#el('span', 'jl-label');
+    implLabel.textContent = 'Impl';
+    const implChips = this.#el('div', 'jl-chips');
+    for (const impl of [{ value: 'c', label: 'C' }, { value: 'rust', label: 'Rust' }]) {
+      const input = this.#el('input', 'jl-chip-input');
+      input.type  = 'radio';
+      input.name  = 'jl-vendor-impl';
+      input.id    = `jl-impl-${impl.value}`;
+      input.value   = impl.value;
+      input.checked = impl.value === this.#vendorImpl;
+      input.addEventListener('change', () => {
+        this.#vendorImpl = impl.value;
+        this.#updateVendorAppearance();
+        this.#validate();
+      });
+      const lbl = this.#el('label');
+      lbl.htmlFor = `jl-impl-${impl.value}`;
+      const dot = this.#el('span', 'jl-dot');
+      lbl.append(dot, ' ' + impl.label);
+      implChips.append(input, lbl);
+    }
+    implRow.append(implLabel, implChips);
+
     const vendorRow = this.#el('div', 'jl-field-row');
     const vendorLabel = this.#el('span', 'jl-label');
     vendorLabel.textContent = 'Vendor';
@@ -318,7 +397,7 @@ export class JobLauncher {
     featLabel.textContent = 'Features';
     this.#featuresInput = this.#el('input', 'jl-commit-input');
     this.#featuresInput.type = 'text';
-    this.#featuresInput.placeholder = 'e.g. cputs';
+    this.#featuresInput.placeholder = 'e.g. introspection';
     this.#featuresInput.spellcheck = false;
     this.#featuresInput.autocomplete = 'off';
     featRow.append(featLabel, this.#featuresInput);
@@ -333,41 +412,28 @@ export class JobLauncher {
     this.#parametersInput.autocomplete = 'off';
     paramsRow.append(paramsLabel, this.#parametersInput);
 
-    const nbAttemptsRow = this.#el('div', 'jl-field-row');
-    const nbAttemptsLabel = this.#el('span', 'jl-label');
-    nbAttemptsLabel.textContent = 'Attempts';
+    const resourcesRow = this.#el('div', 'jl-field-row');
+    const resourcesLabel = this.#el('span', 'jl-label');
+    resourcesLabel.textContent = 'Resources';
+
+    const attemptsSubLabel = this.#el('span', 'jl-mem-sublabel');
+    attemptsSubLabel.textContent = 'Attempts';
     this.#nbAttemptsInput = this.#el('input', 'jl-timeout-input');
     this.#nbAttemptsInput.type = 'number';
     this.#nbAttemptsInput.min = '1';
     this.#nbAttemptsInput.step = '1';
     this.#nbAttemptsInput.value = '1';
-    nbAttemptsRow.append(nbAttemptsLabel, this.#nbAttemptsInput);
 
-    const nbCoreRow = this.#el('div', 'jl-field-row');
-    const nbCoreLabel = this.#el('span', 'jl-label');
-    nbCoreLabel.textContent = 'Cores';
+    const coreSubLabel = this.#el('span', 'jl-mem-sublabel');
+    coreSubLabel.textContent = 'Cores';
     this.#nbCoreInput = this.#el('input', 'jl-timeout-input');
     this.#nbCoreInput.type = 'number';
     this.#nbCoreInput.min = '1';
     this.#nbCoreInput.step = '1';
     this.#nbCoreInput.value = '1';
-    nbCoreRow.append(nbCoreLabel, this.#nbCoreInput);
 
-    const memRow = this.#el('div', 'jl-field-row');
-    const memLabel = this.#el('span', 'jl-label');
-    memLabel.textContent = 'Memory';
-    const memInputs = this.#el('div', 'jl-mem-inputs');
-    const memBaseLabel = this.#el('span', 'jl-mem-sublabel');
-    memBaseLabel.textContent = 'base';
-    this.#memBaseInput = this.#el('input', 'jl-timeout-input');
-    this.#memBaseInput.type = 'number';
-    this.#memBaseInput.min = '0';
-    this.#memBaseInput.step = '256';
-    this.#memBaseInput.value = '0';
-    const memBaseUnit = this.#el('span', 'jl-timeout-unit');
-    memBaseUnit.textContent = 'MB';
-    const memMaxLabel = this.#el('span', 'jl-mem-sublabel');
-    memMaxLabel.textContent = 'max';
+    const memSubLabel = this.#el('span', 'jl-mem-sublabel');
+    memSubLabel.textContent = 'Memory';
     this.#memMaxInput = this.#el('input', 'jl-timeout-input');
     this.#memMaxInput.type = 'number';
     this.#memMaxInput.min = '0';
@@ -375,29 +441,47 @@ export class JobLauncher {
     this.#memMaxInput.value = '0';
     const memMaxUnit = this.#el('span', 'jl-timeout-unit');
     memMaxUnit.textContent = 'MB';
-    memInputs.append(memBaseLabel, this.#memBaseInput, memBaseUnit, memMaxLabel, this.#memMaxInput, memMaxUnit);
-    memRow.append(memLabel, memInputs);
 
-    wrap.append(vendorRow, featRow, paramsRow, nbAttemptsRow, nbCoreRow, memRow);
+    const resourcesInputs = this.#el('div', 'jl-mem-inputs');
+    resourcesInputs.append(
+      attemptsSubLabel, this.#nbAttemptsInput,
+      coreSubLabel, this.#nbCoreInput,
+      memSubLabel, this.#memMaxInput, memMaxUnit,
+    );
+    resourcesRow.append(resourcesLabel, resourcesInputs);
+
+    wrap.append(campaignIdRow, implRow, vendorRow, featRow, paramsRow, resourcesRow);
     return wrap;
+  }
+
+  #updateVendorAppearance() {
+    const isRust = this.#vendorImpl === 'rust';
+    this.#vendorInput.placeholder = isRust ? 'e.g. asan,wolfssl540' : 'e.g. wolfssl:wolfssl540';
   }
 
   // ── Load commits ──────────────────────────────────────────────────────────
 
-  async #loadCommits() {
+  async #loadCommits(refreshParam = null) {
     try {
-      const res = await fetch(this.#config.commitsUrl);
+      const url = refreshParam
+        ? `${this.#config.commitsUrl}?refresh=${refreshParam}`
+        : this.#config.commitsUrl;
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
 
-      const commits = json.commits ?? [];
-      const pr      = json.PR      ?? [];
+      const commits = json.commits  ?? [];
+      const pr      = json.branches ?? [];
+      const prOpen  = (json.PR ?? []).filter(p => p.state === 'open');
+      this.#prApiInfos = json.PR_API_Infos ?? null;
 
-      this.#data.dev = commits.filter(c => c.branch === 'dev' || c.branch === 'main');
-      this.#data.pr  = pr;
+      this.#data.dev     = commits.filter(c => c.branch === 'dev' || c.branch === 'main');
+      this.#data.pr_open = prOpen;
+      this.#data.pr      = pr;
       this.#data.all = [
         ...commits,
-        ...pr.map(p => ({ id: p.id, date: p.date, comment: p.comment, _branch: p.branch })),
+        ...prOpen.map(p => ({ id: p.id, date: p.date, comment: p.comment, _branch: p.branch })),
+        ...pr.map(p    => ({ id: p.id, date: p.date, comment: p.comment, _branch: p.branch })),
       ].sort((a, b) => (b.date > a.date ? 1 : -1));
 
       this.#renderList();
@@ -424,7 +508,7 @@ export class JobLauncher {
     }
 
     for (const item of items) {
-      const isPR = this.#activeTab === 'pr' || item._branch !== undefined;
+      const isPR = this.#activeTab === 'pr' || this.#activeTab === 'pr_open' || item._branch !== undefined;
       const row  = this.#el('div', 'jl-list-item');
       if (this.#selectedCommit?.id === item.id) row.classList.add('selected');
 
@@ -441,7 +525,7 @@ export class JobLauncher {
         hashWrap.appendChild(badge);
       }
       const hash = this.#el('span', 'jl-item-hash');
-      hash.textContent = item.id;
+      hash.textContent = item.id.slice(0, 14);
       hashWrap.appendChild(hash);
 
       const date = this.#el('span', 'jl-item-date');
@@ -454,7 +538,7 @@ export class JobLauncher {
 
       row.addEventListener('click', () => {
         this.#selectedCommit = item;
-        this.#commitInput.value = item.id;
+        this.#commitInput.value = item.id.slice(0, 14);
         this.#updateCommitInfo(item);
         this.#listEl.querySelectorAll('.jl-list-item').forEach(r => r.classList.remove('selected'));
         row.classList.add('selected');
@@ -472,10 +556,53 @@ export class JobLauncher {
 
   #currentItems() {
     switch (this.#activeTab) {
-      case 'dev': return this.#data.dev;
-      case 'pr':  return this.#data.pr;
-      case 'all': return this.#data.all;
-      default:    return [];
+      case 'dev':     return this.#data.dev;
+      case 'pr_open': return this.#data.pr_open;
+      case 'pr':      return this.#data.pr;
+      case 'all':     return this.#data.all;
+      default:        return [];
+    }
+  }
+
+  // ── Commit field actions ──────────────────────────────────────────────────
+
+  #clearCommit() {
+    this.#commitInput.value = '';
+    this.#selectedCommit    = null;
+    this.#updateCommitInfo(null);
+    this.#autoUpdateTitle();
+    this.#validate();
+  }
+
+  async #refreshCommits() {
+    const param = this.#activeTab === 'pr_open' ? 'all' : 'local';
+    this.#isLoading = true;
+    this.#refreshBtn.classList.add('loading');
+    this.#tablistEl.classList.add('loading');
+    this.#listEl.innerHTML = '';
+    this.#listEl.appendChild(this.#el('div', 'jl-list-spinner'));
+    try {
+      await this.#loadCommits(param);
+    } finally {
+      this.#isLoading = false;
+      this.#refreshBtn.classList.remove('loading');
+      this.#tablistEl.classList.remove('loading');
+    }
+  }
+
+  #updateRefreshBtnStyle() {
+    if (!this.#refreshBtn) return;
+    const isPR = this.#activeTab === 'pr_open';
+    this.#refreshBtn.classList.toggle('jl-refresh-pr', isPR);
+    if (isPR && this.#prApiInfos) {
+      //const reset = new Date(this.#prApiInfos.apiResetTS * 1000).toLocaleString();
+      const resetDate = new Date(this.#prApiInfos.apiResetTS * 1000).toLocaleString([], { 
+          month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false});
+      this.#refreshBtn.title =
+        `Refresh PRs (GitHub API)\nCredits remaining: ${this.#prApiInfos.apiRemaining}\nReset: ${resetDate}`;
+    } else {
+      this.#refreshBtn.title = 'Refresh commit list';
     }
   }
 
@@ -543,14 +670,20 @@ export class JobLauncher {
 
   #autoUpdateTitle() {
     if (this.#titleModified) return;
-    const parts = [];
+    const commit = this.#commitInput.value.trim().slice(0, 14);
+    const label  = this.#selectedCommit?.state !== undefined
+      ? (this.#selectedCommit.branch ?? commit)
+      : commit;
     if (this.#selectedType) {
       const jobDef = this.#jobDefs.find(j => j.value === this.#selectedType);
-      if (jobDef) parts.push(jobDef.label);
+      if (jobDef) {
+        this.#taskNameInput.value = jobDef.composite?.length
+          ? [jobDef.label, label].filter(Boolean).join(' ')
+          : [jobDef.label, label].filter(Boolean).join(' - ');
+        return;
+      }
     }
-    const commit = this.#commitInput.value.trim();
-    if (commit) parts.push(commit.slice(0, 7));
-    this.#taskNameInput.value = parts.join(' - ');
+    this.#taskNameInput.value = label;
   }
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -568,9 +701,10 @@ export class JobLauncher {
     const typeOk    = this.#selectedType !== null;
     const commitOk  = isKnown || isHex;
     const confirmOk = !isUnknown || this.#confirmUnknownCheck.checked;
-    const jobDef    = this.#jobDefs.find(j => j.value === this.#selectedType);
-    const vendorOk  = !jobDef?.campaign || this.#vendorInput.value.trim().length > 0;
-    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk);
+    const jobDef        = this.#jobDefs.find(j => j.value === this.#selectedType);
+    const vendorOk      = !jobDef?.campaign || this.#vendorInput.value.trim().length > 0;
+    const campaignIdOk  = !jobDef?.campaign || this.#campaignIdInput.value.trim().length > 0;
+    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && campaignIdOk);
   }
 
   // ── Launch ────────────────────────────────────────────────────────────────
@@ -583,21 +717,53 @@ export class JobLauncher {
     const jobDef = this.#jobDefs.find(j => j.value === jobType);
     if (!jobDef) return;
 
-    const isCampaign = !!jobDef.campaign;
-    const timeoutD   = isCampaign ? (parseInt(this.#timeoutDayInput.value,  10) || 0) : 0;
-    const timeoutH   = isCampaign ? (parseInt(this.#timeoutInput.value,    10) || 0) : 0;
-    const timeoutM   = isCampaign ? (parseInt(this.#timeoutMinInput.value,  10) || 0) : 0;
-    const timeoutStr = isCampaign ? `${timeoutD * 1440 + timeoutH * 60 + timeoutM}m` : null;
-    const vendor     = isCampaign ? (this.#vendorInput.value.trim()      || null) : null;
-    const features   = isCampaign ? (this.#featuresInput.value.trim()   || null) : null;
-    const parameters = isCampaign ? (this.#parametersInput.value.trim() || null) : null;
-
     this.#showToast('', '');
     this.#launchBtn.disabled = true;
     this.#launchBtn.textContent = 'Launching…';
 
     try {
-      // fetch all job files in parallel
+      const baseName = this.#taskNameInput.value.trim() || 'New Task';
+      if (jobDef.composite?.length) {
+        const subJobs = jobDef.composite.map(v => this.#jobDefs.find(j => j.value === v)).filter(Boolean);
+        const results = await Promise.all(
+          subJobs.map(sub => this.#launchSingleJob(commit, sub, `${baseName} - ${sub.label}`))
+        );
+        const allOk = results.every(r => r.ok);
+        const lines = results.map((r, i) =>
+          `${subJobs[i].label}: ${r.ok ? 'OK' + (r.task_id ? ` (${r.task_id})` : '') : 'FAILED - ' + r.error}`
+        );
+        this.#showToast(allOk ? 'success' : 'error', lines.join('\n'));
+      } else {
+        const result = await this.#launchSingleJob(commit, jobDef, baseName);
+        if (result.ok) {
+          this.#showToast('success',
+            `Task queued.\nCommit  : ${commit}\nType    : ${jobType}` +
+            (result.task_id ? `\nTask ID : ${result.task_id}` : '')
+          );
+        } else {
+          this.#showToast('error', `Server error ${result.error}`);
+        }
+      }
+    } catch (err) {
+      this.#showToast('error', `Request failed:\n${err.message}`);
+    } finally {
+      this.#launchBtn.disabled = false;
+      this.#launchBtn.textContent = 'Launch Task';
+      this.#validate();
+    }
+  }
+
+  async #launchSingleJob(commit, jobDef, name) {
+    try {
+      const isCampaign = !!jobDef.campaign;
+      const timeoutD   = isCampaign ? (parseInt(this.#timeoutDayInput.value,  10) || 0) : 0;
+      const timeoutH   = isCampaign ? (parseInt(this.#timeoutInput.value,    10) || 0) : 0;
+      const timeoutM   = isCampaign ? (parseInt(this.#timeoutMinInput.value,  10) || 0) : 0;
+      const timeoutStr = isCampaign ? `${timeoutD * 1440 + timeoutH * 60 + timeoutM}m` : null;
+      const vendor     = isCampaign ? (this.#vendorInput.value.trim()      || null) : null;
+      const features   = isCampaign ? (this.#featuresInput.value.trim()   || null) : null;
+      const parameters = isCampaign ? (this.#parametersInput.value.trim() || null) : null;
+
       const allPaths = [jobDef.config, jobDef.script, ...(jobDef.files ?? [])];
       const blobs = await Promise.all(allPaths.map(async path => {
         const res = await fetch(path);
@@ -606,7 +772,7 @@ export class JobLauncher {
       }));
 
       const fd = new FormData();
-      fd.append('name',     this.#taskNameInput.value.trim() || 'New Task');
+      fd.append('name',     name);
       fd.append('user',     this.#usernameInput.value.trim());
       fd.append('job_type', jobDef.job_type ?? jobDef.value);
       fd.append('config',   blobs[0], jobDef.config.split('/').pop());
@@ -615,47 +781,40 @@ export class JobLauncher {
         fd.append('files[]', blobs[2 + i], jobDef.files[i].split('/').pop());
 
       fd.append('args[COMMIT_ID]', commit);
+      if (isCampaign) {
+        fd.append('args[CAMPAIGN_ID]', this.#campaignIdInput.value.trim());
+        fd.append('args[SAVE_CORPUS]', 1);
+      }
       const nbAttempts = isCampaign ? (parseInt(this.#nbAttemptsInput.value, 10) || null) : null;
       const nbCore     = isCampaign ? (parseInt(this.#nbCoreInput.value,     10) || null) : null;
-      const memBase    = isCampaign ? (parseInt(this.#memBaseInput.value,    10) || null) : null;
       const memMax     = isCampaign ? (parseInt(this.#memMaxInput.value,     10) || null) : null;
       if (timeoutStr != null) fd.append('runtime[RUNTIME_TIMEOUT]',           timeoutStr);
       if (nbAttempts != null) fd.append('runtime[RUNTIME_NB_RUN]',            String(nbAttempts));
       if (nbCore     != null) fd.append('runtime[RUNTIME_NB_CORES]',          String(nbCore));
-      if (memBase    > 0)     fd.append('runtime[RUNTIME_MEMORY_CORE]',        String(memBase));
+      if (memMax     > 0)     fd.append('runtime[RUNTIME_MEMORY_CORE]',        String(memMax));
       if (memMax     > 0)     fd.append('runtime[RUNTIME_MEMORY_CONSUMPTION]', String(memMax));
       if (isCampaign) {
-        // Derive config name from vendor: "wolfssl:wolfssl540" → "wolfssl540"
         const configName = vendor ? vendor.split(':').pop() : 'campaign';
         const conf = { args: {} };
-        if (vendor)         conf.args.vendor      = vendor;
-        if (features)       conf.args.features    = features;
-        if (parameters)     conf.args.extra_flags = parameters;
+        if (this.#vendorImpl === 'c'    && vendor)   conf.args.vendor             = vendor;
+        if (this.#vendorImpl === 'rust' && vendor)   conf.args.features           = vendor;
+        else                                         conf.args.features           = '';
+        if (features)                                conf.args.required_features  = features;
+        if (parameters)                              conf.args.extra_flags        = parameters;
+        conf.args.experiment = vendor || features;
         if (nbCore > 0)     conf.nb_cores         = nbCore;
         fd.append('runtime[RUNTIME_RUN_CONFIG]', JSON.stringify({ [configName]: conf }));
       }
 
       const response = await fetch(this.#config.launchUrl, { method: 'POST', body: fd });
-
       if (response.ok) {
         const data = await response.json().catch(() => ({}));
-        this.#showToast('success',
-          `Task queued.\n` +
-          `Commit  : ${commit}\n` +
-          `Type    : ${jobType}\n` +
-          (timeoutStr != null ? `Timeout : ${timeoutStr}\n` : '') +
-          (data.task_id   ? `Task ID : ${data.task_id}` : '')
-        );
-      } else {
-        const text = await response.text().catch(() => response.statusText);
-        this.#showToast('error', `Server error ${response.status}:\n${text}`);
+        return { ok: true, task_id: data.task_id };
       }
+      const text = await response.text().catch(() => response.statusText);
+      return { ok: false, error: `${response.status}: ${text}` };
     } catch (err) {
-      this.#showToast('error', `Request failed:\n${err.message}`);
-    } finally {
-      this.#launchBtn.disabled = false;
-      this.#launchBtn.textContent = 'Launch Task';
-      this.#validate();
+      return { ok: false, error: err.message };
     }
   }
 
@@ -686,12 +845,15 @@ export class JobLauncher {
     this.#timeoutDayInput.value  = '0';
     this.#timeoutInput.value     = '3';
     this.#timeoutMinInput.value  = '0';
+    this.#vendorImpl = 'c';
+    this.#overlay.querySelectorAll('input[name="jl-vendor-impl"]').forEach(i => i.checked = i.value === 'c');
+    this.#updateVendorAppearance();
+    this.#campaignIdInput.value  = '';
     this.#vendorInput.value      = '';
     this.#featuresInput.value    = '';
     this.#parametersInput.value  = '';
     this.#nbAttemptsInput.value  = '1';
     this.#nbCoreInput.value      = '1';
-    this.#memBaseInput.value     = '0';
     this.#memMaxInput.value      = '0';
     this.#confirmUnknownCheck.checked = false;
     this.#confirmUnknownEl.classList.remove('visible');
@@ -700,6 +862,7 @@ export class JobLauncher {
     this.#showToast('', '');
     this.#activeTab = 'dev';
     Object.entries(this.#tabBtns).forEach(([k, b]) => b.classList.toggle('active', k === 'dev'));
+    this.#updateRefreshBtnStyle();
     this.#renderList();
   }
 

@@ -417,6 +417,7 @@
   /*background: rgba(22, 215, 215, 0.35);*/
   background: transparent;
   z-index: 1;
+  overscroll-behavior: contain;
 }
 
 .logs-container {

@@ -1,9 +1,30 @@
 #include "linux.hxx"
+#include <filesystem>
+#include <map>
+#include <sys/stat.h>
 
-ns_System::Linux::Linux(uint64_t time_interval) : time_interval_(time_interval), 
-    threadRunning_(true)
+ns_System::Linux::Linux(uint64_t time_interval, std::unordered_map<std::string, std::filesystem::path> storages) 
+    : storages_(), time_interval_(time_interval), threadRunning_(true)
 {
   cores_.Init();
+
+  std::map<dev_t, std::string> partitions;
+  for(auto const& [name, path]: storages) {
+    struct stat infos {};
+    if (::stat(path.c_str(), &infos) != 0) {
+      continue;
+    }
+    auto [it, inserted] = partitions.try_emplace(infos.st_dev, name);
+    if (inserted) {
+      storages_[name] = path;
+    } else {
+      std::string oldName = it->second;
+      it->second += " / " + name;
+      storages_[it->second] = storages_[oldName];
+      storages_.erase(oldName);
+    }
+  }
+
   if (!ThreadWaitOrStop(2)) {
     return;
   }
@@ -18,7 +39,17 @@ ns_System::Linux::~Linux() {
 }
 
 void ns_System::Linux::GetLoad(CoreStats& global, std::vector<CoreStats>& perCores, 
-      ns_System::Memory::MemoryStats& memory) {
+      ns_System::MemoryMonitor::MemoryStats& memory, 
+      std::unordered_map<std::string, std::pair<uint64_t, uint64_t>>& storages) {
+  for(auto const& [name, path]: storages_) {
+    std::error_code ec;
+    std::filesystem::space_info storageState = std::filesystem::space(path, ec);
+    if (ec) {
+      storages[name] = { 0, 0 };
+      continue;
+    }
+    storages[name] = { storageState.capacity, storageState.available };
+  }
   std::lock_guard lock(lock_);
   cores_.CoresValuesRatio(global, perCores);
   memory = memory_.Stats();

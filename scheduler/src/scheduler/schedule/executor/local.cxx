@@ -52,7 +52,7 @@ ns_Executor::LocalTaskData::LocalTaskData(rapidjson::Value const& config)
   cgroupPath_ = Get<std::string>(config, "cgroup_path");
 
   if (config.HasMember("os_load") && config["os_load"].IsObject()) {
-    rapidjson::Value const& loadJSON = config["os_load"].GetObject();
+    rapidjson::Value const& loadJSON = config["os_load"];
     os_memory_load_ = Get<uint64_t>(loadJSON, "memory");
     os_cores_load_ = Get<uint64_t>(loadJSON, "cores");
     os_memory_max_load_ = Get<uint64_t>(loadJSON, "memory_max");
@@ -110,12 +110,12 @@ ns_Executor::LocalData::LocalData(rapidjson::Value const& config)
   cgroup_path_ = Get<std::string>(config, "cgroup_path");
 
   if (config.HasMember("os_load") && config["os_load"].IsObject()) {
-    rapidjson::Value const& loadJSON = config["os_load"].GetObject();
+    rapidjson::Value const& loadJSON = config["os_load"];
     os_memory_load_ = Get<uint64_t>(loadJSON, "memory");
     if ((!loadJSON.HasMember("cores")) || (!loadJSON["cores"].IsArray())) {
       throw std::runtime_error("Missing cores array in load object");
     }
-    rapidjson::Value const& coresJSON = loadJSON["cores"].GetArray();
+    rapidjson::Value const& coresJSON = loadJSON["cores"];
     os_cores_load_.reserve(coresJSON.Size());
     for (size_t i=0; i<coresJSON.Size(); ++i) {
       if (!coresJSON[i].IsUint64()) {
@@ -168,7 +168,7 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
       nbCoresMax_(config_.nbCores_), coresFree_(config_.cores_), nbChild_(0), 
       cachePort_(cachePort), cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0), 
-      cgroupDisableUpdateSliceUser_(false)
+      cgroupDisableUpdateSliceUser_(false), cpuMaxLoad_(config_.cpuMaxLoad_), memMinAllowed_(0)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -206,6 +206,8 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     }
     nbCoresMax_ = nbCoresFree_;
   }
+
+  memMinAllowed_ = double(os.Memory().Total()) * config_.memMinRatio_;
 }
 
 ns_Executor::Local::~Local() {
@@ -266,11 +268,19 @@ bool ns_Executor::Local::TaskFinalize(ExecutorTaskData* data) {
 
 std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
     std::list<ns_Schedule::Step*> const& steps) {
+  std::list<ns_Schedule::Step*> result;
+
   GatherStats();
   uint64_t freeMemory = stats_.freeMemory;
-
   uint64_t nbCoresFree = nbCoresFree_;
-  std::list<ns_Schedule::Step*> result;
+
+  if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
+    return result;
+  }
+  if (freeMemory < memMinAllowed_) {
+    return result;
+  }
+  freeMemory -= memMinAllowed_;
 
   for(auto step : steps) {
     uint64_t nbCoresRequired = step->nb_cores_;
@@ -712,8 +722,11 @@ ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
   return new LocalData(config);
 }
 
-std::pair<bool, bool> ns_Executor::Local::RetrieveStats() {
-  return std::make_pair<>(stats_.cores > 90, stats_.memory > 85);
+std::pair<bool, bool> ns_Executor::Local::LimitsState() {
+  return std::make_pair<>(
+      (!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_), 
+      stats_.freeMemory < memMinAllowed_
+  );
 }
 
 std::pair<int8_t, int8_t> ns_Executor::Local::UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const {
@@ -784,6 +797,14 @@ void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAll
     loadPerCore.PushBack(loadCore, alloc);
   }
   stats.AddMember("load_per_core", loadPerCore, alloc);
+  rapidjson::Value storages(rapidjson::kObjectType);
+  for(auto const& [ name, values ]: stats_.storages) {
+    rapidjson::Value storage(rapidjson::kObjectType);
+    storage.AddMember("capacity", values.first, alloc);
+    storage.AddMember("available", values.second, alloc);
+    storages.AddMember(rapidjson::Value(name.c_str(), alloc), storage, alloc);
+  }
+  stats.AddMember("storage", storages, alloc);
   root.AddMember("stats", stats, alloc);
 }
 
@@ -797,7 +818,7 @@ void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step
         " uuid: " << step->uuid_ << " session: " << sessionID << 
         " cleaned_pid: " << killedPID << Log::Flags::End;
   }
-  std::vector<pid_t> pids = os_.process_.GetPidsBySid(sessionID);
+  std::vector<pid_t> pids = os_.Process().GetPidsBySid(sessionID);
   for(pid_t pid: pids) {
     LOGD << "waiting for " << pid << Log::Flags::End;
     waitpid(pid, nullptr, 0);
@@ -983,7 +1004,7 @@ std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
       }
     }
   } else {
-    result = os_.cores_.SelectMostIdleCores(nbCores, &coresFree_);
+    result = os_.Cores().SelectMostIdleCores(nbCores, &coresFree_);
     for (size_t i=0; i<result.size(); ++i) {
       coresFree_[result[i]] = false;
     }
@@ -1218,17 +1239,18 @@ bool ns_Executor::Local::CGroupMemoryUsed(std::filesystem::path const& cgroupMem
   if (usedMemory == 0) {
     return false;
   }
-  percentOfUsedMemory = ((double)usedMemory / (double)os_.memory_.Total()) * 100.0;
+  percentOfUsedMemory = ((double)usedMemory / (double)os_.Memory().Total()) * 100.0;
   return true;
 }
 
 void ns_Executor::Local::GatherStats() {
   ns_System::CoreStats global;
   std::vector<ns_System::CoreStats> perCores;
-  ns_System::Memory::MemoryStats memory;
-  os_.GetLoad(global, perCores, memory);
+  ns_System::MemoryMonitor::MemoryStats memory;
+  os_.GetLoad(global, perCores, memory, stats_.storages);
   stats_.memory = memory.UsedRatio() * 100.0;
   stats_.freeMemory = memory.free_kb * 1024;
+  stats_.totalMemory = memory.total_kb * 1024;
   stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
   stats_.perCores.resize(perCores.size());
   for(size_t i=0; i<perCores.size(); ++i) {

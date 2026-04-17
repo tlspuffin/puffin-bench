@@ -34,6 +34,8 @@ struct LocalConfig : public Config {
   uint64_t logsSize_;
   std::string cgroupPathSymbolic_;
   std::filesystem::path cgroupPath_;
+  uint8_t cpuMaxLoad_;
+  double memMinRatio_;
   void Validate(bool forceInstall) const;
 
   LocalConfig(std::string const& name);

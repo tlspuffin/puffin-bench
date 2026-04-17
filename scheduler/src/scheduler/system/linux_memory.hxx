@@ -5,7 +5,7 @@
 
 namespace ns_System {
 
-class Memory {
+class MemoryMonitor {
 public:
   struct MemoryStats {
     uint64_t total_kb = 0;
@@ -19,19 +19,19 @@ public:
     double FreeRatio() const { return 1.0 - UsedRatio(); }
   };
 
-  Memory();
+  MemoryMonitor();
   void Update();
-  MemoryStats Stats();
-  uint64_t Total();
+  MemoryStats Stats() const;
+  uint64_t Total() const;
 
 private:
-  std::mutex lock_;
+  mutable std::mutex lock_;
   MemoryStats stats_;
   uint64_t total_;
 };
 
 
-inline uint64_t Memory::Total() {
+inline uint64_t MemoryMonitor::Total() const {
   return total_;
 }
 

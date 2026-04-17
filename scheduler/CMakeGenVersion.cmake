@@ -1,3 +1,13 @@
+#***********************************************\
+#                                               *
+#  project : Cmake helper to maintain version   *
+#            header                             *
+#                                               *
+#  author : Olivier Demengeon                   *
+#  created : 2026                               *
+#                                               *
+#***********************************************/
+
 if(NOT DEFINED INPUT)
     message(FATAL_ERROR "missing INPUT")
 endif()

@@ -111,7 +111,7 @@ GET /api/task/<taskID>/<stepUUID>/<stepID>/output/<stdout|stderr>/<size>/<offset
 
 For a **running** step, data is read from the in-memory or file ring buffer via `FDCaptureThread::Read()`.
 
-For a **completed** step, data is read from the archived `.tgz` file via `file_tgz.cxx`.
+For a **completed** step, data is read from the archived `.zip` file via `FileCompressed` (falls back to `.tgz` for legacy tasks).
 
 **Response `200 OK`:**
 ```json
@@ -175,7 +175,7 @@ Returns metadata for a completed task, read from `<exportPath>/<taskID>/metadata
 GET /api/task/<taskID>/artefacts
 ```
 
-Returns the list of artefacts registered by step functions via `CreateArtefact`. For completed tasks, artefacts are read from the `.tgz` archive.
+Returns the list of artefacts registered by step functions via `CreateArtefact`. For completed tasks, artefacts are read from the `.zip` archive.
 
 **Response `200 OK`:**
 ```json

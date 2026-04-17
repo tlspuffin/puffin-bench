@@ -6,16 +6,15 @@
   <title>Experiment Manager</title>
   <link rel="stylesheet" href="board.css">
   <link rel="stylesheet" href="taskcard.css">
-  <link rel="stylesheet" href="joblauncher.css">
 </head>
 <body>
   <div class="header">
     <div class="header-top">
-      <h1>Experiment Scheduler Dashboard</h1>
+      <h1 id="header-title"></h1>
       <div id="executors-stats" class="executors-stats"></div>
       <div class="header-actions">
         <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
-        <a style="color: white" href="http://pesto-calc:10082/files/tlspuffin5/summary_PR.html">All Results</a>
+        <div id="custom_header"></div>
       </div>
     </div>
     <div class="stats-bar">
@@ -41,8 +40,6 @@
   <div id="container-running-steps" class="container-running-steps"></div>
 
   <div id="exec-tooltip" class="exec-tooltip"></div>
-
-  <button class="new-task" id="new-task">+</button>
 
   <script type="module" src="board.js"></script>
 </body>

@@ -1,0 +1,50 @@
+.container-running-steps {
+  padding: 0px 0.5em;
+}
+
+.card-task-loads { display: none; }
+
+.card-task-running {
+  max-width: 100%;
+  width: 100%;
+  padding-top: 0;
+}
+
+.card-task-running:hover {
+  background: #2d2d2d;
+}
+
+#card-task-header {
+  position: sticky;
+  top: 0;
+  padding-top: 20px;
+  background: #2d2d2d;
+  border-radius: 15px 15px 0 0;
+  border-bottom: 1px solid #555;
+  z-index: 10;
+}
+
+.btn-download-artefacts {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 100;
+  padding: 0.4rem 0.8rem;
+  background: #4CAF50;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.btn-download-artefacts:hover {
+  background: #388E3C;
+}
+
+#card-task-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  align-items: start;
+}

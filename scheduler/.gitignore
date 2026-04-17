@@ -1,11 +1,4 @@
-CMakeLists.conf
-.vscode/
-build/
-**/embeded/
-
-analyze_run/
-/cache/
-exports/
-runs/
-tools/
-**/__pycache__
+/.vscode/
+/build/
+/embeded/
+/third-party/

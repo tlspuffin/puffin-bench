@@ -6,10 +6,10 @@
 #include <regex>
 #include <archive.h>
 
-class FileTGZ {
+class FileCompressed {
 public:
-  FileTGZ(std::string const& filename);
-  ~FileTGZ();
+  FileCompressed(std::string const& filename);
+  ~FileCompressed();
   std::unordered_map<std::string, uint64_t> ListFiles(std::regex const& pattern =std::regex(".*"));
   int64_t ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize);
   void StopExtractFileData();

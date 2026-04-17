@@ -47,7 +47,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   variables.emplace("task_id", std::to_string(id_));
   name_ = ResolveVariables(name_, variables);
   name_.erase(std::remove_if(name_.begin(), name_.end(), [](char c) {
-    return !std::isalnum(c) && c != '-' && c != '_' && c != '.';
+    return !std::isalnum(c) && c != '-' && c != '_' && c != '.' && c != ' ';
   }), name_.end());
 
   executor_name_ = GetOrDefault<std::string>(
@@ -296,7 +296,9 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
   for (const auto& [key, value] : args_) {
     variables.emplace(key, value);
   }
-  variables.emplace("task_id", id);
+  variables.emplace("TASK_ID", id);
+  variables.emplace("TASK_USER", user_);
+  variables.emplace("TASK_JOB_TYPE", job_type_);
 
   executor_->TaskFinalize(executor_data_);
 
@@ -310,7 +312,7 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
   }
 
   std::filesystem::path pathID = id;
-  return ArchiveJob(publish_, variables, finalSavePath.string() + ".tgz", 
+  return ArchiveJob(publish_, variables, finalSavePath.string() + ".zip", 
       { taskJSONfile, finalSavePath / "artefacts", finalSavePath / "logs" }, 
       finalSavePath, finalSavePath);
 }

@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "tlspuffin/PR/${COMMIT_ID}/Vuln/",
+    "storage": "tlspuffin/PR/${COMMIT_ID}/Vuln/",
     "goal": "Vuln PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
@@ -9,7 +9,7 @@
       "args": {
         "experiment": "BUF",
         "features": "wolfssl540,fix-CVE-2022-42905",
-        "vendor": "wolfssl:wolfssl510-buf"
+        "vendor": "wolfssl:wolfssl540-buf"
       }
     },
     "CDOS": {
@@ -54,6 +54,7 @@
       {
         "run": [],
         "configuration": {
+          "nb_cores": 4,
           "nb_retry": 5
         }
       },
@@ -66,7 +67,6 @@
       {
         "step": "ExperimentWithCargo",
         "configuration": {
-          "nb_cores": 4,
           "timeout": "190m"
         },
         "monitor": {
@@ -87,4 +87,3 @@
     }
   ]
 }
-

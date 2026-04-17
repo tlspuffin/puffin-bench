@@ -1,11 +1,11 @@
 {
   "server": {
     "secure": false,
-    "key": "../security/site.key",
-    "cert": "../security/site.pem",
-    "CA": "../security/CA.pem",
-    "port": 8080, 
-    "html": "../html"
+    "key": "security/site.key",
+    "cert": "security/site.pem",
+    "CA": "security/CA.pem",
+    "port": 10082, 
+    "html": "html"
   },
   "schedule": {
     "executors": {
@@ -21,17 +21,17 @@
     },
     "publisher": {
       "default": {
-        "uri": "http://127.0.0.1:8081/api/notify",
+        "uri": "http://127.0.0.1:10083/api/notify",
         "storage": "/home/olivier/Desktop/Archives"
       }
     },
-    "runPath": "../runs",
-    "userPath": "../users_data",
-    "exportPath": "../exports/schedule",
-    "toolsPath": "../tools"
+    "runPath": "runs",
+    "userPath": "users_data",
+    "exportPath": "exports",
+    "toolsPath": "tools"
   },
   "cache": {
-    "storagePath": "../cache",
+    "storagePath": "cache",
     "mappingFile": "cache.json"
   }
 }

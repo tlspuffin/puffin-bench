@@ -40,6 +40,8 @@ public:
     int8_t cores = -1;
     std::vector<int8_t> perCores;
     uint64_t freeMemory;
+    uint64_t totalMemory;
+    std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> storages;
   };
 
   static Executor* Build(ns_Executor::Config* config, uint16_t cachePort, ns_System::Linux& os);
@@ -63,7 +65,7 @@ public:
   virtual ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const = 0;
   virtual ExecutorData* CreateLocalData(rapidjson::Value const& config) const = 0;
 
-  virtual std::pair<bool, bool> RetrieveStats() = 0;
+  virtual std::pair<bool, bool> LimitsState() = 0;
   virtual std::pair<int8_t, int8_t> UpdateTaskStats(ExecutorTaskData* data, std::vector<ns_Executor::ExecutorData*> stepsData) const = 0;
   virtual void UpdateStepStats(ExecutorData* data) const = 0;
   virtual void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const = 0;

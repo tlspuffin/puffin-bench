@@ -1,5 +1,5 @@
-import { JobLauncher } from './joblauncher.js';
 import { TaskCard } from './taskcard.js';
+import './launchers/launchers.js';
 
 let taskCard;
 
@@ -122,8 +122,17 @@ function SetHeader(counters, executors) {
     name.classList.add('executor-stat-name');
     name.textContent = executor.name;
 
-    row.append(name, CreateMetric('CPU', executor.stats.load_cores, executor.stats.load_per_core), 
-        CreateMetric('MEM', executor.stats.load_memory));
+    const storages = document.createElement('div');
+    storages.classList.add('executor-stat-storages');
+    Object.entries(executor.stats.storage ?? {}).forEach(([label, storage]) => {
+        const usedPercentage = Math.round((storage.capacity - storage.available) / storage.capacity * 100);
+        storages.appendChild(CreateMetric(label, usedPercentage));
+    });
+    row.append(name, 
+        CreateMetric('CPU', executor.stats.load_cores, executor.stats.load_per_core), 
+        CreateMetric('MEM', executor.stats.load_memory),
+        storages
+    );
     container.appendChild(row);
   });
 }
@@ -150,13 +159,18 @@ async function RefreshBoard() {
 }
 
 function Main() {
-  taskCard = new TaskCard({ onRefresh: RefreshBoard });
-  const launcher = new JobLauncher({
-        commitsUrl: `http://${window.location.hostname}:10083/api/git/history/tlspuffin`
+  const title = document.getElementById('header-title');
+  title.innerText = `Experiment Scheduler Dashboard on ${window.location.hostname}`;
+
+  fetch('custom/header.html')
+    .then(response => response.text())
+    .then(data => {
+      document.getElementById('custom_header').innerHTML = data;
     });
 
+  taskCard = new TaskCard({ onRefresh: RefreshBoard });
+
   document.getElementById('refresh-button').onclick = RefreshBoard;
-  document.getElementById('new-task').onclick = () => { launcher.open() };
 
   RefreshBoard();
 }

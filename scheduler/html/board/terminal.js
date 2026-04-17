@@ -1,5 +1,6 @@
 export class Terminal {
   #isScrollbarActive
+  #phantomDiv;
 
   constructor(containerId) {
     this.container = document.getElementById(containerId);;
@@ -14,6 +15,11 @@ export class Terminal {
     this.contentPre = document.getElementById(`${containerId.replace('-container', '')}-content`);
     
     this.#isScrollbarActive = false;
+
+    this.#phantomDiv = document.createElement('div');
+    this.#phantomDiv.style.width = '1px';
+    this.#phantomDiv.style.height = '0px';
+    this.scrollContainer.appendChild(this.#phantomDiv);
 
     this. #Init();
   }
@@ -39,7 +45,7 @@ export class Terminal {
     this.contentPre.addEventListener('wheel', (e) => {
         e.preventDefault();
         this.scrollContainer.scrollTop += e.deltaY;
-    });
+    }, { passive: false });
     
     // Observer les changements de taille
     this.resizeObserver = new ResizeObserver(() => {
@@ -111,7 +117,7 @@ export class Terminal {
   
   SetText(text) {
     this.lines = this.#PrepareText(text);
-    this.visibleStartLine = 0;
+    this.visibleStartLine = Math.min(this.visibleStartLine, Math.max(0, this.lines.length - 1));
     this.#Render();
   }
   
@@ -126,7 +132,7 @@ export class Terminal {
     
     // Trouver quelle ligne logique correspond à scrollTop
     let cumulativeHeight = 0;
-    let newStartLine = 0;
+    let newStartLine = Math.max(0, this.lines.length - 1);
     
     for (let i = 0; i < this.lines.length; i++) {
         const visualLines = Math.ceil(this.lines[i].charCount / this.charsPerLine) || 1;
@@ -165,25 +171,17 @@ export class Terminal {
     const totalVisualLines = this.lines.reduce((sum, line) => 
         sum + (Math.ceil(line.charCount / this.charsPerLine) || 1), 0
     );
-    const phantomHeight = totalVisualLines * this.lineHeight;
-    this.scrollContainer.innerHTML = `<div style="height: ${phantomHeight}px; width: 1px;"></div>`;
+    const phantomHeight = (totalVisualLines - 1) * this.lineHeight + this.container.clientHeight;
+    this.#phantomDiv.style.height = `${phantomHeight}px`
     
     // Afficher les lignes visibles
     const visibleLines = this.lines.slice(this.visibleStartLine, endLine);
     this.contentPre.textContent = visibleLines.map(line => line.content).join('\n');
-
-    if ((this.scrollContainer.scrollTop == 0) && (this.visibleStartLine > 0)) {
-      let nbAboveLine = 0;
-      for(let i=0; i<this.visibleStartLine; ++i) {
-        nbAboveLine += Math.ceil(this.lines[i].charCount / this.charsPerLine) || 1;
-      }
-      this.scrollContainer.scrollTop = nbAboveLine * this.lineHeight;
-   }
   }
   
   ScrollToBottom() {
-    const maxScroll = Math.max(0, (this.lines.length - this.visibleLines) * this.lineHeight);
-    this.scrollContainer.scrollTop = maxScroll;
+    this.scrollContainer.scrollTop =
+        this.scrollContainer.scrollHeight - this.scrollContainer.clientHeight;
   }
   
   ScrollToTop() {
@@ -191,14 +189,12 @@ export class Terminal {
   }
   
   ScrollToLine(lineNumber) {
-    const targetScroll = lineNumber * this.lineHeight;
-    this.scrollContainer.scrollTop = targetScroll;
+    this.scrollContainer.scrollTop = lineNumber * this.lineHeight;
   }
   
   #IsAtBottom() {
-    const scrollTop = this.scrollContainer.scrollTop;
-    const maxScroll = Math.max(0, (this.lines.length - this.visibleLines) * this.lineHeight);
-    return Math.abs(scrollTop - maxScroll) < this.lineHeight;
+    const maxScroll = this.scrollContainer.scrollHeight - this.scrollContainer.clientHeight;
+    return Math.abs(this.scrollContainer.scrollTop - maxScroll) < this.lineHeight;
   }
   
   GetLineCount() {

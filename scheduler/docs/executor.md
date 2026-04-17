@@ -47,8 +47,8 @@ public:
   // UpdateTaskStats: returns (memory_ok, cores_ok) pair
   virtual std::pair<int8_t,int8_t> UpdateTaskStats(ExecutorTaskData*, std::vector<ExecutorData*>) const = 0;
   virtual void UpdateStepStats(ExecutorData*) const = 0;
-  // RetrieveStats: returns (memory_overloaded, cores_overloaded)
-  virtual std::pair<bool,bool> RetrieveStats() = 0;
+  // LimitsState: returns (cpu_overloaded, memory_overloaded)
+  virtual std::pair<bool,bool> LimitsState() = 0;
 
   // Serialise executor state to JSON
   virtual void ToJSON(rapidjson::Value&, rapidjson::Document::AllocatorType&) = 0;
@@ -133,6 +133,8 @@ struct LocalTaskData : ExecutorTaskData {
 | `excludeCores` | `[0]` | Cores never assigned (keep OS responsive) |
 | `scriptPath` | — | Directory containing `executor.sh`, `functions.sh` |
 | `logsSize` | 10 MB | Size limit for the output ring buffer per step |
+| `cpuMaxLoad` | 101 | CPU load threshold (%) above which no new step is started |
+| `memMinimumRatio` | 0.15 | Minimum free memory ratio required to start a new step |
 
 ### CPU Core Management
 
@@ -188,7 +190,7 @@ The executor maintains a `vector<bool> coresFree_` of size `nbCoresMax_`.
        → write memory.max if memory_max_ set
 ```
 
-`executor.sh` (embedded in the binary via `xxd -i`) sets up the shell environment, sources `functions.sh`, and calls the step's bash function by name.
+`executor.sh` (embedded in the binary as a C string literal via `EmbedTextFileScript`) sets up the shell environment, sources `functions.sh`, and calls the step's bash function by name.
 
 ### Completion Detection (`CheckFinishedSteps`)
 
@@ -251,7 +253,7 @@ FDCaptureThread (epoll loop, shared across all running steps)
 MemoryRing (per fd)   — only implementation currently instantiated
 ```
 
-`FileRing` existe et est entièrement implémentée mais n'est jamais instanciée dans le code actuel (dead code).
+`FileRing` is fully implemented but never instantiated (dead code).
 
 ### FDCaptureThread
 
@@ -286,8 +288,13 @@ Rotating file buffer for large / persistent output:
 
 `Linux` (system monitor) maintains:
 - `CoresMonitor`: reads `/proc/stat` periodically, computes per-core utilisation ratios.
-- `Memory`: reads `/proc/meminfo` for total / available / swap stats.
+- `MemoryMonitor`: reads `/proc/meminfo` for total / available / swap stats.
+- Storage partitions: polls `statvfs` for capacity/available on each named path (run, export).
 
-`Local::GatherStats()` reads cgroup `memory.current` for each running step. Results stored in `LocalData::os_memory_load_` and exposed through `RetrieveStats()` → `OSLoad`.
+`Local::GatherStats()` reads cgroup `memory.current` for each running step. Results stored in `LocalData::os_memory_load_`.
 
-`Schedule::LimitRessourcesUsages()` compares `os_memory_load_` against `step.memory_max_` and kills the step if exceeded.
+`Local::LimitsState()` returns `(cpu_overloaded, memory_overloaded)` based on configurable thresholds (`cpuMaxLoad`, `memMinimumRatio`).
+
+`Schedule::LimitRessourcesUsages()` handles CPU and memory pressure independently:
+- **Memory pressure**: cancels the step with the highest memory consumption (`ToKillMem()`).
+- **CPU overload**: cancels the step with the highest CPU/time score (`ToKillCPU()`).

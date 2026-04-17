@@ -9,7 +9,7 @@ The server runs the following concurrent threads at steady state:
 | Poco HTTP worker pool | `MyServerApp` | Accept and serve HTTP requests |
 | Schedule loop | `Schedule` | Dispatch steps, detect completion, manage resources |
 | inotify monitor | `Monitor` | Watch monitor files for step status updates |
-| Archiver | `Archiver` | Create `.tgz` archives and publish results |
+| Archiver | `Archiver` | Create `.zip` archives and publish results |
 | FD capture | `FDCaptureThreadImpl` | epoll over process stdout/stderr pipes |
 | System monitor | `Linux` | Periodic `/proc/stat` and `/proc/meminfo` sampling |
 | Cache worker | `Cache` | Copy files into the cache storage and compute MD5s |
@@ -77,7 +77,7 @@ thread:
     queueCV_.wait(lk, [&]{ return !jobs_.empty() || !threadRunning_; })
     job = jobs_.front(); jobs_.pop();
     lk.unlock()
-    ProcessJob(job)   // libarchive .tgz + optional HTTP publish
+    ProcessJob(job)   // libarchive .zip + optional HTTP publish
 ```
 
 - **AddJob()** (called from schedule loop): `lock_guard(queueMutex_)`, push, `queueCV_.notify_one()`.

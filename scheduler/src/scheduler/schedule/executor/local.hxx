@@ -85,7 +85,7 @@ public:
   ExecutorTaskData* CreateLocalTaskData(rapidjson::Value const& config) const;
   ExecutorData* CreateLocalData(rapidjson::Value const& config) const;
 
-  std::pair<bool, bool> RetrieveStats();
+  std::pair<bool, bool> LimitsState();
   std::pair<int8_t, int8_t> UpdateTaskStats(ExecutorTaskData* data, std::vector<ExecutorData*> stepsData) const;
   void UpdateStepStats(ExecutorData* data) const;
   void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const;
@@ -103,6 +103,8 @@ private:
   std::string cgroupRootCapabilitiesString_;
   bool cgroupDisableUpdateSliceUser_;
   struct Executor::OSLoad stats_;
+  uint8_t cpuMaxLoad_;
+  uint64_t memMinAllowed_;
 
   void WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);
   void KillSession(pid_t sessionID, std::filesystem::path const& cgroupPath, 

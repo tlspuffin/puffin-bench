@@ -1,7 +1,5 @@
 #### HELPER START ####
 
-declare -r SAVE_CORPUS=1
-
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
@@ -143,14 +141,15 @@ ComputeBuildRuntimeInfo() {
           }
     fi
   fi
-  if ! ${refcputs}; then
-    for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
-      grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/tlspuffin/Cargo.toml" || {
-        echo "Unsupported feature $i";
-        return 1;
-      }
-    done
+  if [ -n "${required_features}" ]; then
+    ref_features="${required_features},${ref_features}"
   fi
+  for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
+    grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/tlspuffin/Cargo.toml" || {
+      echo "Unsupported feature $i";
+      return 1;
+    }
+  done
 
   echo "cputs= ${refcputs} features= ${ref_features} vendor= ${vendor}";
 
@@ -222,35 +221,37 @@ ExperimentSetupForCargo() {
   local -n ref_last_core=$1;
   shift
   if [ -z "$1" ]; then
-    echo "Missing parameter feature"
+    echo "Missing reference parameter for feature"
     return 1
   fi
-  local features="$1";
+  local -n ref_esfc_features=$1;
   shift
 
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
   # disable this if preload is set to load asan and faketime
-  [ ! -z "${PREFIX_FAKETIME}" ] && echo "${features}" | grep -qi asan && PREFIX_FAKETIME="" && echo "Disable faketime, asan used"
+  [ ! -z "${PREFIX_FAKETIME}" ] && echo "${ref_esfc_features}" | grep -qi asan && PREFIX_FAKETIME="" && echo "Disable faketime, asan used"
 
   local cputs=false
-  ComputeBuildRuntimeInfo "${vendor}" features cputs || {
-      echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
+  ComputeBuildRuntimeInfo "${vendor}" ref_esfc_features cputs || {
+      echo "Failed to compute runtime info for vendor '${vendor}' '${ref_esfc_features}'"
       return 1;
   }
   if ${cputs}; then
     echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
     echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "./.compil_info.json"
   else
-    echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "./.compil_info.json"
+    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "${THEJOB_USER_STATE_FILE}";
+    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "./.compil_info.json"
   fi
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
 }
 
 ExperimentPostLaunchSetup() {
+  [[ ${SAVE_CORPUS:-} == 1 ]] || SAVE_CORPUS=0;
+
   if [ -z "$1" ]; then
     echo 'Missing reference parameter for statsJSON' > /dev/stderr;
     return 1
@@ -430,8 +431,8 @@ ExperimentRun() {
   shift;
 
 
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1;
   fi
   if [ -z "${experiment}" ]; then
@@ -487,8 +488,8 @@ ExperimentRunWithCargo() {
   local saveData="$1"
   shift;
 
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1
   fi
   if [ -z "${experiment}" ]; then
@@ -497,11 +498,11 @@ ExperimentRunWithCargo() {
   fi
 
   local last_core=0;
-  ExperimentSetupForCargo last_core "${features}" || return 1;
+  ExperimentSetupForCargo last_core features || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -532,7 +533,7 @@ Init () {
 #"
 #    git merge-base --is-ancestor "${COMMIT_ID}" 8b29ce76d && PREFIX_FAKETIME="${TLSPUFFIN_RUN_PREFIX}" || PREFIX_FAKETIME=""
     git merge-base --is-ancestor "${COMMIT_ID}" 8b29ce76d && PREFIX_FAKETIME="faketime 2022-12-24" || PREFIX_FAKETIME=""
-    AddGlobalParam PREFIX_FAKETIME "${PREFIX_FAKETIME}"
+    #AddGlobalParam PREFIX_FAKETIME "${PREFIX_FAKETIME}"
   fi
   if [ -n "${PREFIX_FAKETIME}" ]; then
     echo "Faketime setup to ${PREFIX_FAKETIME}";
@@ -570,8 +571,8 @@ Init () {
 }
 
 Build() {
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1
   fi
   if [ -z "${experiment}" ]; then
@@ -612,8 +613,8 @@ Build() {
 }
 
 ForcedBuild() {
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1
   fi
   if [ -z "${experiment}" ]; then
@@ -622,8 +623,6 @@ ForcedBuild() {
   fi
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
-  rm -rf ./seeds
-  nix-shell --run "cargo run --release -p tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   local cputs=false
   ComputeBuildRuntimeInfo "${vendor}" features cputs || {
@@ -636,11 +635,13 @@ ForcedBuild() {
     nix-shell --run "./tools/mk_vendor make '${vendor}'"
   fi
 
-  rm -rf ./experiments
+  rm -rf ./seeds
+  echo "nix-shell --run \"cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed\""
+  nix-shell --run "cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- help" || return 1
-
   rm -rf ./experiments
+  echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help" || return 1
 }
 
 Clean() {

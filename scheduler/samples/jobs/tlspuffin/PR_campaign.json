@@ -1,21 +1,22 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "${PUBLISHER_STORAGE}/campaign/PR/${COMMIT_ID}/",
-    "goal": "Campaign - Commit ${COMMIT_ID}"
+    "storage": "tlspuffin/Campaign/${TASK_USER}/${CAMPAIGN_ID}/",
+    "goal": "Campaign"
   },
   "configurations": ${RUNTIME_RUN_CONFIG},
   "name" : "Campaign - Commit ${COMMIT_ID}",
   "flow" : [
     {
-      "step": "Init",
-      "configuration": {
-          "nb_cores": ${RUNTIME_NB_CORES}
-        }
+      "step": "Init"
     },
     [
       {
-        "run": []
+        "run": [],
+        "configuration": {
+          "nb_cores": ${RUNTIME_NB_CORES},
+          "nb_retry": ${RUNTIME_NB_RUN}
+        }
       },
       {
         "step": "ForcedBuild"
@@ -34,7 +35,7 @@
         }
       },
       {
-        "step": "ExperimentEnd"
+        "step": "ExperimentEndCommon"
       }
     ],
     {

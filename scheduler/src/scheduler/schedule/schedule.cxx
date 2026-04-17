@@ -3,7 +3,7 @@
 #include "executor/local.hxx"
 #include "../../utils/file.hxx"
 #include "../../utils/variables.hxx"
-#include "../../utils/file_tgz.hxx"
+#include "../../utils/file_compressed.hxx"
 #include "../../utils/logs.hxx"
 #include <stdlib.h>
 #include <iostream>
@@ -223,20 +223,28 @@ void ns_Schedule::Schedule::GetOutput(
     return;
   }
 
-  std::string archiveName = config_.exportPath_ / (taskID + ".tgz");
-  if (!std::filesystem::exists(archiveName)) {
-    archiveName = config_.exportCanceledPath_ / (taskID + ".tgz");
-    if (!std::filesystem::exists(archiveName)) {
-      return;
+  std::string archiveName;
+  for(auto const& name: { 
+      config_.exportPath_ / (taskID + ".zip"), 
+      config_.exportCanceledPath_ / (taskID + ".zip"), 
+      config_.exportPath_ / (taskID + ".tgz"), 
+      config_.exportCanceledPath_ / (taskID + ".tgz") }) {
+    if (std::filesystem::exists(name)) {
+      archiveName = name;
+      break;
     }
   }
-  FileTGZ fileTGZ(archiveName);
+  if (archiveName.empty()) {
+    return;
+  }
+  FileCompressed fileCompressed(archiveName);
   std::string outputFile = "logs/" + type + "." + stepID + ".txt";
   data.buffer.resize(data.requestReadOffset + data.requestReadSize);
-  data.supportSeek = false;
+  data.supportSeek = true;
   data.partialFile = false;
   try {
-    int64_t readSize = fileTGZ.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), &data.filesize);
+    int64_t readSize = fileCompressed.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), &data.filesize);
+    fileCompressed.StopExtractFileData();
     data.buffer.resize(readSize);
     if (data.buffer.size() > data.requestReadOffset) {
       data.buffer.erase(0, data.requestReadOffset);
@@ -254,13 +262,23 @@ void ns_Schedule::Schedule::GetOutput(
 bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id, 
     std::string& fileStateJSON, std::string& fileArtefacts) const {
   fileStateJSON = config_.exportPath_ / (task_id + ".json");
-  fileArtefacts = config_.exportPath_ / (task_id + ".tgz");
-  if (std::filesystem::exists(fileStateJSON) && std::filesystem::exists(fileArtefacts)) {
+  fileArtefacts = config_.exportPath_ / (task_id + ".zip");
+  bool artefactFound = std::filesystem::exists(fileArtefacts);
+  if (!artefactFound) {
+    fileArtefacts = config_.exportPath_ / (task_id + ".tgz");
+    artefactFound = std::filesystem::exists(fileArtefacts);
+  }
+  if (std::filesystem::exists(fileStateJSON) && artefactFound) {
     return true;
   }
   fileStateJSON = config_.exportCanceledPath_ / (task_id + ".json");
-  fileArtefacts = config_.exportCanceledPath_ / (task_id + ".tgz");
-  if (std::filesystem::exists(fileStateJSON) && std::filesystem::exists(fileArtefacts)) {
+  fileArtefacts = config_.exportCanceledPath_ / (task_id + ".zip");
+  artefactFound = std::filesystem::exists(fileArtefacts);
+  if (!artefactFound) {
+    fileArtefacts = config_.exportCanceledPath_ / (task_id + ".tgz");
+    artefactFound = std::filesystem::exists(fileArtefacts);
+  }
+  if (std::filesystem::exists(fileStateJSON) && artefactFound) {
     return true;
   }
   fileStateJSON.clear();
@@ -520,11 +538,15 @@ void ns_Schedule::Schedule::AppendStepToFinishLog(std::ofstream& log, ns_Schedul
 bool ns_Schedule::Schedule::LimitRessourcesUsages() {
   bool updateStatus = false;
   std::unordered_map<ns_Executor::Executor*, std::vector<struct SRessourcesSummary>> executorsMemoryFull;
+  std::unordered_map<ns_Executor::Executor*, std::vector<struct SRessourcesSummary>> executorsCPUFull;
   for(auto& executor : executors_) {
-    if (executor.second->RetrieveStats().second) {
+    auto const& [cpuFull, memFull] = executor.second->LimitsState();
+    if (memFull) {
       executorsMemoryFull[executor.second] = {};
     }
-    updateStatus = true;
+    if (cpuFull) {
+      executorsCPUFull[executor.second] = {};
+    }
   }
   std::unordered_map<ns_Schedule::Task*, std::vector<ns_Schedule::Step*>> runningTasksAndSteps;
   for (ns_Schedule::Step* step : stepsRunning_) {
@@ -534,18 +556,38 @@ bool ns_Schedule::Schedule::LimitRessourcesUsages() {
   }
   for (auto& [task, steps] : runningTasksAndSteps) {
     struct SRessourcesSummary ressourcesSummary = task->UpdateStats(steps);
-    auto it = executorsMemoryFull.find(task->executor_);
-    if (it != executorsMemoryFull.end()) {
-      executorsMemoryFull[task->executor_].push_back(ressourcesSummary);
+    auto itMem = executorsMemoryFull.find(task->executor_);
+    if (itMem != executorsMemoryFull.end()) {
+      itMem->second.push_back(ressourcesSummary);
     }
-    updateStatus = true;
+    auto itCPU = executorsCPUFull.find(task->executor_);
+    if (itCPU != executorsCPUFull.end()) {
+      itCPU->second.push_back(ressourcesSummary);
+    }
   }
   for (auto& [executor, tasks] : executorsMemoryFull) {
     if (tasks.empty()) {
       continue;
     }
-    SRessourcesSummary const* worst = SRessourcesSummary::ToKill(tasks);
-    CancelTask(worst->task->id_, "out of ressources");
+    SRessourcesSummary const* worst = SRessourcesSummary::ToKillMem(tasks);
+    CancelTask(worst->task->id_, "memory pressure too high");
+    
+    auto it = executorsCPUFull.find(executor);
+    if (it == executorsCPUFull.end()) {
+      continue;
+    }
+    auto toRemove = std::find_if(it->second.begin(), it->second.end(),
+        [&worst](SRessourcesSummary const& summary) { return summary.task->id_ == worst->task->id_; });
+    if (toRemove != it->second.end()) {
+      it->second.erase(toRemove);
+    }
+  }
+  for (auto& [executor, tasks] : executorsCPUFull) {
+    if (tasks.empty()) {
+      continue;
+    }
+    SRessourcesSummary const* worst = SRessourcesSummary::ToKillCPU(tasks);
+    CancelTask(worst->task->id_, "cpu load is too high");
   }
   return updateStatus;
 }

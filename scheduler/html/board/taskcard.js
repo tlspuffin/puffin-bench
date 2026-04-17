@@ -33,6 +33,7 @@ export class TaskCard {
 
     this.#logsInfos = {
         timerID: null,
+        abortController: null,
         id: 0,
         step: null,
         type: 'stdout',
@@ -70,7 +71,12 @@ export class TaskCard {
     const cancelButton = document.createElement('button');
     cancelButton.classList.add('card-attempt-cancel-btn');
     cancelButton.textContent = 'Cancel';
-    cancelButton.onclick = async () => { await this.#CancelTask(task.id); };
+    cancelButton.onclick = async () => { 
+        if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
+          return;
+        }
+        await this.#CancelTask(task.id);
+    };
 
     // Count active steps to decide whether to show the cancel button
     let activeCount = 0;
@@ -81,56 +87,73 @@ export class TaskCard {
       cancelButton.style.display = 'none';
     }
 
+    let username = '';
+    if (task?.user && (task.user != '')) {
+      username = task.user;
+    }
+
+    const divCardHeader = document.createElement('div');
+    divCardHeader.id = 'card-task-header';
     let taskName = task.name;
     if (taskName === '') {
       taskName = task.id;
-      div.appendChild(this.#CreateCardLine(
+      divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
         ['task-label-id', 'task-value-name'],
         ['Task ' + task.id, cancelButton]
       ));
+      if (username != '') {
+        divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-name',
+          ['task-label-id', 'task-value-id'],
+          ['User', username]
+        ));
+      }
     } else {
-      div.appendChild(this.#CreateCardLine(
+      divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
         ['task-value-name', 'task-value-name'],
         [task.name, cancelButton]
       ));
-      div.appendChild(this.#CreateCardLine(
+      divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
         ['task-label-id', 'task-value-id'],
-        ['Task', task.id]
+        ['Task / User: ', task.id + ' / ' + username]
       ));
     }
 
     const separator = document.createElement('div');
     separator.classList.add('card-task-separator');
-    div.appendChild(separator);
+    divCardHeader.appendChild(separator);
 
     const taskLoad = task.executor_data?.os_load;
     if (taskLoad) {
-      div.appendChild(this.#CreateCardLine(
+      divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-loads',
         ['task-loads-label', 'task-loads-value', 'task-loads-value'],
         ['Load', 'Mem ' + taskLoad.memory + '%', 'CPU ' + taskLoad.cores + '%']
       ));
       const separator2 = document.createElement('div');
       separator2.classList.add('card-task-separator');
-      div.appendChild(separator2);
+      divCardHeader.appendChild(separator2);
     }
 
-    div.appendChild(this.#CreateCardLine(
+    divCardHeader.appendChild(this.#CreateCardLine(
       null, 'task-label-args',
       ['task-args-label'],
       ['Arguments:']
     ));
     task.args.forEach(arg => {
-      div.appendChild(this.#CreateCardLine(
+      divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-args',
         ['task-args-name', 'task-args-name'],
         [arg.key, arg.value]
       ));
     });
+    div.appendChild(divCardHeader);
 
+    const divCardSteps = document.createElement('div');
+    divCardSteps.id = 'card-task-steps';
     steps.forEach((byId, functionName) => {
       const divStep = document.createElement('div');
       divStep.classList.add('card-step');
@@ -150,19 +173,20 @@ export class TaskCard {
       };
       divStep.appendChild(divStepName);
 
-      let allPending = true
+      let hasRunning = false
       byId.forEach(attempts => {
-        allPending = attempts.reduce(
-            (accumulator, attempt) => accumulator && (attempt.state == "Pending"), 
-            allPending);
+        hasRunning = attempts.reduce(
+            (accumulator, attempt) => accumulator || (attempt.state === 'Running'),
+            hasRunning);
         divStep.appendChild(this.#CreateStepsCard(attempts, taskName, task.request_cancel));
       });
-      if (allPending) {
+      if (!hasRunning) {
         divStep.classList.add('collapsed');
         iconSpan.innerText = '➕';
       }
-      div.appendChild(divStep);
+      divCardSteps.appendChild(divStep);
     });
+    div.appendChild(divCardSteps);
 
     return div;
   }
@@ -172,6 +196,10 @@ export class TaskCard {
     if (this.#logsInfos.timerID != null) {
       window.clearTimeout(this.#logsInfos.timerID);
       this.#logsInfos.timerID = null;
+    }
+    if (this.#logsInfos.abortController != null) {
+      this.#logsInfos.abortController.abort();
+      this.#logsInfos.abortController = null;
     }
     this.#modal.classList.remove('show');
   }
@@ -438,7 +466,12 @@ export class TaskCard {
         const cancelButton = document.createElement('button');
         cancelButton.classList.add('card-attempt-cancel-btn');
         cancelButton.textContent = 'Cancel';
-        cancelButton.onclick = async () => { await this.#CancelStep(step.task_id, step.uuid); };
+        cancelButton.onclick = async () => {
+            if (!confirm(`Cancel step "${step.name}" ?`)) {
+              return;
+            }
+            await this.#CancelStep(step.task_id, step.uuid); 
+        };
         action.appendChild(cancelButton);
       }
       details.appendChild(action);
@@ -588,7 +621,8 @@ export class TaskCard {
 
     console.log('query');
     var response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${logsInfos[type].lastoffset}`);
+        `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${logsInfos[type].lastoffset}`, 
+        { signal: logsInfos.abortController.signal });
 
     if (!response.ok) {
       return [false, 0, null];
@@ -609,7 +643,15 @@ export class TaskCard {
   }
 
   async #RetrieveFullStepLogs(logsInfos, size) {
-    logsInfos.timerID = null;
+    if (logsInfos.timerID != null) {
+      window.clearTimeout(logsInfos.timerID);
+      logsInfos.timerID = null;
+    }
+    if (logsInfos.abortController != null) {
+      logsInfos.abortController.abort();
+    }
+    logsInfos.abortController = new AbortController();
+
     const type = logsInfos.type;
     const channel = logsInfos[type];
 
@@ -619,7 +661,12 @@ export class TaskCard {
     while(success && (state === FileReadState.Ok)) {
       const wasLive = !channel.supportSeek;
 
-      [success, state, data] = await this.#RetrieveStepLogs(logsInfos, type, size);
+      try {
+        [success, state, data] = await this.#RetrieveStepLogs(logsInfos, type, size);
+      } catch(error) {
+        return [false, 0, null];
+      }
+
       if (!success || data.length === 0) {
         break;
       }
@@ -655,9 +702,17 @@ export class TaskCard {
   async #OpenLogs(step, taskName) {
     const id = step.task_id + '-' + step.uuid;
     if (this.#logsInfos.id !== id) {
-      this.#logsInfos.id   = id;
-      this.#logsInfos.step = step;
-      this.#logsInfos.type = 'stdout';
+      if (this.#logsInfos.timerID != null) {
+        window.clearTimeout(this.#logsInfos.timerID);
+      }
+      if (this.#logsInfos.abortController != null) {
+        this.#logsInfos.abortController.abort();
+      }
+      this.#logsInfos.timerID         = null;
+      this.#logsInfos.abortController = null;
+      this.#logsInfos.id              = id;
+      this.#logsInfos.step            = step;
+      this.#logsInfos.type            = 'stdout';
       for (const type of ['stdout', 'stderr']) {
         this.#logsInfos[type].terminal.SetText('');
         this.#logsInfos[type].decoder     = new TextDecoder('utf-8');

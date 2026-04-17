@@ -53,7 +53,7 @@ ScheduleLoop() picks up root steps and dispatches them
 When last step ends:
   Task::FinalizeAndArchive()
     → builds ArchiveJob
-    → Archiver::AddJob()          (async .tgz + optional publish)
+    → Archiver::AddJob()          (async .zip + optional publish)
     → TasksManager::DeleteTask()  (removed from memory)
 ```
 
@@ -110,16 +110,16 @@ The hierarchical coordinates are:
                                 └──────────┘  └──────────┘
 ```
 
-Transitions vers `Cancelled` :
-- `MarkCancel()` — depuis `Pending` uniquement (pas de process à tuer)
-- `KillAndMarkCancel()` — depuis `Pending` ou `Running` ; si `Running`, appelle `Shutdown()` pour tuer le process d'abord
+Transitions to `Cancelled`:
+- `MarkCancel()` — from `Pending` only (no process to kill).
+- `KillAndMarkCancel()` — from `Pending` or `Running`; if `Running`, calls `Shutdown()` to kill the process first.
 
-Autres transitions terminales depuis `Running` :
-- `MarkDone(0)` → `Done` (succès)
-- `MarkDone(n)` → `Done` (échec, exit code non nul)
-- `KillAndMarkTimedout()` → `TimedOut` (timeout dépassé, process tué)
-- `MarkLaunchError()` → `LaunchError` (fork/exec échoué)
-- `Step::Shutdown()` → `Shutdown` (arrêt serveur, distinct d'un cancel utilisateur)
+Other terminal transitions from `Running`:
+- `MarkDone(0)` → `Done` (success)
+- `MarkDone(n)` → `Done` (failure, non-zero exit code)
+- `KillAndMarkTimedout()` → `TimedOut` (timeout exceeded, process killed)
+- `MarkLaunchError()` → `LaunchError` (fork/exec failed)
+- `Step::Shutdown()` → `Shutdown` (server shutdown, distinct from user cancel)
 
 `IsDone()` returns true for all terminal states (`Done`, `TimedOut`, `Cancelled`, `Shutdown`, `LaunchError`): the enum is ordered so `state_ >= State::Done` covers them all.
 
@@ -172,7 +172,7 @@ step.next_           // Step*       — immediately following step
 | `stdout_`, `stderr_` | path | Output file paths |
 | `monitor_` | shared_ptr\<Monitor::Task\> | Optional monitor config |
 | `executor_data_` | ExecutorData* | Per-step executor state (pid, cores, pipes…) |
-| `user_run_state_` | string | Structured metadata written by the step script at end of run (see below) |
+| `user_run_state_` | string | Structured metadata written by the step script at end of run |
 
 ### User Run State — file-based side channel
 
@@ -210,13 +210,13 @@ memory_core, memory_consumption, args
 
 (`memory_max` is derived: `memory_core + memory_consumption × timeout`, not set directly.)
 
-### nb_retry — cas particulier des steps dans un groupe
+### nb_retry — special case for steps in a group
 
-Pour un step **hors groupe**, `nb_retry` suit la règle générale ci-dessus.
+For a step **outside a group**, `nb_retry` follows the general rule above.
 
-Pour un step **dans un groupe**, `nb_retry_` est calculé par `MakeWithOverrides()` puis **immédiatement écrasé** par `GroupStepConfigurations::NbRetry(configName)`. Le `nb_retry` éventuellement défini dans la configuration du step est **silencieusement ignoré**.
+For a step **inside a group**, `nb_retry_` is computed by `MakeWithOverrides()` then **immediately overwritten** by `GroupStepConfigurations::NbRetry(configName)`. Any `nb_retry` defined in the step's configuration is **silently ignored**.
 
-`GroupStepConfigurations` est alimenté par le bloc `configuration` du groupe :
+`GroupStepConfigurations` is populated by the group's `configuration` block:
 
 ```json
 [
@@ -233,15 +233,13 @@ Pour un step **dans un groupe**, `nb_retry_` est calculé par `MakeWithOverrides
 ]
 ```
 
-Ici, un step utilisant `Conf_A` aura `nb_retry=3`, les autres auront `nb_retry=2`. Tout `nb_retry` écrit directement dans la `configuration` du step est ignoré.
+Here, a step using `Conf_A` will have `nb_retry=3`; others will have `nb_retry=2`. Any `nb_retry` written directly in the step's `configuration` is ignored.
 
-### Retries — structure statique
+### Retries — static structure
 
-Les retries sont créés **à l'analyse du JSON**, pas à l'exécution. `nb_retry=3` génère 3 instances `Step` en chaîne (`attempt_id` 0, 1, 2) dès la soumission de la tâche. Si `attempt_id=0` échoue, `attempt_id=1` est disponible dans la file, etc.
+Retries are created **at JSON parse time**, not at execution time. `nb_retry=3` generates 3 `Step` instances in a chain (`attempt_id` 0, 1, 2) as soon as the task is submitted. If `attempt_id=0` fails, `attempt_id=1` is available in the queue, etc.
 
 **Steps inside a group** cannot carry a `run` field — the parser raises an error. Parallel parameterisation via `run` is only available at the group level or on standalone steps.
-
-`GroupStepConfigurations` holds per-named-configuration retry counts for the group as a whole.
 
 ---
 

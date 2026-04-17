@@ -4,8 +4,8 @@
 #include "../../../utils/rapidjson.hxx"
 #include "../../../utils/variables.hxx"
 
-#include "../../../embeded/scheduler/executor_sh.h"
-#include "../../../embeded/scheduler/functions_sh.h"
+#include "embeded/scheduler/executor_sh.h"
+#include "embeded/scheduler/functions_sh.h"
 
 #include <iostream>
 #include <fstream>
@@ -50,8 +50,9 @@ static ns_Executor::LocalConfig defaultLocalConfig("local");
 ns_Executor::LocalConfig::LocalConfig(std::string const& name) 
     : Config(Config::Type::Local, name), nbCores_(1), cores_(), 
     scriptPath_("scripts"), logsSize_(16*1024*1024), 
-    cgroupPathSymbolic_("/sys/fs/cgroup/user.slice/user-${euid}.slice/user@${euid}.service/"), 
-    cgroupPath_()
+    //cgroupPathSymbolic_("/sys/fs/cgroup/user.slice/user-${euid}.slice/user@${euid}.service/"),
+    cgroupPathSymbolic_("/sys/fs/cgroup/scheduler.service"), 
+    cgroupPath_(), cpuMaxLoad_(101), memMinRatio_(0.15)
 {
   uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   cores_.assign(maxNbCores, true);
@@ -144,6 +145,9 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
   cgroupPathSymbolic_ = GetOrDefault<std::string>(node, "cgroupPath", defaultLocalConfig.cgroupPathSymbolic_);
   cgroupPath_ = std::filesystem::weakly_canonical(ResolveVariables(cgroupPathSymbolic_, 
       {{"euid", std::to_string(geteuid())}, {"uid", std::to_string(getuid())}}));
+
+  cpuMaxLoad_ = GetOrDefault(node, "cpuMaxLoad", defaultLocalConfig.cpuMaxLoad_);
+  memMinRatio_ = GetOrDefault(node, "memMinimumRatio", defaultLocalConfig.memMinRatio_);
 }
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
@@ -172,4 +176,7 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
 
   node.AddMember("cgroupPath", 
       rapidjson::Value(cgroupPathSymbolic_.c_str(), alloc), alloc);
+
+  node.AddMember("cpuMaxLoad", cpuMaxLoad_, alloc);
+  node.AddMember("memMinimumRatio", memMinRatio_, alloc);
 }

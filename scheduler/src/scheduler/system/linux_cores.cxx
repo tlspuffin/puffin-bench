@@ -220,7 +220,7 @@ uint64_t ns_System::CoresMonitor::NbCores() const {
 }
 
 std::vector<uint64_t> ns_System::CoresMonitor::SelectMostIdleCores(uint64_t nb_cores, 
-    std::vector<bool> const* cores_included) {
+    std::vector<bool> const* cores_included) const {
   std::vector<CoreStats> cores_values_ratio;
   {
     std::lock_guard<std::mutex> lock(lock_);

@@ -2,7 +2,7 @@ Experiment () {
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
-  ExperimentRun tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  ExperimentRun tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
 
   local status=1
   (( tlspuffin_killed == 0 )) && {
@@ -16,7 +16,7 @@ ExperimentWithCargo () {
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
-  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 1 "${@}" || return 1;
 
   local status=1
   (( tlspuffin_killed == 0 )) && {

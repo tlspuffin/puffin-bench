@@ -1,7 +1,5 @@
 #### HELPER START ####
 
-declare -r SAVE_CORPUS=1
-
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
@@ -143,14 +141,15 @@ ComputeBuildRuntimeInfo() {
           }
     fi
   fi
-  if ! ${refcputs}; then
-    for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
-      grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/tlspuffin/Cargo.toml" || {
-        echo "Unsupported feature $i";
-        return 1;
-      }
-    done
+  if [ -n "${required_features}" ]; then
+    ref_features="${required_features},${ref_features}"
   fi
+  for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
+    grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/tlspuffin/Cargo.toml" || {
+      echo "Unsupported feature $i";
+      return 1;
+    }
+  done
 
   echo "cputs= ${refcputs} features= ${ref_features} vendor= ${vendor}";
 
@@ -222,35 +221,37 @@ ExperimentSetupForCargo() {
   local -n ref_last_core=$1;
   shift
   if [ -z "$1" ]; then
-    echo "Missing parameter feature"
+    echo "Missing reference parameter for feature"
     return 1
   fi
-  local features="$1";
+  local -n ref_esfc_features=$1;
   shift
 
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
   # disable this if preload is set to load asan and faketime
-  [ ! -z "${PREFIX_FAKETIME}" ] && echo "${features}" | grep -qi asan && PREFIX_FAKETIME="" && echo "Disable faketime, asan used"
+  [ ! -z "${PREFIX_FAKETIME}" ] && echo "${ref_esfc_features}" | grep -qi asan && PREFIX_FAKETIME="" && echo "Disable faketime, asan used"
 
   local cputs=false
-  ComputeBuildRuntimeInfo "${vendor}" features cputs || {
-      echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
+  ComputeBuildRuntimeInfo "${vendor}" ref_esfc_features cputs || {
+      echo "Failed to compute runtime info for vendor '${vendor}' '${ref_esfc_features}'"
       return 1;
   }
   if ${cputs}; then
     echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
     echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "./.compil_info.json"
   else
-    echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": false, \"features\": \"${features}\" }" > "./.compil_info.json"
+    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "${THEJOB_USER_STATE_FILE}";
+    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "./.compil_info.json"
   fi
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
 }
 
 ExperimentPostLaunchSetup() {
+  [[ ${SAVE_CORPUS:-} == 1 ]] || SAVE_CORPUS=0;
+
   if [ -z "$1" ]; then
     echo 'Missing reference parameter for statsJSON' > /dev/stderr;
     return 1
@@ -430,8 +431,8 @@ ExperimentRun() {
   shift;
 
 
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1;
   fi
   if [ -z "${experiment}" ]; then
@@ -487,8 +488,8 @@ ExperimentRunWithCargo() {
   local saveData="$1"
   shift;
 
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1
   fi
   if [ -z "${experiment}" ]; then
@@ -497,11 +498,11 @@ ExperimentRunWithCargo() {
   fi
 
   local last_core=0;
-  ExperimentSetupForCargo last_core "${features}" || return 1;
+  ExperimentSetupForCargo last_core features || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -532,7 +533,7 @@ Init () {
 #"
 #    git merge-base --is-ancestor "${COMMIT_ID}" 8b29ce76d && PREFIX_FAKETIME="${TLSPUFFIN_RUN_PREFIX}" || PREFIX_FAKETIME=""
     git merge-base --is-ancestor "${COMMIT_ID}" 8b29ce76d && PREFIX_FAKETIME="faketime 2022-12-24" || PREFIX_FAKETIME=""
-    AddGlobalParam PREFIX_FAKETIME "${PREFIX_FAKETIME}"
+    #AddGlobalParam PREFIX_FAKETIME "${PREFIX_FAKETIME}"
   fi
   if [ -n "${PREFIX_FAKETIME}" ]; then
     echo "Faketime setup to ${PREFIX_FAKETIME}";
@@ -570,8 +571,8 @@ Init () {
 }
 
 Build() {
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1
   fi
   if [ -z "${experiment}" ]; then
@@ -612,8 +613,8 @@ Build() {
 }
 
 ForcedBuild() {
-  if [ -z "${features}" ]; then
-    echo "Missing required global variable: features"
+  if [ -z "${features}" ] && [ -z "${vendor}" ]; then
+    echo "Missing required global variable: features | vendor"
     return 1
   fi
   if [ -z "${experiment}" ]; then
@@ -622,8 +623,6 @@ ForcedBuild() {
   fi
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
-  rm -rf ./seeds
-  nix-shell --run "cargo run --release -p tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   local cputs=false
   ComputeBuildRuntimeInfo "${vendor}" features cputs || {
@@ -636,11 +635,13 @@ ForcedBuild() {
     nix-shell --run "./tools/mk_vendor make '${vendor}'"
   fi
 
-  rm -rf ./experiments
+  rm -rf ./seeds
+  echo "nix-shell --run \"cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed\""
+  nix-shell --run "cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- help" || return 1
-
   rm -rf ./experiments
+  echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help" || return 1
 }
 
 Clean() {
@@ -761,117 +762,286 @@ MonitorExperiment() {
     echo "" >> ${outfile}
   fi
 }
+CheckObjectif() {
+  local -n ref_status=$1; shift
+  local tlspuffin_pid="$1"; shift;
+  local stats="$1"; shift;
+  local -n ref_goal_success=$1; shift
+
+  local statsmaxsize=$(( 16*1024*1024 ));
+  local statssize=0;
+  local lastcheck=0;
+  local nbissues=0;
+  local problems='';
+  while true; do
+    local obj_count=$( find experiments/*/objective -maxdepth 1 -type f -name '*.trace' 2>/dev/null | wc -l )
+    if (( ${obj_count} > 0 )); then
+      echo "FOUND OBJECTIF, END PROCESS" >&2
+      ref_goal_success=1
+      break;
+    fi
+
+    local currentProblems='';
+    ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
+    local haveissue=0;
+    local i='';
+    for i in ${currentProblems}; do
+      echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
+    done;
+    problems="${currentProblems}";
+    (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
+    (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
+
+    (( nbissues > 4 )) && { echo "TOO MUCH ISSUES, END PROCESS" >&2 ; break; }
+
+    if (( statssize > statsmaxsize )); then
+      echo "Try purge ${stats}";
+      cp "${stats}" "${stats}.1"
+      local purgeRetries=0
+      while (( statssize > statsmaxsize )); do
+        truncate -s 0 "${stats}";
+        sleep 0.5;
+        statssize=$( stat --format=%s "${stats}" )
+        (( purgeRetries++ ))
+        (( purgeRetries > 10 )) && { echo "Fail to purge ${stats}" >&2; break; };
+      done;
+      (( purgeRetries <= 10 )) && statssize=0;
+    fi;
+
+    sleep 60;
+  done
+  echo "END EXPERIMENT ${tlspuffin_pid} ..." >&2
+  ref_status=$( EndDirectChild "${tlspuffin_pid}" );
+  local code=$?
+  (( code != 0 )) && ref_status=1
+  echo "END EXPERIMENT ${tlspuffin_pid}" >&2
+
+  echo "${ref_goal_success}";
+  return 0;
+}
+
 Experiment () {
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
   ExperimentRun tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  echo  "${stats}" > ./.xp_state_file
+  echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
+  local goal_success=0
   local status=1
-  (( tlspuffin_killed == 0 )) && {
-    status=$( ExperimentCheckRun "${tlspuffin_pid}" "${stats}" )
-  }
+  if ((tlspuffin_killed == 0)); then
+    echo "CheckObjectif status ${tlspuffin_pid} ${stats} goal_success" >&2
+    CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success
+  fi
 
-  return ${status}
+  (( goal_success == 1 )) && return 0;
+  return "${status}"
 }
 
 ExperimentWithCargo () {
-  local tlspuffin_pid=0;
-  local tlspuffin_killed=0;
+  local tlspuffin_pid=-1;
+  local tlspuffin_killed=-1;
   local stats="";
   ExperimentRunWithCargo tlspuffin_pid tlspuffin_killed stats 0 "${@}" || return 1;
+  echo  "${stats}" > ./.xp_state_file
+  echo "Experiment launched with process: ${tlspuffin_pid}" >&2
 
+  local goal_success=0
   local status=1
-  (( tlspuffin_killed == 0 )) && {
-    status=$( ExperimentCheckRun "${tlspuffin_pid}" "${stats}" )
+  if ((tlspuffin_killed == 0)); then
+    echo "CheckObjectif status ${tlspuffin_pid} ${stats} goal_success" >&2
+    CheckObjectif status "${tlspuffin_pid}" "${stats}" goal_success;
+  fi
+
+  (( goal_success == 1 )) && return 0;
+  return "${status}"
+}
+
+ExperimentEnd() {
+  ExperimentEndCommon
+  SaveSummary
+}
+
+SaveSummary() {
+  local output="summary.json";
+  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
+
+  #local stats=$( cat ./.xp_state_file )
+  local stats="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json"
+  [ -r "${stats}" ] || {
+    echo "{\"error\": \"no file ${stats} not found\"}" > "${output}"
+    return 1;
   }
 
-  return ${status}
+  local -a filesLst=()
+  [ -r "${stats}.1" ] && filesLst+=("${stats}.1")
+  filesLst+=("${stats}")
+  : > "${output}"
+  for file in "${filesLst[@]}"; do
+    awk '
+      function Validate(line, is_first,       opens, closes, i, c) {
+        if (is_first == 1) {
+          if (line !~ /^\{/) return ""
+          line = substr(line, 2)
+        } else if (is_first == 0) {
+          if (line !~ /\}$/) return ""
+          line = substr(line, 1, length(line) - 1)
+        }
+
+        opens = 0
+        closes = 0
+        for (i = 1; i <= length(line); i++) {
+          c = substr(line, i, 1)
+          if (c == "{") opens++
+          else if (c == "}") closes++
+        }
+        if (opens != closes) return ""
+        return line
+    }
+      BEGIN {
+        RS="}{"; line=""; buffer=""; first_record="";
+      }
+      {
+        sub(/\n$/, "", $0)
+
+        line = buffer
+        if (NR == 1) {
+          first_record=$0;
+          buffer = Validate($0, 1)
+        } else {
+          buffer = $0
+        }
+        if (line != "") {
+          if (Validate(line, 2) != "") {
+            print "{" line "}"
+          }
+        }
+      }
+      END {
+        if (NR == 1) {
+          if (buffer !~ /^\{/) buffer = substr(first_record, 2);
+          else buffer = ""
+        }
+        line = Validate(buffer, 0)
+        if (line != "") {
+          print "{" line "}"
+        }
+      }
+    ' "${file}" >> "${output}"
+  done
+
+  local summary=$( awk '
+    BEGIN {
+      nb = 0;
+    }
+    {
+      if ($0 ~ /"type":"global"/) {
+        if (!global_set) {
+          global = $0
+          if ($0 !~ /"objective_size":0/) {
+            global_set = 1
+          }
+        }
+      } else if ($0 ~ /"type":"client"/) {
+        if (match($0, /"id": *[0-9]+/)) {
+          id = substr($0, RSTART, RLENGTH)
+          gsub(/[^0-9]/, "", id)
+          if (id > nb) { nb = id }
+          if (!clients_set[id]) {
+            clients[id] = $0
+            if ($0 !~ /"objective_size":0/) {
+              clients_set[id] = 1
+            }
+          }
+        }
+      }
+    }
+    END {
+      if (global) print global
+
+      for (id = 1; id <= nb; id++) {
+        if (clients[id]) print clients[id]
+      }
+    }' "${output}" | jq -c '.' 2>/dev/null )
+
+  echo "${summary}" > "${output}"
+  [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&2
+
+  local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
+  [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && echo '{"run_error":"fuzzer timeout"}' >> "${output}"
+}
+
+ManageResults () {
+  echo "${vulnerabilities}"
+  python_storage="/local-unsafe/demengeo"
+  if [[ ! -d "${python_storage}/puffin-bench.venv" ]]; then
+    python3 -m venv "${python_storage}/puffin-bench.venv"
+    source "${python_storage}/puffin-bench.venv/bin/activate"
+    python3 -m pip install -r ${script}/requirements.txt
+  else
+    source "${python_storage}/puffin-bench.venv/bin/activate"
+  fi
+  python3 ${script}/cli.py generate --commit "${COMMIT_ID}" "${THEJOB_ARTEFACTS_PATH}" out.csv
+  python3 ${script}/cli.py report --outdir out out.csv
+  CreateArtefact "./out/report" "report" "commit_id:${COMMIT_ID}"
+  return 0
 }
 
 SummaryRun () {
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
 
-  local json='{ "type": "perf", "libraries": [ ';
+  echo -n '{ "type": "vuln", "libraries": [ ' > .run-summary.json.tmp
   local firstlib=1;
   while read -r libresults; do
-    local lib=${libresults#"$THEJOB_ARTEFACTS_PATH"/}
+    local lib=${libresults#"${THEJOB_ARTEFACTS_PATH}/"}
     if (( ! firstlib )); then
-      json+=","
+      echo -n "," >> .run-summary.json.tmp
     fi
     firstlib=0
-    json+=" { \"name\": \"${lib}\", \"data\": [ ";
+    echo -n " { \"name\": \"${lib}\", \"data\": [ " >> .run-summary.json.tmp
     local firstRun=1;
+    local cputs="";
     while read -r i; do
-      local idRun=$( echo "${i}" | sed 's:.*/\([0-9][0-9]*\)-stats.json$:\1:' )
+      local statsFile="${i#"${THEJOB_ARTEFACTS_PATH}/${lib}/"}";
+      local runID="${statsFile%'-summary-stats.json'}"
+      local readmeFile="${THEJOB_ARTEFACTS_PATH}/${lib}/${runID}-README.md"
+      local jsonEntry='';
+      if [ ! -r "${readmeFile}" ]; then
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
+        echo "Missing required file ${readmeFile}" >&2; 
+      elif [ ! -r "${i}" ]; then
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
+        echo "Missing required file ${i}" >&2; 
+      elif jq -e 'has("error")' "${i}" 2>/dev/null >&2; then
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
+        echo "Error in required file ${i}" >&2; 
+      else
+        local startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
+        local endTime=$( jq -r 'select(.type=="global") | .time.secs_since_epoch' "${i}" )
+        local runTime=$(( endTime - startTime ))
 
-      local startInfos=$( head -c 1M "${i}" | sed 's/}{/}\n{/g' | head -1 );
-      local startTime=$( echo "${startInfos}" | jq -r '.time.secs_since_epoch' );
-      local endInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | tail -1 );
-      echo "${endInfos}" | jq >/dev/null 2>&1 || endInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | tail -2 | head -1 );
-      local endTime=$( echo "${endInfos}" | jq -r '.time.secs_since_epoch' );
-      local runTime=$(( endTime - startTime ));
-
-      local endGlobalInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"global".*}$' | tail -1 );
-      echo "${endGlobalInfos}" | jq >/dev/null 2>&1 || endGlobalInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"global".*}$' | tail -2 | head -1 );
-
-      local corpus=$( echo "${endGlobalInfos}" | jq -r '.corpus_size' )
-      [ -z "${corpus}" ] && corpus='null';
-      local execs=$( echo "${endGlobalInfos}" | jq -r '.total_execs' )
-      [ -z "${execs}" ] && execs='null';
-      local nbClients=$( echo "${endGlobalInfos}" | jq -r '.clients' )
-      [ -z "${nbClients}" ] && nbClients=0;
-      local objectiveSize=$( echo "${endGlobalInfos}" | jq -r '.objective_size' )
-      [ -z "${objectiveSize}" ] && objectiveSize=0;
-
-      local coverages=''
-      local nbDuration=0
-      local avgDuration=0
-      local endClientsInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"client".*}$' );
-      for (( client=1; client<nbClients; ++client )); do
-
-        local startClientInfos=$( head -c 2M "${i}" | sed 's/}{/}\n{/g' | grep "\"id\":${client}" | head -1 );
-        local clientStartTime=$( echo "$startClientInfos" | jq -r '.time.secs_since_epoch' )
-
-        local endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -1 );
-        echo "${endClientInfos}" | jq  >/dev/null 2>&1 || endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -2 | head -1 );
-
-        local clientCovHit=''
-        clientCovHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit' ) || clientCovHit=$(echo "$endClientInfos" | jq -e -r '.coverage.discovered' ) || clientCovHit='';
-        local clientCovMax=''
-        clientCovMax=$( echo "$endClientInfos" | jq -e -r '.coverage.max' ) || clientCovMax='';
-        local clientCoverage=0
-
-        [ -n "${clientCovHit}" ] && {
-          [ -n "${clientCovMax}" ] && {
-            clientCoverage=$( echo "scale=8; ( ${clientCovHit} / ${clientCovMax} ) * 100" | bc | LC_ALL=C xargs printf "%.6f\n" )
-            [ -n "${coverages}" ] && coverages+=","
-            coverages+="${clientCoverage}"
-          }
-        }
-
-        local clientEndTime=$( echo "$endClientInfos" | jq -r '.time.secs_since_epoch' )
-        local clientDuration=;
-        [ -n "${clientStartTime}" ] && [ -n "${clientEndTime}" ] && clientDuration=$(( clientEndTime - clientStartTime  ))
-        [ -n "${clientDuration}" ] && {
-          (( avgDuration += clientDuration ));
-          (( ++nbDuration ));
-        }
-      done
-      [ -z "${coverages}" ] && coverages=''
-      (( nbDuration > 0)) && avgDuration=$(( avgDuration / nbDuration )) || avgDuration='"NA"';
-
+        local objectiveSize=$( jq -n '[inputs.objective_size] | max' "${i}" );
+        [ -z "${objectiveSize}" ] && objectiveSize=0;
+        local totalExecs=$( jq 'select(.type == "global") | .total_execs' "${i}" );
+        [ -z "${totalExecs}" ] && totalExecs=0;
+        jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}";
+        local cancelByRunError=$( jq -r 'select(has("run_error")) | .run_error' "${i}" )
+        [ -n "${cancelByRunError}" ] && { jsonEntry+=", \"run_error\": \"${cancelByRunError}\""; objectiveSize=0; }
+        jsonEntry+=", \"objective_size\": ${objectiveSize}, \"valid\": true }";
+        [ -z "${cputs}" ] && cputs=$( jq -r 'select(has("cputs")) | .cputs' "${i}" )
+      fi
       if (( ! firstRun )); then
-        json+=","
+        echo -n "," >> .run-summary.json.tmp
       fi
       firstRun=0;
-      json+=" { \"id\": \"${idRun}\", \"duration\": ${runTime}, \"corpus_size\": ${corpus}, \"total_execs\": ${execs}, \"coverage\": [ ${coverages} ], \"objective_size\": ${objectiveSize}, \"client_average_duration_s\": ${avgDuration} }";
+      echo -n  "${jsonEntry}" >> .run-summary.json.tmp
 
-    done < <(find "${libresults}" -name "*.json" | sort -V)
-    json+=" ] }";
-  done < <(find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -V)
-  json+=" ] }";
-  echo "${json}" > summary.json;
-  CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"
+    done < <( find "${libresults}" -name "*-summary-stats.json" | sort -V )
+    echo -n " ], \"cputs\": \"${cputs}\" }" >> .run-summary.json.tmp
+  done < <( find "${THEJOB_ARTEFACTS_PATH}" -maxdepth 1 -mindepth 1 -type d | sort -V )
+  echo " ] }" >> .run-summary.json.tmp
+  mv .run-summary.json.tmp run-summary.json;
+  CreateArtefact "./run-summary.json" "run-summary.json" "commit_id:${COMMIT_ID}"
   return 0;
 }

@@ -114,11 +114,11 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
     }
 
     std::unordered_map<std::string, std::string> args;
-    for (auto& [name, value] : form) {
-      if ((name.find("args[") != 0) || (name.rfind("]") != (name.size()-1))) {
+    for (auto& [fullkey, value] : form) {
+      if ((fullkey.find("args[") != 0) || (fullkey.rfind("]") != (fullkey.size()-1))) {
         continue;
       }
-      std::string key = name.substr(5, name.size() - 6);
+      std::string key = fullkey.substr(5, fullkey.size() - 6);
       if (key.empty()) {
         throw std::runtime_error("Empty key in args[]");
       }
@@ -129,11 +129,11 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
     }
 
     std::unordered_map<std::string, std::string> runtimeConfig;
-    for (auto& [name, value] : form) {
-      if ((name.find("runtime[") != 0) || (name.rfind("]") != (name.size()-1))) {
+    for (auto& [fullkey, value] : form) {
+      if ((fullkey.find("runtime[") != 0) || (fullkey.rfind("]") != (fullkey.size()-1))) {
         continue;
       }
-      std::string key = name.substr(16, name.size() - 17);
+      std::string key = fullkey.substr(16, fullkey.size() - 17);
       if (key.empty()) {
         throw std::runtime_error("Empty key in runtime[]");
       }
@@ -222,10 +222,10 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
 
     out = &(response.send());
 
-    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "size": )" << 
-        data.buffer.size() << R"(, "filesize": )" << data.filesize << R"(, "state": )" << 
-        (int)(data.state) << R"(, "support_seek": )" << data.supportSeek << 
-        R"(, "start_offset": )" << data.startOffset << "}";
+    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "partial": )" << 
+        data.partialFile << R"(, "size": )" << data.buffer.size() << R"(, "filesize": )" << 
+        data.filesize << R"(, "state": )" << (int)(data.state) << R"(, "support_seek": )" << 
+        data.supportSeek << R"(, "start_offset": )" << data.startOffset << "}";
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {
@@ -308,6 +308,12 @@ void ns_Server::RequestHandlerTaskGetArtefacts::handleRequest(Poco::Net::HTTPSer
       status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
       throw std::runtime_error("task does not exist");
     }
+    size_t extensionOffset = fileArtefacts.rfind(".");
+    if (extensionOffset == std::string::npos) {
+      throw std::runtime_error("task artefact filename invalid");
+    }
+    response.set("Content-Disposition", "attachment; filename=\"" + taskID + "-artefacts" + 
+        fileArtefacts.substr(extensionOffset) + "\"");
     SendFile(fileArtefacts, response, out);
   } catch(std::runtime_error const& e) {
     if (out == nullptr) {
@@ -334,6 +340,7 @@ void ns_Server::RequestHandlerTaskGetFinalState::handleRequest(Poco::Net::HTTPSe
       status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
       throw std::runtime_error("task does not exist");
     }
+    response.set("Content-Disposition", "attachment; filename=\"" + taskID + ".json\"");
     SendFile(fileStateJSON, response, out);
   } catch(std::runtime_error const& e) {
     if (out == nullptr) {

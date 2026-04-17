@@ -1,6 +1,6 @@
 #***********************************************\
 #                                               *
-#  project : Cmake Helper to find Library       *
+#  project : Cmake helper to find Libraries     *
 #                                               *
 #  author : Olivier Demengeon                   *
 #  created : 2024                               *
@@ -13,23 +13,7 @@ cmake_minimum_required(VERSION 3.16)
 ########################## Helper functions ##########################
 #######################################################################
 
-function (IsLibWanted libpath libname type wantedlib symbolicName)
-  set(${symbolicName} "" PARENT_SCOPE)
-  string(REGEX MATCHALL "/[^/]*" pathSplit ${libpath})
-  foreach(arch ${MYTOOLS_LIB_PATH_ARCH_AVOID})
-    if("/${arch}" IN_LIST pathSplit)
-        return()
-    endif()
-  endforeach()
-
-  if ((NOT wantedlib) OR (NOT type))
-    set(${symbolicName} "${libname}" PARENT_SCOPE)
-    return()
-  endif()
-
-  if (${type} STREQUAL "debug")
-    string(REGEX REPLACE "d$" "" libname ${libname})
-  endif()
+function(CheckLibWanted libname wantedlib symbolicName)
   if (${libname} IN_LIST wantedlib)
     set(${symbolicName} "${libname}" PARENT_SCOPE)
     return()
@@ -38,6 +22,36 @@ function (IsLibWanted libpath libname type wantedlib symbolicName)
   if (${libnamewithoutprefix} IN_LIST wantedlib)
     set(${symbolicName} "${libnamewithoutprefix}" PARENT_SCOPE)
     return()
+  endif()
+endfunction()
+
+function (IsLibWanted libpath libname type wantedlib symbolicName)
+  set(${symbolicName} "" PARENT_SCOPE)
+  set(${symbolicName} "")
+  string(REGEX MATCHALL "/[^/]*" pathSplit ${libpath})
+  foreach(arch ${MYTOOLS_LIB_PATH_ARCH_AVOID})
+    if("/${arch}" IN_LIST pathSplit)
+      return()
+    endif()
+  endforeach()
+
+  if ((NOT wantedlib) OR (NOT type))
+    set(${symbolicName} "${libname}" PARENT_SCOPE)
+    return()
+  endif()
+
+  CheckLibWanted("${libname}" "${wantedlib}" ${symbolicName})
+  if (NOT "${${symbolicName}}" STREQUAL "")
+    set(${symbolicName} "${${symbolicName}}" PARENT_SCOPE)
+    return()
+  endif()
+  if (${type} STREQUAL "debug")
+    string(REGEX REPLACE "d$" "" libname_stripped ${libname})
+    CheckLibWanted("${libname_stripped}" "${wantedlib}" ${symbolicName})
+    if (NOT "${${symbolicName}}" STREQUAL "")
+      set(${symbolicName} "${${symbolicName}}" PARENT_SCOPE)
+      return()
+    endif()
   endif()
 endfunction()
 
@@ -119,11 +133,11 @@ endif (UNIX)
 ## Required parameters
 ### libname (in) : name of the library
 ### libsharedstatic (in) : STATIC, SHARED or HEADERSONLY type of library file to find
-### libpath (in) : 
+### libpath (in) :
 ###  * for STATIC or SHARED libraries: path where to search for the headers and libraries files
 ###  * for HEADERSONLY libraries: it match is same as the optional parameter HEADERSAMPLE, can be empty to use default search method
 ### requiredlib (in) : list of libraries names required to find in <libpath>, if empty will use all libraries found
-### outFoundlibs (out) : list of libraries found or NOT-fOUND or NOT-ALL-fOUND
+### outFoundlibs (out) : list of libraries found or NOT-FOUND or NOT-ALL-FOUND
 ## Optional (in) parameters
 ### HEADERSONLY : will only setup headers informations
 ### HEADERSPATH <path> : a path where the headers are, not test will be done on it, ignored if path is empty.
@@ -134,7 +148,7 @@ endif (UNIX)
 function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   message(STATUS "looking for ${libname} in ${libpath}")
 
-  cmake_parse_arguments(PARSE_ARGV 5 arg "VERBOSE" "HEADERSPATH;HEADERSAMPLE" "OPTIONALS")
+  cmake_parse_arguments(PARSE_ARGV 5 arg "VERBOSE" "HEADERSPATH;HEADERSAMPLE;HEADERSSEARCHPATH" "OPTIONALS")
   string(REPLACE "\\;" ";" arg_OPTIONALS "${arg_OPTIONALS}")
   set(headersPathSearch ON)
   set(optionallib "${arg_OPTIONALS}")
@@ -148,18 +162,23 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   set(verbose ${arg_VERBOSE})
 
   set(foundMSG "not found")
-  set(${outFoundlibs} "NOT-fOUND" PARENT_SCOPE)
+  set(${outFoundlibs} "NOT-FOUND" PARENT_SCOPE)
 
   if (NOT arg_HEADERSPATH)
+	if(arg_HEADERSSEARCHPATH)
+	  set(includesearchpath "${arg_HEADERSSEARCHPATH}")
+	else()
+	  set(includesearchpath "${libpath}")
+	endif()
     if(NOT includesample)
-      file(GLOB_RECURSE headersfound "${libpath}/*.h")
+      file(GLOB_RECURSE headersfound "${includesearchpath}/*.h")
       list(APPEND allheadersfound ${headersfound})
-      file(GLOB_RECURSE headersfound "${libpath}/*.hpp")
+      file(GLOB_RECURSE headersfound "${includesearchpath}/*.hpp")
       list(APPEND allheadersfound ${headersfound})
-      file(GLOB_RECURSE headersfound "${libpath}/*.hxx")
+      file(GLOB_RECURSE headersfound "${includesearchpath}/*.hxx")
       list(APPEND allheadersfound ${headersfound})
       if (NOT allheadersfound)
-        message(STATUS "looking for ${libname} in ${libpath} - ${foundMSG}")
+        message(STATUS "looking for ${libname} in ${includesearchpath} - ${foundMSG}")
         return()
       endif()
       list(SORT allheadersfound)
@@ -168,7 +187,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
       string(REGEX REPLACE "/include/.*" "/include/" realheaderpath ${headerpath})
     else()
       get_filename_component(includesamplename "${includesample}" NAME)
-      file(GLOB_RECURSE headersfound "${libpath}/*${includesamplename}")
+      file(GLOB_RECURSE headersfound "${includesearchpath}/*${includesamplename}")
       list(APPEND allheadersfound ${headersfound})
       list(SORT allheadersfound)
       foreach(file ${allheadersfound})
@@ -178,7 +197,7 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
         endif()
       endforeach()
       if(NOT headerpath)
-        message(STATUS "looking for ${libname} in ${libpath} - ${foundMSG}")
+        message(STATUS "looking for ${libname} in ${includesearchpath} - ${foundMSG}")
         return()
       endif()
       string(REGEX REPLACE "${includesample}$" "" realheaderpath ${headerpath})
@@ -209,7 +228,9 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   endif()
   set(MYLIBSEARCH_${libname}_HEADERS "${headersPath}" PARENT_SCOPE)
 
-  message(STATUS "  headers ${headersPath}")
+  if(verbose)
+    message(STATUS "  headers ${headersPath}")
+  endif()
   if("${libsharedstatic}" STREQUAL "HEADERSONLY")
     if(headersPath)
       set(foundMSG "found")
@@ -219,6 +240,9 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
       set(MYLIBSEARCH_${libname}_TYPE_HEADERS ON PARENT_SCOPE)
     endif()
     message(STATUS "looking for ${libname} in ${libpath} - ${foundMSG}")
+    if(foundMSG STREQUAL "found")
+      set(${outFoundlibs} "FOUND" PARENT_SCOPE)
+    endif()
     return()
   endif()
 
@@ -234,17 +258,18 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
   set(dllFilesLst)
   file(GLOB_RECURSE dllFilesLst "${libpath}/*.dll")
   foreach(file ${dllFilesLst})
-    # subPathName is the relative path of pathName from  libpath 
+    # subPathName is the relative path of pathName from  libpath
     string(REGEX REPLACE "^${libpath}" "" subPathName "${file}")
     list(APPEND dllFiles ${subPathName})
   endforeach()
 
   set(libs)
+  set(libsDebug)
   foreach(file ${files})
     get_filename_component(pathName ${file} DIRECTORY)
     get_filename_component(filename ${file} NAME_WLE)
     #get_filename_component(fileext ${file} LAST_EXT)
-    # subPathName is the relative path of pathName from  libpath 
+    # subPathName is the relative path of pathName from  libpath
     string(REGEX REPLACE "^${libpath}" "" subPathName "${pathName}")
 
     set(libType "release")
@@ -256,15 +281,17 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
       set(libPostfix "_DEBUG")
     else()
       if ((NOT ${filenameRelease} STREQUAL ${filename}) AND ("${filenameRelease}" IN_LIST files))
-      set(libType "debug")
-      set(libPostfix "_DEBUG")
+        set(libType "debug")
+        set(libPostfix "_DEBUG")
       endif()
     endif()
 
     IsLibWanted(${pathName} ${filename} ${libType} "${libslist}" filenameRelease)
 
     if (filenameRelease)
-      message(STATUS "  check ${file}")
+      if(verbose)
+        message(STATUS "  check ${file} ${libType} ${filenameRelease}")
+      endif()
       if ((${libsharedstatic} STREQUAL "SHARED") AND (OS_SUPPORT_DLL))
         TryFindDLL(${filename} "${libType}" "${dllFiles}" dllFile)
         string(PREPEND dllFile "${libpath}")
@@ -284,16 +311,33 @@ function(GetLibs libname libsharedstatic libpath requiredlib outFoundlibs)
       set(MYLIBSEARCH_${libname}_${filenameRelease}${libPostfix} "${file}" PARENT_SCOPE)
       if(NOT libPostfix)
         list(APPEND libs ${filenameRelease})
+      else()
+        list(APPEND libsDebug ${filenameRelease})
       endif()
     endif()
   endforeach()
+  if(libs)
+    set(MYLIBSEARCH_${libname}_HAS_RELEASE ON PARENT_SCOPE)
+  endif()
+  if(libsDebug)
+    set(MYLIBSEARCH_${libname}_HAS_DEBUG ON PARENT_SCOPE)
+  endif()
+  if (NOT libs AND libsDebug)
+    message(STATUS "No release libs, using debug one")
+    foreach(file ${libsDebug})
+      if(MYLIBSEARCH_${libname}_${file}_DLL_DEBUG)
+        set(MYLIBSEARCH_${libname}_${file}_DLL "${MYLIBSEARCH_${libname}_${file}_DLL_DEBUG}" PARENT_SCOPE)
+      endif()
+      set(MYLIBSEARCH_${libname}_${file} "${MYLIBSEARCH_${libname}_${file}_DEBUG}" PARENT_SCOPE)
+      list(APPEND libs ${file})
+    endforeach()
+  endif()
   if (libs)
     set(foundMSG "found")
-
     foreach(alib ${requiredlib})
       if (NOT ${alib} IN_LIST libs)
-        set(foundMSG "missing required libs")
-        set(${outFoundlibs} "NOT-fOUND" PARENT_SCOPE)
+        set(foundMSG "missing required libs ${alib}")
+        set(${outFoundlibs} "NOT-FOUND" PARENT_SCOPE)
         break()
       endif()
       list(REMOVE_ITEM libs ${alib})
@@ -323,9 +367,11 @@ endfunction()
 ### DEPLOYTARGET <name> : name of the target used to copy the dll in build directories, if the target does not exist, il will create it
 ### VERBOSE : to make cmake display information at run
 function(CreateExternalLib libname libs)
-  cmake_parse_arguments(PARSE_ARGV 2 arg "VERBOSE" "DEPLOYTARGET" "")
+  cmake_parse_arguments(PARSE_ARGV 2 arg "VERBOSE" "DEPLOYTARGET" "COMPILE_DEFINITIONS;LINK_LIBRARIES")
   set(verbose ${arg_VERBOSE})
   set(deploytarget ${arg_DEPLOYTARGET})
+  set(compileDefs ${arg_COMPILE_DEFINITIONS})
+  set(linkLibraries ${arg_LINK_LIBRARIES})
 
   set(importedDst IMPLIB)
   set(libtype SHARED)
@@ -339,6 +385,9 @@ function(CreateExternalLib libname libs)
     add_library(${libname} INTERFACE)
     set_target_properties(${libname} PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES "${MYLIBSEARCH_${libname}_HEADERS}")
+    if(compileDefs)
+      target_compile_definitions(${libname} INTERFACE ${compileDefs})
+    endif()
     return()
   endif()
   if(verbose)
@@ -368,6 +417,14 @@ function(CreateExternalLib libname libs)
       if (MYLIBSEARCH_${libname}_${filename}_DEBUG)
         set_target_properties(${libname}::${filename} PROPERTIES
           IMPORTED_IMPLIB_DEBUG "${MYLIBSEARCH_${libname}_${filename}_DEBUG}")
+      else()
+        set_target_properties(${libname}::${filename} PROPERTIES
+          IMPORTED_IMPLIB_DEBUG "${MYLIBSEARCH_${libname}_${filename}}")
+      endif()
+    else()
+      if (MYLIBSEARCH_${libname}_${filename}_DEBUG)
+        set_target_properties(${libname}::${filename} PROPERTIES
+          IMPORTED_LOCATION_DEBUG "${MYLIBSEARCH_${libname}_${filename}_DEBUG}")
       else()
         set_target_properties(${libname}::${filename} PROPERTIES
           IMPORTED_LOCATION_DEBUG "${MYLIBSEARCH_${libname}_${filename}}")
@@ -402,78 +459,54 @@ function(CreateExternalLib libname libs)
         add_dependencies(${deploytarget} ${deploytarget}_${libname}_${filename})
         set_target_properties(${deploytarget}_${libname}_${filename} PROPERTIES FOLDER "${deploytarget} deps")
       endif()
-    endif() 
+    endif()
 
   endforeach()
 
-  add_library(${libname} INTERFACE)
+  add_library(${libname} INTERFACE IMPORTED)
   target_link_libraries(${libname} INTERFACE ${library_elements})
+  if(compileDefs)
+    target_compile_definitions(${libname} INTERFACE ${compileDefs})
+  endif()
+  if (linkLibraries)
+    target_link_libraries(${libname} INTERFACE ${linkLibraries})
+  endif()
 endfunction()
 
+function(PrintTargetProperties tgt)
+  if(NOT TARGET ${tgt})
+    message(STATUS "Target ${tgt} does not exist.")
+    return()
+  endif()
 
-# EmbedTextFile(<input_txt> <output_header> <varname_prefix>)
-## Required parameters
-### INPUT_TXT (in) : path to the source text file to embed
-### OUTPUT_HEADER (out) : generates a C header file
-###   VARPREFIX_data (out) : a NUL-terminated C string literal
-###   VARPREFIX_size (out) : size of the C string literal (excluding the NULL)
-function(EmbedTextFile INPUT_TXT OUTPUT_HEADER VARPREFIX)
-  file(READ "${INPUT_TXT}" _raw_content)
+  # Liste non exhaustive des propriétés communes
+  set(props
+        INCLUDE_DIRECTORIES
+        LINK_LIBRARIES
+        INTERFACE_INCLUDE_DIRECTORIES
+        IMPORTED_LINK_INTERFACE_LIBRARIES
+        IMPORTED_LOCATION
+        IMPORTED_LOCATION_DEBUG
+        IMPORTED_IMPLIB
+        COMPILE_DEFINITIONS
+        SOURCES
+        BINARY_DIR
+    )
 
-  string(REPLACE "\\" "\\\\" _escaped_content "${_raw_content}")
-  string(REPLACE "\"" "\\\"" _escaped_content "${_escaped_content}")
-  string(REPLACE "\n" "\\n\"\n\"" _escaped_content "${_escaped_content}")
-
-  file(WRITE "${OUTPUT_HEADER}"
-    "/* Auto-generated from ${INPUT_TXT} */\n"
-    "static const char ${VARPREFIX}_data[] = \"${_escaped_content}\";\n"
-    "static const size_t ${VARPREFIX}_size = sizeof(${VARPREFIX}_data) - 1;\n"
-  )
-endfunction()
-
-# EmbedTextFileScript(<input_txt> <output_header> <varname_prefix>)
-##
-## Declares a build rule that generates a C header file from a text file
-## (e.g. a shell script). The header contains the file content encoded
-## as a C string literal.
-##
-## Required parameters:
-### INPUT_TEXT (in) : path to the source text file to embed
-### OUTPUT_H (out) : path to the generated C header
-###   - VARPREFIX_data (out) : a NUL-terminated C string literal
-###   - VARPREFIX_size (out) : the size of the string literal (excluding the NUL)
-### VARPREFIX (in) : prefix used to name the generated C symbols
-##
-## Behavior:
-## - Declares a custom build rule with add_custom_command().
-## - Automatically regenerates the header if INPUT_TXT changes.
-## - Creates the output directory if necessary.
-## - OUTPUT_HEADER is marked as a byproduct and can be used with target_sources().
-##
-## Example usage:
-##   EmbedTextFileScript(${CMAKE_SOURCE_DIR}/scripts/myscript.sh
-##                ${CMAKE_BINARY_DIR}/generated/myscript.h
-##                myscript)
-##
-##   add_library(mylib ...)
-##   target_sources(mylib PRIVATE ${CMAKE_BINARY_DIR}/generated/myscript.h)
-##   target_include_directories(mylib PRIVATE ${CMAKE_BINARY_DIR}/generated)
-##
-function(EmbedTextFileScript INPUT_TEXT OUTPUT_H VARPREFIX)
-  # Assure-toi que le dossier existe
-  get_filename_component(_out_dir "${OUTPUT_H}" DIRECTORY)
-  file(MAKE_DIRECTORY "${_out_dir}")
-
-  add_custom_command(
-    OUTPUT  "${OUTPUT_H}"
-    COMMAND "${CMAKE_COMMAND}"
-            -DINPUT_TXT=${INPUT_TEXT}
-            -DOUTPUT_HEADER=${OUTPUT_H}
-            -DVARPREFIX=${VARPREFIX}
-            -P "${CMAKE_SOURCE_DIR}/CMakeTextEmbedding.cmake"
-    DEPENDS "${INPUT_TEXT}" "${CMAKE_SOURCE_DIR}/CMakeTextEmbedding.cmake"
-    BYPRODUCTS "${OUTPUT_H}"
-    COMMENT "Embedding ${INPUT_TEXT} -> ${OUTPUT_H}"
-    VERBATIM
-  )
+  message(STATUS "Properties of target: ${tgt}")
+  foreach(prop ${props})
+    get_target_property(propval ${tgt} ${prop})
+    if(propval)
+      message(STATUS "  ${prop} = ${propval}")
+    endif()
+  endforeach()
+  get_target_property(libs ${tgt} INTERFACE_LINK_LIBRARIES)
+  if (libs)
+    message(STATUS "  INTERFACE_LINK_LIBRARIES = ${libs}")
+    foreach(lib ${libs})
+      if(TARGET ${lib})
+        PrintTargetProperties(${lib})
+      endif()
+    endforeach()
+  endif()
 endfunction()

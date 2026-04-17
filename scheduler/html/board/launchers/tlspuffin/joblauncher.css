@@ -56,6 +56,13 @@
   font-weight: 600;
   color: var(--jl-text);
 }
+.jl-edit-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  pointer-events: none;
+  margin-right: 6px;
+}
+
 .jl-task-name {
   background: none;
   border: none;
@@ -147,6 +154,58 @@
   color:        var(--jl-chip-color, #888);
   background:   color-mix(in srgb, var(--jl-chip-color, #888) 10%, transparent);
 }
+
+/* ── Commit input row ── */
+.jl-commit-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jl-commit-input-wrap {
+  position: relative;
+  flex: 1;
+}
+.jl-commit-input-wrap .jl-commit-input { width: 100%; }
+
+/* ── Icon buttons (🧹 clear + ↻ refresh) ── */
+.jl-icon-btn {
+  background: var(--jl-bg);
+  border: 1px solid var(--jl-border-light);
+  border-radius: 8px;
+  color: var(--jl-text-muted);
+  font-size: 14px;
+  padding: 7px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.jl-icon-btn:hover:not(:disabled) { color: var(--jl-text); border-color: #888; }
+.jl-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Refresh button — floating over input right side ── */
+.jl-refresh-btn {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  padding: 4px 8px;
+  font-size: 15px;
+  background: rgba(30, 30, 30, 0.88);
+  border-color: transparent;
+  backdrop-filter: blur(2px);
+}
+.jl-refresh-btn.visible { display: block; }
+.jl-refresh-btn:hover:not(:disabled) { border-color: var(--jl-border-light); }
+.jl-refresh-btn.loading {
+  animation: jl-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+.jl-refresh-btn.jl-refresh-pr { color: #f5a623; }
+.jl-refresh-btn.jl-refresh-pr:hover:not(:disabled) { color: #ffb84d; }
+@keyframes jl-spin { to { transform: rotate(360deg); } }
 
 /* ── Commit input ── */
 .jl-commit-input {
@@ -277,6 +336,23 @@
   color: #555;
   font-size: 13px;
   text-align: center;
+}
+.jl-tablist.loading { pointer-events: none; }
+
+.jl-list-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.jl-list-spinner::after {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--jl-border-light);
+  border-top-color: var(--jl-accent);
+  border-radius: 50%;
+  animation: jl-spin 0.7s linear infinite;
 }
 
 /* ── Tabs footer ── */

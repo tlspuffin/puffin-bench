@@ -5,7 +5,7 @@
 #include <string>
 #include <fstream>
 
-std::vector<pid_t> ns_System::Process::GetPidsBySid(pid_t sid) {
+std::vector<pid_t> ns_System::ProcessMonitor::GetPidsBySid(pid_t sid) {
   LOGD << "Looking for orphans of session " << sid << Log::Flags::End;
   std::vector<pid_t> pids;
 

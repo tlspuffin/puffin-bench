@@ -9,7 +9,7 @@ void ns_Schedule::GroupStepConfigurations::ReadFromTaskJSON(rapidjson::Value con
 
   rapidjson::Value const emptyObject(rapidjson::kObjectType);
   rapidjson::Value::ConstObject customConfig = 
-      GetOrDefault<rapidjson::Value::ConstObject>(entry, "custom", emptyObject.GetObj());
+      GetOrDefault<rapidjson::Value::ConstObject>(entry, "custom", emptyObject.GetObject());
   for (auto const& config: customConfig) {
     nb_retry_[config.name.GetString()] = GetOrDefault<uint32_t>(config.value, "nb_retry", nb_retry_[""]);
   }

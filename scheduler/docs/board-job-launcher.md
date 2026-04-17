@@ -16,7 +16,7 @@ The job launcher is a modal dialog opened from the board's `+` button. It lets t
 
 ## `jobs_config.json` — Job Type Registry
 
-Located at `html/board/jobs_config.json`, served as `GET /files/board/jobs_config.json`.
+Located at `html/board/launchers/tlspuffin/jobsconfig.json`, embedded in the launcher JavaScript.
 
 ### Format
 
@@ -29,11 +29,11 @@ Located at `html/board/jobs_config.json`, served as `GET /files/board/jobs_confi
       "job_type": "vuln-a",
       "color":    "#FF9800",
       "campaign": false,
-      "config":   "/files/jobs_scripts/PR_vulnerabilities-groupA_cargo.json",
-      "script":   "/files/jobs_scripts/PR_vulnerabilities_full.sh",
+      "config":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json",
+      "script":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh",
       "files":    [
-        "/files/jobs_scripts/shell.nix",
-        "/files/jobs_scripts/wolfssl_put.c.patch"
+        "/files/jobsscripts/tlspuffin/shell.nix",
+        "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
       ]
     }
   ]
@@ -52,14 +52,15 @@ Located at `html/board/jobs_config.json`, served as `GET /files/board/jobs_confi
 | `config` | URL path | Flow JSON file to submit (fetched from `/files/…`) |
 | `script` | URL path | Bash step script to submit (fetched from `/files/…`) |
 | `files` | array of URL paths | Additional files to attach (e.g. patches, Nix expressions) |
+| `composite` | array of `value` | If set, this job type launches each listed sub-job in parallel; `config`/`script` are unused |
 
-All URL paths are resolved by the browser relative to the board origin, so `/files/jobs_scripts/…` maps to `GET /files/jobs_scripts/…` on the scheduler.
+All URL paths are resolved by the browser relative to the board origin, so `/files/jobsscripts/…` maps to `GET /files/jobsscripts/…` on the scheduler.
 
 ### Adding a new job type
 
-1. Place the flow JSON and step script in `html/jobs_scripts/`.
-2. Add an entry to `jobs_config.json` with `"config"` and `"script"` pointing to their `/files/jobs_scripts/` paths.
-3. Reload the board — `jobs_config.json` is fetched fresh each time the dialog opens.
+1. Place the flow JSON and step script in `html/jobs_scripts/` (installed by the server).
+2. Add an entry to `jobsconfig.json` with `"config"` and `"script"` pointing to their `/files/jobsscripts/` paths.
+3. Reload the board — the configuration is embedded in the launcher JavaScript.
 
 ---
 
@@ -81,19 +82,52 @@ The fallback (when constructing `JobLauncher` without `commitsUrl`) is `./git.js
     { "id": "abc1234def...", "date": "2026-04-17", "comment": "fix: something", "branch": "main" },
     { "id": "789abcdef0...", "date": "2026-04-16", "comment": "feat: other",    "branch": "dev"  }
   ],
+  "branches": [
+    { "id": "a1b2c3d4e5...", "date": "2026-04-15", "comment": "feat: wip",      "branch": "my-branch" }
+  ],
   "PR": [
-    { "id": "a1b2c3d4e5...", "date": "2026-04-15", "comment": "pr: my feature", "branch": "pr/42" }
-  ]
+    { "id": "b2c3d4e5f6...", "date": "2026-04-14", "comment": "pr: my feature", "branch": "pr/42", "state": "open" }
+  ],
+  "PR_API_Infos": {
+    "apiRemaining": 58,
+    "apiResetTS": 1718000000
+  }
 }
 ```
 
-The UI splits commits into three tabs: **main/dev** (branch = `main` or `dev`), **PR heads**, and **All**.
+The UI splits commits into four tabs:
+
+| Tab | Key | Content |
+|-----|-----|---------|
+| **main/dev** | `dev` | `commits` entries with `branch = main` or `dev` |
+| **PR** | `pr_open` | `PR` entries filtered to `state = "open"` (GitHub API) |
+| **branches** | `pr` | All `branches` entries |
+| **All** | `all` | All of the above sorted by date |
+
+The **PR** tab refresh button calls `commitsUrl?refresh=all` (hits GitHub API); other tabs use `?refresh=local`. The button tooltip shows `PR_API_Infos.apiRemaining` credits and reset time when on the PR tab.
 
 ---
 
 ## Submission Flow
 
-When the user clicks **Launch Task**, `joblauncher.js`:
+When the user clicks **Launch Task**, `joblauncher.js` branches on whether the selected job type is composite.
+
+### Composite job types (`"composite": [...]`)
+
+The launcher resolves each `value` in `composite` to its job definition and calls `#launchSingleJob()` for each **in parallel** (`Promise.all`). The `config`, `script`, and `files` fields on the composite entry itself are unused — they are carried by each sub-job definition.
+
+Each sub-task is submitted with name `"<baseName> - <sub.label>"` (e.g. `"Evaluate PR abc12345 - Vuln group A"`).
+
+After all launches complete, a single toast summarises each sub-job result:
+
+```
+Vuln group A: OK (task_id: 42)
+Perf: FAILED - 500: internal error
+```
+
+The toast is `success` only if every sub-job returned HTTP 2xx.
+
+### Simple job types
 
 1. Fetches `config`, `script`, and each file in `files` in parallel (`Promise.all`).
 2. Assembles a `FormData` and POSTs it to `/api/task/new`.

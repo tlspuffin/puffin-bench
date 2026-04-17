@@ -75,14 +75,14 @@ public:
   uint64_t NbCores() const;
 
   std::vector<uint64_t> SelectMostIdleCores(uint64_t nb_cores, 
-      std::vector<bool> const* cores_included);
+      std::vector<bool> const* cores_included) const;
   void CoresValuesRatio(CoreStats& global, std::vector<CoreStats>& perCores);
 
   void Init();
   void Update();
 
 private:
-  std::mutex lock_;
+  mutable std::mutex lock_;
   CoresStats t0_;
   CoresStats t1_;
   std::vector<CoreStats> cores_ratio_infos_;

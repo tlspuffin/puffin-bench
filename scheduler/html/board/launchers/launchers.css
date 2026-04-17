@@ -1,0 +1,46 @@
+.new-task {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  z-index: 500;
+  transition: transform 0.2s ease;
+}
+.new-task:hover  { transform: scale(1.1); }
+.new-task:active { transform: scale(0.95); }
+
+.launcher-menu {
+  position: fixed;
+  z-index: 600;
+  background: #2d2d2d;
+  border: 1px solid #555;
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.launcher-menu-item {
+  background: none;
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.launcher-menu-item:hover { background: #667eea33; }

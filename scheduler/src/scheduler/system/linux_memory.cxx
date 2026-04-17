@@ -3,12 +3,12 @@
 #include <string>
 #include <stdexcept>
 
-ns_System::Memory::Memory() : total_(0) {
+ns_System::MemoryMonitor::MemoryMonitor() : total_(0) {
   Update();
   total_ = stats_.total_kb * 1000;
 }
 
-void ns_System::Memory::Update() {
+void ns_System::MemoryMonitor::Update() {
   std::ifstream ifs("/proc/meminfo");
   if (!ifs.is_open()) {
     throw std::runtime_error("MemoryMonitor::Update: failed to open /proc/meminfo");
@@ -32,7 +32,7 @@ void ns_System::Memory::Update() {
   stats_ = s;
 }
 
-ns_System::Memory::MemoryStats ns_System::Memory::Stats() {
+ns_System::MemoryMonitor::MemoryStats ns_System::MemoryMonitor::Stats() const {
   std::lock_guard<std::mutex> lock(lock_);
   return stats_;
 }

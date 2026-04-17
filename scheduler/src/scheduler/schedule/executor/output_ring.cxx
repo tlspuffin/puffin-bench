@@ -38,7 +38,7 @@ ns_Executor::FileRing::FileRing(FileRing&& other)
 
 ns_Executor::FileRing& ns_Executor::FileRing::operator=(FileRing&& other) {
   if (this != &other) {
-    this->~FileRing();
+    this->Close();
 
     file_ = std::move(other.file_);
     maxSize_ = other.maxSize_;
@@ -53,6 +53,30 @@ ns_Executor::FileRing& ns_Executor::FileRing::operator=(FileRing&& other) {
 }
 
 ns_Executor::FileRing::~FileRing() {
+  Close();
+}
+
+bool ns_Executor::FileRing::Write(uint8_t const* data, uint64_t size) {
+  uint64_t written = 0;
+  while (written < size) {
+    uint64_t spaceLeft = maxSize_ - fileSize_;
+    if (spaceLeft == 0) {
+      if (!RotateFile()) {
+        return false;
+      }
+      spaceLeft = maxSize_;
+    }
+    uint64_t toWrite = std::min(size - written, spaceLeft);
+    if (!WriteBytes(&data[written], toWrite)) {
+      return false;
+    }
+    written += toWrite;
+    fileSize_ += toWrite;
+  }
+  return true;
+}
+
+void ns_Executor::FileRing::Close() {
   if (fd_ == -1) {
     return;
   }
@@ -96,26 +120,6 @@ ns_Executor::FileRing::~FileRing() {
     }
   }
   CleanRotationFiles();
-}
-
-bool ns_Executor::FileRing::Write(uint8_t const* data, uint64_t size) {
-  uint64_t written = 0;
-  while (written < size) {
-    uint64_t spaceLeft = maxSize_ - fileSize_;
-    if (spaceLeft == 0) {
-      if (!RotateFile()) {
-        return false;
-      }
-      spaceLeft = maxSize_;
-    }
-    uint64_t toWrite = std::min(size - written, spaceLeft);
-    if (!WriteBytes(&data[written], toWrite)) {
-      return false;
-    }
-    written += toWrite;
-    fileSize_ += toWrite;
-  }
-  return true;
 }
 
 bool ns_Executor::FileRing::RotateFile() {
@@ -378,7 +382,6 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFD(int fd) {
   auto it = fds_.find(fd);
   if (it == fds_.end()) {
     LOGE << "Unable to remove no existing fd: " << fd << " errno: " << errno << Log::Flags::End;
-    close(fd);
     return false;
   }
   bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
@@ -488,7 +491,6 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFDNoLock(int fd) {
   auto it = fds_.find(fd);
   if (it == fds_.end()) {
     LOGE << "Unable to remove no existing fd: " << fd << " errno: " << errno << Log::Flags::End;
-    close(fd);
     return false;
   }
   bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;

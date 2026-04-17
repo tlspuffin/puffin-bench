@@ -130,10 +130,12 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
   }
 
   std::ostringstream cmd;
-  cmd << "tar -czf " << tmpArchivePath_;
+  //cmd << "tar -czf " << tmpArchivePath_;
   if (!job.baseDir_.empty()) {
-    cmd << " -C " << job.baseDir_;
+    //cmd << " -C " << job.baseDir_;
+    cmd << "cd " << job.baseDir_ << " ; ";
   }
+  cmd << "zip -r " << tmpArchivePath_;
   for (auto const& source : job.sources_) {
     if (job.baseDir_.empty()) {
       cmd << " " << source;
@@ -157,7 +159,7 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
   }
   int exitCode = pclose(pipe);
   if (WEXITSTATUS(exitCode) != 0) {
-    LOGW << "[Archiver] tar failed with code " << exitCode << " out:" << output << Log::Flags::End;
+    LOGW << "[Archiver] compression failed with code " << exitCode << " out:" << output << Log::Flags::End;
     return false;
   }
 

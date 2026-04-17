@@ -33,10 +33,12 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   uint64_t task_id = 0;
   {
     std::lock_guard<std::mutex> lock(lock_);
-    //task_id = ++next_task_id_;
     task_id = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (task_id < next_task_id_) {
+      task_id = next_task_id_;
+    }
+    next_task_id_ = task_id + 1;
   }
 
   std::filesystem::path inDataPath = config_.userPath_ / (std::to_string(task_id));
