@@ -1,6 +1,6 @@
 #### HELPER START ####
 
-declare -r SAVE_CORPUS 1
+declare -r SAVE_CORPUS=1
 
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
@@ -636,7 +636,9 @@ ForcedBuild() {
     nix-shell --run "./tools/mk_vendor make '${vendor}'"
   fi
 
-  nix-shell --run "cargo run --bin tlspuffin --release --features=${features} -j ${THEJOB_NB_CORES} -- help" || return 1
+  rm -rf ./experiments
+
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --frozen --bin tlspuffin --release --features=${features} -- help" || return 1
 
   rm -rf ./experiments
 }

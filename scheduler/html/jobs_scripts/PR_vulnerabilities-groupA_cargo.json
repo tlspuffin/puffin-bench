@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin5/PR/${COMMIT_ID}/VulnX/",
+    "storage_path": "tlspuffin/PR/${COMMIT_ID}/Vuln/",
     "goal": "Vuln PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
@@ -60,13 +60,13 @@
       {
         "step": "ForcedBuild",
         "configuration": {
-	  "nb_cores": 4
-	}
+          "nb_cores": 4
+        }
       },
       {
         "step": "ExperimentWithCargo",
         "configuration": {
-	  "nb_cores": 4,
+          "nb_cores": 4,
           "timeout": "190m"
         },
         "monitor": {
@@ -81,15 +81,6 @@
     ],
     {
       "step": "SummaryRun"
-    },
-    {
-      "step": "ManageResults",
-      "configuration": {
-        "args": {
-          "vulnerabilities": "BUF CDOS HEAP SDOS2 SKIP",
-          "script": "/local-unsafe/demengeo/XP/scripts/reports_generate"
-        }
-      }
     },
     {
       "step": "CleanAllRepo"

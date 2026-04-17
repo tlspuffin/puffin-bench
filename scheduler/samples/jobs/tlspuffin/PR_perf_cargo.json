@@ -1,33 +1,33 @@
 {
   "publish": {
     "server": "default",
-    "storage_path": "${PUBLISHER_STORAGE}/tlspuffin4/PR/${COMMIT_ID}/Perf/",
+    "storage_path": "tlspuffin/PR/${COMMIT_ID}/Perf/",
     "goal": "Perf PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
     "LibreSSL": {
       "args": {
         "experiment": "LibreSSL 333",
-        "features": "libressl"
+        "features": "introspection,libressl"
       }
     },
     "BoringSSL": {
       "args": {
         "experiment": "BoringSSL 202403",
-        "features": "asan,boringssl202403"
+        "features": "introspection,asan,boringssl202403"
       }
     },
     "OpenSSL": {
       "args": {
         "experiment": "OpenSSL",
-        "features": "asan,openssl111k",
+        "features": "introspection,asan,openssl111k",
         "vendor": "openssl:openssl340-asan"
       }
     },
     "WolfSSL": {
       "args": {
         "experiment": "WolfSSL",
-        "features": "asan,wolfssl540",
+        "features": "introspection,asan,wolfssl540",
         "vendor": "wolfssl:wolfssl580-asan"
       }
     }
@@ -41,7 +41,8 @@
       {
         "run": [ "LibreSSL", "BoringSSL", "OpenSSL", "WolfSSL" ],
         "configuration": {
-          "nb_retry": 5
+          "nb_retry": 5,
+          "nb_cores": 3
         }
       },
       {
@@ -50,8 +51,7 @@
       {
         "step": "ExperimentWithCargo",
         "configuration": {
-          "nb_cores": 3,
-          "timeout": "1h"
+          "timeout": "70m"
         },
         "monitor": {
           "entry_point": "MonitorExperiment",
