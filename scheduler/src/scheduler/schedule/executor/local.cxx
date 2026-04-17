@@ -815,18 +815,18 @@ void ns_Executor::Local::KillSession(pid_t sessionID,
     std::string const& label) {
 
   if (!cgroupPath.empty()) {
-    return KillCGroupSession(cgroupPath, step, label);
-  }
-
-  for(int sig: std::vector<int>{SIGTERM, SIGKILL}) {
-    if (kill(-sessionID, 0) != 0) {
-      break;
+    KillCGroupSession(cgroupPath, step, label);
+  } else {
+    for(int sig: std::vector<int>{SIGTERM, SIGKILL}) {
+      if (kill(-sessionID, 0) != 0) {
+        break;
+      }
+      kill(-sessionID, sig);
+      if (sig == SIGKILL) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::seconds(4));
     }
-    kill(-sessionID, sig);
-    if (sig == SIGKILL) {
-      break;
-    }
-    std::this_thread::sleep_for(std::chrono::seconds(4));
   }
   WaitSessionEnd(sessionID, step, label);
 }

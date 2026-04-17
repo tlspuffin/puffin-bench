@@ -12,14 +12,14 @@ Logs::Logs() : a_(std::cout, lockOut, ""), e_(std::shared_ptr<Log>(new Log())),
 void Logs::SetLevel(struct sLevel logsLevel) {
   if (logsLevel_.error != logsLevel.error) {
     if (logsLevel.error) {
-      e_ =  std::shared_ptr<Log>(new LogInstance(std::cerr, lockError, "[X]"));
+      e_ =  std::shared_ptr<Log>(new LogInstance(std::cerr, lockError, "[X] "));
     } else {
       e_ = std::shared_ptr<Log>(new Log());
     }
   }
   if (logsLevel_.warning != logsLevel.warning) {
     if (logsLevel.warning) {
-      w_ =  std::shared_ptr<Log>(new LogInstance(std::cerr, lockError, "/!\\"));
+      w_ =  std::shared_ptr<Log>(new LogInstance(std::cerr, lockError, "/!\\ "));
     } else {
       w_ = std::shared_ptr<Log>(new Log());
     }

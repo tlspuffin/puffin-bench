@@ -90,6 +90,16 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
   }
   node.AddMember("executors", executorsConfig, alloc);
 
+  rapidjson::Value publishersJSONConfig(rapidjson::kObjectType);
+  for(auto const&[publisherName, publisherConfig]: publishers_) {
+    rapidjson::Value publisherJSONConfig(rapidjson::kObjectType);
+    publisherJSONConfig.AddMember("uri", rapidjson::Value(publisherConfig.uri_.c_str(), alloc), alloc);
+    publisherJSONConfig.AddMember("storage", rapidjson::Value(publisherConfig.storage_.c_str(), alloc), alloc);
+    publisherJSONConfig.AddMember("check_server_certificat", publisherConfig.checkServerCertificat_, alloc);
+    publishersJSONConfig.AddMember(rapidjson::Value(publisherName.c_str(), alloc), publisherJSONConfig, alloc);
+  }
+  node.AddMember("publisher", publishersJSONConfig, alloc);
+
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 

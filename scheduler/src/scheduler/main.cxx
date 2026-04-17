@@ -6,37 +6,10 @@
 #include "config.hxx"
 #include "schedule/executor/config.hxx"
 
-#include <iostream>
-
-#define SEC_PATH "../security"
-#define USR_PATH "../users_data"
-#define SCRIPT_PATH "../scripts"
-#define RUN_PATH "../runs"
-#define EXPORT_PATH "../users_data"
-
 int main(int argc, char *argv[]) {
   logs.SetLevel({1, 1, 1, 1});
   LOGA << "Version: " << buildID << (buildGitDirty ? "-dev" : "") << Log::Flags::End;
   Config config;
-
-#if 0
-  config.server_.secure_ = false;
-  config.server_.key_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "site.key").string();
-  config.server_.cert_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "site.pem").string();
-  config.server_.CA_ = std::filesystem::weakly_canonical(std::filesystem::path(SEC_PATH) / "CA.pem").string();
-  config.server_.port_ = config.server_.secure_ ? 8443 : 8080;
-
-  ns_Executor::LocalConfig* localConfig = new struct ns_Executor::LocalConfig();
-  localConfig->maxCPU_ = 4;
-  localConfig->scriptPath_ = std::filesystem::canonical(std::filesystem::path(SCRIPT_PATH)).string();
-  localConfig->runPath_ = std::filesystem::canonical(std::filesystem::path(RUN_PATH)).string();
-  config.schedule_.executors_.insert(std::make_pair<>("local", localConfig));
-  config.schedule_.userPath_ = std::filesystem::canonical(std::filesystem::path(USR_PATH)).string();
-  config.schedule_.exportPath_ = std::filesystem::canonical(std::filesystem::path(EXPORT_PATH)).string();
-
-  config.cache_.storagePath_ = std::filesystem::canonical(std::filesystem::path(USR_PATH)).string();
-  config.cache_.mappingFile_ = std::filesystem::weakly_canonical(std::filesystem::path(USR_PATH) / "cache.json").string();
-#endif
 
   bool overrideLogsLevel = false;
   unsigned int userLogsLevel = 0;

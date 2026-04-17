@@ -115,13 +115,22 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
     std::error_code ec;
     std::filesystem::create_directories(archivePath.parent_path(), ec);
     if (ec) {
-      LOGW <<"[Archiver] Error creating directory: " << ec.message() << Log::Flags::End;
+      LOGE <<"[Archiver] Error creating directory: " << ec.message() << Log::Flags::End;
       return false;
     }
   }
 
+  std::string tmpArchivePath_ = job.archivePath_.string() + ".tmp";
+  std::error_code ec;
+  std::filesystem::remove(tmpArchivePath_, ec);
+  if (ec) {
+    LOGE <<"[Archiver] Error unable to delete " << tmpArchivePath_ << " : " << 
+        ec.message() << Log::Flags::End;
+    return false;
+  }
+
   std::ostringstream cmd;
-  cmd << "tar -czf " << job.archivePath_;
+  cmd << "tar -czf " << tmpArchivePath_;
   if (!job.baseDir_.empty()) {
     cmd << " -C " << job.baseDir_;
   }
@@ -147,16 +156,23 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
     output += buffer;
   }
   int exitCode = pclose(pipe);
-  if (exitCode != 0) {
+  if (WEXITSTATUS(exitCode) != 0) {
     LOGW << "[Archiver] tar failed with code " << exitCode << " out:" << output << Log::Flags::End;
     return false;
   }
 
-  if ((!std::filesystem::exists(job.archivePath_)) || 
-      (std::filesystem::file_size(job.archivePath_) == 0)) {
+  if ((!std::filesystem::exists(tmpArchivePath_)) || 
+      (std::filesystem::file_size(tmpArchivePath_) == 0)) {
     std::error_code ec;
-    std::filesystem::remove(job.archivePath_, ec);
-    LOGW << "[Archiver] Error: archive not created" << Log::Flags::End;
+    std::filesystem::remove(tmpArchivePath_, ec);
+    LOGE << "[Archiver] Error: archive not created" << Log::Flags::End;
+    return false;
+  }
+
+  std::filesystem::rename(tmpArchivePath_, job.archivePath_, ec);
+  if (ec) {
+    LOGE << "[Archiver] Error: unable to rename archive " << tmpArchivePath_ << " to " 
+        << job.archivePath_ <<  " : " << ec.message() << Log::Flags::End;
     return false;
   }
 

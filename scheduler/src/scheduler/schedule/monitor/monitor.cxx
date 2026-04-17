@@ -97,6 +97,7 @@ void ns_Monitor::Monitor::Main(int fd, int wd) {
       if (length == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
           cv_.wait_for(lock, std::chrono::seconds(1));
+          continue;
         } else if (errno == EINTR) {
           continue;
         } else {
@@ -105,20 +106,20 @@ void ns_Monitor::Monitor::Main(int fd, int wd) {
       }
     }
 
+    struct SPendingUpdate {
+      std::string filename;
+      std::string fullfilename;
+      std::string message;
+    };
+    std::vector<struct SPendingUpdate> pendingUpdates;
+
     ssize_t i = 0;
     while (i < length) {
       struct inotify_event *event = (struct inotify_event *) &buffer[i];
       if (event->len > 0) {
         if (event->mask & IN_MOVED_TO) {
-          std::unique_lock<std::mutex> lock(lock_);
-          //LOGI("Step monitor updated: " << event->name);
-          auto const& it = stepsList_.find(event->name);
-          if (it != stepsList_.end()) {
-            monitorsMessage_.insert(
-                std::make_pair<>(it->second, GetMessage(it->second->monitor_path_)));
-          }/* else {
-            LOGE("Ignoring modification on " << event->name);
-          }*/
+          pendingUpdates.push_back({event->name, "", ""});
+          //LOGI << "Step monitor updated: " << event->name << Log::Flags::End;
         }
       }
       i += sizeof(struct inotify_event) + event->len;
@@ -126,6 +127,39 @@ void ns_Monitor::Monitor::Main(int fd, int wd) {
         break;
       }
     }
+
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      for(auto& [filename, fullfilename, _]: pendingUpdates) {
+        auto const& it = stepsList_.find(filename);
+        if (it != stepsList_.end()) {
+          fullfilename = it->second->monitor_path_;
+        } /*else {
+          //LOGE << "Ignoring modification on " << modifiedFile << Log::Flags::End;
+        }*/
+      }
+    }
+
+    std::vector<std::string> activeMessages;
+    for(auto& [_, fullfilename, message]: pendingUpdates) {
+      if (!fullfilename.empty()) {
+        message = GetMessage(fullfilename);
+      }
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      for(auto const& [filename, fullfilename, message]: pendingUpdates) {
+        if (fullfilename.empty()) {
+          continue;
+        }
+        auto const& it = stepsList_.find(filename);
+        if (it != stepsList_.end()) {
+          monitorsMessage_[it->second] = message;
+        }
+      }
+    }
+
   }
 
   inotify_rm_watch(fd, wd);

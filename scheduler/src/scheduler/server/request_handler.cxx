@@ -103,16 +103,8 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       return;
     }
 
-    std::string user = "anonymous";
-    auto userIT = parts.find("user");
-    if (userIT != parts.end()) {
-      user = userIT->second.content[0];
-    }
-    std::string jobType = "unknown";
-    auto jobTypeIT = parts.find("job_type");
-    if (jobTypeIT != parts.end()) {
-      jobType = jobTypeIT->second.content[0];
-    }
+    std::string user = form.get("user", "anonymous");
+    std::string jobType = form.get("job_type", "unknown");
 
     std::unordered_map<std::string, std::vector<uint8_t>> files;
     auto range = parts.equal_range("files[]");

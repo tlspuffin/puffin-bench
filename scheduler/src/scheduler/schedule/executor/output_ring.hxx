@@ -1,4 +1,5 @@
 #pragma once
+#include "../../../utils/logs.hxx"
 #include "../../../utils/file.hxx"
 #include <cstdint>
 #include <thread>
@@ -120,7 +121,12 @@ inline bool FDCaptureThread::AddFD(int fd, OutputBuffer* outputBuffer) {
   std::shared_ptr<ns_Executor::OutputBuffer> outputBufferPtr(outputBuffer);
   {
     std::lock_guard lock((lockFDs_));
-    fds_.insert({fd, outputBufferPtr});
+    auto result = fds_.insert({fd, outputBufferPtr});
+    if (!result.second) {
+      LOGE << "Unable to store fd: " << fd << " errno: " << errno << Log::Flags::End;
+      return false;
+    }
+
   }
   return thread_->AddFD(fd, outputBufferPtr);
 }

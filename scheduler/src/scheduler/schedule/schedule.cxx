@@ -29,7 +29,7 @@
   std::stringstream oss;\
   oss << label << ": " << step->task_->id_ << " / " << step->ID()  << \
       " uuid: " << step->uuid_;\
-  LOGE << oss.str() << Log::Flags::End;\
+  LOGD << oss.str() << Log::Flags::End;\
 }
 
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
