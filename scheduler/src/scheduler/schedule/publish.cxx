@@ -13,7 +13,7 @@
 #include <Poco/Net/HTTPResponse.h>
 
 ns_Schedule::Publish::Publish() 
-    : server_(), storage_(), checkServerCertificat_(false) {
+    : server_(), rootStorage_(), storage_(), checkServerCertificat_(false) {
 }
 
 ns_Schedule::Publish::Publish(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
@@ -33,13 +33,16 @@ void ns_Schedule::Publish::ReadJSON(std::unordered_map<std::string, PublisherCon
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
   storage_  = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(config, "storage_path", ""));
+      GetOrDefault<std::string>(config, "storage", ""));
+  rootStorage_.clear();
 
   auto const& itConfig = publishersConfig.find(server_);
   if (itConfig != publishersConfig.end()) {
     server_ = itConfig->second.uri_;
     checkServerCertificat_ = itConfig->second.checkServerCertificat_;
-    storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
+    //storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
+    //storage_ = storage_;
+    rootStorage_ = itConfig->second.storage_;
   }
 }
 
@@ -47,7 +50,8 @@ void ns_Schedule::Publish::ToJSON(rapidjson::Value& node,
     rapidjson::Document::AllocatorType& alloc) const {
   node.AddMember("server", rapidjson::Value(server_.c_str(), alloc), alloc);
   node.AddMember("check_server_certificat", checkServerCertificat_, alloc);
-  node.AddMember("storage_path", rapidjson::Value(storage_.c_str(), alloc), alloc);
+  node.AddMember("root_storage", rapidjson::Value(rootStorage_.c_str(), alloc), alloc);
+  node.AddMember("storage", rapidjson::Value(storage_.c_str(), alloc), alloc);
   node.AddMember("goal", rapidjson::Value(goal_.c_str(), alloc), alloc);
 }
 
@@ -55,22 +59,34 @@ void ns_Schedule::Publish::PublishResults(
     std::unordered_map<std::string, std::string> const& taskVariables, 
     std::filesystem::path const& taskJSONfile,
     std::vector<std::filesystem::path> const& data) {
-  if (storage_.empty()) {
+  std::filesystem::path finalStoragePath = ResolveVariables(storage_, taskVariables);
+  if (finalStoragePath.empty()) {
+    LOGE << "Error: can not publish result, no storage provided" << Log::Flags::End;
+    return;
+  }
+  if (rootStorage_.empty() ? finalStoragePath.is_relative() : rootStorage_.is_relative()) {
+    LOGE << "Error: can not publish result, publish folder can not be computed from : " << 
+        rootStorage_ << " / " << finalStoragePath << Log::Flags::End;
     return;
   }
 
-  std::filesystem::path finalStoragePath = ResolveVariables(storage_, taskVariables);
-  /*if (!finalStoragePath.empty()) {
-    std::filesystem::create_directories(finalStoragePath);
-
-    std::filesystem::copy_options copyOptions = 
-        std::filesystem::copy_options::overwrite_existing |
-        std::filesystem::copy_options::recursive;
-    for(auto const& file: data) {
-      std::filesystem::copy(file, finalStoragePath, copyOptions);
+  if (!rootStorage_.empty()) {
+    finalStoragePath = rootStorage_ / finalStoragePath;
+  }
+  if (!finalStoragePath.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(finalStoragePath, ec);
+    if (ec) {
+      LOGE << "Error: can not publish result, publish folder creation failed : " << 
+          finalStoragePath << " : " << ec.message() << Log::Flags::End;
     }
-    std::filesystem::copy(taskJSONfile, finalStoragePath / taskJSONfile.filename(), copyOptions);
-  }*/
+    for(auto const& file: data) {
+      std::filesystem::path destinationFile = finalStoragePath / file.filename();
+      MoveFileAndCreateSymLink(file, destinationFile);
+    }
+    std::filesystem::path destinationFile = finalStoragePath / taskJSONfile.filename();
+    MoveFileAndCreateSymLink(taskJSONfile, destinationFile);
+  }
 
   if (server_.empty()) {
     return;
@@ -141,4 +157,87 @@ void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files
   } catch (const Poco::Exception& e) {
     throw std::runtime_error("HTTP[S] request failed: " + e.displayText());
   }
+}
+
+bool ns_Schedule::Publish::MoveFileAndCreateSymLink(std::string const& source, 
+    std::filesystem::path const& destination) {
+  if (!std::filesystem::is_regular_file(source)) {
+    return false;
+  }
+
+  if (access(destination.parent_path().string().c_str(), W_OK) != 0) {
+    LOGE << "Unable to copy, not have write right in folder " << 
+        destination.parent_path() << Log::Flags::End;
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::rename(source, destination, ec);
+  if (ec) {
+    ec.clear();
+
+    static std::filesystem::copy_options const copyOptions = 
+        std::filesystem::copy_options::overwrite_existing;
+    std::string destinationTmp = destination.string() + ".tmp";
+    std::filesystem::copy(source, destinationTmp, copyOptions, ec);
+    if (ec) {
+      LOGE << "Unable to copy " << source << " to " << destinationTmp << " :" << 
+          ec.message() << Log::Flags::End;
+      return false;
+    }
+    std::filesystem::rename(destinationTmp, destination, ec);
+    if (ec) {
+      LOGE << "Unable to rename " << destinationTmp << " to " << destination << 
+          ec.message() << Log::Flags::End;
+      std::filesystem::remove(destinationTmp, ec);
+      return false;
+    }
+    std::filesystem::remove(source, ec);
+    if (ec) {
+      LOGE << "Unable to delete " << source << " : " << ec.message() <<
+           Log::Flags::End;
+      return false;
+    }
+  }
+
+  std::filesystem::create_symlink(destination, source, ec);
+  if (ec) {
+    LOGE << "Unable to create a symlink " <<  source << " to " << destination << 
+        " : " << ec.message() << Log::Flags::End;
+    return false;
+  }
+
+  return true;
+}
+
+bool ns_Schedule::Publish::MoveDirectory(std::string const& source, std::string const& destination) {
+  if (!std::filesystem::is_directory(source)) {
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::rename(source, destination, ec);
+  if (!ec) {
+    return true;
+  }
+  ec.clear();
+
+  static std::filesystem::copy_options const copyOptions = 
+      std::filesystem::copy_options::overwrite_existing |
+      std::filesystem::copy_options::copy_symlinks |
+      std::filesystem::copy_options::recursive;
+  std::filesystem::copy(source, destination, copyOptions, ec);
+  if (ec) {
+    LOGE << "Unable to copy folder " << source << " to " << destination << " : " << 
+        ec.message() << Log::Flags::End;
+    return false;
+  }
+  std::filesystem::remove_all(source, ec);
+  if (ec) {
+    LOGE << "Unable to delete folder " << source << " : " << ec.message() << 
+        Log::Flags::End;
+    return false;
+  }
+
+  return true;
 }

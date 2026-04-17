@@ -22,6 +22,7 @@ public:
       std::vector<std::filesystem::path> const& data);
 
   std::string server_;
+  std::filesystem::path rootStorage_;
   std::filesystem::path storage_;
   bool checkServerCertificat_;
   std::string goal_;
@@ -29,6 +30,10 @@ public:
 private:
   void PublishToServer(std::vector<std::string> const& files, 
     std::string const& archivePath);
+
+  bool MoveFileAndCreateSymLink(std::string const& source, 
+      std::filesystem::path const& destination);
+  bool MoveDirectory(std::string const& source, std::string const& destination);
 };
 
 };
