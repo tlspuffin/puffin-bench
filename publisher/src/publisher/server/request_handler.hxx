@@ -38,8 +38,10 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
 }
 
 REQUESTHANDLER(Error);
+REQUESTHANDLER(CORSOptions);
 REQUESTHANDLER(Notify);
+REQUESTHANDLER(ProjectListData, std::string const);
+REQUESTHANDLER(ProjectListCampaigns, std::string const);
 REQUESTHANDLER(Files, std::string const, std::string const);
-REQUESTHANDLER(Download);
 
 };

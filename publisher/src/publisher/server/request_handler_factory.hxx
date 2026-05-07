@@ -3,6 +3,7 @@
 #include "config.hxx"
 #include "request_handler.hxx"
 #include "../../utils/logs.hxx"
+#include <regex>
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
 #include <Poco/Net/HTTPServerRequest.h>
 
@@ -28,21 +29,36 @@ RequestHandlerFactory::RequestHandlerFactory(ns_Server::Config const& config,
 Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest& request) {
 
+  static std::regex reProjectListData(R"(/api/project/([a-zA-Z0-9_-]+)/data$)");
+  static std::regex reProjectListCampaigns(R"(/api/project/([a-zA-Z0-9_-]+)/campaigns$)");
+
   RequestHandler* requestHandler = nullptr;
   std::string uri = request.getURI();
   std::string method = request.getMethod();
-  LOGI("Got request " << method << " " << uri);
-  if (method == Poco::Net::HTTPRequest::HTTP_POST) {
+  LOGI << "Got request " << method << " " << uri << Log::Flags::End;
+  std::smatch matches;
+  if (method == Poco::Net::HTTPRequest::HTTP_OPTIONS) {
+    requestHandler = new RequestHandlerCORSOptions();
+  } else if (method == Poco::Net::HTTPRequest::HTTP_POST) {
     if (uri == "/api/notify") {
       requestHandler = new RequestHandlerNotify;
     }
    } else if (method == Poco::Net::HTTPRequest::HTTP_GET) {
-    if (uri.find("/api/download?") == 0 || (uri == "/api/download")) {
-      requestHandler = new RequestHandlerDownload();
+    if (std::regex_match(uri, matches, reProjectListData)) {
+      requestHandler = new RequestHandlerProjectListData(matches[1].str());
+    } else if (std::regex_match(uri, matches, reProjectListCampaigns)) {
+      requestHandler = new RequestHandlerProjectListCampaigns(matches[1].str());
     } else if (uri.find("/files/") == 0) {
-      requestHandler = new RequestHandlerFiles("/files", apis_.publishAPI_.Storage());
+      uri = uri.substr(7);
+      std::string uriRulesIndex = apis_.publishAPI_.RulesIndex(uri);
+      if (uri == uriRulesIndex) {
+        requestHandler = new RequestHandlerFiles(apis_.publishAPI_.Storage(), uri);
+      } else {
+        requestHandler = new RequestHandlerFiles(apis_.publishAPI_.HTMLStorage(), uriRulesIndex);
+      }
     } else if (uri.find("/html/") == 0) {
-      requestHandler = new RequestHandlerFiles("/html", apis_.publishAPI_.HTMLStorage());
+      uri = uri.substr(6);
+      requestHandler = new RequestHandlerFiles(apis_.publishAPI_.HTMLStorage(), uri);
     }
   }
   if (requestHandler != nullptr) {

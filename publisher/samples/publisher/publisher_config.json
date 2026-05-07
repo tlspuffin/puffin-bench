@@ -1,0 +1,15 @@
+{
+  "logs_level": 15,
+  "server": {
+    "secure": false,
+    "key": "security/site.key",
+    "cert": "security/site.pem",
+    "CA": "security/CA.pem",
+    "port": 10083
+  },
+  "publisher": {
+    "storagePath": "data",
+    "htmlPath": "html",
+    "orphanScanInterval": 3600
+  }
+}

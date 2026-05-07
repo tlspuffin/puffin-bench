@@ -63,9 +63,9 @@ template<typename T> inline T Get(rapidjson::Value const& obj,
     } else if constexpr (std::is_same_v<T, std::string>) {
       if (value.IsString()) return std::string(value.GetString());
     } else if constexpr (std::is_same_v<T, rapidjson::Value::Object>) {
-      if (value.IsObject()) return value.GetObj();
+      if (value.IsObject()) return value.GetObject();
     } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstObject>) {
-      if (value.IsObject()) return value.GetObj();
+      if (value.IsObject()) return value.GetObject();
     } else if constexpr (std::is_same_v<T, rapidjson::Value::Array>) {
       if (value.IsArray()) return value.GetArray();
     } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstArray>) {

@@ -1,17 +1,14 @@
 #include "rapidjson.hxx"
-#include "logs.hxx"
 #include <fstream>
 #include <rapidjson/istreamwrapper.h>
 
 void ReadJSONFile(std::string const& file, rapidjson::Document& doc) {
   std::ifstream ifs(file);
   if (!ifs.is_open()) {
-    LOGE("Unable to open " << file);
     throw std::runtime_error("Unable to open JSON file: " + file);
   }
   rapidjson::IStreamWrapper isw(ifs);
   if (doc.ParseStream(isw).HasParseError()) {
-    LOGE("Error JSON file corrupted " << file);
     throw std::runtime_error("Error JSON file corrupted: " + file);
   }
 }

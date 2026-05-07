@@ -13,9 +13,13 @@ public:
 
   bool NotifyFiles(std::vector<std::filesystem::path>& srcPath, 
       std::filesystem::path& dstPath, std::string& error);
-  std::string GetFilePath(std::string const& project, std::string const& file);
+  bool ProjectListData(std::string const& projectName, std::vector<std::string>& list);  
   std::filesystem::path Storage() const;
   std::filesystem::path HTMLStorage() const;
+  std::string RulesIndex(std::filesystem::path path);
+
+  std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
+      ProjectListCampaigns(std::string const& projectName);
 
 private:
   ns_Publish::Config const& config_;
@@ -28,11 +32,12 @@ inline PublishAPI::PublishAPI(ns_Publish::Config const& config)
 
 inline bool PublishAPI::NotifyFiles(std::vector<std::filesystem::path>& srcPath, 
     std::filesystem::path& dstPath, std::string& error) {
-  return publish_.NotifyFiles(std::move(srcPath), dstPath, error);
+  return publish_.NotifyFiles(srcPath, dstPath, error);
 }
 
-inline std::string PublishAPI::GetFilePath(std::string const& project, std::string const& file) {
-  return publish_.GetFilePath(project, file);
+inline bool PublishAPI::ProjectListData(std::string const& projectName, 
+    std::vector<std::string>& list) {
+  return publish_.ProjectListData(projectName, list);
 }
 
 inline std::filesystem::path PublishAPI::Storage() const {
@@ -40,7 +45,16 @@ inline std::filesystem::path PublishAPI::Storage() const {
 }
 
 inline std::filesystem::path PublishAPI::HTMLStorage() const {
-  return config_.weboutput_;
+  return config_.html_;
+}
+
+inline std::string PublishAPI::RulesIndex(std::filesystem::path path) {
+  return publish_.RulesIndex(path);
+}
+
+inline std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
+    PublishAPI::ProjectListCampaigns(std::string const& projectName) {
+  return publish_.ProjectListCampaigns(projectName);
 }
 
 };

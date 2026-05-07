@@ -4,7 +4,7 @@
 static ns_Server::Config defaultConfig;
 
 ns_Server::Config::Config()
-    : port_(8081), secure_(false), key_("security/site.key"), 
+    : port_(10083), secure_(false), key_("security/site.key"), 
     cert_("security/site.pem"), CA_("security/CA.pem")
 {}
 

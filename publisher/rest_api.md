@@ -1,6 +1,8 @@
 curl -X POST http://localhost:8080/api/task/new -F "name=myrun" -F "config=@./samples/test_monitor.json" -F "script=@./samples/test_monitor.sh" -F "files[]=@./samples/shell.nix" -F "args[COMMIT_ID]=3f648f016c84884d6470fc906735bb8c5da7891b"
 curl -X GET http://localhost:8080/api/tasks/running
 
+curl -X POST http://localhost:8081/api/notify -F "src=/path/to/file1.json" -F "src=/path/to/file2.json" -F "dst=/path/to/destination"
+
 git log --graph --oneline --first-parent 3bc37034a9a9decd0a069aa810929c0e518056c9^..HEAD
 git log --reverse --oneline --first-parent 3bc37034a9a9decd0a069aa810929c0e518056c9^..HEAD | awk 'NR%3==1'
 

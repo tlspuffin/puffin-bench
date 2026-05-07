@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <archive.h>
 #include <archive_entry.h>
-#include "../utils/logs.hxx"
+
 
 #define CHUNK (1 << 16) // 64 KiB buffer libarchive
 
@@ -88,7 +88,6 @@ void CompressTARZSTD(std::string const& srcDir, std::string const& outFile, bool
 
     if (relativePath) {
       std::string finalPath = std::filesystem::relative(path, srcDir);
-      //LOGI(path << " = " << finalPath);
       if (finalPath == ".") {
         continue;
       }
