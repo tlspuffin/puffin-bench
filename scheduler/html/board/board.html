@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Experiment Manager</title>
+  <link rel="stylesheet" href="board.css">
+  <link rel="stylesheet" href="taskcard.css">
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <h1 id="header-title"></h1>
+      <div id="executors-stats" class="executors-stats"></div>
+      <div class="header-actions">
+        <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
+        <div id="custom_header"></div>
+      </div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-label">Done</span>
+        <span class="stat-value done" id="done-count">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Running</span>
+        <span class="stat-value running" id="running-count">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Queued</span>
+        <span class="stat-value queued" id="queued-count">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Last update</span>
+        <span class="stat-value lastupdate" id="last-update">N/A</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="container-running-steps" class="container-running-steps"></div>
+
+  <div id="exec-tooltip" class="exec-tooltip"></div>
+
+  <script type="module" src="board.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+[Unit]
+Description=Scheduler XP
+After=network-online.target
+
+[Service]
+Slice=-.slice
+User=<user>
+WorkingDirectory=<working_dir>
+ExecStart=<srv_path>
+Restart=always
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target

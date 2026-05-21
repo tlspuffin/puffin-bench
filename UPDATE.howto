@@ -1,0 +1,17 @@
+# to merge without history; require temporay commit to be chained
+git merge --squash scheduler --allow-unrelated-histories
+git commit -m "tmp: scheduler"
+git merge --squash publisher --allow-unrelated-histories
+git commit -m "tmp: publisher"
+git merge --squash git_restapi --allow-unrelated-histories
+git commit -m "tmp: git_restapi"
+# keep file but remove temporary commit
+git reset --soft HEAD~3
+
+# to retrieve commit ID
+git rev-parse scheduler
+git rev-parse publisher
+git rev-parse git_restapi
+
+# all merge in 1 commit
+git commit

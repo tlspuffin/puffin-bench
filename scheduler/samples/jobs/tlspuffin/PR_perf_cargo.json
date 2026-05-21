@@ -1,0 +1,78 @@
+{
+  "publish": {
+    "server": "default",
+    "storage": "tlspuffin/PR/${COMMIT_ID}/Perf/",
+    "goal": "Perf PR/Commit ${COMMIT_ID}"
+  },
+  "configurations": {
+    "LibreSSL": {
+      "args": {
+        "experiment": "LibreSSL 333",
+        "required_features": "introspection",
+        "features": "asan,libressl"
+      }
+    },
+    "BoringSSL": {
+      "args": {
+        "experiment": "BoringSSL 202403",
+        "required_features": "introspection",
+        "features": "asan,boringssl202403"
+      }
+    },
+    "OpenSSL": {
+      "args": {
+        "experiment": "OpenSSL",
+        "required_features": "introspection",
+        "features": "asan,openssl111k",
+        "vendor": "openssl:openssl340-asan"
+      }
+    },
+    "WolfSSL": {
+      "args": {
+        "experiment": "WolfSSL",
+        "required_features": "introspection",
+        "features": "asan,wolfssl540",
+        "vendor": "wolfssl:wolfssl580-asan"
+      }
+    }
+  },
+  "name" : "Performance - ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init"
+    }, 
+    [
+      {
+        "run": [ "LibreSSL", "BoringSSL", "OpenSSL", "WolfSSL" ],
+        "configuration": {
+          "nb_retry": 5,
+          "nb_cores": 3
+        }
+      },
+      {
+        "step": "ForcedBuild"
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "timeout": "70m"
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
+      },
+      {
+        "step": "ExperimentEndCommon"
+      }
+    ],
+    {
+      "step": "SummaryRun"
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}
+

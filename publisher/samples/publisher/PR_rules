@@ -1,0 +1,15 @@
+{
+  "index": "summary_PR.html",
+  "Vuln": {
+    "onFiles": "PR/[0-9a-fA-F]+/Vuln/[0-9]+\\.zip",
+    "action": "GenerateReportVuln3"
+  },
+  "Perf": {
+    "onFiles": "PR/[0-9a-fA-F]+/Perf/[0-9]+\\.zip",
+    "action": "GenerateReportPerfFromSummary"
+  },
+   "Campaign": {
+    "onFiles": "Campaign/[^/]+/[^/]+/[0-9]+\\.zip",
+    "action": "GenerateReportCampaignFromSummary"
+  }
+}

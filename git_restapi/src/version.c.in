@@ -1,0 +1,10 @@
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+char const * const buildID = "@BUILD_DATE@ @BUILD_TIME@ @GIT_COMMIT@";
+int buildGitDirty = @GIT_DIRTY@;
+
+#ifdef __cplusplus
+}
+#endif

@@ -1,0 +1,49 @@
+{
+  "publish": {
+    "server": "default",
+    "storage": "tlspuffin/Campaign/${TASK_USER}/${CAMPAIGN_ID}/",
+    "goal": "Campaign"
+  },
+  "configurations": ${RUNTIME_RUN_CONFIG},
+  "name" : "Campaign - Commit ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init"
+    },
+    [
+      {
+        "run": [],
+        "configuration": {
+          "nb_cores": ${RUNTIME_NB_CORES},
+          "nb_retry": ${RUNTIME_NB_RUN}
+        }
+      },
+      {
+        "step": "ForcedBuild"
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "timeout": "${RUNTIME_TIMEOUT}",
+          "memory_core": ${RUNTIME_MEMORY_CORE},
+          "memory_consumption": ${RUNTIME_MEMORY_CONSUMPTION}
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
+      },
+      {
+        "step": "ExperimentEndCommon"
+      }
+    ],
+    {
+      "step": "SummaryRun"
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}
+

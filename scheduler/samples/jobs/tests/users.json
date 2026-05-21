@@ -1,0 +1,54 @@
+{
+    "alice": {
+        "perf": {
+            "1712000000000": {
+                "name": "PR_perf_full",
+                "running": false,
+                "cancelled": false
+            },
+            "1712100000000": {
+                "name": "PR_perf_full",
+                "running": false,
+                "cancelled": false
+            },
+            "1712200000000": {
+                "name": "PR_perf_full",
+                "running": true,
+                "cancelled": false
+            }
+        },
+        "vulnerabilities": {
+            "1712050000000": {
+                "name": "PR_vulnerabilities_full",
+                "running": false,
+                "cancelled": false
+            },
+            "1712150000000": {
+                "name": "PR_vulnerabilities_full",
+                "running": false,
+                "cancelled": true
+            }
+        }
+    },
+    "bob": {
+        "perf": {
+            "1712010000000": {
+                "name": "PR_perf_full",
+                "running": false,
+                "cancelled": false
+            }
+        },
+        "debug": {
+            "1712020000000": {
+                "name": "PR_debug_run",
+                "running": false,
+                "cancelled": false
+            },
+            "1712120000000": {
+                "name": "PR_debug_run",
+                "running": false,
+                "cancelled": true
+            }
+        }
+    }
+}

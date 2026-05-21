@@ -1,0 +1,37 @@
+{
+  "server": {
+    "secure": false,
+    "key": "security/site.key",
+    "cert": "security/site.pem",
+    "CA": "security/CA.pem",
+    "port": 10082, 
+    "html": "html"
+  },
+  "schedule": {
+    "executors": {
+      "local": {
+        "name": "local",
+        "type": 1,
+        "nbCores": 1,
+        "excludeCores": [
+          0
+        ],
+        "scriptPath": "../scripts"
+      }
+    },
+    "publisher": {
+      "default": {
+        "uri": "http://127.0.0.1:10083/api/notify",
+        "storage": "/home/olivier/Desktop/Archives"
+      }
+    },
+    "runPath": "runs",
+    "userPath": "users_data",
+    "exportPath": "exports",
+    "toolsPath": "tools"
+  },
+  "cache": {
+    "storagePath": "cache",
+    "mappingFile": "cache.json"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "publish": {
+    "server": "default",
+    "storage": "Y/Tests/${COMMIT_ID}/",
+    "goal": "Mesurer PR/Commit ${COMMIT_ID}"
+  },
+  "name" : "Test Monitor",
+  "flow" : [
+    {
+      "step": "Step1",
+      "run": [
+        {"Conf_A": {}},
+        {"Conf_B": {}}
+      ],
+      "configuration": {
+        "nb_retry": 2
+      }
+    },
+    { "step": "Step2" },
+    {
+      "step": "Step3",
+      "configuration": {
+        "timeout": "15s",
+        "args": {
+          "features": "'wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173'"
+        }
+      },
+      "monitor": {
+        "entry_point": "MonitorStep3",
+        "delay_start": "1s",
+        "interval": "5s",
+        "timeout": "10s"
+      }
+    }
+  ]
+}

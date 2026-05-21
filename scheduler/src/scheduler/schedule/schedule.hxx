@@ -1,0 +1,89 @@
+#pragma once
+
+#include "config.hxx"
+#include "step.hxx"
+#include "tasksmanager.hxx"
+#include "archiver.hxx"
+#include "executor/executors_provider.hxx"
+#include "executor/executor.hxx"
+#include "monitor/monitor.hxx"
+#include "../api/users_api.hxx"
+#include "../system/linux.hxx"
+#include "../../utils/file.hxx"
+#include <vector>
+#include <list>
+#include <string>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <rapidjson/document.h>
+
+namespace ns_Schedule {
+
+class Schedule : public ns_Executor::ExecutorsProvider {
+public:
+  Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
+      ns_System::Linux& os, uint16_t cachePort);
+  ~Schedule();
+  std::string TaskManagerStateFile() const;
+  uint64_t AddTask(std::string const& name, std::string const& tasksListPattern, 
+      std::string const& functions, 
+      std::unordered_map<std::string, std::vector<uint8_t>>& files,
+      std::unordered_map<std::string, std::string>& args,
+      std::unordered_map<std::string, std::string>& runtimeConfig, 
+      std::string const& user, std::string const& jobType);
+  bool CancelStep(uint64_t taskID, uint64_t stepUUID);
+  bool CancelTask(uint64_t taskID, std::string const& source);
+
+  ns_Executor::Executor* GetExecutor(std::string const& name) const;
+  void GetOutput(
+      std::string const& type, std::string const& taskID,
+      uint64_t stepUUID, std::string const& stepID, 
+      struct FileExtractedText& data);
+  bool GetTaskFinalData(std::string const& task_id, 
+    std::string& fileStateJSON, std::string& fileArtefacts) const;
+
+private:
+  void ScheduleLoop();
+  std::list<ns_Schedule::Step*> SearchTasksToRun();
+  bool ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& delayedSteps, 
+      std::ofstream& stepsDoneFile);
+  void ManageEndOfStep(ns_Schedule::Step* step, std::ofstream& stepsDoneFile);
+  void ExportRunningSteps(
+      std::string const& filename, std::list<ns_Schedule::Step*> const& steps) const;
+  void SaveStatus(bool exportRunningSteps);
+  static void AppendStepToFinishLog(std::ofstream& log, ns_Schedule::Step const& step);
+  bool LimitRessourcesUsages();
+
+  ns_Schedule::Config const& config_;
+  std::filesystem::path exportPath_;
+
+  ns_Schedule::TasksManager tasksManager_;
+
+  std::mutex lockThread_;
+  std::thread thread_;
+  bool threadRunning_;
+  std::list<ns_Schedule::Step*> steps_;
+  std::list<ns_Schedule::Step*> stepsRunning_;
+  std::list<ns_Schedule::Step*> stepsDone_;
+  std::string defaultExecutor_;
+  std::unordered_map<std::string, ns_Executor::Executor*> executors_;
+
+  ns_Monitor::Monitor monitor_;
+
+  Archiver archiver_;
+
+  ns_System::Linux& os_;
+
+  ns_API::UsersAPI& users_;
+
+  static bool shutdownTasksAtExit__;
+  static void HandlerUSR1(int sig);
+  static int InstallSigUSRHandler();
+};
+
+inline std::string Schedule::TaskManagerStateFile() const {
+  return config_.exportPath_ / "tasksmanager.json";
+}
+
+};

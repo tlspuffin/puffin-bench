@@ -1,0 +1,30 @@
+{
+  "name": "Test Heavy Stdout Output",
+  "configurations": {
+    "SmallLines": {"args": {"nb_lines": "100000", "line_size": "80"}},
+    "LargeLines": {"args": {"nb_lines": "10000", "line_size": "1024"}},
+    "ExtraLargeLines": {"args": {"nb_lines": "0", "line_size": "1024"}},
+    "MixedOutput": {"args": {"nb_lines": "50000", "line_size": "256", "with_stderr": "true"}}
+  },
+  "flow": [
+    {
+      "step": "Init"
+    },
+    {
+      "step": "HeavyOutput",
+      "run": [ "SmallLines", "LargeLines", "ExtraLargeLines", "MixedOutput" ],
+      "configuration": {
+        "nb_retry": 1
+      },
+      "monitor": {
+        "entry_point": "MonitorHeavyOutput",
+        "delay_start": "2s",
+        "interval": "5s",
+        "timeout": "10s"
+      }
+    },
+    {
+      "step": "Summary"
+    }
+  ]
+}

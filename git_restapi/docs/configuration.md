@@ -1,0 +1,162 @@
+# git_restapi — Configuration Reference
+
+## Config File
+
+Default filename: `git_restapi-config.json` (overridable via the first positional command-line argument).
+
+If the file does not exist at startup, a default configuration is written to disk and the process exits. Inspect and edit the file, then restart.
+
+A runtime snapshot of the fully-resolved configuration (with all defaults filled in and paths canonicalized) is saved as `<configfile>.run` on each startup. This file is useful for diagnostics.
+
+## Command-Line Arguments
+
+| Argument | Description |
+|---|---|
+| `<config-file>` | Path to the JSON config file. Default: `git_restapi-config.json`. |
+| `--install` | Force-reinstall the embedded `tlspuffin_history.sh` script, then continue normal startup. |
+| `--logslevel <N>` | Override the log level bitmask at runtime (see `logs_level` below). |
+
+## Top-Level Keys
+
+```json
+{
+  "logs_level": 15,
+  "server": { ... },
+  "git": { ... }
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `logs_level` | uint | `15` | Bitmask: `1`=error, `2`=warn, `4`=info, `8`=debug. `15` enables all levels. |
+
+---
+
+## `server` Section
+
+```json
+"server": {
+  "secure": false,
+  "port": 8080,
+  "key":  "security/site.key",
+  "cert": "security/site.pem",
+  "CA":   "security/CA.pem",
+  "html": "html"
+}
+```
+
+| Key | Type | Default (plain) | Default (TLS) | Description |
+|---|---|---|---|---|
+| `secure` | bool | `false` | — | Enable TLS. When `true`, `key`, `cert`, and `CA` are required. |
+| `port` | uint16 | `8080` | `8443` | TCP port to listen on. |
+| `key` | path | `security/site.key` | same | Path to the server private key (PEM). Required when `secure: true`. |
+| `cert` | path | `security/site.pem` | same | Path to the server certificate (PEM). Required when `secure: true`. |
+| `CA` | path | `security/CA.pem` | same | Path to the CA bundle (PEM). Required when `secure: true`. |
+| `html` | path | `html` | same | Path to the HTML root directory (served as static files). |
+
+All paths are resolved with `std::filesystem::canonical()` at startup. Missing paths when `secure: true` cause startup to fail.
+
+TLS uses `VERIFY_NONE` (client certificate verification is disabled).
+
+---
+
+## `git` Section
+
+```json
+"git": {
+  "storage": "/tmp/git_restapi-<pid>",
+  "scripts": "/tmp/git_restapi-<pid>",
+  "repositories": {
+    "myrepo": {
+      "url": "https://github.com/org/repo.git"
+    }
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `storage` | path | process temp dir | Directory where repositories are cloned. Each repository gets a `<name>/repo` subdirectory. |
+| `scripts` | path | process temp dir | Directory where embedded scripts are installed. |
+| `repositories` | object | `{}` | Map of repository name → object with `url` and optional fields. |
+
+### Repository Entry
+
+```json
+"<repo-name>": {
+  "url":    "<git-remote-url>",
+  "url_pr": "<github-api-pulls-url>"
+}
+```
+
+| Key | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | Yes | Any URL accepted by `git clone`. Supports HTTPS and SSH remotes. |
+| `url_pr` | string | No | HTTPS URL of the GitHub REST API pull-requests endpoint (e.g. `https://api.github.com/repos/org/repo/pulls`). When present, the `/api/git/history/:repo` response includes a `PR` field with open pull requests fetched from this endpoint, and a `PR_API_Infos` field with rate-limit metadata. Results are cached in `<storage>/<name>/pr_cache.json`. |
+
+The repository name (`<repo-name>`) must match `[0-9a-zA-Z-_.]+`. It becomes the `:repo` path segment in API endpoints.
+
+### Repository Initialization
+
+At startup, for each configured repository, the server runs:
+
+```
+git -C <storage>/<name>/repo fetch --all
+```
+
+If that fails (e.g., first run — the directory does not exist yet), it falls back to:
+
+```
+git clone --filter=blob:none <url> <storage>/<name>/repo
+```
+
+`--filter=blob:none` performs a blobless clone: commit and tree objects are fetched immediately, but file contents are fetched lazily. This speeds up the initial clone for large repositories. If any repository fails to initialize, the server aborts startup.
+
+### Script Installation
+
+At startup, `ns_GIT::Config::Validate()` checks whether `tlspuffin_history.sh` exists in `scriptsPath_`. If it is missing or `--install` was passed, the script is extracted from the compiled-in binary blob and written to disk with permissions `rwxr-x---`.
+
+---
+
+## Example: Minimal Configuration
+
+```json
+{
+  "logs_level": 7,
+  "server": {
+    "port": 8080
+  },
+  "git": {
+    "storage": "/var/lib/git_restapi",
+    "repositories": {
+      "tlspuffin": {
+        "url":    "https://github.com/tlspuffin/tlspuffin.git",
+        "url_pr": "https://api.github.com/repos/tlspuffin/tlspuffin/pulls"
+      }
+    }
+  }
+}
+```
+
+## Example: TLS Configuration
+
+```json
+{
+  "logs_level": 7,
+  "server": {
+    "secure": true,
+    "port": 8443,
+    "key":  "/etc/ssl/private/server.key",
+    "cert": "/etc/ssl/certs/server.pem",
+    "CA":   "/etc/ssl/certs/ca-bundle.pem"
+  },
+  "git": {
+    "storage": "/var/lib/git_restapi",
+    "repositories": {
+      "myrepo": {
+        "url": "git@github.com:org/repo.git"
+      }
+    }
+  }
+}
+```

@@ -1,0 +1,40 @@
+{
+  "name": "Test Group Steps",
+  "flow": [
+    {
+      "step": "Init",
+      "configuration": {
+        "nb_retry": 1
+      }
+    },
+    [
+      {
+        "run": ["Conf_A", "Conf_B", "Conf_C"],
+        "configuration": {
+          "nb_retry": 2,
+          "custom": {
+            "Conf_A": { "nb_retry": 3 }
+          }
+        }
+      },
+      {
+        "step": "Build"
+      },
+      {
+        "step": "Test",
+        "configuration": {
+          "timeout": "2m"
+        }
+      },
+      {
+        "step": "Verify"
+      }
+    ],
+    {
+      "step": "Summary",
+      "configuration": {
+        "nb_retry": 1
+      }
+    }
+  ]
+}

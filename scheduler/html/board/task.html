@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task View</title>
+  <link rel="stylesheet" href="board.css">
+  <link rel="stylesheet" href="taskcard.css">
+  <link rel="stylesheet" href="task.css">
+</head>
+<body>
+  <div class="header" id="header">
+    <div class="stats-bar">
+      <div class="stat" id="error-stat" style="display:none">
+        <span class="stat-value" style="color:#f44336" id="error-message"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="container-running-steps" class="container-running-steps"></div>
+
+  <div id="exec-tooltip" class="exec-tooltip"></div>
+
+  <script type="module" src="task.js"></script>
+</body>
+</html>
