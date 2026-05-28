@@ -3,7 +3,7 @@
  * No DOM, no network, no side effects — only data and pure transformations.
  */
 
-import { TASK_TYPES } from './constants.js';
+import { TASK_TYPES, DEFAULT_LEGEND_FORMAT } from './constants.js';
 
 // ============================================================
 // MODAL CANCEL MANAGEMENT
@@ -34,10 +34,7 @@ export const state = {
     subtasks: new Map(),  // name → { value: { tasktype, subtask } | null, alias: string | null }
     metrics:  new Map(),  // name → metricPath | null
   },
-  legendFormat: {
-    experiment: null,  // template string | null  (e.g. "${COMMIT_ALIAS} − ${SUBTASK_ALIAS}")
-    metric:     null,  // template string | null  (e.g. "${METRIC:uppercase}")
-  },
+  legendFormat: { ...DEFAULT_LEGEND_FORMAT },
   commitRegistry: new Map(),
   metricLegend:   new Map(),  // metricPath → { displayName: string|null, dash: string|null }
 };
@@ -117,7 +114,7 @@ export function migrateStateIfNeeded(loadedState) {
 
   // ── Ensure legendFormat exists ────────────────────────────────────────────
   if (!loadedState.legendFormat) {
-    loadedState.legendFormat = { experiment: null, metric: null };
+    loadedState.legendFormat = { ...DEFAULT_LEGEND_FORMAT };
   }
 
   return loadedState;

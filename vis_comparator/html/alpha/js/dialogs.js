@@ -423,16 +423,20 @@ export async function AddGraphique(prefill = null, editId = null) {
   modalpage.innerHTML = '';
 
   const container = document.createElement('div');
+  container.className = 'modal-dialog-scrollable';
   _ui.Reset();
+
+  const modalBody = document.createElement('div');
+  modalBody.className = 'modal-body';
 
   // ── Section 1: Experiments ──────────────────────────────────────
   if (editId !== null) {
-    container.appendChild(_ui.CreateTitle('Edit graph', 'h3', null));
+    modalBody.appendChild(_ui.CreateTitle('Edit graph', 'h3', null));
   }
-  container.appendChild(_ui.CreateTitle('1. Experiments', 'h3', null));
+  modalBody.appendChild(_ui.CreateTitle('1. Experiments', 'h3', null));
   const experimentList = document.createElement('div');
   experimentList.className = 'experiment-list';
-  container.appendChild(experimentList);
+  modalBody.appendChild(experimentList);
   ctx.experimentList = experimentList;
 
   const addBtn = document.createElement('button');
@@ -444,10 +448,10 @@ export async function AddGraphique(prefill = null, editId = null) {
     renderExperiments();
     onExperimentChange();
   };
-  container.appendChild(addBtn);
+  modalBody.appendChild(addBtn);
 
   // ── Section 2: Metrics ─────────────────────────────────────────
-  container.appendChild(_ui.CreateTitle('2. Metrics', 'h3', null));
+  modalBody.appendChild(_ui.CreateTitle('2. Metrics', 'h3', null));
 
   const modeRow = document.createElement('div');
   modeRow.className = 'metrics-mode-row';
@@ -481,17 +485,17 @@ export async function AddGraphique(prefill = null, editId = null) {
     btnAnd.classList.remove('active');
     btnOr.classList.add('active');
   }
-  container.appendChild(modeRow);
+  modalBody.appendChild(modeRow);
 
   const metricsWrapper = document.createElement('div');
-  container.appendChild(metricsWrapper);
+  modalBody.appendChild(metricsWrapper);
   ctx.metricsWrapper = metricsWrapper;
 
   // ── Section 3: Time range ──────────────────────────────────────
-  container.appendChild(_ui.CreateTitle('3. Time range (μs)', 'h3', null));
+  modalBody.appendChild(_ui.CreateTitle('3. Time range (μs)', 'h3', null));
   ctx.timeID = _ui.ID();
   const time = _ui.CreateTimeSelection(0, 0, 0, null);
-  container.appendChild(time);
+  modalBody.appendChild(time);
 
   if (prefill) {
     const s = time.querySelector('#time_start_' + ctx.timeID);
@@ -594,6 +598,7 @@ export async function AddGraphique(prefill = null, editId = null) {
       }
     }
   });
+  container.appendChild(modalBody);
   container.appendChild(actions);
   modalpage.appendChild(container);
 

@@ -34,3 +34,9 @@ export const COMMIT_PALETTE = Object.freeze(['#1f77b4', '#ff7f0e', '#2ca02c', '#
 
 /** Deterministic branch color palette for commit picker branch badges. */
 export const BRANCH_PR_PALETTE = Object.freeze(['#7b5ea7', '#9b5de5', '#6a4c93', '#5e548e', '#7678ed', '#8338ec', '#c77dff']);
+
+/** Default legend format templates applied when no explicit override is set. */
+export const DEFAULT_LEGEND_FORMAT = Object.freeze({
+  experiment: '${COMMIT_ALIAS} − ${SUBTASK_ALIAS}',
+  metric:     '${METRIC}',
+});

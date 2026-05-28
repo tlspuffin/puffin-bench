@@ -192,8 +192,8 @@ class UI {
           const toggle = document.createElement('span');
           toggle.id = 'toggle_' + currentPath;
           toggle.className = 'metrics-toggle';
-          toggle.innerText = ICONS.FOLDER_SHUT;
-          toggle.dataset.open = 'false';
+          toggle.innerText = ICONS.FOLDER_OPEN;
+          toggle.dataset.open = 'true';
           separator.appendChild(toggle);
 
           const label = document.createElement('span');
@@ -217,9 +217,6 @@ class UI {
         }
         const label = document.createElement('label');
         label.className = 'checkbox-label';
-        // Unchecked metrics start hidden (folder is closed by default).
-        // They become visible when the folder is opened, or when the metric is selected.
-        label.style.display = 'none';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'metric-checkbox';

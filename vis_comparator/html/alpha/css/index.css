@@ -1672,6 +1672,40 @@ input:disabled {
 }
 
 /* =================================================================
+   Scrollable modal layout (dialog with sticky OK/Cancel footer)
+   ================================================================= */
+
+/* Override the generic .modalpage > div scroll to use flex column */
+.modalpage > .modal-dialog-scrollable {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+/* Scrollable content area — fills the available height */
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Sticky footer: always visible at the bottom */
+.modal-dialog-scrollable .modal-actions {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border);
+  padding-top: 14px;
+  padding-bottom: 20px;
+  margin-top: 0;
+  background: white;
+}
+
+.modal-dialog-scrollable .modal-button-ok,
+.modal-dialog-scrollable .modal-button-cancel {
+  margin-top: 0;
+}
+
+/* =================================================================
    Metrics AND/OR toggle row
    ================================================================= */
 

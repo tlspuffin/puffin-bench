@@ -4,7 +4,7 @@ import { ErrorManager } from "./error.js";
 import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
-import { TASK_TYPES, ICONS } from './constants.js';
+import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
 import { state, globalDynamicSubtasks, getModalCancelFn, clearModalCancel, dedupSubtasks, migrateStateIfNeeded, resolveExperimentSlot } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, OpenInfoModal } from './dialogs.js';
@@ -155,7 +155,7 @@ async function ResetState(state, newState, templateName = null) {
   state.variables      = migrated?.variables      ?? {
     commits: new Map(), subtasks: new Map(), metrics: new Map(),
   };
-  state.legendFormat   = migrated?.legendFormat   ?? { experiment: null, metric: null };
+  state.legendFormat   = migrated?.legendFormat   ?? { ...DEFAULT_LEGEND_FORMAT };
   state.commitRegistry = migrated?.commitRegistry ?? new Map();
   state.metricLegend   = migrated?.metricLegend   ?? new Map();
 

@@ -48,7 +48,10 @@ void ns_Server::Config::Save(std::string const& name, rapidjson::Value& doc,
 
 void ns_Server::Config::Validate() const {
   auto discard = std::filesystem::canonical(html_);
-  discard = std::filesystem::canonical(userdata_);
+  std::error_code ec;
+  std::filesystem::create_directories(userdata_, ec);
+  if (ec)
+    throw std::runtime_error("Unable to create userdata directory \"" + userdata_.string() + "\": " + ec.message());
   if(secure_) {
     discard = std::filesystem::canonical(key_);
     discard = std::filesystem::canonical(cert_);
