@@ -339,6 +339,28 @@ body {
   font-family: inherit;
 }
 
+/* Compact override — commit picker and simple dropdown inside sidebar variable cards */
+.sidebar-variable-card .commit-picker-trigger {
+  font-size: 0.78rem;
+  font-family: monospace;
+  border-radius: 4px;
+  padding: 3px 8px;
+  height: auto;
+  min-height: unset;
+  margin-bottom: 5px;
+}
+.sidebar-variable-card .commit-picker-trigger::after {
+  font-size: 0.85rem;
+}
+.sidebar-variable-card .simple-dropdown-option {
+  font-size: 0.78rem;
+  padding: 5px 12px;
+}
+.sidebar-variable-card .commit-picker-row-simple {
+  font-size: 0.78rem;
+  padding: 5px 12px;
+}
+
 /* Alias row inside variable cards */
 .sidebar-alias-row {
   display: flex;
@@ -911,9 +933,20 @@ select:focus {
   font-family: 'Courier New', monospace;
   cursor: pointer;
   user-select: none;
-  min-height: 28px;
+  height: 30px;
   box-sizing: border-box;
 }
+
+.commit-picker-trigger::after {
+  content: '▾';
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 1rem;
+  color: var(--color-text-muted, #888);
+  pointer-events: none;
+  font-family: inherit;
+}
+
 .commit-picker-trigger:hover {
   border-color: var(--color-primary, #667eea);
 }
@@ -941,6 +974,38 @@ select:focus {
 }
 .commit-picker-panel.hidden { display: none; }
 
+/* ── Simple dropdown (generic custom select) ──────────────────── */
+.simple-dropdown {
+  width: 100%;
+}
+
+.simple-dropdown-panel {
+  position: fixed;
+  z-index: 1200;
+  background: var(--color-bg, #fff);
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  overflow-y: auto;
+  max-height: 240px;
+  min-width: 160px;
+}
+.simple-dropdown-panel.hidden { display: none; }
+
+.simple-dropdown-option {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--color-text, #333);
+}
+.simple-dropdown-option:hover { background: var(--color-bg-subtle, #efefef); }
+.simple-dropdown-option.is-selected { background: rgba(102,126,234,0.08); color: var(--color-primary, #667eea); font-weight: 600; }
+.simple-dropdown-option.is-disabled {
+  color: var(--color-text-muted, #888);
+  cursor: default;
+  pointer-events: none;
+}
+
 .commit-picker-search {
   display: block;
   width: 100%;
@@ -963,27 +1028,29 @@ select:focus {
 /* ── Rows ─── */
 .commit-picker-row {
   display: grid;
-  grid-template-columns: 9rem 6.5rem 1fr;
+  grid-template-columns: 10rem 6.5rem 1fr;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
   cursor: pointer;
-  min-height: 44px;
 }
 .commit-picker-row:hover { background: var(--color-bg-subtle, #efefef); }
 .commit-picker-row.selected { background: rgba(102,126,234,0.08); }
+.commit-picker-row.selected .commit-hash-label  { color: rgba(102,126,234,0.55); }
+.commit-picker-row.selected .commit-picker-date { color: rgba(102,126,234,0.55); }
+.commit-picker-row.selected .commit-picker-comment { color: var(--color-primary, #667eea); }
 
 .commit-picker-row-simple {
   display: block;
-  padding: 6px 10px;
+  padding: 6px 12px;
   min-height: unset;
   font-size: 0.85rem;
-  color: var(--color-text-muted, #888);
-  font-style: italic;
+  color: var(--color-text, #333);
   cursor: pointer;
 }
+.commit-picker-row-simple.empty { color: var(--color-text-muted, #888); font-style: italic; }
 .commit-picker-row-simple:hover { background: var(--color-bg-subtle, #efefef); }
-.commit-picker-row-simple.selected { background: rgba(102,126,234,0.08); color: var(--color-text, #333); font-style: normal; }
+.commit-picker-row-simple.selected { background: rgba(102,126,234,0.08); color: var(--color-primary, #667eea); }
 
 .commit-picker-sep {
   height: 1px;
@@ -993,8 +1060,9 @@ select:focus {
 
 .commit-picker-row-left {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -1008,7 +1076,7 @@ select:focus {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 8.5rem;
+  max-width: 5.5rem;
 }
 
 .commit-hash-label {
@@ -1253,6 +1321,73 @@ button:disabled {
 .info-modal-body li {
   margin-bottom: 6px;
   color: #555;
+}
+
+.help-section {
+  margin-bottom: 24px;
+}
+
+.help-section h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 8px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+
+.help-table th {
+  text-align: left;
+  font-weight: 700;
+  padding: 4px 8px;
+  background: #f4f5f7;
+  border: 1px solid #e0e0e0;
+  color: #444;
+}
+
+.help-table td {
+  padding: 4px 8px;
+  border: 1px solid #e0e0e0;
+  vertical-align: top;
+  color: #555;
+}
+
+.help-table td:first-child {
+  white-space: nowrap;
+  font-weight: 500;
+  color: #333;
+}
+
+.help-code {
+  background: #f4f5f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #333;
+  overflow-x: auto;
+  margin: 6px 0 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.info-modal-body kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid #bbb;
+  background: #f4f5f7;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #333;
 }
 
 /* =================================================================
@@ -1584,7 +1719,7 @@ input:disabled {
 
 .experiment-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 6px;
   flex-wrap: wrap;
   padding: 8px;
@@ -1593,11 +1728,31 @@ input:disabled {
   background: #fafafa;
 }
 
-.experiment-row select {
-  margin-bottom: 0;
+.slot-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   flex: 1;
   min-width: 100px;
-  padding: 8px 10px;
+}
+
+.slot-field-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.experiment-row select {
+  margin-bottom: 0;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  height: 30px;
 }
 
 .experiment-row-add-btn {
@@ -1635,6 +1790,7 @@ input:disabled {
   margin: 0;
   flex-shrink: 0;
   line-height: 1.4;
+  align-self: center;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 
@@ -1649,6 +1805,7 @@ input:disabled {
   font-size: 0.9rem;
   flex-shrink: 0;
   cursor: default;
+  align-self: flex-end;
 }
 
 .experiment-var-toggle {

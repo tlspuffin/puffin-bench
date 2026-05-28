@@ -75,6 +75,146 @@ class UI {
   }
 
   /**
+   * Creates a custom single-select dropdown whose trigger reuses .commit-picker-trigger,
+   * making it visually identical to the commit picker.
+   *
+   * The returned element exposes:
+   *   .value          — get/set the selected option value
+   *   'change' event  — dispatched on every user selection
+   *
+   * @param {Array<{value:string, text?:string, selected?:boolean, disabled?:boolean}>} configOptions
+   * @param {object} _domOptions - reserved, unused (kept for API symmetry with CreateSelect)
+   * @returns {HTMLDivElement}
+   */
+  CreateSimpleDropdown(configOptions, _domOptions) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'simple-dropdown';
+
+    let _value = null;
+
+    // ── Trigger (reuses commit-picker-trigger for free visual identity) ──
+    const trigger = document.createElement('div');
+    trigger.className = 'commit-picker-trigger';
+    trigger.tabIndex = 0;
+    const label = document.createElement('span');
+    label.className = 'simple-dropdown-label';
+    trigger.appendChild(label);
+    wrapper.appendChild(trigger);
+
+    // ── Panel ────────────────────────────────────────────────────────────
+    const panel = document.createElement('div');
+    panel.className = 'simple-dropdown-panel hidden';
+    wrapper.appendChild(panel);
+
+    function updateLabel() {
+      if (!_value) {
+        label.textContent = '(—)';
+        trigger.classList.add('empty');
+        return;
+      }
+      const match = Array.from(panel.querySelectorAll('.simple-dropdown-option'))
+        .find(r => r.dataset.value === _value && !r.classList.contains('is-disabled'));
+      if (match) {
+        label.textContent = match.textContent;
+        trigger.classList.remove('empty');
+      } else {
+        label.textContent = '(—)';
+        trigger.classList.add('empty');
+        _value = null;
+      }
+    }
+
+    function buildPanel(opts) {
+      panel.replaceChildren();
+      for (const opt of opts) {
+        const row = document.createElement('div');
+        row.className = 'simple-dropdown-option'
+          + (opt.disabled ? ' is-disabled' : '')
+          + (opt.value === _value ? ' is-selected' : '');
+        row.dataset.value = opt.value;
+        row.textContent = opt.text ?? opt.value;
+        if (!opt.disabled) row.addEventListener('click', () => selectValue(opt.value));
+        panel.appendChild(row);
+      }
+    }
+
+    function openPanel() {
+      const rect = trigger.getBoundingClientRect();
+      const w = Math.max(rect.width, 160);
+      let left = rect.left;
+      if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+      panel.style.top   = (rect.bottom + 2) + 'px';
+      panel.style.left  = left + 'px';
+      panel.style.width = w + 'px';
+      panel.classList.remove('hidden');
+    }
+
+    function closePanel() { panel.classList.add('hidden'); }
+
+    function selectValue(val) {
+      _value = val;
+      panel.querySelectorAll('.simple-dropdown-option')
+        .forEach(r => r.classList.toggle('is-selected', r.dataset.value === val));
+      updateLabel();
+      closePanel();
+      wrapper.dispatchEvent(new Event('change'));
+    }
+
+    trigger.addEventListener('click', () =>
+      panel.classList.contains('hidden') ? openPanel() : closePanel()
+    );
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closePanel();
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); }
+    });
+
+    const outsideHandler = (e) => {
+      if (!document.contains(wrapper)) { document.removeEventListener('click', outsideHandler, true); return; }
+      if (!wrapper.contains(e.target)) closePanel();
+    };
+    document.addEventListener('click', outsideHandler, true);
+
+    Object.defineProperty(wrapper, 'value', {
+      get: () => _value,
+      set: (v) => {
+        _value = v;
+        panel.querySelectorAll('.simple-dropdown-option')
+          .forEach(r => r.classList.toggle('is-selected', r.dataset.value === v));
+        updateLabel();
+      },
+    });
+
+    // Exposed for UpdateSimpleDropdown — rebuilds options, preserving current value if still valid.
+    wrapper._rebuildOptions = function(opts) {
+      const stillValid = _value !== null && opts.some(o => o.value === _value && !(o.disabled ?? false));
+      if (!stillValid) {
+        const sel = opts.find(o => o.selected);
+        _value = sel ? sel.value : null;
+      }
+      buildPanel(opts);
+      updateLabel();
+    };
+
+    // Initial population
+    const initial = configOptions.find(o => o.selected);
+    _value = initial ? initial.value : null;
+    buildPanel(configOptions);
+    updateLabel();
+
+    return wrapper;
+  }
+
+  /**
+   * Replaces the options in an existing simple dropdown (from CreateSimpleDropdown).
+   * Preserves the current selected value if it still appears in the new options.
+   * @param {HTMLDivElement} element
+   * @param {Array<{value:string, text?:string, selected?:boolean, disabled?:boolean}>} configOptions
+   */
+  UpdateSimpleDropdown(element, configOptions) {
+    if (typeof element._rebuildOptions === 'function') element._rebuildOptions(configOptions);
+  }
+
+  /**
    * Creates a row of action buttons (OK, and optionally Cancel).
    * @param {boolean} cancelSupport - If true, adds a Cancel button
    * @param {object}  options       - { ok: {text, callback, className}, cancel: {callback} }
@@ -528,9 +668,11 @@ class UI {
       if (_value.startsWith('_var_')) {
         const name = _value.slice(5);
         const entry = options?.variables?.get(name);
-        trigger.textContent = entry?.value
-          ? `${name} = ${CommitHelp.ShortHash(entry.value)}`
-          : `${name} (undefined)`;
+        if (entry?.value) {
+          trigger.textContent = `${name} = ${CommitHelp.ShortHash(entry.value)}${entry.alias ? ` (${entry.alias})` : ''}`;
+        } else {
+          trigger.textContent = `${name} (undefined)`;
+        }
       } else {
         trigger.textContent = CommitHelp.ShortHash(_value);
       }
@@ -586,7 +728,7 @@ class UI {
 
     function buildSimpleRow(val, label) {
       const row = document.createElement('div');
-      row.className = 'commit-picker-row commit-picker-row-simple' + (val === _value ? ' selected' : '');
+      row.className = 'commit-picker-row commit-picker-row-simple' + (!val ? ' empty' : '') + (val === _value ? ' selected' : '');
       row.textContent = label;
       row.onclick = () => selectValue(val);
       return row;

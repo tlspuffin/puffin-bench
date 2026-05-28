@@ -5,6 +5,7 @@
  */
 
 import { ICONS, TASK_TYPES, COMMIT_PALETTE } from './constants.js';
+import { HELP_HTML } from './help.js';
 import { resolveExperimentSlot, migrateStateIfNeeded, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
@@ -183,7 +184,7 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
   if (!resolvedCommit) {
     const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, []);
     const current = subtaskSel.value;
-    _ui.UpdateSelect(subtaskSel, options);
+    _ui.UpdateSimpleDropdown(subtaskSel, options);
     subtaskSel.value = current;
     return;
   }
@@ -197,7 +198,7 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
   dedupSubtasks(globalDynamicSubtasks, dynamicKnown);
   const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, dynamicKnown);
   const current = subtaskSel.value;
-  _ui.UpdateSelect(subtaskSel, options);
+  _ui.UpdateSimpleDropdown(subtaskSel, options);
   subtaskSel.value = current;
 }
 
@@ -660,14 +661,14 @@ export async function AddGraphique(prefill = null, editId = null) {
     });
 
     // Subtask selector
-    const subtaskSel = _ui.CreateSelect(
+    const subtaskSel = _ui.CreateSimpleDropdown(
       buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar), null
     );
     subtaskSel.title = 'Subtask';
 
     loadDynamicSubtasks(slot, subtaskSel);
 
-    subtaskSel.onchange = function() {
+    subtaskSel.addEventListener('change', function() {
       const val = subtaskSel.value;
       if (!val || val === '__sep__' || val === '__hint__') {
         slot.subtaskVar = null; slot.tasktype = null; slot.subtask = null;
@@ -680,10 +681,25 @@ export async function AddGraphique(prefill = null, editId = null) {
         slot.subtask  = val.slice(fc + 1);
       }
       onExperimentChange();
-    };
+    });
 
-    row.appendChild(commitSel);
-    row.appendChild(subtaskSel);
+    const commitField = document.createElement('div');
+    commitField.className = 'slot-field';
+    const commitLabel = document.createElement('span');
+    commitLabel.className = 'slot-field-label';
+    commitLabel.textContent = 'Commit';
+    commitField.appendChild(commitLabel);
+    commitField.appendChild(commitSel);
+    row.appendChild(commitField);
+
+    const subtaskField = document.createElement('div');
+    subtaskField.className = 'slot-field';
+    const subtaskLabel = document.createElement('span');
+    subtaskLabel.className = 'slot-field-label';
+    subtaskLabel.textContent = 'Subtask';
+    subtaskField.appendChild(subtaskLabel);
+    subtaskField.appendChild(subtaskSel);
+    row.appendChild(subtaskField);
 
     // ⚠ badge: resolved combination has no data from the server
     if (ctx.invalidSlotIndices.has(slotIdx)) {
@@ -1111,9 +1127,7 @@ export function OpenInfoModal() {
 
   const body = document.createElement('div');
   body.className = 'info-modal-body';
-  body.innerHTML = `
-    <p>Help content to be written later.</p>
-  `;
+  body.innerHTML = HELP_HTML;
   container.appendChild(body);
 
   const closeFn = function() {

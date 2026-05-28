@@ -386,23 +386,15 @@ function buildSubtaskVariableSection(state) {
     const knownSubtasks = getKnownSubtasks(state);
     const currentToken  = entry?.value ? `${entry.value.tasktype}:${entry.value.subtask}` : null;
 
-    const select = document.createElement('select');
-    select.className = `sidebar-pill-select${!entry?.value ? ' undefined-value' : ''}`;
-
-    const none = document.createElement('option');
-    none.value = '';
-    none.textContent = knownSubtasks.length === 0 ? '(no subtasks loaded yet)' : '(undefined)';
-    none.selected = !entry?.value;
-    select.appendChild(none);
-
-    for (const { tasktype, subtask } of knownSubtasks) {
-      const token = `${tasktype}:${subtask}`;
-      const opt   = document.createElement('option');
-      opt.value       = token;
-      opt.textContent = `${tasktype}/${subtask}`;
-      opt.selected    = token === currentToken;
-      select.appendChild(opt);
-    }
+    const subtaskOpts = [
+      { value: '', text: knownSubtasks.length === 0 ? '(no subtasks loaded yet)' : '(undefined)', selected: !currentToken },
+      ...knownSubtasks.map(({ tasktype, subtask }) => ({
+        value: `${tasktype}:${subtask}`,
+        text:  `${tasktype}/${subtask}`,
+        selected: `${tasktype}:${subtask}` === currentToken,
+      })),
+    ];
+    const select = _ui.CreateSimpleDropdown(subtaskOpts, null);
 
     select.addEventListener('change', () => {
       const token = select.value;
@@ -786,9 +778,13 @@ async function openMetricVarModal(name, currentVal, state) {
   const modalpage = document.getElementById('modalpage');
   modalpage.innerHTML = '';
   const container = document.createElement('div');
+  container.className = 'modal-dialog-scrollable';
   _ui.Reset();
 
-  container.appendChild(_ui.CreateTitle(`Metric Variable: ${name}`, 'h3', null));
+  const modalBody = document.createElement('div');
+  modalBody.className = 'modal-body';
+
+  modalBody.appendChild(_ui.CreateTitle(`Metric Variable: ${name}`, 'h3', null));
 
   let selectedMetric = currentVal;
   let btOk = null;
@@ -803,14 +799,14 @@ async function openMetricVarModal(name, currentVal, state) {
     const msg = document.createElement('p');
     msg.style.cssText = 'color:#aaa;font-style:italic;font-size:0.9rem;margin:8px 0;';
     msg.textContent = 'No metrics available. First add graphs with resolved experiments.';
-    container.appendChild(msg);
+    modalBody.appendChild(msg);
   } else {
     const syntheticMetrics = buildSyntheticMetrics(union);
     const metricsTree = _ui.CreateMetrics(syntheticMetrics, {
       callback: function(event) {
         if (event.target.checked) {
           // Single selection: uncheck all others
-          container.querySelectorAll('.metric-checkbox').forEach(cb => {
+          modalBody.querySelectorAll('.metric-checkbox').forEach(cb => {
             if (cb !== event.target) cb.checked = false;
           });
           selectedMetric = event.target.value;
@@ -820,11 +816,11 @@ async function openMetricVarModal(name, currentVal, state) {
         updateOk();
       }
     });
-    container.appendChild(metricsTree);
+    modalBody.appendChild(metricsTree);
 
     // Pre-select currentVal if set
     if (currentVal) {
-      container.querySelectorAll('.metric-checkbox').forEach(cb => {
+      modalBody.querySelectorAll('.metric-checkbox').forEach(cb => {
         if (cb.value === currentVal) {
           cb.checked = true;
           const label = cb.closest('.checkbox-label');
@@ -861,6 +857,7 @@ async function openMetricVarModal(name, currentVal, state) {
       }
     }
   });
+  container.appendChild(modalBody);
   container.appendChild(actions);
 
   modalpage.appendChild(container);
