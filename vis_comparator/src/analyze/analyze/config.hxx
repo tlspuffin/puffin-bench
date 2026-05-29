@@ -8,7 +8,6 @@ namespace ns_Analyze {
 class Config {
 public:
   std::filesystem::path dataPath_;
-  std::filesystem::path analyzeTools_;
 
   Config();
   void Load(std::string const& name, rapidjson::Value& doc);

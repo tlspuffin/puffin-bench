@@ -1,4 +1,4 @@
-import './plotly-3.3.0.min.js'
+import '../../third-party/plotly/plotly-3.3.0.min.js'
 const Plotly = window.Plotly;
 import { ErrorManager } from "./error.js";
 import { ApiREST } from "./apirest.js";

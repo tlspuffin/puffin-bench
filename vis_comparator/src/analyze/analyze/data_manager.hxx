@@ -62,9 +62,6 @@ private:
   std::unordered_map<std::string, 
       std::unordered_map<std::string, std::filesystem::path>> runsResults_;
 
-  void SummaryRunPerf(std::filesystem::path const& taskPath);
-  void SummaryRunVuln(std::filesystem::path const& taskPath);
-
   std::vector<struct SInterpolations> ExtractDataTS(FileTARZST& archive, 
       std::filesystem::path const& prefixPath, 
       struct SMetricInfos const& metricInfos, uint64_t min, uint64_t max, 

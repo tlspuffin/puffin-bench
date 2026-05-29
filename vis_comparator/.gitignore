@@ -1,4 +1,4 @@
-CMakeLists.conf
-.vscode/
-build/
-**/embeded/
+/.vscode/
+/build/
+/embeded/
+/third-party/

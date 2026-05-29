@@ -13,14 +13,18 @@ ns_Server::MyServerApp::MyServerApp(ns_Server::Config const& config,
 int ns_Server::MyServerApp::main(const std::vector<std::string>& args) {
   Poco::Net::ServerSocket* serverSocket = nullptr;
   if (!config_.secure_) {
-    serverSocket = new Poco::Net::ServerSocket(config_.port_);
+    serverSocket = new Poco::Net::ServerSocket();
   } else {
     Poco::Net::Context::Ptr context = new Poco::Net::Context(
         Poco::Net::Context::SERVER_USE,
         config_.key_, config_.cert_, config_.CA_, 
         Poco::Net::Context::VERIFY_NONE);
-    serverSocket = new Poco::Net::SecureServerSocket(config_.port_, 64, context);
+    serverSocket = new Poco::Net::SecureServerSocket(context);
   }
+
+  Poco::Net::SocketAddress address(config_.port_);
+  serverSocket->bind(address, true, false);
+  serverSocket->listen(64);
 
   Poco::Net::HTTPServer server(new RequestHandlerFactory(config_, apis_), 
       *serverSocket, new Poco::Net::HTTPServerParams);
