@@ -46,12 +46,9 @@ public:
         continue;
       }
       bool acrossRun = metric.find("global.") == 0;
-      if (acrossRun && (runs.size() < 2)) {
-        continue;
-      } else {
+      if (!acrossRun) {
         acrossRun = it->second.size() == runs.size();
       }
-
       data.merge(ns_Analyze::Statistics::ComputeStats(metric, it->second, acrossRun ? nullptr : &runs));
     }
     return data;
