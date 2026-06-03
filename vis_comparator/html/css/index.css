@@ -1300,6 +1300,65 @@ button:disabled {
 }
 
 /* =================================================================
+   Status Bar (global loading indicator)
+   ================================================================= */
+
+.status-bar {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(48px);
+  background: rgba(44, 62, 80, 0.92);
+  color: #fff;
+  padding: 5px 14px 5px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+}
+
+.status-bar.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.status-bar-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Local loading states */
+
+select.select-loading {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.metrics-loading {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.metrics-loading .spinner {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+  margin: 0;
+}
+
+/* =================================================================
    Info Modal Body
    ================================================================= */
 

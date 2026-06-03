@@ -251,7 +251,17 @@ async function restoreGraphs(savedSettings) {
 // ============================================================
 
 const errorManager = new ErrorManager();
-const apirest = new ApiREST(config.apiBase, errorManager);
+
+const statusBarEl = document.getElementById('status-bar');
+const statusBarText = statusBarEl.querySelector('.status-bar-text');
+let _loadingCount = 0;
+function onLoading(delta, label) {
+  _loadingCount = Math.max(0, _loadingCount + delta);
+  if (label && delta > 0) statusBarText.textContent = label;
+  statusBarEl.classList.toggle('visible', _loadingCount > 0);
+}
+
+const apirest = new ApiREST(config.apiBase, errorManager, onLoading);
 // Loaded once at startup; reused as a resolved Promise by all dropdowns.
 const gitHistoryPromise = apirest.LoadGitHistory();
 // Pre-fetch all available commits once for use in sidebar pill-selectors.

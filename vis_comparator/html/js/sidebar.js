@@ -768,6 +768,17 @@ async function openMetricVarModal(name, currentVal, state) {
   }
 
   const experiments = Array.from(uniqueExps.values());
+
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+  if (experiments.length > 0) {
+    const loadingContainer = document.createElement('div');
+    loadingContainer.className = 'modal-dialog-scrollable';
+    loadingContainer.innerHTML = '<div class="modal-body metrics-loading"><div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0"></div></div>';
+    modalpage.appendChild(loadingContainer);
+    modalpage.classList.add('modalpage-visible');
+  }
+
   const metricsResults = experiments.length > 0
     ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask)))
     : [];
@@ -775,7 +786,6 @@ async function openMetricVarModal(name, currentVal, state) {
   const union = new Set();
   for (const mr of metricsResults) flattenMetricPaths(mr).forEach(p => union.add(p));
 
-  const modalpage = document.getElementById('modalpage');
   modalpage.innerHTML = '';
   const container = document.createElement('div');
   container.className = 'modal-dialog-scrollable';

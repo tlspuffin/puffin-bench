@@ -189,12 +189,19 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
     return;
   }
   const dynamicKnown = [];
-  const [perfSubjs, vulnSubjs] = await Promise.all([
-    _apirest.LoadCommitSubjects(TASK_TYPES.PERF, resolvedCommit),
-    _apirest.LoadCommitSubjects(TASK_TYPES.VULN, resolvedCommit)
-  ]);
-  perfSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.PERF, subtask: s.value }));
-  vulnSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.VULN, subtask: s.value }));
+  subtaskSel.disabled = true;
+  subtaskSel.classList.add('select-loading');
+  try {
+    const [perfSubjs, vulnSubjs] = await Promise.all([
+      _apirest.LoadCommitSubjects(TASK_TYPES.PERF, resolvedCommit),
+      _apirest.LoadCommitSubjects(TASK_TYPES.VULN, resolvedCommit)
+    ]);
+    perfSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.PERF, subtask: s.value }));
+    vulnSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.VULN, subtask: s.value }));
+  } finally {
+    subtaskSel.disabled = false;
+    subtaskSel.classList.remove('select-loading');
+  }
   dedupSubtasks(globalDynamicSubtasks, dynamicKnown);
   const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, dynamicKnown);
   const current = subtaskSel.value;
@@ -240,11 +247,18 @@ async function rebuildMetricsUI(ctx) {
 
   const gen = ++ctx.metricsRebuildGen;
 
+  if (ctx.metricsUIContainer) { ctx.metricsUIContainer.remove(); ctx.metricsUIContainer = null; }
+  const loadingDiv = document.createElement('div');
+  loadingDiv.className = 'metrics-loading';
+  loadingDiv.innerHTML = '<div class="spinner"></div>';
+  ctx.metricsWrapper?.appendChild(loadingDiv);
+
   const metricsResults = await Promise.all(
     resolvedWithIdx.map(({ resolved }) =>
       _apirest.LoadCommitMetrics(resolved.tasktype, resolved.commit, resolved.subtask))
   );
 
+  loadingDiv.remove();
   if (gen !== ctx.metricsRebuildGen) return;
 
   const newInvalid = new Set(

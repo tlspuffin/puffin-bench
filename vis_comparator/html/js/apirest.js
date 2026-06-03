@@ -7,14 +7,18 @@ import { JSONHelp } from './jsonhelp.js';
 class ApiREST {
   #apiURI;
   #errorManager;
+  #onLoading;
 
   /**
-   * @param {string} apiURI - Base API URL, e.g. '/api/PR'
+   * @param {string}   apiURI       - Base API URL, e.g. '/api/PR'
    * @param {ErrorManager} errorManager - Toast notification service
+   * @param {function} [onLoading]  - Optional callback(delta: +1|-1, label?: string)
+   *   called before/after heavy async fetches to drive a loading indicator.
    */
-  constructor(apiURI, errorManager) {
+  constructor(apiURI, errorManager, onLoading = null) {
     this.#apiURI = apiURI;
     this.#errorManager = errorManager;
+    this.#onLoading = onLoading;
   }
 
   /**
@@ -134,6 +138,7 @@ class ApiREST {
    * @returns {Promise<object|null>} Deserialised template state, or null on failure
    */
   async LoadTemplate(name) {
+    this.#onLoading?.(+1, 'Chargement du template…');
     try {
       const encodedName = encodeURIComponent(name);
       const response = await fetch(`${this.#apiURI}/userdata/templates/${encodedName}`);
@@ -144,6 +149,8 @@ class ApiREST {
       return JSONHelp.Parse(data);
     } catch (error) {
       this.#errorManager.Error('Failed to load template: ' + error.message);
+    } finally {
+      this.#onLoading?.(-1);
     }
     return null;
   }
@@ -232,6 +239,7 @@ class ApiREST {
    */
   async LoadCommitSubjects(commitType, commitID) {
     const subjects = [];
+    this.#onLoading?.(+1, 'Chargement des subtasks…');
     try {
       const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}`);
       if (!response.ok) {
@@ -244,6 +252,8 @@ class ApiREST {
       });
     } catch (error) {
       this.#errorManager.Error('Failed to load commit subjects: ' + error.message);
+    } finally {
+      this.#onLoading?.(-1);
     }
     return subjects;
   }
@@ -260,6 +270,7 @@ class ApiREST {
    *   Returns {metrics: null, maxTimeMicroS: -1} on failure.
    */
   async LoadCommitMetrics(commitType, commitID, commitSubject) {
+    this.#onLoading?.(+1, 'Chargement des métriques…');
     try {
       const response = await fetch(
         `${this.#apiURI}/metrics/${commitType}/${commitID}/${commitSubject}`
@@ -300,11 +311,13 @@ class ApiREST {
       return { metrics: metricsFolders, maxTimeMicroS };
     } catch (error) {
       this.#errorManager.Error('Failed to load metrics: ' + error.message);
+    } finally {
+      this.#onLoading?.(-1);
     }
-    
+
     return { metrics: null, maxTimeMicroS: -1 };
   }
-  
+
   /**
    * Fetches time-series data for selected metrics from the server.
    * The response uses a custom binary format (see #ParseBinaryResponse).
@@ -322,9 +335,10 @@ class ApiREST {
    */
   async LoadCommitMetricsValues(commitType, commitID, commitSubject, timeMin, timeMax, timeStep,
       selectedMetrics) {
+    this.#onLoading?.(+1, 'Chargement des données…');
     try {
       const url = `${this.#apiURI}/values/${commitType}/${commitID}/${commitSubject}/${timeMin}/${timeMax}/${timeStep}`;
-        
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -340,11 +354,13 @@ class ApiREST {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-        
+
       const { header, series } = await this.#ParseBinaryResponse(response);
       return { header, series };
     } catch (error) {
       this.#errorManager.Error('Failed to load metrics: ' + error.message);
+    } finally {
+      this.#onLoading?.(-1);
     }
     return null;
   }
