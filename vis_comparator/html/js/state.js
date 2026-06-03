@@ -3,7 +3,7 @@
  * No DOM, no network, no side effects — only data and pure transformations.
  */
 
-import { TASK_TYPES, DEFAULT_LEGEND_FORMAT } from './constants.js';
+import { TASK_TYPES, DEFAULT_LEGEND_FORMAT, COMMIT_PALETTE } from './constants.js';
 
 // ============================================================
 // MODAL CANCEL MANAGEMENT
@@ -118,6 +118,37 @@ export function migrateStateIfNeeded(loadedState) {
   }
 
   return loadedState;
+}
+
+/**
+ * Resolves a metric entry (plain path string or JSON-encoded {variable:name}) to a
+ * concrete metric path. Returns null for unresolved VarRefs or unparseable values.
+ * @param {string|object} m           - Raw metric entry from graphConfig.metrics
+ * @param {Map|null}      metricsMap  - state.variables.metrics
+ * @returns {string|null}
+ */
+export function resolveMetricEntry(m, metricsMap) {
+  if (typeof m === 'object' && m !== null && 'variable' in m) {
+    return metricsMap?.get(m.variable) ?? null;
+  }
+  if (typeof m === 'string') {
+    try {
+      const parsed = JSON.parse(m);
+      if (parsed?.variable) return metricsMap?.get(parsed.variable) ?? null;
+    } catch (_) {}
+    return m;
+  }
+  return null;
+}
+
+/**
+ * Returns the next color from the commit palette for a new registry entry.
+ * Must be called before inserting the new entry (uses current .size as index).
+ * @param {Map} commitRegistry - state.commitRegistry
+ * @returns {string}
+ */
+export function nextCommitColor(commitRegistry) {
+  return COMMIT_PALETTE[commitRegistry.size % COMMIT_PALETTE.length];
 }
 
 /**

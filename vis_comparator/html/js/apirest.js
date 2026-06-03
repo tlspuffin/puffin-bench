@@ -199,22 +199,17 @@ class ApiREST {
    * @returns {Promise<string[]>} Sorted commit IDs, or [] on failure
    */
   async LoadCommits(commitType) {
-    const commitID = [];
     try {
       const response = await fetch(`${this.#apiURI}/commits/${commitType}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-
       const data = await response.json();
-      
-      data.commits.forEach(commit => {
-        commitID.push(commit);
-      });
+      return data.commits;
     } catch (error) {
       this.#errorManager.Error('Failed to load commits: ' + error.message);
     }
-    return commitID;
+    return [];
   }
   
   /**
@@ -238,24 +233,23 @@ class ApiREST {
    * @returns {Promise<Array<{value: string, text: string}>>} Subject options, or [] on failure
    */
   async LoadCommitSubjects(commitType, commitID) {
-    const subjects = [];
     this.#onLoading?.(+1, 'Chargement des subtasks…');
     try {
       const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-
       const data = await response.json();
-      Object.entries(data).forEach(([subject, count]) => {
-        subjects.push({value: subject, text:`${subject} (${count} runs)`});
-      });
+      return Object.entries(data).map(([subject, count]) => ({
+        value: subject,
+        text:  `${subject} (${count} runs)`,
+      }));
     } catch (error) {
       this.#errorManager.Error('Failed to load commit subjects: ' + error.message);
     } finally {
       this.#onLoading?.(-1);
     }
-    return subjects;
+    return [];
   }
   
   /**
@@ -305,7 +299,7 @@ class ApiREST {
           currentStorage = elementMap;
         }
       });
-      const maxRunTime = Math.max(...data.runs.map(run => run.runTime));
+      const maxRunTime = data.runs.reduce((m, r) => Math.max(m, r.runTime), -Infinity);
       const maxTimeMicroS = Math.ceil(maxRunTime * 1.1);
       
       return { metrics: metricsFolders, maxTimeMicroS };

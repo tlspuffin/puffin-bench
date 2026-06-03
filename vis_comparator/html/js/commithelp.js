@@ -1,24 +1,18 @@
 
-/**
- *
- * @param hash
- * @param branch
- * @param date
- * @param comment
- * @constructor
- */
-function EnrichedCommit(hash, branch, date, comment) {
-  this.hash = hash;
-  this.branch = branch;
-  this.date = date ?? '';
-  this.comment = comment ?? '';
-  const short = CommitHelp.ShortHash(hash);
-  if (branch && date) {
-    this.label = `[${date}] ${short} — ${branch}`
-  } else if (branch) {
-    this.label = `${short} — ${branch}`
-  } else {
-    this.label = date ? `[${date}] ${short}` : short;
+class EnrichedCommit {
+  constructor(hash, branch, date, comment) {
+    this.hash    = hash;
+    this.branch  = branch;
+    this.date    = date ?? '';
+    this.comment = comment ?? '';
+    const short  = CommitHelp.ShortHash(hash);
+    if (branch && date) {
+      this.label = `[${date}] ${short} — ${branch}`;
+    } else if (branch) {
+      this.label = `${short} — ${branch}`;
+    } else {
+      this.label = date ? `[${date}] ${short}` : short;
+    }
   }
 }
 class CommitHelp {

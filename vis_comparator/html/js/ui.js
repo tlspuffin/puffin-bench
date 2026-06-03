@@ -1,6 +1,15 @@
 import {CommitHelp} from "./commithelp.js";
 import { ICONS, BRANCH_PR_PALETTE } from './constants.js';
 
+function buildOption(configOption) {
+  const option = document.createElement('option');
+  option.value = configOption.value;
+  option.defaultSelected = configOption?.selected ?? false;
+  option.innerText = configOption?.text ?? configOption.value;
+  option.disabled = configOption?.disabled ?? false;
+  return option;
+}
+
 /**
  * DOM component factory for modal forms.
  * Uses an internal counter (#id) to generate unique element IDs.
@@ -46,14 +55,7 @@ class UI {
   CreateSelect(configOptions, options) {
     const select = document.createElement('select');
     this.#ApplyOptions(select, options);
-    for (const configOption of configOptions) {
-      const option = document.createElement('option');
-      option.value = configOption.value;
-      option.defaultSelected = configOption?.selected ?? false;
-      option.innerText = configOption?.text ?? configOption.value;
-      option.disabled = configOption?.disabled ?? false;
-      select.appendChild(option);
-    }
+    for (const configOption of configOptions) select.appendChild(buildOption(configOption));
     return select;
   }
 
@@ -64,14 +66,7 @@ class UI {
    */
   UpdateSelect(element, configOptions) {
     element.innerHTML = '';
-    for (let configOption of configOptions) {
-      const option = document.createElement('option');
-      option.value = configOption.value;
-      option.defaultSelected = configOption?.selected ?? false;
-      option.innerText = configOption?.text ?? configOption.value;
-      option.disabled = configOption?.disabled ?? false;
-      element.appendChild(option);
-    }
+    for (const configOption of configOptions) element.appendChild(buildOption(configOption));
   }
 
   /**
@@ -918,8 +913,8 @@ class UI {
     });
     while((stack.length + stackLeaf.length) > 0) {
       if (stackLeaf.length > 0) {
-        results.push(stackLeaf.pop());
-      } else { 
+        results.push(stackLeaf.shift());
+      } else {
         const metric = stack.pop();
         const currentPath = metric.path;
         metric.metric.forEach((metric, path) => {

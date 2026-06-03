@@ -1,6 +1,7 @@
 // Shared commit colour palette — imported by index.js for commitRegistry assignment.
 import {CommitHelp} from "./commithelp.js";
-import { ICONS, COMMIT_PALETTE } from './constants.js';
+import { ICONS, COMMIT_PALETTE, DASH_PALETTE } from './constants.js';
+import { resolveMetricEntry } from './state.js';
 
 /**
  * Manages Plotly graph instances displayed in the main area.
@@ -22,7 +23,7 @@ class GraphManager {
   static #PALETTE = COMMIT_PALETTE;
 
   // Four distinct dash styles, one per metric. Beyond 4 metrics, styles cycle.
-  static #DASH_PALETTE = ['solid', 'dot', 'dash', 'dashdot'];
+  static #DASH_PALETTE = DASH_PALETTE;
 
   /**
    * @param {HTMLElement} container  - Container element where graph divs are appended
@@ -245,39 +246,24 @@ class GraphManager {
    * @returns {string[]}
    */
   #ResolveMetrics(graphConfig) {
-    const state = this.#callbacks?.getState?.();
-    const seen  = new Set();
-    return graphConfig.metrics.map(m => {
-      if (typeof m === 'object' && m !== null && 'variable' in m) {
-        return state?.variables?.metrics?.get(m.variable) ?? null;
-      }
-      if (typeof m === 'string') {
-        try {
-          const p = JSON.parse(m);
-          if (p?.variable) return state?.variables?.metrics?.get(p.variable) ?? null;
-        } catch (_) {}
-      }
-      return m;
-    }).filter(path => {
-      if (!path) return false;
-      if (seen.has(path)) return false;  // deduplicate: first occurrence wins
-      seen.add(path);
-      return true;
-    });
+    const metricsMap = this.#callbacks?.getState?.()?.variables?.metrics;
+    const seen = new Set();
+    return graphConfig.metrics
+      .map(m => resolveMetricEntry(m, metricsMap))
+      .filter(path => {
+        if (!path) return false;
+        if (seen.has(path)) return false;  // deduplicate: first occurrence wins
+        seen.add(path);
+        return true;
+      });
   }
 
   /** Returns true if any resolved metric path appears more than once in graphConfig.metrics. */
   #HasDuplicateMetrics(graphConfig) {
-    const state = this.#callbacks?.getState?.();
-    const seen  = new Set();
+    const metricsMap = this.#callbacks?.getState?.()?.variables?.metrics;
+    const seen = new Set();
     for (const m of graphConfig.metrics) {
-      let path = m;
-      if (typeof m === 'string') {
-        try {
-          const p = JSON.parse(m);
-          if (p?.variable) path = state?.variables?.metrics?.get(p.variable) ?? null;
-        } catch (_) {}
-      }
+      const path = resolveMetricEntry(m, metricsMap);
       if (!path) continue;
       if (seen.has(path)) return true;
       seen.add(path);

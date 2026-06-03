@@ -4,10 +4,12 @@
  * Call initSidebar(deps) once at startup before any sidebar function is used.
  */
 
-import { ICONS, TASK_TYPES, COMMIT_PALETTE } from './constants.js';
+import { ICONS, TASK_TYPES, DASH_PALETTE } from './constants.js';
 import { UI } from './ui.js';
 import {
   resolveExperimentSlot,
+  resolveMetricEntry,
+  nextCommitColor,
   getKnownSubtasks,
   globalDynamicSubtasks,
   setModalCancel,
@@ -47,6 +49,27 @@ export function initSidebar(deps) {
   _errorManager      = deps.errorManager;
   _allCommitsPromise = deps.allCommitsPromise;
   _gitHistoryPromise = deps.gitHistoryPromise ?? Promise.resolve(null);
+}
+
+// ============================================================
+// INTERNAL DOM HELPERS
+// ============================================================
+
+/** Creates a sidebar section div with a title header and an Add (+) button. */
+function buildSidebarSection(title, addTitle, onAdd) {
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-title';
+  header.textContent = title;
+  const addBtn = document.createElement('button');
+  addBtn.className = 'sidebar-add-btn';
+  addBtn.textContent = '+';
+  addBtn.title = addTitle;
+  addBtn.addEventListener('click', onAdd);
+  header.appendChild(addBtn);
+  section.appendChild(header);
+  return section;
 }
 
 // ============================================================
@@ -115,7 +138,7 @@ export function refreshGraphsUsingVariable(state, varName) {
     const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName)
       || config.metrics.some(m => {
         if (typeof m === 'string') {
-          try { const p = JSON.parse(m); return p?.variable === varName; } catch (_) {}
+          try { return JSON.parse(m)?.variable === varName; } catch (_) {}
         }
         return false;
       });
@@ -146,17 +169,9 @@ export function refreshGraphsUsingExperiment(state, expKey) {
 function getGraphIDsUsingMetric(state, metricPath) {
   const ids = [];
   for (const [id, config] of state.graphSettings) {
-    const uses = config.metrics.some(m => {
-      if (typeof m === 'string') {
-        let path = m;
-        try {
-          const p = JSON.parse(m);
-          if (p?.variable) path = state.variables.metrics.get(p.variable) ?? null;
-        } catch (_) {}
-        return path === metricPath;
-      }
-      return false;
-    });
+    const uses = config.metrics.some(m =>
+      resolveMetricEntry(m, state.variables.metrics) === metricPath
+    );
     if (uses) ids.push(id);
   }
   return ids;
@@ -177,17 +192,11 @@ async function _refetchAndRedrawGraph(state, id, config) {
   if (resolved.length === 0) return;
 
   // Deduplicate: two variables may resolve to the same path
-  const resolvedMetrics = [...new Set(config.metrics
-    .map(m => {
-      if (typeof m === 'string') {
-        try {
-          const parsed = JSON.parse(m);
-          if (parsed?.variable) return state.variables.metrics.get(parsed.variable) ?? null;
-        } catch (_) {}
-      }
-      return m;
-    })
-    .filter(m => m != null))];
+  const resolvedMetrics = [...new Set(
+    config.metrics
+      .map(m => resolveMetricEntry(m, state.variables.metrics))
+      .filter(m => m != null)
+  )];
   if (resolvedMetrics.length === 0) return;
 
   const results = await Promise.all(
@@ -264,25 +273,12 @@ function buildAliasRow(card, currentAlias, onAliasChange) {
 }
 
 function buildCommitVariableSection(state) {
-  const section = document.createElement('div');
-  section.className = 'sidebar-section';
-
-  const header = document.createElement('div');
-  header.className = 'sidebar-section-title';
-  header.textContent = 'Variables: Commits';
-
-  const addBtn = document.createElement('button');
-  addBtn.className = 'sidebar-add-btn';
-  addBtn.textContent = '+';
-  addBtn.title = 'Add commit variable';
-  addBtn.addEventListener('click', () => {
+  const section = buildSidebarSection('Variables: Commits', 'Add commit variable', () => {
     let n = 1;
     while (state.variables.commits.has(`c${n}`)) n++;
     state.variables.commits.set(`c${n}`, { value: null, alias: null });
     BuildSidebar(state);
   });
-  header.appendChild(addBtn);
-  section.appendChild(header);
 
   for (const [name, entry] of state.variables.commits) {
     const card = document.createElement('div');
@@ -343,25 +339,12 @@ function buildCommitVariableSection(state) {
 }
 
 function buildSubtaskVariableSection(state) {
-  const section = document.createElement('div');
-  section.className = 'sidebar-section';
-
-  const header = document.createElement('div');
-  header.className = 'sidebar-section-title';
-  header.textContent = 'Variables: Subtasks';
-
-  const addBtn = document.createElement('button');
-  addBtn.className = 'sidebar-add-btn';
-  addBtn.textContent = '+';
-  addBtn.title = 'Add subtask variable';
-  addBtn.addEventListener('click', () => {
+  const section = buildSidebarSection('Variables: Subtasks', 'Add subtask variable', () => {
     let n = 1;
     while (state.variables.subtasks.has(`s${n}`)) n++;
     state.variables.subtasks.set(`s${n}`, { value: null, alias: null });
     BuildSidebar(state);
   });
-  header.appendChild(addBtn);
-  section.appendChild(header);
 
   for (const [name, entry] of state.variables.subtasks) {
     const card = document.createElement('div');
@@ -425,25 +408,12 @@ function buildSubtaskVariableSection(state) {
 }
 
 function buildMetricVariableSection(state) {
-  const section = document.createElement('div');
-  section.className = 'sidebar-section';
-
-  const header = document.createElement('div');
-  header.className = 'sidebar-section-title';
-  header.textContent = 'Variables: Metrics';
-
-  const addBtn = document.createElement('button');
-  addBtn.className = 'sidebar-add-btn';
-  addBtn.textContent = '+';
-  addBtn.title = 'Add metric variable';
-  addBtn.addEventListener('click', () => {
+  const section = buildSidebarSection('Variables: Metrics', 'Add metric variable', () => {
     let n = 1;
     while (state.variables.metrics.has(`m${n}`)) n++;
     state.variables.metrics.set(`m${n}`, null);
     BuildSidebar(state);
   });
-  header.appendChild(addBtn);
-  section.appendChild(header);
 
   for (const [name, value] of state.variables.metrics) {
     const card = document.createElement('div');
@@ -533,8 +503,7 @@ function buildExperimentLegend(state) {
   for (const expKey of activeKeys) {
     let entry = state.commitRegistry.get(expKey);
     if (!entry) {
-      const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
-      entry = { color, displayName: null, visible: true };
+      entry = { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true };
       state.commitRegistry.set(expKey, entry);
     }
     // expKey format: "commitHash:type:subject"
@@ -599,19 +568,15 @@ function buildExperimentLegend(state) {
 
 // Returns the effective dash style for a metric path as actually rendered on the first graph
 // that uses it (i.e. the palette default for its deduped index). Used to seed the legend select.
-const _DASH_PALETTE = ['solid', 'dot', 'dash', 'dashdot'];
 function getMetricDefaultDash(state, metricPath) {
   for (const [, config] of state.graphSettings) {
     const seen = new Set();
     let idx = 0;
     for (const m of config.metrics) {
-      let path = m;
-      if (typeof m === 'string') {
-        try { const p = JSON.parse(m); if (p?.variable) path = state.variables.metrics.get(p.variable) ?? null; } catch (_) {}
-      }
+      const path = resolveMetricEntry(m, state.variables.metrics);
       if (!path || seen.has(path)) continue;
       seen.add(path);
-      if (path === metricPath) return _DASH_PALETTE[idx % _DASH_PALETTE.length];
+      if (path === metricPath) return DASH_PALETTE[idx % DASH_PALETTE.length];
       idx++;
     }
   }
@@ -623,14 +588,8 @@ function getActiveMetrics(state) {
   const paths = new Set();
   for (const [, config] of state.graphSettings) {
     for (const m of config.metrics) {
-      if (typeof m === 'string') {
-        let path = m;
-        try {
-          const p = JSON.parse(m);
-          if (p?.variable) path = state.variables.metrics.get(p.variable) ?? null;
-        } catch (_) {}
-        if (path) paths.add(path);
-      }
+      const path = resolveMetricEntry(m, state.variables.metrics);
+      if (path) paths.add(path);
     }
   }
   return paths;

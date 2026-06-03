@@ -4,8 +4,8 @@ import { ErrorManager } from "./error.js";
 import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
-import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT, COMMIT_PALETTE } from './constants.js';
-import { state, globalDynamicSubtasks, getModalCancelFn, clearModalCancel, dedupSubtasks, migrateStateIfNeeded, resolveExperimentSlot } from './state.js';
+import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
+import { state, globalDynamicSubtasks, getModalCancelFn, clearModalCancel, dedupSubtasks, migrateStateIfNeeded, resolveExperimentSlot, resolveMetricEntry, nextCommitColor } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, OpenInfoModal } from './dialogs.js';
 
@@ -104,13 +104,7 @@ function UpdateHeader() {
 const UIElt = [];
 
 function EnableMainUI(enabled) {
-  UIElt.forEach(function(element) {
-    if (enabled) {
-      UI.EnableElement(element);
-    } else {
-      UI.DisableElement(element);
-    }
-  });
+  UIElt.forEach(el => enabled ? UI.EnableElement(el) : UI.DisableElement(el));
 }
 
 // ============================================================
@@ -194,20 +188,11 @@ async function restoreGraphs(savedSettings) {
     }
 
     // Resolve MetricVarRef entries before fetching (deduplicate: same path from two variables)
-    const resolvedMetrics = [...new Set(graphConfig.metrics
-      .map(m => {
-        if (typeof m === 'object' && m !== null && 'variable' in m) {
-          return state.variables.metrics.get(m.variable) ?? null;
-        }
-        if (typeof m === 'string') {
-          try {
-            const parsed = JSON.parse(m);
-            if (parsed?.variable) return state.variables.metrics.get(parsed.variable) ?? null;
-          } catch (_) {}
-        }
-        return m;
-      })
-      .filter(Boolean))];
+    const resolvedMetrics = [...new Set(
+      graphConfig.metrics
+        .map(m => resolveMetricEntry(m, state.variables.metrics))
+        .filter(Boolean)
+    )];
 
     if (resolvedMetrics.length === 0) {
       // All metric variables unresolved — render placeholders.
@@ -236,8 +221,7 @@ async function restoreGraphs(savedSettings) {
     for (const exp of resolved) {
       const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
       if (!state.commitRegistry.has(expKey)) {
-        const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
-        state.commitRegistry.set(expKey, { color, displayName: null, visible: true });
+        state.commitRegistry.set(expKey, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });
       }
     }
 

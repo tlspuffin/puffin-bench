@@ -4,9 +4,9 @@
  * Call initDialogs(deps) once at startup before any dialog function is used.
  */
 
-import { ICONS, TASK_TYPES, COMMIT_PALETTE } from './constants.js';
+import { ICONS, TASK_TYPES } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, migrateStateIfNeeded, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
+import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, migrateStateIfNeeded, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -543,20 +543,15 @@ export async function AddGraphique(prefill = null, editId = null) {
         for (const exp of resolved) {
           const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
           if (!_state.commitRegistry.has(expKey)) {
-            const color = COMMIT_PALETTE[_state.commitRegistry.size % COMMIT_PALETTE.length];
-            _state.commitRegistry.set(expKey, { color, displayName: null });
+            _state.commitRegistry.set(expKey, { color: nextCommitColor(_state.commitRegistry), displayName: null });
           }
         }
 
-        const fetchMetrics = [...new Set(ctx.selectedMetrics.map(m => {
-          if (typeof m === 'string') {
-            try {
-              const parsed = JSON.parse(m);
-              if (parsed?.variable) return _state.variables.metrics.get(parsed.variable) ?? null;
-            } catch (_) {}
-          }
-          return m;
-        }).filter(m => m != null))];
+        const fetchMetrics = [...new Set(
+          ctx.selectedMetrics
+            .map(m => resolveMetricEntry(m, _state.variables.metrics))
+            .filter(m => m != null)
+        )];
 
         if (fetchMetrics.length === 0) {
           BuildSidebar(_state);
