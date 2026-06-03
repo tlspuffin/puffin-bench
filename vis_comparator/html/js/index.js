@@ -4,7 +4,7 @@ import { ErrorManager } from "./error.js";
 import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
-import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
+import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT, COMMIT_PALETTE } from './constants.js';
 import { state, globalDynamicSubtasks, getModalCancelFn, clearModalCancel, dedupSubtasks, migrateStateIfNeeded, resolveExperimentSlot } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, OpenInfoModal } from './dialogs.js';
@@ -232,6 +232,14 @@ async function restoreGraphs(savedSettings) {
     );
 
     if (dataMap.size === 0) continue;
+
+    for (const exp of resolved) {
+      const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
+      if (!state.commitRegistry.has(expKey)) {
+        const color = COMMIT_PALETTE[state.commitRegistry.size % COMMIT_PALETTE.length];
+        state.commitRegistry.set(expKey, { color, displayName: null, visible: true });
+      }
+    }
 
     const id = await graphManager.AddGraph(graphConfig, dataMap);
     state.graphSettings.set(id, graphConfig);
