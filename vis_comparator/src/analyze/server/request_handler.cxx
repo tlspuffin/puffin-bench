@@ -17,6 +17,44 @@
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
 
+static std::string decodeViewName(const std::string& encoded) {
+  std::string decoded;
+  Poco::URI::decode(encoded, decoded);
+  return decoded;
+}
+
+static std::string viewNameToStem(const std::string& name) {
+  std::string result;
+  result.reserve(name.size());
+  for (char c : name) {
+    if (c == '/') result += "%2F";
+    else          result += c;
+  }
+  return result;
+}
+
+static std::string stemToViewName(const std::string& stem) {
+  std::string result;
+  result.reserve(stem.size());
+  for (size_t i = 0; i < stem.size(); ++i) {
+    if (stem[i] == '%' && i + 2 < stem.size() &&
+        stem[i+1] == '2' && (stem[i+2] == 'F' || stem[i+2] == 'f')) {
+      result += '/';
+      i += 2;
+    } else {
+      result += stem[i];
+    }
+  }
+  return result;
+}
+
+static bool isValidViewName(const std::string& name) {
+  if (name.empty()) return false;
+  if (name.find('\0') != std::string::npos) return false;
+  if (name.find("..") != std::string::npos) return false;
+  return true;
+}
+
 inline static bool ToBool(std::string const& v) {
   return v == "1" || v == "true" || v == "on" || v == "yes";
 };
@@ -447,12 +485,18 @@ void ns_Server::RequestHandlerAPISaveUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
-  std::string const& name =  config_->userdata_ / (std::get<0>(args_) + ".dat");
+  std::string viewName = decodeViewName(std::get<0>(args_));
+  if (!isValidViewName(viewName)) {
+    SendErrorResponse(response, 400, "Invalid view name");
+    return;
+  }
+  std::filesystem::path const filePath =
+      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
   std::istream& stream = request.stream();
 
-  std::ofstream ofs(name, std::ios::binary);
+  std::ofstream ofs(filePath, std::ios::binary);
   if (!ofs.is_open()) {
-    SendErrorResponse(response, 400, "Unable to create file " + name);
+    SendErrorResponse(response, 400, "Unable to create file " + filePath.string());
     return;
   }
   ofs << stream.rdbuf();
@@ -468,13 +512,19 @@ void ns_Server::RequestHandlerAPILoadUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
-  std::string const& name = config_->userdata_ / (std::get<0>(args_) + ".dat");
+  std::string viewName = decodeViewName(std::get<0>(args_));
+  if (!isValidViewName(viewName)) {
+    SendErrorResponse(response, 400, "Invalid view name");
+    return;
+  }
+  std::filesystem::path const filePath =
+      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
 
   rapidjson::Document doc;
   try {
-    ReadJSONFile(name, doc);
+    ReadJSONFile(filePath.string(), doc);
   } catch(...) {
-    SendErrorResponse(response, 400, "Unable to read " + name);
+    SendErrorResponse(response, 400, "Unable to read " + filePath.string());
     return;
   }
 
@@ -506,7 +556,7 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
         if (entry.path().extension().string() != ".dat") {
           continue;
         }
-        std::string filename = entry.path().stem().string();
+        std::string filename = stemToViewName(entry.path().stem().string());
         rapidjson::Value filenameVal;
         filenameVal.SetString(filename.c_str(), filename.length(), allocator);
         files.PushBack(filenameVal, allocator);
@@ -528,7 +578,13 @@ void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
-  std::filesystem::path const filePath = config_->userdata_ / (std::get<0>(args_) + ".dat");
+  std::string viewName = decodeViewName(std::get<0>(args_));
+  if (!isValidViewName(viewName)) {
+    SendErrorResponse(response, 400, "Invalid view name");
+    return;
+  }
+  std::filesystem::path const filePath =
+      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "View not found: " + filePath.string());
@@ -558,9 +614,14 @@ void ns_Server::RequestHandlerAPISaveTemplate::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  std::string templateName = decodeViewName(std::get<0>(args_));
+  if (!isValidViewName(templateName)) {
+    SendErrorResponse(response, 400, "Invalid template name");
+    return;
+  }
   std::filesystem::path const dir = getTemplatesDir(config_);
   std::filesystem::create_directories(dir);
-  std::filesystem::path const filePath = dir / (std::get<0>(args_) + ".dat");
+  std::filesystem::path const filePath = dir / (viewNameToStem(templateName) + ".dat");
 
   std::istream& stream = request.stream();
   std::ofstream ofs(filePath, std::ios::binary);
@@ -587,8 +648,13 @@ void ns_Server::RequestHandlerAPILoadTemplate::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  std::string templateName = decodeViewName(std::get<0>(args_));
+  if (!isValidViewName(templateName)) {
+    SendErrorResponse(response, 400, "Invalid template name");
+    return;
+  }
   std::filesystem::path const filePath =
-      getTemplatesDir(config_) / (std::get<0>(args_) + ".dat");
+      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".dat");
 
   rapidjson::Document doc;
   try {
@@ -617,7 +683,7 @@ void ns_Server::RequestHandlerAPIListTemplates::handleRequest(
     for (auto const& entry : std::filesystem::directory_iterator(dir)) {
       if (!entry.is_regular_file()) continue;
       if (entry.path().extension().string() != ".dat") continue;
-      std::string filename = entry.path().stem().string();
+      std::string filename = stemToViewName(entry.path().stem().string());
       rapidjson::Value filenameVal;
       filenameVal.SetString(filename.c_str(), filename.length(), allocator);
       files.PushBack(filenameVal, allocator);
@@ -634,8 +700,13 @@ void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  std::string templateName = decodeViewName(std::get<0>(args_));
+  if (!isValidViewName(templateName)) {
+    SendErrorResponse(response, 400, "Invalid template name");
+    return;
+  }
   std::filesystem::path const filePath =
-      getTemplatesDir(config_) / (std::get<0>(args_) + ".dat");
+      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".dat");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "Template not found: " + filePath.string());

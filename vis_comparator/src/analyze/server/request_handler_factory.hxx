@@ -6,7 +6,6 @@
 #include <regex>
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
 #include <Poco/Net/HTTPServerRequest.h>
-#include <Poco/URI.h>
 
 namespace ns_Server {
 
@@ -30,8 +29,9 @@ RequestHandlerFactory::RequestHandlerFactory(ns_Server::Config const& config,
 Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     const Poco::Net::HTTPServerRequest& request) {
 
-  Poco::URI uri(request.getURI());
-  std::string path = uri.getPath();
+  std::string path = request.getURI();
+  size_t qPos = path.find('?');
+  if (qPos != std::string::npos) path = path.substr(0, qPos);
   std::string method = request.getMethod();
 
   RequestHandler* requestHandler = nullptr;
