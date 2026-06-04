@@ -1,7 +1,7 @@
 // Shared commit colour palette — imported by index.js for commitRegistry assignment.
 import {CommitHelp} from "./commithelp.js";
 import { ICONS, COMMIT_PALETTE, DASH_PALETTE } from './constants.js';
-import { resolveMetricEntry } from './state.js';
+import { resolveMetricEntry, resolveExperimentSlot } from './state.js';
 
 /**
  * Manages Plotly graph instances displayed in the main area.
@@ -199,6 +199,16 @@ class GraphManager {
     this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
   }
 
+  /** Returns the dash style for a resolved metric path as it would be rendered. */
+  getMetricDash(metricPath) {
+    for (const { graphConfig } of this.#configs.values()) {
+      const metrics = this.#ResolveMetrics(graphConfig);
+      const idx = metrics.indexOf(metricPath);
+      if (idx !== -1) return GraphManager.#DASH_PALETTE[idx % GraphManager.#DASH_PALETTE.length];
+    }
+    return 'solid';
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   /**
@@ -207,37 +217,13 @@ class GraphManager {
    * @returns {Array<{ resolved: object|null, slot, idx, commitVarName: string|null, subtaskVarName: string|null }>}
    */
   #ResolveExperiments(graphConfig) {
-    const state = this.#callbacks?.getState?.();
-    const vars  = state?.variables;
-    return graphConfig.experiments.map((slot, idx) => {
-      let commit   = null;
-      let tasktype = null;
-      let subtask  = null;
-      let commitVarName  = null;
-      let subtaskVarName = null;
-
-      if (slot.commitVar) {
-        commitVarName = slot.commitVar;
-        commit = vars?.commits?.get(slot.commitVar)?.value ?? null;
-      } else {
-        commit = slot.commit ?? null;
-      }
-
-      if (slot.subtaskVar) {
-        subtaskVarName = slot.subtaskVar;
-        const val = vars?.subtasks?.get(slot.subtaskVar)?.value ?? null;
-        if (val) { tasktype = val.tasktype; subtask = val.subtask; }
-      } else {
-        tasktype = slot.tasktype ?? null;
-        subtask  = slot.subtask  ?? null;
-      }
-
-      const resolved = (commit && tasktype && subtask)
-        ? { commit, tasktype, subtask }
-        : null;
-
-      return { resolved, slot, idx, commitVarName, subtaskVarName };
-    });
+    const vars = this.#callbacks?.getState?.()?.variables;
+    return graphConfig.experiments.map((slot, idx) => ({
+      resolved:       resolveExperimentSlot(slot, vars),
+      slot, idx,
+      commitVarName:  slot.commitVar  ?? null,
+      subtaskVarName: slot.subtaskVar ?? null,
+    }));
   }
 
   /**
@@ -513,9 +499,7 @@ class GraphManager {
     graphConfig.metrics.forEach((m, i) => {
       if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
       let varName = null;
-      if (typeof m === 'string') {
-        try { const p = JSON.parse(m); if (p?.variable) varName = p.variable; } catch (_) {}
-      }
+      if (typeof m === 'object' && m !== null && m.variable) varName = m.variable;
       if (varName) {
         const badge = document.createElement('span');
         badge.className = 'graph-title-var-badge';

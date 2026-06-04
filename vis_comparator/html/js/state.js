@@ -112,6 +112,18 @@ export function migrateStateIfNeeded(loadedState) {
     loadedState.variables.subtasks = loadedState.variables.subtasks ?? new Map();
   }
 
+  // ── Upgrade string-form MetricVarRefs to object form ─────────────────────
+  if (loadedState.graphSettings instanceof Map) {
+    for (const [, config] of loadedState.graphSettings) {
+      if (!Array.isArray(config.metrics)) continue;
+      config.metrics = config.metrics.map(m => {
+        if (typeof m !== 'string') return m;
+        try { const p = JSON.parse(m); if (p?.variable) return { variable: p.variable }; } catch (_) {}
+        return m;
+      });
+    }
+  }
+
   // ── Ensure legendFormat exists ────────────────────────────────────────────
   if (!loadedState.legendFormat) {
     loadedState.legendFormat = { ...DEFAULT_LEGEND_FORMAT };
@@ -132,10 +144,6 @@ export function resolveMetricEntry(m, metricsMap) {
     return metricsMap?.get(m.variable) ?? null;
   }
   if (typeof m === 'string') {
-    try {
-      const parsed = JSON.parse(m);
-      if (parsed?.variable) return metricsMap?.get(parsed.variable) ?? null;
-    } catch (_) {}
     return m;
   }
   return null;
@@ -188,12 +196,7 @@ export function isVarReferenced(state, varName, type) {
   for (const [, config] of state.graphSettings) {
     if (type === 'commit' && config.experiments.some(s => s.commitVar === varName)) return true;
     if (type === 'subtask' && config.experiments.some(s => s.subtaskVar === varName)) return true;
-    if (type === 'metric' && config.metrics.some(m => {
-      if (typeof m === 'string') {
-        try { return JSON.parse(m)?.variable === varName; } catch (_) {}
-      }
-      return false;
-    })) return true;
+    if (type === 'metric' && config.metrics.some(m => m?.variable === varName)) return true;
   }
   return false;
 }

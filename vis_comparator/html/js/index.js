@@ -267,9 +267,9 @@ let allCommitsPromise = Promise.all([
   ));
 
   const results = await Promise.all(fetches);
+  const before = globalDynamicSubtasks.length;
   dedupSubtasks(globalDynamicSubtasks, results.flat());
-
-  BuildSidebar(state);
+  if (globalDynamicSubtasks.length > before) BuildSidebar(state);
 
   return all;
 });

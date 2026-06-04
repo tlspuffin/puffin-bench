@@ -136,12 +136,7 @@ export function refreshAllGraphAppearances(state) {
 export function refreshGraphsUsingVariable(state, varName) {
   for (const [id, config] of state.graphSettings) {
     const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName)
-      || config.metrics.some(m => {
-        if (typeof m === 'string') {
-          try { return JSON.parse(m)?.variable === varName; } catch (_) {}
-        }
-        return false;
-      });
+      || config.metrics.some(m => m?.variable === varName);
     if (usesVar) {
       _refetchAndRedrawGraph(state, id, config).catch(err => console.error('[sidebar] refetch error:', err));
     }
@@ -566,23 +561,6 @@ function buildExperimentLegend(state) {
   return section;
 }
 
-// Returns the effective dash style for a metric path as actually rendered on the first graph
-// that uses it (i.e. the palette default for its deduped index). Used to seed the legend select.
-function getMetricDefaultDash(state, metricPath) {
-  for (const [, config] of state.graphSettings) {
-    const seen = new Set();
-    let idx = 0;
-    for (const m of config.metrics) {
-      const path = resolveMetricEntry(m, state.variables.metrics);
-      if (!path || seen.has(path)) continue;
-      seen.add(path);
-      if (path === metricPath) return DASH_PALETTE[idx % DASH_PALETTE.length];
-      idx++;
-    }
-  }
-  return 'solid';
-}
-
 // Returns the set of resolved metric paths currently active across all graphs.
 function getActiveMetrics(state) {
   const paths = new Set();
@@ -649,7 +627,7 @@ function buildMetricLegend(state) {
     const dashSelect = document.createElement('select');
     dashSelect.className = 'metric-legend-dash-select';
     dashSelect.title = 'Line style';
-    const effectiveDash = entry.dash ?? getMetricDefaultDash(state, metricPath);
+    const effectiveDash = entry.dash ?? _graphManager.getMetricDash(metricPath);
     for (const style of ['solid', 'dot', 'dash', 'dashdot']) {
       const opt = document.createElement('option');
       opt.value = style;
@@ -728,76 +706,23 @@ async function openMetricVarModal(name, currentVal, state) {
 
   const experiments = Array.from(uniqueExps.values());
 
+  // Build modal chrome once before the async fetch
   const modalpage = document.getElementById('modalpage');
-  modalpage.innerHTML = '';
-  if (experiments.length > 0) {
-    const loadingContainer = document.createElement('div');
-    loadingContainer.className = 'modal-dialog-scrollable';
-    loadingContainer.innerHTML = '<div class="modal-body metrics-loading"><div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0"></div></div>';
-    modalpage.appendChild(loadingContainer);
-    modalpage.classList.add('modalpage-visible');
-  }
-
-  const metricsResults = experiments.length > 0
-    ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask)))
-    : [];
-
-  const union = new Set();
-  for (const mr of metricsResults) flattenMetricPaths(mr).forEach(p => union.add(p));
-
-  modalpage.innerHTML = '';
   const container = document.createElement('div');
   container.className = 'modal-dialog-scrollable';
   _ui.Reset();
 
   const modalBody = document.createElement('div');
   modalBody.className = 'modal-body';
-
   modalBody.appendChild(_ui.CreateTitle(`Metric Variable: ${name}`, 'h3', null));
 
+  const contentArea = document.createElement('div');
+  if (experiments.length > 0) {
+    contentArea.innerHTML = '<div class="metrics-loading"><div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0"></div></div>';
+  }
+  modalBody.appendChild(contentArea);
+
   let selectedMetric = currentVal;
-  let btOk = null;
-
-  function updateOk() {
-    if (!btOk) return;
-    if (selectedMetric) UI.EnableElement(btOk);
-    else UI.DisableElement(btOk);
-  }
-
-  if (union.size === 0) {
-    const msg = document.createElement('p');
-    msg.style.cssText = 'color:#aaa;font-style:italic;font-size:0.9rem;margin:8px 0;';
-    msg.textContent = 'No metrics available. First add graphs with resolved experiments.';
-    modalBody.appendChild(msg);
-  } else {
-    const syntheticMetrics = buildSyntheticMetrics(union);
-    const metricsTree = _ui.CreateMetrics(syntheticMetrics, {
-      callback: function(event) {
-        if (event.target.checked) {
-          // Single selection: uncheck all others
-          modalBody.querySelectorAll('.metric-checkbox').forEach(cb => {
-            if (cb !== event.target) cb.checked = false;
-          });
-          selectedMetric = event.target.value;
-        } else {
-          selectedMetric = null;
-        }
-        updateOk();
-      }
-    });
-    modalBody.appendChild(metricsTree);
-
-    // Pre-select currentVal if set
-    if (currentVal) {
-      modalBody.querySelectorAll('.metric-checkbox').forEach(cb => {
-        if (cb.value === currentVal) {
-          cb.checked = true;
-          const label = cb.closest('.checkbox-label');
-          if (label) label.style.display = '';
-        }
-      });
-    }
-  }
 
   setModalCancel(function() {
     clearModalCancel();
@@ -829,8 +754,59 @@ async function openMetricVarModal(name, currentVal, state) {
   container.appendChild(modalBody);
   container.appendChild(actions);
 
+  modalpage.innerHTML = '';
   modalpage.appendChild(container);
-  btOk = container.querySelector('.metric-var-ok-btn');
+  const btOk = container.querySelector('.metric-var-ok-btn');
+
+  function updateOk() {
+    if (selectedMetric) UI.EnableElement(btOk);
+    else UI.DisableElement(btOk);
+  }
   updateOk();
   modalpage.classList.add('modalpage-visible');
+
+  // Fetch metrics, then replace only the content area
+  const metricsResults = experiments.length > 0
+    ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask)))
+    : [];
+
+  const union = new Set();
+  for (const mr of metricsResults) flattenMetricPaths(mr).forEach(p => union.add(p));
+
+  contentArea.innerHTML = '';
+  if (union.size === 0) {
+    const msg = document.createElement('p');
+    msg.style.cssText = 'color:#aaa;font-style:italic;font-size:0.9rem;margin:8px 0;';
+    msg.textContent = 'No metrics available. First add graphs with resolved experiments.';
+    contentArea.appendChild(msg);
+  } else {
+    const syntheticMetrics = buildSyntheticMetrics(union);
+    const metricsTree = _ui.CreateMetrics(syntheticMetrics, {
+      callback: function(event) {
+        if (event.target.checked) {
+          // Single selection: uncheck all others
+          contentArea.querySelectorAll('.metric-checkbox').forEach(cb => {
+            if (cb !== event.target) cb.checked = false;
+          });
+          selectedMetric = event.target.value;
+        } else {
+          selectedMetric = null;
+        }
+        updateOk();
+      }
+    });
+    contentArea.appendChild(metricsTree);
+
+    // Pre-select currentVal if set
+    if (currentVal) {
+      contentArea.querySelectorAll('.metric-checkbox').forEach(cb => {
+        if (cb.value === currentVal) {
+          cb.checked = true;
+          const label = cb.closest('.checkbox-label');
+          if (label) label.style.display = '';
+        }
+      });
+    }
+  }
+  updateOk();
 }

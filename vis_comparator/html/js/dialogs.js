@@ -227,6 +227,12 @@ function updateOkButton(ctx) {
  * range on first load.
  * @param {Object} ctx - Live AddGraphique dialog context
  */
+function metricsMatch(a, b) {
+  if (typeof a === 'string' && typeof b === 'string') return a === b;
+  if (a?.variable && b?.variable) return a.variable === b.variable;
+  return false;
+}
+
 async function rebuildMetricsUI(ctx) {
   const previousMetrics = [...ctx.selectedMetrics];
   ctx.selectedMetrics = [];
@@ -340,13 +346,12 @@ async function rebuildMetricsUI(ctx) {
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'metric-checkbox';
-      cb.value = JSON.stringify({ variable: name });
+      cb.dataset.varref = name;
       const span = document.createElement('span');
       span.textContent = metricPath ? `${name} (= ${metricPath})` : `${name} (undefined)`;
       cb.onchange = function() {
-        const ref = JSON.stringify({ variable: name });
-        if (cb.checked) ctx.selectedMetrics.push(ref);
-        else { const i = ctx.selectedMetrics.indexOf(ref); if (i >= 0) ctx.selectedMetrics.splice(i, 1); }
+        if (cb.checked) ctx.selectedMetrics.push({ variable: name });
+        else { const i = ctx.selectedMetrics.findIndex(m => m?.variable === name); if (i >= 0) ctx.selectedMetrics.splice(i, 1); }
         updateOkButton(ctx);
       };
       label.appendChild(cb);
@@ -382,10 +387,11 @@ async function rebuildMetricsUI(ctx) {
   const toRestore = (ctx.prefill && !ctx.metricsPrefilled) ? ctx.prefill.metrics : previousMetrics;
   if (toRestore.length > 0) {
     ctx.metricsWrapper.querySelectorAll('.metric-checkbox').forEach(function(cb) {
-      if (toRestore.includes(cb.value) && !cb.checked) {
+      const cbMetric = cb.dataset.varref ? { variable: cb.dataset.varref } : cb.value;
+      if (toRestore.some(m => metricsMatch(m, cbMetric)) && !cb.checked) {
         cb.checked = true;
         cb.closest('.checkbox-label').style.display = '';
-        ctx.selectedMetrics.push(cb.value);
+        ctx.selectedMetrics.push(cbMetric);
       }
     });
     if (ctx.prefill && !ctx.metricsPrefilled) ctx.metricsPrefilled = true;

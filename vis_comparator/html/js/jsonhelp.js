@@ -33,6 +33,10 @@ class JSONHelp {
     if (value instanceof Set) {
       return { __type: 'Set', value: Array.from(value)};
     }
+    if (typeof value === 'object' && value !== null
+        && 'variable' in value && Object.keys(value).length === 1) {
+      return { __type: 'MetricVarRef', value: value.variable };
+    }
     return value;
   };
 
@@ -43,6 +47,9 @@ class JSONHelp {
       }
       if (value.__type === 'Set') {
         return new Set(value.value);
+      }
+      if (value.__type === 'MetricVarRef') {
+        return { variable: value.value };
       }
     }
     return value;
