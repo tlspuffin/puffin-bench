@@ -67,12 +67,21 @@ body {
   gap: 16px;
 }
 
-.header-left {
+.header-brand {
+  flex-shrink: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  opacity: 0.92;
+  white-space: nowrap;
+}
+
+.header-center {
   display: flex;
   align-items: center;
   gap: 0;
   min-width: 0;
   flex: 1;
+  justify-content: center;
 }
 
 .header-toolbar {

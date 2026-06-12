@@ -35,6 +35,11 @@ headerEditBtn.title = 'Rename this view';
 headerEditBtn.style.display = 'none';
 let headerEditInput = null;
 
+const serverName = window.location.hostname;
+const headerBrand = document.createElement('div');
+headerBrand.className = 'header-brand';
+headerBrand.textContent = `Experiment Analyzer on ${serverName}`;
+
 function commitTitleEdit() {
   if (headerEditBtn.dataset.editing !== 'true' || !headerEditInput) return;
   const newTitle = headerEditInput.value.trim() || state.title;
@@ -82,9 +87,10 @@ headerEditBtn.onclick = function() {
 };
 
 const headerLeft = document.createElement('div');
-headerLeft.className = 'header-left';
+headerLeft.className = 'header-center';
 headerLeft.appendChild(headerTitle);
 headerLeft.appendChild(headerEditBtn);
+header.appendChild(headerBrand);
 header.appendChild(headerLeft);
 
 const headerToolbar = document.createElement('div');
