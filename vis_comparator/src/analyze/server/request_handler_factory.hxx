@@ -37,10 +37,11 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   RequestHandler* requestHandler = nullptr;
 
   static const std::regex regListCommits("^/api/PR/commits/([^/]+)$");
-  static const std::regex regGetCommitSubjects("^/api/PR/subjects/([^/]+)/([^/]+)$");
-  static const std::regex regGetCommitMetrics("^/api/PR/metrics/([^/]+)/([^/]+)/([^/]+)$");
+  static const std::regex regListCampaigns("^/api/PR/campaigns$");
+  static const std::regex regGetCommitSubjects("^/api/PR/subjects/([^/]+)/([^/]+)/([0-9]+)$");
+  static const std::regex regGetCommitMetrics("^/api/PR/metrics/([^/]+)/([^/]+)/([0-9]+)/([^/]+)$");
   static const std::regex regGetCommitMetricsValues(
-      "^/api/PR/values/([^/]+)/([^/]+)/([^/]+)/([0-9]+)/([0-9]+)/([0-9]+)$");
+      "^/api/PR/values/([^/]+)/([^/]+)/([0-9]+)/([^/]+)/([0-9]+)/([0-9]+)/([0-9]+)$");
   static const std::regex regSaveLoadUserData("^/api/PR/userdata/([^/]+)$");
   static const std::regex regListUserData("^/api/PR/userdata/*$");
   static const std::regex regSaveLoadTemplate("^/api/PR/userdata/templates/([^/]+)$");
@@ -54,12 +55,16 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       if (method == "GET") {
         if (std::regex_search(path, match, regListCommits)) {
           requestHandler = new RequestHandlerAPIListCommits(match[1].str());
+        } else if (std::regex_search(path, match, regListCampaigns)) {
+          requestHandler = new RequestHandlerAPIListCampaigns();
         } else if (std::regex_search(path, match, regGetCommitSubjects)) {
           requestHandler = new RequestHandlerAPIGetCommitSubjects(
-              match[1].str(), match[2].str());
+              match[1].str(), match[2].str(),
+              std::strtoull(match[3].str().c_str(), nullptr, 10));
         } else if (std::regex_search(path, match, regGetCommitMetrics)) {
           requestHandler = new RequestHandlerAPIGetCommitMetrics(
-              match[1].str(), match[2].str(), match[3].str());
+              match[1].str(), match[2].str(),
+              std::strtoull(match[3].str().c_str(), nullptr, 10), match[4].str());
         } else if (std::regex_search(path, match, regGetGitHistory)) {
           requestHandler = new RequestHandlerAPIGetGitHistory();
         } else if (std::regex_search(path, match, regSaveLoadTemplate)) {
@@ -82,10 +87,11 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
           requestHandler = new RequestHandlerAPISaveTemplate(match[1].str());
         } else if (std::regex_search(path, match, regGetCommitMetricsValues)) {
           requestHandler = new RequestHandlerAPIGetCommitMetricsValues(
-              match[1].str(), match[2].str(), match[3].str(), 
-              std::strtoull(match[4].str().c_str(), nullptr, 10), 
-              std::strtoull(match[5].str().c_str(), nullptr, 10), 
-              std::strtoull(match[6].str().c_str(), nullptr, 10));
+              match[1].str(), match[2].str(),
+              std::strtoull(match[3].str().c_str(), nullptr, 10), match[4].str(),
+              std::strtoull(match[5].str().c_str(), nullptr, 10),
+              std::strtoull(match[6].str().c_str(), nullptr, 10),
+              std::strtoull(match[7].str().c_str(), nullptr, 10));
         } else if (std::regex_search(path, match, regSaveLoadUserData)) {
           requestHandler = new RequestHandlerAPISaveUserData(match[1].str());
         } else if (path == "/api/refresh") {

@@ -56,19 +56,25 @@ public:
   };
 
   DataManager(Config const& config);
-  std::vector<std::string> Commits(std::string const& type);
+  // Local commit runs of `type` as (commit, latestTimestamp) pairs.
+  std::vector<std::pair<std::string, uint64_t>> Commits(std::string const& type);
   std::vector<RunEntry> const& RunIndex() const { return runIndex_; }
-  std::vector<std::pair<std::string, uint64_t>> 
-      CommitSubjects(std::string const& type, std::string const& commitID);
+  // Runs are addressed by the runId (type, commit, timestamp).
+  std::vector<std::pair<std::string, uint64_t>>
+      CommitSubjects(std::string const& type, std::string const& commitID,
+      uint64_t timestamp);
   struct ns_Analyze::DataManager::SMetricsSummaries CommitMetrics(
-      std::string const& type, std::string const& commitID, 
-      std::string const& subject);
+      std::string const& type, std::string const& commitID,
+      uint64_t timestamp, std::string const& subject);
   std::unordered_map<std::string, std::vector<struct SMetricValues>> CommitValues(
-      std::string const& type, std::string const& commitID, 
-      std::string const& subject, uint64_t min, uint64_t max, 
+      std::string const& type, std::string const& commitID, uint64_t timestamp,
+      std::string const& subject, uint64_t min, uint64_t max,
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
       std::vector<std::string> const& metrics, std::string const& aggregate);
+  // "mtime:size" fingerprint for cache keying ("" if the run is unknown).
+  std::string RunTag(std::string const& type, std::string const& commitID,
+      uint64_t timestamp) const;
 
 private:
   struct SInterpolations {

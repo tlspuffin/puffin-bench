@@ -8,6 +8,11 @@ class ApiREST {
   #apiURI;
   #errorManager;
   #onLoading;
+  // "type/commit" -> latest timestamp, populated by LoadCommits. Lets commit-mode
+  // callers omit the timestamp and have it resolved to the newest run.
+  #commitLatest = new Map();
+  // Session cache of the campaign run list.
+  #campaigns = null;
 
   /**
    * @param {string}   apiURI       - Base API URL, e.g. '/api/PR'
@@ -205,9 +210,50 @@ class ApiREST {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       const data = await response.json();
-      return data.commits;
+      // Server now returns [{ commit, timestamp }]. Cache the latest timestamp
+      // per commit and return the bare commit id list (back-compat for callers).
+      const commits = [];
+      for (const entry of data.commits ?? []) {
+        this.#commitLatest.set(`${commitType}/${entry.commit}`, entry.timestamp);
+        commits.push(entry.commit);
+      }
+      return commits;
     } catch (error) {
       this.#errorManager.Error('Failed to load commits: ' + error.message);
+    }
+    return [];
+  }
+
+  /**
+   * Resolves the latest timestamp for a (type, commit) run, fetching the commit
+   * list once if not already cached. Returns null when the run is unknown.
+   * @param {string} commitType
+   * @param {string} commitID
+   * @returns {Promise<number|null>}
+   */
+  async #latestTimestamp(commitType, commitID) {
+    const key = `${commitType}/${commitID}`;
+    if (!this.#commitLatest.has(key)) {
+      await this.LoadCommits(commitType);
+    }
+    return this.#commitLatest.get(key) ?? null;
+  }
+
+  /**
+   * Loads the list of campaign runs (one entry per run/zst), cached for the session.
+   * @returns {Promise<Array<{type,user,campaign,commit,timestamp,subjects:string[]}>>}
+   */
+  async LoadCampaigns() {
+    if (this.#campaigns) return this.#campaigns;
+    try {
+      const response = await fetch(`${this.#apiURI}/campaigns`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      this.#campaigns = await response.json();
+      return this.#campaigns;
+    } catch (error) {
+      this.#errorManager.Error('Failed to load campaigns: ' + error.message);
     }
     return [];
   }
@@ -232,10 +278,14 @@ class ApiREST {
    * @param {string} commitID   - Commit hash
    * @returns {Promise<Array<{value: string, text: string}>>} Subject options, or [] on failure
    */
-  async LoadCommitSubjects(commitType, commitID) {
+  async LoadCommitSubjects(commitType, commitID, timestamp) {
     this.#onLoading?.(+1, 'Chargement des subtasks…');
     try {
-      const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}`);
+      const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
+      // No run of this type for the commit (e.g. a Perf-only commit probed for Vuln):
+      // return no subjects rather than erroring.
+      if (ts == null) return [];
+      const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}/${ts}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -263,11 +313,13 @@ class ApiREST {
    *   maxTimeMicroS — upper bound of the time axis in microseconds.
    *   Returns {metrics: null, maxTimeMicroS: -1} on failure.
    */
-  async LoadCommitMetrics(commitType, commitID, commitSubject) {
+  async LoadCommitMetrics(commitType, commitID, commitSubject, timestamp) {
     this.#onLoading?.(+1, 'Chargement des métriques…');
     try {
+      const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
+      if (ts == null) return { metrics: null, maxTimeMicroS: -1 };
       const response = await fetch(
-        `${this.#apiURI}/metrics/${commitType}/${commitID}/${commitSubject}`
+        `${this.#apiURI}/metrics/${commitType}/${commitID}/${ts}/${commitSubject}`
       );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -328,10 +380,12 @@ class ApiREST {
    *   Returns null on failure.
    */
   async LoadCommitMetricsValues(commitType, commitID, commitSubject, timeMin, timeMax, timeStep,
-      selectedMetrics) {
+      selectedMetrics, timestamp) {
     this.#onLoading?.(+1, 'Chargement des données…');
     try {
-      const url = `${this.#apiURI}/values/${commitType}/${commitID}/${commitSubject}/${timeMin}/${timeMax}/${timeStep}`;
+      const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
+      if (ts == null) return null;
+      const url = `${this.#apiURI}/values/${commitType}/${commitID}/${ts}/${commitSubject}/${timeMin}/${timeMax}/${timeStep}`;
 
       const response = await fetch(url, {
         method: 'POST',

@@ -4,6 +4,8 @@
 #include <fstream>
 #include <unordered_map>
 #include <string>
+#include <list>
+#include <mutex>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Net/HTTPServerRequest.h>
@@ -16,6 +18,48 @@
 #include <Poco/Net/HTTPResponse.h>
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
+
+// Simple thread-safe LRU cache of serialized endpoint responses. The cache key
+// embeds the run's (mtime,size) fingerprint, so a changed run yields a new key
+// (the stale entry is evicted by LRU pressure).
+class ResponseCache {
+public:
+  explicit ResponseCache(size_t maxEntries) : maxEntries_(maxEntries) {}
+
+  bool Get(std::string const& key, std::string& out) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(key);
+    if (it == map_.end()) {
+      return false;
+    }
+    order_.splice(order_.begin(), order_, it->second.second);
+    out = it->second.first;
+    return true;
+  }
+
+  void Put(std::string const& key, std::string value) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(key);
+    if (it != map_.end()) {
+      it->second.first = std::move(value);
+      order_.splice(order_.begin(), order_, it->second.second);
+      return;
+    }
+    order_.push_front(key);
+    map_.emplace(key, std::make_pair(std::move(value), order_.begin()));
+    while (map_.size() > maxEntries_) {
+      map_.erase(order_.back());
+      order_.pop_back();
+    }
+  }
+
+private:
+  size_t maxEntries_;
+  std::mutex mutex_;
+  std::list<std::string> order_;  // front = most recently used
+  std::unordered_map<std::string,
+      std::pair<std::string, std::list<std::string>::iterator>> map_;
+};
 
 static std::string decodeViewName(const std::string& encoded) {
   std::string decoded;
@@ -203,18 +247,52 @@ void ns_Server::RequestHandlerAPIListCommits::handleRequest(
   if (ManageCORS(request, response)) return;
 
   std::string const& type = std::get<0>(args_);
-  std::vector<std::string> commits = apis_->analyzeAPI_.GetCommits(type);
+  std::vector<std::pair<std::string, uint64_t>> commits = apis_->analyzeAPI_.GetCommits(type);
 
   rapidjson::Document doc;
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
 
   rapidjson::Value commitsArray(rapidjson::kArrayType);
-  for (auto const& commit : commits) {
-    commitsArray.PushBack(rapidjson::Value(commit.c_str(), allocator), allocator);
+  for (auto const& [commit, timestamp] : commits) {
+    rapidjson::Value obj(rapidjson::kObjectType);
+    obj.AddMember("commit", rapidjson::Value(commit.c_str(), allocator), allocator);
+    obj.AddMember("timestamp", timestamp, allocator);
+    commitsArray.PushBack(obj, allocator);
   }
 
   doc.AddMember("commits", commitsArray, allocator);
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIListCampaigns::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::vector<ns_Analyze::DataManager::RunEntry> campaigns =
+      apis_->analyzeAPI_.GetCampaigns();
+
+  rapidjson::Document doc;
+  doc.SetArray();
+  auto& allocator = doc.GetAllocator();
+
+  for (auto const& run : campaigns) {
+    rapidjson::Value obj(rapidjson::kObjectType);
+    obj.AddMember("type", rapidjson::Value(run.type.c_str(), allocator), allocator);
+    obj.AddMember("user", rapidjson::Value(run.user.c_str(), allocator), allocator);
+    obj.AddMember("campaign", rapidjson::Value(run.campaign.c_str(), allocator), allocator);
+    obj.AddMember("commit", rapidjson::Value(run.commit.c_str(), allocator), allocator);
+    obj.AddMember("timestamp", run.timestamp, allocator);
+    rapidjson::Value subjects(rapidjson::kArrayType);
+    for (auto const& s : run.subjects) {
+      subjects.PushBack(rapidjson::Value(s.c_str(), allocator), allocator);
+    }
+    obj.AddMember("subjects", subjects, allocator);
+    doc.PushBack(obj, allocator);
+  }
+
   SendJSONResponse(response, doc);
 }
 
@@ -226,8 +304,9 @@ void ns_Server::RequestHandlerAPIGetCommitSubjects::handleRequest(
 
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
-  std::vector<std::pair<std::string, uint64_t>> subjects = 
-      apis_->analyzeAPI_.GetCommitSubjects(type, commitID);
+  uint64_t timestamp = std::get<2>(args_);
+  std::vector<std::pair<std::string, uint64_t>> subjects =
+      apis_->analyzeAPI_.GetCommitSubjects(type, commitID, timestamp);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -248,9 +327,10 @@ void ns_Server::RequestHandlerAPIGetCommitMetrics::handleRequest(
 
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
-  std::string const& subject = std::get<2>(args_);
-  ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = 
-      apis_->analyzeAPI_.GetCommitMetrics(type, commitID, subject);
+  uint64_t timestamp = std::get<2>(args_);
+  std::string const& subject = std::get<3>(args_);
+  ns_Analyze::DataManager::SMetricsSummaries metricsSummaries =
+      apis_->analyzeAPI_.GetCommitMetrics(type, commitID, timestamp, subject);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -343,19 +423,43 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  static ResponseCache valuesCache(256);
+
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
-  std::string const& subject = std::get<2>(args_);
-  uint64_t min = std::get<3>(args_);
-  uint64_t max = std::get<4>(args_);
-  uint64_t step = std::get<5>(args_);
+  uint64_t timestamp = std::get<2>(args_);
+  std::string const& subject = std::get<3>(args_);
+  uint64_t min = std::get<4>(args_);
+  uint64_t max = std::get<5>(args_);
+  uint64_t step = std::get<6>(args_);
   std::string aggregate = "";
 
   std::istream& stream = request.stream();
   std::stringstream ss;
   ss << stream.rdbuf();
+  std::string const body = ss.str();
+
+  // Response cache: identical (runId, params, body) for an unchanged run -> hit.
+  std::string const runTag = apis_->analyzeAPI_.GetRunTag(type, commitID, timestamp);
+  std::string cacheKey;
+  if (!runTag.empty()) {
+    cacheKey = type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
+        "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
+        "@" + runTag + "#" + body;
+    std::string cached;
+    if (valuesCache.Get(cacheKey, cached)) {
+      response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
+      response.setContentType("application/x-metrics-binary+json");
+      response.setContentLength64(cached.size());
+      std::ostream& ostr = response.send();
+      ostr.write(cached.data(), static_cast<std::streamsize>(cached.size()));
+      ostr.flush();
+      return;
+    }
+  }
+
   rapidjson::Document doc;
-  doc.Parse(ss.str().c_str());
+  doc.Parse(body.c_str());
   if (doc.HasParseError()) {
     SendErrorResponse(response, 400, "Invalid json in request body");
     return;
@@ -388,7 +492,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;
   try {
-    values = apis_->analyzeAPI_.GetCommitValues(type, commitID, subject, min, max, step,
+    values = apis_->analyzeAPI_.GetCommitValues(type, commitID, timestamp, subject, min, max, step,
         runs, clients, metrics, aggregate);
   } catch (std::exception const& e) {
     std::cerr << "[GetCommitValues] exception: " << e.what() << std::endl;
@@ -457,25 +561,32 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     }
   }
 
-  response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
-  response.setContentType("application/x-metrics-binary+json");
-  response.setContentLength64(dataSize);
-  std::ostream& ostr = response.send();
-
-  ostr.write(reinterpret_cast<const char*>(&jsonSizeLE), sizeof(jsonSizeLE));
-  ostr.write(jsonHeader.data(), static_cast<std::streamsize>(jsonHeader.size()));
-
+  // Assemble the full binary payload once (so it can be cached and written).
+  std::string payload;
+  payload.reserve(dataSize);
+  payload.append(reinterpret_cast<const char*>(&jsonSizeLE), sizeof(jsonSizeLE));
+  payload.append(jsonHeader.data(), jsonHeader.size());
   for (const auto& [name, series]: values) {
     for (const auto& serie: series) {
       if (std::holds_alternative<std::vector<uint64_t>>(serie.values_)) {
         std::vector<uint64_t> const& data = std::get<std::vector<uint64_t>>(serie.values_);
-        ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint64_t));
+        payload.append(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint64_t));
       } else {
         std::vector<double> const& data = std::get<std::vector<double>>(serie.values_);
-        ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
+        payload.append(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
       }
     }
   }
+
+  if (!cacheKey.empty()) {
+    valuesCache.Put(cacheKey, payload);
+  }
+
+  response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
+  response.setContentType("application/x-metrics-binary+json");
+  response.setContentLength64(payload.size());
+  std::ostream& ostr = response.send();
+  ostr.write(payload.data(), static_cast<std::streamsize>(payload.size()));
   ostr.flush();
 }
 

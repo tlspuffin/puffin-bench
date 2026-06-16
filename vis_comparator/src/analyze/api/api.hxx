@@ -14,29 +14,45 @@ public:
       : dataManager_(config)
   {}
 
-  std::vector<std::string> GetCommits(std::string const& type) {
+  std::vector<std::pair<std::string, uint64_t>> GetCommits(std::string const& type) {
     return dataManager_.Commits(type);
   }
 
-  std::vector<std::pair<std::string, uint64_t>> 
-      GetCommitSubjects(std::string const& type, std::string const& commitID) {
-    return dataManager_.CommitSubjects(type, commitID);
+  std::vector<ns_Analyze::DataManager::RunEntry> GetCampaigns() {
+    std::vector<ns_Analyze::DataManager::RunEntry> result;
+    for (auto const& run : dataManager_.RunIndex()) {
+      if (run.kind == "campaign") {
+        result.push_back(run);
+      }
+    }
+    return result;
+  }
+
+  std::string GetRunTag(std::string const& type, std::string const& commitID,
+      uint64_t timestamp) {
+    return dataManager_.RunTag(type, commitID, timestamp);
+  }
+
+  std::vector<std::pair<std::string, uint64_t>>
+      GetCommitSubjects(std::string const& type, std::string const& commitID,
+      uint64_t timestamp) {
+    return dataManager_.CommitSubjects(type, commitID, timestamp);
   }
 
   struct ns_Analyze::DataManager::SMetricsSummaries GetCommitMetrics(
-      std::string const& type, std::string const& commitID, 
-      std::string const& subject) {
-    return dataManager_.CommitMetrics(type, commitID, subject);
+      std::string const& type, std::string const& commitID,
+      uint64_t timestamp, std::string const& subject) {
+    return dataManager_.CommitMetrics(type, commitID, timestamp, subject);
   }
 
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> GetCommitValues(
-      std::string const& type, std::string const& commitID, 
-      std::string const& subject, uint64_t min, uint64_t max, 
+      std::string const& type, std::string const& commitID, uint64_t timestamp,
+      std::string const& subject, uint64_t min, uint64_t max,
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
       std::vector<std::string> const& metrics, std::string const& aggregate) {
     std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> data = dataManager_.CommitValues(
-        type, commitID, subject, min, max, step, runs, clients, metrics, aggregate);
+        type, commitID, timestamp, subject, min, max, step, runs, clients, metrics, aggregate);
     uint64_t resultOffset = 0;
     std::vector<uint64_t> indexes(runs.size());
      std::vector<std::string> metricsRequired = metrics;

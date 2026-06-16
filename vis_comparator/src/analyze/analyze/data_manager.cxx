@@ -412,25 +412,36 @@ ns_Analyze::DataManager::RunEntry const* ns_Analyze::DataManager::ResolveLatest(
   return &runIndex_[c->second.rbegin()->second];  // highest timestamp
 }
 
-std::vector<std::string> ns_Analyze::DataManager::Commits(std::string const& type) {
+std::vector<std::pair<std::string, uint64_t>>
+ns_Analyze::DataManager::Commits(std::string const& type) {
   auto t = runsByTriple_.find(type);
   if (t == runsByTriple_.end()) {
     return {};
   }
-  std::vector<std::string> result;
+  std::vector<std::pair<std::string, uint64_t>> result;
   result.reserve(t->second.size());
-  for (auto const& [commitID, _] : t->second) {
-    result.push_back(commitID);
+  for (auto const& [commitID, byTs] : t->second) {
+    uint64_t latest = byTs.empty() ? 0 : byTs.rbegin()->first;
+    result.emplace_back(commitID, latest);
   }
   return result;
 }
 
-std::vector<std::pair<std::string, uint64_t>> 
+std::string ns_Analyze::DataManager::RunTag(std::string const& type,
+    std::string const& commitID, uint64_t timestamp) const {
+  RunEntry const* run = Resolve(type, commitID, timestamp);
+  if (run == nullptr) {
+    return "";
+  }
+  return std::to_string(run->mtime) + ":" + std::to_string(run->size);
+}
+
+std::vector<std::pair<std::string, uint64_t>>
     ns_Analyze::DataManager::CommitSubjects(
-    std::string const& type, std::string const& commitID) {
+    std::string const& type, std::string const& commitID, uint64_t timestamp) {
   std::vector<std::pair<std::string, uint64_t>> result{};
 
-  RunEntry const* run = ResolveLatest(type, commitID);
+  RunEntry const* run = Resolve(type, commitID, timestamp);
   if (run == nullptr) {
     return result;
   }
@@ -453,9 +464,9 @@ std::vector<std::pair<std::string, uint64_t>>
 }
 
 struct ns_Analyze::DataManager::SMetricsSummaries
-ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string const& commitID, std::string const& subject) {
+ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string const& commitID, uint64_t timestamp, std::string const& subject) {
   struct SMetricsSummaries result {0};
-  RunEntry const* run = ResolveLatest(type, commitID);
+  RunEntry const* run = Resolve(type, commitID, timestamp);
   if (run == nullptr) {
     return result;
   }
@@ -486,14 +497,14 @@ ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string cons
 
 std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> 
 ns_Analyze::DataManager::CommitValues(
-    std::string const& type, std::string const& commitID, 
-    std::string const& subject, uint64_t min, uint64_t max, 
+    std::string const& type, std::string const& commitID, uint64_t timestamp,
+    std::string const& subject, uint64_t min, uint64_t max,
     uint64_t step, std::vector<uint64_t>& runs,
     std::vector<uint64_t> const& clients,
     std::vector<std::string> const& metrics, std::string const& aggregate) {
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> result;
 
-  struct ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = CommitMetrics(type, commitID, subject);
+  struct ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = CommitMetrics(type, commitID, timestamp, subject);
 
   std::unordered_map<uint64_t, uint64_t> runsIDMap;
   bool findRun = !runs.empty();
@@ -516,7 +527,7 @@ ns_Analyze::DataManager::CommitValues(
     runsIDMap.emplace(runID, i);
   }
 
-  RunEntry const* run = ResolveLatest(type, commitID);
+  RunEntry const* run = Resolve(type, commitID, timestamp);
   if (run == nullptr) {
     return result;
   }
