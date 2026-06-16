@@ -833,6 +833,66 @@ class UI {
   }
 
   /**
+   * Campaign run selector. Each option is one campaign run (one zst).
+   * `.value` is a runRef { type:'Campaign', commit, timestamp, user, campaign, subject }
+   * or null; dispatches a native `change` event on selection.
+   *
+   * NOTE: minimal native-select implementation (Phase 3). Phase 4 replaces this
+   * with a rich columns/search/sort/filter picker keeping the same `.value` contract.
+   *
+   * @param {Array<{type,user,campaign,commit,timestamp,subjects:string[]}>} campaigns
+   * @param {object} options
+   * @param {object|null} [options.selected] - pre-selected runRef
+   * @returns {HTMLDivElement}
+   */
+  CreateCampaignPicker(campaigns, options) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'campaign-picker';
+    this.#ApplyOptions(wrapper, options?.container);
+
+    let _value = options?.selected ?? null;
+    Object.defineProperty(wrapper, 'value', { get: () => _value, set: (v) => { _value = v; } });
+
+    const runToRef = (r) => ({
+      type: 'Campaign', commit: r.commit, timestamp: r.timestamp,
+      user: r.user, campaign: r.campaign,
+      subject: (r.subjects && r.subjects[0]) || null,
+    });
+    const label = (r) => {
+      const date = new Date(Number(r.timestamp)).toISOString().slice(0, 16).replace('T', ' ');
+      const subj = (r.subjects && r.subjects[0]) ? ` · ${r.subjects[0]}` : '';
+      return `${r.user}/${r.campaign} — ${CommitHelp.ShortHash(r.commit)} (${date})${subj}`;
+    };
+
+    const select = document.createElement('select');
+    select.className = 'campaign-picker-select';
+
+    const optNone = document.createElement('option');
+    optNone.value = '';
+    optNone.textContent = '(—)';
+    select.appendChild(optNone);
+
+    // Newest first.
+    const sorted = [...(campaigns ?? [])].sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+    for (const r of sorted) {
+      const opt = document.createElement('option');
+      opt.value = String(r.timestamp);
+      opt.textContent = label(r);
+      select.appendChild(opt);
+    }
+    if (_value?.timestamp != null) select.value = String(_value.timestamp);
+
+    select.addEventListener('change', () => {
+      const ts = select.value;
+      _value = ts ? runToRef(sorted.find(r => String(r.timestamp) === ts)) : null;
+      wrapper.dispatchEvent(new Event('change'));
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
+  /**
    * Creates a file list container, optionally pre-populated.
    * If files is null, shows a spinner until UpdateListFiles is called.
    * @param {string[]|null} files   - File names, or null to show loading spinner

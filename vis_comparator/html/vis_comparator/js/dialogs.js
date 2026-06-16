@@ -6,7 +6,7 @@
 
 import { ICONS, TASK_TYPES } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, migrateStateIfNeeded, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
+import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -1074,8 +1074,7 @@ export async function tryLoadTemplateFromURL() {
   const raw = await _apirest.LoadTemplate(templateName);
   if (!raw) return false;
 
-  // Migrate to new format before applying URL params
-  const tpl = migrateStateIfNeeded(raw);
+  const tpl = raw;
 
   // Populate commit variables from URL params (format: <varName>=<commitHash>, <varName>.alias=<alias>)
   // An empty value (e.g. c1=) explicitly clears the default to null.

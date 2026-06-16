@@ -5,7 +5,7 @@ import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
-import { state, globalDynamicSubtasks, getModalCancelFn, clearModalCancel, dedupSubtasks, migrateStateIfNeeded, resolveExperimentSlot, resolveMetricEntry, nextCommitColor } from './state.js';
+import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, OpenInfoModal } from './dialogs.js';
 
@@ -148,13 +148,15 @@ function Save(state) {
 // ============================================================
 
 async function ResetState(state, newState, templateName = null) {
-  const migrated = migrateStateIfNeeded(newState);
+  const migrated = newState;
   graphManager.DelAllGraph();
   state.title          = migrated?.title          ?? 'Vue_' + Date.now();
   state.graphSettings  = new Map();
   state.variables      = migrated?.variables      ?? {
-    commits: new Map(), subtasks: new Map(), metrics: new Map(),
+    commits: new Map(), subtasks: new Map(), campaigns: new Map(), metrics: new Map(),
   };
+  // Ensure the campaigns map exists (safe default for views saved before it existed).
+  if (!(state.variables.campaigns instanceof Map)) state.variables.campaigns = new Map();
   state.legendFormat   = migrated?.legendFormat   ?? { ...DEFAULT_LEGEND_FORMAT };
   state.commitRegistry = migrated?.commitRegistry ?? new Map();
   state.metricLegend   = migrated?.metricLegend   ?? new Map();
@@ -278,6 +280,12 @@ let allCommitsPromise = Promise.all([
   if (globalDynamicSubtasks.length > before) BuildSidebar(state);
 
   return all;
+});
+// Load the campaign run list once; refresh the sidebar when it arrives.
+apirest.LoadCampaigns().then(list => {
+  globalCampaigns.length = 0;
+  globalCampaigns.push(...(list ?? []));
+  BuildSidebar(state);
 });
 const ui = new UI();
 const graphManager = new GraphManager(main, {

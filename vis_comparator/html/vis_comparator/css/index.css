@@ -1101,6 +1101,22 @@ select:focus {
   white-space: nowrap;
 }
 
+.campaign-picker-select {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+  border: 1px solid var(--color-border, #ccc);
+  border-radius: 4px;
+  background: var(--color-bg, #fff);
+}
+
+.sidebar-campaign-info {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--color-text-muted, #888);
+  word-break: break-word;
+}
+
 .commit-picker-date {
   font-size: 0.8rem;
   color: var(--color-text-muted, #888);

@@ -12,11 +12,13 @@ import {
   nextCommitColor,
   getKnownSubtasks,
   globalDynamicSubtasks,
+  globalCampaigns,
   setModalCancel,
   clearModalCancel,
   dedupSubtasks,
   isVarReferenced,
 } from './state.js';
+import { CommitHelp } from './commithelp.js';
 
 // ============================================================
 // DEPENDENCY INJECTION
@@ -116,6 +118,7 @@ export function BuildSidebar(state) {
 
   sidebar.appendChild(buildCommitVariableSection(state));
   sidebar.appendChild(buildSubtaskVariableSection(state));
+  sidebar.appendChild(buildCampaignVariableSection(state));
   sidebar.appendChild(buildMetricVariableSection(state));
   sidebar.appendChild(buildExperimentLegend(state));
   sidebar.appendChild(buildMetricLegend(state));
@@ -135,7 +138,7 @@ export function refreshAllGraphAppearances(state) {
 /** Re-fetches and redraws all graphs that reference the given variable name. */
 export function refreshGraphsUsingVariable(state, varName) {
   for (const [id, config] of state.graphSettings) {
-    const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName)
+    const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName || s.campaignVar === varName)
       || config.metrics.some(m => m?.variable === varName);
     if (usesVar) {
       _refetchAndRedrawGraph(state, id, config).catch(err => console.error('[sidebar] refetch error:', err));
@@ -393,6 +396,87 @@ function buildSubtaskVariableSection(state) {
     buildAliasRow(card, entry?.alias, (newAlias) => {
       const cur = state.variables.subtasks.get(name) ?? { value: null, alias: null };
       state.variables.subtasks.set(name, { value: cur.value, alias: newAlias });
+      refreshAllGraphAppearances(state);
+    });
+
+    section.appendChild(card);
+  }
+
+  return section;
+}
+
+/** Short, human-readable label for a campaign run. */
+function campaignRunLabel(run) {
+  const date = run.timestamp != null
+    ? new Date(Number(run.timestamp)).toISOString().slice(0, 16).replace('T', ' ')
+    : '';
+  const subj = (run.subjects && run.subjects[0]) ? ` · ${run.subjects[0]}` : '';
+  return `${run.user}/${run.campaign} — ${CommitHelp.ShortHash(run.commit)} (${date})${subj}`;
+}
+
+/** Converts a campaign run (from /api/PR/campaigns) into a stored runRef. */
+function campaignRunToRef(run) {
+  return {
+    type:      'Campaign',
+    commit:    run.commit,
+    timestamp: run.timestamp,
+    user:      run.user,
+    campaign:  run.campaign,
+    subject:   (run.subjects && run.subjects[0]) || null,
+  };
+}
+
+function buildCampaignVariableSection(state) {
+  const section = buildSidebarSection('Variables: Campaigns', 'Add campaign variable', () => {
+    let n = 1;
+    while (state.variables.campaigns.has(`k${n}`)) n++;
+    state.variables.campaigns.set(`k${n}`, { value: null, alias: null });
+    BuildSidebar(state);
+  });
+
+  for (const [name, entry] of state.variables.campaigns) {
+    const card = document.createElement('div');
+    card.className = 'sidebar-variable-card';
+
+    buildVarCardHeader(card, name, entry?.value !== null && entry?.value !== undefined,
+      () => {
+        state.variables.campaigns.set(name, { value: null, alias: entry?.alias ?? null });
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+      },
+      () => {
+        if (isVarReferenced(state, name, 'campaign')) {
+          _errorManager.Error(`Variable "${name}" is used by one or more graphs — remove it from the graphs before deleting.`);
+          return;
+        }
+        state.variables.campaigns.delete(name);
+        BuildSidebar(state);
+      }
+    );
+
+    const campaignSel = _ui.CreateCampaignPicker(globalCampaigns, { selected: entry?.value ?? null });
+    campaignSel.addEventListener('change', () => {
+      const run = campaignSel.value || null;
+      state.variables.campaigns.set(name, { value: run, alias: entry?.alias ?? null });
+      refreshGraphsUsingVariable(state, name);
+      BuildSidebar(state);
+    });
+    card.appendChild(campaignSel);
+
+    if (entry?.value) {
+      const info = document.createElement('div');
+      info.className = 'sidebar-campaign-info';
+      info.textContent = campaignRunLabel({
+        user: entry.value.user, campaign: entry.value.campaign,
+        commit: entry.value.commit, timestamp: entry.value.timestamp,
+        subjects: entry.value.subject ? [entry.value.subject] : [],
+      });
+      card.appendChild(info);
+    }
+
+    buildAliasRow(card, entry?.alias, (newAlias) => {
+      const cur = state.variables.campaigns.get(name) ?? { value: null, alias: null };
+      state.variables.campaigns.set(name, { value: cur.value, alias: newAlias });
       refreshAllGraphAppearances(state);
     });
 
