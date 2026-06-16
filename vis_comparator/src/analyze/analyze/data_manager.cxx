@@ -8,6 +8,8 @@
 #include <regex>
 #include "rapidjson/document.h"
 #include "rapidjson/istreamwrapper.h"
+#include "rapidjson/ostreamwrapper.h"
+#include "rapidjson/writer.h"
 
 static std::regex const reIsNumber("^[0-9]+$");
 static std::regex const reRunKeyFiles("^(?:.*/)?(logs/.+|artefacts/(?:[^/]+/)*[0-9]+-(?:stats\\.json|README\\.md))$");
@@ -145,12 +147,126 @@ struct ns_Analyze::DataManager::SMetricsSummary MetricsSummatries(uint64_t id, s
 }
 
 
-ns_Analyze::DataManager::DataManager(Config const& config) : config_(config), rootpath_(config.dataPath_)
+// Pull task.user and task.args[].{key=="COMMIT_ID"}.value from the sidecar <ts>.json.
+// The sidecar holds the task metadata but no clean subjects field.
+static void ParseSidecar(std::filesystem::path const& jsonFile,
+    std::string& user, std::string& commitId) {
+  std::ifstream ifs(jsonFile);
+  if (!ifs) {
+    return;
+  }
+  rapidjson::IStreamWrapper isw(ifs);
+  rapidjson::Document doc;
+  doc.ParseStream(isw);
+  if (doc.HasParseError() || !doc.IsObject()) {
+    return;
+  }
+  auto taskIt = doc.FindMember("task");
+  if (taskIt == doc.MemberEnd() || !taskIt->value.IsObject()) {
+    return;
+  }
+  auto const& task = taskIt->value;
+  auto userIt = task.FindMember("user");
+  if (userIt != task.MemberEnd() && userIt->value.IsString()) {
+    user = userIt->value.GetString();
+  }
+  auto argsIt = task.FindMember("args");
+  if (argsIt != task.MemberEnd() && argsIt->value.IsArray()) {
+    for (auto const& e : argsIt->value.GetArray()) {
+      if (!e.IsObject()) {
+        continue;
+      }
+      auto kIt = e.FindMember("key");
+      auto vIt = e.FindMember("value");
+      if (kIt != e.MemberEnd() && kIt->value.IsString() &&
+          std::string(kIt->value.GetString()) == "COMMIT_ID" &&
+          vIt != e.MemberEnd() && vIt->value.IsString()) {
+        commitId = vIt->value.GetString();
+      }
+    }
+  }
+}
+
+// Read the subject names from the archive top-level metadata.json ({subject: count}).
+// FileTARZST seeks to this tiny file in the seekable zstd+tar — no full decompress.
+static std::vector<std::string> ReadSubjects(std::filesystem::path const& zstPath) {
+  std::vector<std::string> subjects;
+  try {
+    FileTARZST archive(zstPath.string());
+    std::vector<char> buffer;
+    archive.ExtractFile("metadata.json", buffer);
+    if (buffer.empty()) {
+      return subjects;
+    }
+    buffer.push_back(0);
+    rapidjson::Document doc;
+    doc.Parse(buffer.data());
+    if (doc.HasParseError() || !doc.IsObject()) {
+      return subjects;
+    }
+    for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
+      subjects.push_back(it->name.GetString());
+    }
+  } catch (std::exception const& e) {
+    LOGW(std::string("Could not read subjects from ") + zstPath.string() + ": " + e.what());
+  }
+  return subjects;
+}
+
+ns_Analyze::DataManager::DataManager(Config const& config)
+    : config_(config), rootpath_(config.dataPath_)
 {
-  std::vector<std::string> commits;
-  for(auto it = std::filesystem::recursive_directory_iterator(rootpath_);
-        it != std::filesystem::recursive_directory_iterator(); ++it) {
-      auto const& entry = *it;
+  BuildIndex();
+}
+
+// (mtime,size) fingerprint of the .zst, used to skip re-parsing unchanged runs.
+static void Fingerprint(std::filesystem::path const& zstPath, int64_t& mtime, uint64_t& size) {
+  std::error_code ec;
+  auto t = std::filesystem::last_write_time(zstPath, ec);
+  mtime = ec ? 0 : (int64_t)t.time_since_epoch().count();
+  size = ec ? 0 : (uint64_t)std::filesystem::file_size(zstPath, ec);
+}
+
+void ns_Analyze::DataManager::BuildIndex() {
+  std::filesystem::path const cachePath = rootpath_ / ".runindex.json";
+
+  // ── Load the persistent cache: relpath -> (RunEntry, fingerprint) ──────────
+  std::unordered_map<std::string, RunEntry> cache;
+  {
+    std::ifstream ifs(cachePath);
+    if (ifs) {
+      rapidjson::IStreamWrapper isw(ifs);
+      rapidjson::Document doc;
+      doc.ParseStream(isw);
+      if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("entries") &&
+          doc["entries"].IsArray()) {
+        for (auto const& e : doc["entries"].GetArray()) {
+          if (!e.IsObject()) {
+            continue;
+          }
+          RunEntry r{};
+          r.kind      = e["kind"].GetString();
+          r.type      = e["type"].GetString();
+          r.commit    = e["commit"].GetString();
+          r.timestamp = e["timestamp"].GetUint64();
+          r.user      = e["user"].GetString();
+          r.campaign  = e["campaign"].GetString();
+          r.relpath   = std::filesystem::path(e["relpath"].GetString());
+          r.mtime     = e["mtime"].GetInt64();
+          r.size      = e["size"].GetUint64();
+          for (auto const& s : e["subjects"].GetArray()) {
+            r.subjects.push_back(s.GetString());
+          }
+          cache.emplace(r.relpath.string(), std::move(r));
+        }
+      }
+    }
+  }
+
+  // ── Walk the data root for runs (one .zst with numeric stem + sibling .json) ─
+  for (auto it = std::filesystem::recursive_directory_iterator(rootpath_);
+       it != std::filesystem::recursive_directory_iterator(); ++it) {
+    auto const& entry = *it;
     std::filesystem::path const& path = entry.path();
 
     if (entry.is_directory()) {
@@ -166,27 +282,144 @@ ns_Analyze::DataManager::DataManager(Config const& config) : config_(config), ro
         (!std::regex_match(taskID, reIsNumber))) {
       continue;
     }
-
-    std::filesystem::path relativePath = path.lexically_relative(rootpath_);
-    relativePath.replace_extension("");
     std::filesystem::path jsonFile = path;
     jsonFile.replace_extension(".json");
-    std::string const type = path.parent_path().stem();
-    std::string const commitID = path.parent_path().parent_path().stem();
     if (!std::filesystem::exists(jsonFile)) {
       continue;
     }
-    runsResults_[type].emplace(commitID, std::move(relativePath));
+
+    std::filesystem::path relativePath = path.lexically_relative(rootpath_);
+    relativePath.replace_extension("");
+    std::string const relKey = relativePath.string();
+
+    int64_t mtime;
+    uint64_t size;
+    Fingerprint(path, mtime, size);
+
+    // Reuse the cached entry when the fingerprint matches (no archive/sidecar open).
+    auto cached = cache.find(relKey);
+    if (cached != cache.end() && cached->second.mtime == mtime &&
+        cached->second.size == size) {
+      runIndex_.push_back(cached->second);
+      continue;
+    }
+
+    // ── Fresh parse ──────────────────────────────────────────────────────────
+    RunEntry run{};
+    run.timestamp = std::strtoull(taskID.c_str(), nullptr, 10);
+    run.relpath   = relativePath;
+    run.mtime     = mtime;
+    run.size      = size;
+    run.subjects  = ReadSubjects(path);
+
+    std::string user, commitId;
+    ParseSidecar(jsonFile, user, commitId);
+    run.user = user;
+
+    // Classify by the top-level path segment.
+    std::string topSegment;
+    for (auto const& part : relativePath) { topSegment = part.string(); break; }
+
+    if (topSegment == "Campaign") {
+      // Campaign/<user>/<campaign>/<ts>
+      run.kind     = "campaign";
+      run.type     = "Campaign";
+      run.commit   = commitId;  // from sidecar COMMIT_ID
+      run.user     = run.user.empty()
+          ? path.parent_path().parent_path().stem().string() : run.user;
+      run.campaign = path.parent_path().stem().string();
+    } else {
+      // <...>/<commit>/<tasktype>/<ts>  (tolerant of a leading PR/ prefix)
+      run.kind   = "commit";
+      run.type   = path.parent_path().stem().string();
+      run.commit = path.parent_path().parent_path().stem().string();
+    }
+
+    runIndex_.push_back(std::move(run));
+  }
+
+  // ── Build the runId resolution map ─────────────────────────────────────────
+  for (size_t i = 0; i < runIndex_.size(); ++i) {
+    RunEntry const& r = runIndex_[i];
+    runsByTriple_[r.type][r.commit][r.timestamp] = i;
+  }
+
+  // ── Persist the (possibly refreshed) index ─────────────────────────────────
+  {
+    rapidjson::Document doc;
+    doc.SetObject();
+    auto& alloc = doc.GetAllocator();
+    rapidjson::Value entries(rapidjson::kArrayType);
+    for (RunEntry const& r : runIndex_) {
+      rapidjson::Value e(rapidjson::kObjectType);
+      e.AddMember("kind", rapidjson::Value(r.kind.c_str(), alloc), alloc);
+      e.AddMember("type", rapidjson::Value(r.type.c_str(), alloc), alloc);
+      e.AddMember("commit", rapidjson::Value(r.commit.c_str(), alloc), alloc);
+      e.AddMember("timestamp", r.timestamp, alloc);
+      e.AddMember("user", rapidjson::Value(r.user.c_str(), alloc), alloc);
+      e.AddMember("campaign", rapidjson::Value(r.campaign.c_str(), alloc), alloc);
+      e.AddMember("relpath", rapidjson::Value(r.relpath.string().c_str(), alloc), alloc);
+      e.AddMember("mtime", r.mtime, alloc);
+      e.AddMember("size", r.size, alloc);
+      rapidjson::Value subjects(rapidjson::kArrayType);
+      for (std::string const& s : r.subjects) {
+        subjects.PushBack(rapidjson::Value(s.c_str(), alloc), alloc);
+      }
+      e.AddMember("subjects", subjects, alloc);
+      entries.PushBack(e, alloc);
+    }
+    doc.AddMember("version", 1, alloc);
+    doc.AddMember("entries", entries, alloc);
+
+    std::ofstream ofs(cachePath);
+    if (ofs) {
+      rapidjson::OStreamWrapper osw(ofs);
+      rapidjson::Writer<rapidjson::OStreamWrapper> writer(osw);
+      doc.Accept(writer);
+    } else {
+      LOGW("Could not write run index cache to " + cachePath.string());
+    }
   }
 }
 
+ns_Analyze::DataManager::RunEntry const* ns_Analyze::DataManager::Resolve(
+    std::string const& type, std::string const& commit, uint64_t timestamp) const {
+  auto t = runsByTriple_.find(type);
+  if (t == runsByTriple_.end()) {
+    return nullptr;
+  }
+  auto c = t->second.find(commit);
+  if (c == t->second.end()) {
+    return nullptr;
+  }
+  auto ts = c->second.find(timestamp);
+  if (ts == c->second.end()) {
+    return nullptr;
+  }
+  return &runIndex_[ts->second];
+}
+
+ns_Analyze::DataManager::RunEntry const* ns_Analyze::DataManager::ResolveLatest(
+    std::string const& type, std::string const& commit) const {
+  auto t = runsByTriple_.find(type);
+  if (t == runsByTriple_.end()) {
+    return nullptr;
+  }
+  auto c = t->second.find(commit);
+  if (c == t->second.end() || c->second.empty()) {
+    return nullptr;
+  }
+  return &runIndex_[c->second.rbegin()->second];  // highest timestamp
+}
+
 std::vector<std::string> ns_Analyze::DataManager::Commits(std::string const& type) {
-  if (runsResults_.count(type) == 0) {
+  auto t = runsByTriple_.find(type);
+  if (t == runsByTriple_.end()) {
     return {};
   }
   std::vector<std::string> result;
-  result.reserve((runsResults_[type].size()));
-  for(auto const& [ commitID, _ ]: runsResults_[type]) {
+  result.reserve(t->second.size());
+  for (auto const& [commitID, _] : t->second) {
     result.push_back(commitID);
   }
   return result;
@@ -197,11 +430,11 @@ std::vector<std::pair<std::string, uint64_t>>
     std::string const& type, std::string const& commitID) {
   std::vector<std::pair<std::string, uint64_t>> result{};
 
-  if ((runsResults_.count(type) == 0) || 
-      (runsResults_[type].count(commitID) == 0)) {
+  RunEntry const* run = ResolveLatest(type, commitID);
+  if (run == nullptr) {
     return result;
   }
-  std::string binFilename = rootpath_ / (runsResults_[type][commitID].string() + ".zst");
+  std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
   FileTARZST archive(binFilename);
   std::vector<char> buffer;
   archive.ExtractFile("metadata.json", buffer);
@@ -222,14 +455,14 @@ std::vector<std::pair<std::string, uint64_t>>
 struct ns_Analyze::DataManager::SMetricsSummaries
 ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string const& commitID, std::string const& subject) {
   struct SMetricsSummaries result {0};
-  if ((runsResults_.count(type) == 0) || 
-      (runsResults_[type].count(commitID) == 0)) {
+  RunEntry const* run = ResolveLatest(type, commitID);
+  if (run == nullptr) {
     return result;
   }
 
-  std::string binFilename = rootpath_ / (runsResults_[type][commitID].string() + ".zst");
+  std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
   FileTARZST archive(binFilename);
-  std::vector<std::pair<std::string, uint64_t>> metadatasFilename = 
+  std::vector<std::pair<std::string, uint64_t>> metadatasFilename =
       archive.ListFiles(std::regex("^/*artefacts/"+subject+"/[^/]+/metadata.json$"));
 
   for(auto const& metadataFilename : metadatasFilename) {
@@ -283,10 +516,14 @@ ns_Analyze::DataManager::CommitValues(
     runsIDMap.emplace(runID, i);
   }
 
-  std::string binFilename = rootpath_ / (runsResults_[type][commitID].string() + ".zst");
+  RunEntry const* run = ResolveLatest(type, commitID);
+  if (run == nullptr) {
+    return result;
+  }
+  std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
   FileTARZST archive(binFilename);
 
-  std::vector<std::pair<std::string, uint64_t>> metadatasFilename = 
+  std::vector<std::pair<std::string, uint64_t>> metadatasFilename =
       archive.ListFiles(std::regex("^/*artefacts/"+subject+"/[0-9]+-stats.json.bin/$"));
 
   std::unordered_map<uint64_t, std::filesystem::path> runsFolders;

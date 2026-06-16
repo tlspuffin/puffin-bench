@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
+#include <map>
+#include <vector>
 #include <variant>
 #include <cmath>
 
@@ -38,8 +40,24 @@ public:
     std::variant<std::vector<uint64_t>, std::vector<double>> values_;
   };
 
+  // One indexed run (a single .zst archive). The runId is (type, commit, timestamp);
+  // `timestamp` is the filename (= task.id) and is globally unique.
+  struct RunEntry {
+    std::string kind;                  // "commit" | "campaign"
+    std::string type;                  // "Perf"/"Vuln" (commit) | "Campaign"
+    std::string commit;                // commit hash (commit) | COMMIT_ID (campaign)
+    uint64_t timestamp;                // filename stem (= task.id)
+    std::string user;                  // task.user ("" when absent)
+    std::string campaign;              // campaign name (campaigns; "" otherwise)
+    std::filesystem::path relpath;     // zst path w/o extension, relative to rootpath_
+    std::vector<std::string> subjects; // keys of the archive top-level metadata.json
+    int64_t mtime;                     // .zst last_write_time (cache fingerprint)
+    uint64_t size;                     // .zst file size (cache fingerprint)
+  };
+
   DataManager(Config const& config);
   std::vector<std::string> Commits(std::string const& type);
+  std::vector<RunEntry> const& RunIndex() const { return runIndex_; }
   std::vector<std::pair<std::string, uint64_t>> 
       CommitSubjects(std::string const& type, std::string const& commitID);
   struct ns_Analyze::DataManager::SMetricsSummaries CommitMetrics(
@@ -59,8 +77,19 @@ private:
   };
   Config const& config_;
   std::filesystem::path const rootpath_;
-  std::unordered_map<std::string, 
-      std::unordered_map<std::string, std::filesystem::path>> runsResults_;
+
+  // Flat list of every indexed run.
+  std::vector<RunEntry> runIndex_;
+  // runId resolution: type -> commit -> timestamp -> index into runIndex_.
+  // std::map keeps timestamps ordered so commit-mode "latest" = rbegin().
+  std::unordered_map<std::string,
+      std::unordered_map<std::string, std::map<uint64_t, size_t>>> runsByTriple_;
+
+  void BuildIndex();
+  RunEntry const* Resolve(std::string const& type, std::string const& commit,
+      uint64_t timestamp) const;
+  RunEntry const* ResolveLatest(std::string const& type,
+      std::string const& commit) const;
 
   std::vector<struct SInterpolations> ExtractDataTS(FileTARZST& archive, 
       std::filesystem::path const& prefixPath, 
