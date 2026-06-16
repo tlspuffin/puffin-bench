@@ -603,7 +603,7 @@ class UI {
     // ── Filter tabs ───────────────────────────────────────────
     const tabs = document.createElement('div');
     tabs.className = 'commit-picker-tabs';
-    [{ id: 'main', label: 'main/dev' }, { id: 'pr', label: 'PR heads' }, { id: 'all', label: 'All' }].forEach(def => {
+    [{ id: 'main', label: 'main/dev' }, { id: 'branch', label: 'branches' }, { id: 'pr', label: 'PRs' }, { id: 'all', label: 'All' }].forEach(def => {
       const btn = document.createElement('button');
       btn.className = 'commit-picker-tab' + (def.id === _activeTab ? ' active' : '');
       btn.textContent = def.label;
@@ -697,10 +697,10 @@ class UI {
 
       // ── Commit rows (filtered by tab + query) ─────────────────
       const visible = _rows.filter(r => {
-        if (_activeTab === 'main' && r.type !== 'main') return false;
-        if (_activeTab === 'pr'   && r.type !== 'pr')   return false;
+        if (_activeTab !== 'all' && !r.categories.includes(_activeTab)) return false;
         if (_query) {
-          const haystack = `${r.hash} ${r.branch ?? ''} ${r.comment ?? ''} ${r.date ?? ''}`.toLowerCase();
+          const num = r.number != null ? `#${r.number}` : '';
+          const haystack = `${r.hash} ${r.branch ?? ''} ${r.comment ?? ''} ${r.date ?? ''} ${num}`.toLowerCase();
           if (!haystack.includes(_query)) return false;
         }
         return true;
@@ -750,6 +750,13 @@ class UI {
       hashEl.textContent = CommitHelp.ShortHash(r.value);
       left.appendChild(hashEl);
 
+      if (r.number != null) {
+        const prEl = document.createElement('span');
+        prEl.className = 'commit-pr-number';
+        prEl.textContent = `#${r.number}`;
+        left.appendChild(prEl);
+      }
+
       const mid = document.createElement('div');
       mid.className = 'commit-picker-date';
       mid.textContent = r.date ?? '';
@@ -786,15 +793,35 @@ class UI {
     Promise.all([gitHistoryPromise, Promise.resolve(allCommits)]).then(([history, commits]) => {
 
       if (!history) {
-        _rows = commits.map(hash => ({ value: hash, hash, branch: null, date: null, comment: null, type: 'main' }));
+        _rows = commits.map(hash => ({ value: hash, hash, branch: null, date: null, comment: null, number: null, categories: [] }));
       } else {
-        const entryMap = new Map();
-        (history.commits ?? []).forEach(e => entryMap.set(CommitHelp.ShortHash(e.id), { ...e, type: 'main' }));
-        (history.PR ?? []).forEach(e => entryMap.set(CommitHelp.ShortHash(e.id), { ...e, type: 'pr' }));
+        // A local commit can appear in several git categories (e.g. a PR head that
+        // is also a branch tip); track all of them so it shows under each tab.
+        const entryMap = new Map();  // shortHash -> { branch, date, comment, number, categories:Set }
+        const add = (e, cat) => {
+          const k = CommitHelp.ShortHash(e.id);
+          let m = entryMap.get(k);
+          if (!m) { m = { categories: new Set() }; entryMap.set(k, m); }
+          m.categories.add(cat);
+          m.branch  = m.branch  ?? e.branch  ?? null;
+          m.date    = m.date    ?? e.date    ?? null;
+          m.comment = m.comment ?? e.comment ?? null;
+          if (e.number != null) m.number = e.number;
+        };
+        (history.commits  ?? []).forEach(e => add(e, 'main'));
+        (history.branches ?? []).forEach(e => add(e, 'branch'));
+        (history.PR       ?? []).forEach(e => add(e, 'pr'));
         _rows = commits
           .map(hash => {
-            const entry = entryMap.get(CommitHelp.ShortHash(hash));
-            return { value: hash, hash, branch: entry?.branch ?? null, date: entry?.date ?? null, comment: entry?.comment ?? null, type: entry?.type ?? 'main' };
+            const m = entryMap.get(CommitHelp.ShortHash(hash));
+            return {
+              value: hash, hash,
+              branch:  m?.branch  ?? null,
+              date:    m?.date    ?? null,
+              comment: m?.comment ?? null,
+              number:  m?.number  ?? null,
+              categories: m ? [...m.categories] : [],
+            };
           })
           .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
       }

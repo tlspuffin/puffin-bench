@@ -26,6 +26,7 @@ class CommitHelp {
     // Build flat lookup: short id → entry (merge commits + PR arrays)
     const allGitEntries = [
       ...(gitHistory?.commits ?? []),
+      ...(gitHistory?.branches ?? []),
       ...(gitHistory?.PR ?? [])
     ];
 

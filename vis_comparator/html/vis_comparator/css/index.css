@@ -1094,6 +1094,13 @@ select:focus {
   color: var(--color-text-muted, #888);
 }
 
+.commit-pr-number {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #8338ec;
+  white-space: nowrap;
+}
+
 .commit-picker-date {
   font-size: 0.8rem;
   color: var(--color-text-muted, #888);
