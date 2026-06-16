@@ -292,6 +292,7 @@ const graphManager = new GraphManager(main, {
   delete:    function(id) { state.graphSettings.delete(id); BuildSidebar(state); },
   getState:  function()   { return state; },
   editGraph: function(id) { EditGraph(id); },
+  getLatestTimestamp: function(type, commit) { return apirest.LatestTimestampSync(type, commit); },
 });
 
 // Wire up module dependencies now that all objects are created.

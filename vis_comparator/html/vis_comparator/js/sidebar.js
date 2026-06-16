@@ -561,7 +561,7 @@ function buildExperimentLegend(state) {
   fmtInput.className = 'sidebar-format-template-input';
   fmtInput.placeholder = '\${COMMIT_ALIAS} − \${SUBTASK_ALIAS}';
   fmtInput.value = state.legendFormat.experiment ?? '';
-  fmtInput.title = 'Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex)\nExample: ${SUBTASK_ALIAS:afterLast(_):pascalcase}';
+  fmtInput.title = 'Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}, ${USER}, ${CAMPAIGN_NAME}, ${DATE}, ${TIME}, ${DATETIME}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex), format(pattern)\nDate/time default to YYYY-MM-DD / HH:mm:ss / YYYY-MM-DD HH:mm:ss; override with :format(YYYY/MM/DD)\nExample: ${DATE:format(YYYY-MM-DD)} ${USER:uppercase}';
   fmtInput.addEventListener('change', () => {
     state.legendFormat.experiment = fmtInput.value.trim() || null;
     refreshAllGraphAppearances(state);

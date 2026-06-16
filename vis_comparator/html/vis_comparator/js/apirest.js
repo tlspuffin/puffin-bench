@@ -225,6 +225,17 @@ class ApiREST {
   }
 
   /**
+   * Synchronous latest-timestamp lookup from the cache populated by LoadCommits
+   * (called for all types at startup). Returns null if not cached.
+   * @param {string} commitType
+   * @param {string} commitID
+   * @returns {number|null}
+   */
+  LatestTimestampSync(commitType, commitID) {
+    return this.#commitLatest.get(`${commitType}/${commitID}`) ?? null;
+  }
+
+  /**
    * Resolves the latest timestamp for a (type, commit) run, fetching the commit
    * list once if not already cached. Returns null when the run is unknown.
    * @param {string} commitType

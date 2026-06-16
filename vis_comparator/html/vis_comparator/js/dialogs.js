@@ -1056,8 +1056,9 @@ export function SaveAsTemplate(state) {
   fmtInput.className = 'modal-text-input';
   fmtInput.placeholder = state.title;
   fmtInput.title =
-    'Tokens: ${TEMPLATE}, ${DATE}, ${C1_HASH}, ${C1_ALIAS}, ${S1_NAME}, ${S1_TYPE}, ${S1_ALIAS}, ${M1}…\n' +
-    'Transforms (chain with :): uppercase, lowercase, camelcase, kebabcase, beforeFirst(regex), afterLast(regex)\n' +
+    'Tokens: ${TEMPLATE}, ${DATE}, ${TIME}, ${DATETIME}, ${C1_HASH}, ${C1_ALIAS}, ${S1_NAME}, ${S1_TYPE}, ${S1_ALIAS}, ${M1}…\n' +
+    'Transforms (chain with :): uppercase, lowercase, camelcase, kebabcase, beforeFirst(regex), afterLast(regex), format(pattern)\n' +
+    'Date/time default to YYYY-MM-DD / HH:mm:ss; override with :format(YYYY/MM/DD)\n' +
     'Ex: ${C1_ALIAS} − ${C2_ALIAS} (${DATE})';
   container.appendChild(fmtLabel);
   container.appendChild(fmtInput);

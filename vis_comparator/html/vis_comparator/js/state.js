@@ -149,7 +149,10 @@ export function resolveExperimentSlot(slot, variables) {
 export function experimentKey(resolved) {
   if (!resolved) return null;
   const base = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
-  return resolved.timestamp != null ? `${base}:${resolved.timestamp}` : base;
+  // Only campaigns disambiguate by timestamp; commit-mode keys stay 3-part even
+  // though resolved may carry a (latest) timestamp for the ${DATE} legend token.
+  return (resolved.tasktype === 'Campaign' && resolved.timestamp != null)
+    ? `${base}:${resolved.timestamp}` : base;
 }
 
 /**

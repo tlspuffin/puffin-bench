@@ -110,7 +110,8 @@ export const HELP_HTML = `
     <li><strong>Display name</strong> — override the generated label in graph legends (leave blank to use the format template).</li>
     <li><strong>Format</strong> — a template string applied to all experiments without an explicit display name.</li>
   </ul>
-  <p>Experiment format tokens: <code>${"${COMMIT_HASH}"}</code>, <code>${"${SUBTASK_TYPE}"}</code>, <code>${"${SUBTASK_NAME}"}</code>, <code>${"${COMMIT_ALIAS}"}</code>, <code>${"${SUBTASK_ALIAS}"}</code>.</p>
+  <p>Experiment format tokens: <code>${"${COMMIT_HASH}"}</code>, <code>${"${SUBTASK_TYPE}"}</code>, <code>${"${SUBTASK_NAME}"}</code>, <code>${"${COMMIT_ALIAS}"}</code>, <code>${"${SUBTASK_ALIAS}"}</code>, <code>${"${USER}"}</code>, <code>${"${CAMPAIGN_NAME}"}</code>, <code>${"${DATE}"}</code>, <code>${"${TIME}"}</code>, <code>${"${DATETIME}"}</code>.</p>
+  <p>Date/time tokens accept <code>:format(&lt;pattern&gt;)</code> with <code>YYYY MM DD HH mm ss</code> (e.g. <code>${"${DATE:format(YYYY/MM/DD)}"}</code>); without it they default to <code>YYYY-MM-DD</code> / <code>HH:mm:ss</code> / <code>YYYY-MM-DD HH:mm:ss</code>. <code>${"${USER}"}</code> and <code>${"${CAMPAIGN_NAME}"}</code> are empty for non-campaign experiments.</p>
   <p>Default: <code>${"${COMMIT_ALIAS} − ${SUBTASK_ALIAS}"}</code></p>
 </div>
 

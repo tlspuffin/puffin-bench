@@ -218,12 +218,19 @@ class GraphManager {
    */
   #ResolveExperiments(graphConfig) {
     const vars = this.#callbacks?.getState?.()?.variables;
-    return graphConfig.experiments.map((slot, idx) => ({
-      resolved:       resolveExperimentSlot(slot, vars),
-      slot, idx,
-      commitVarName:  slot.commitVar  ?? null,
-      subtaskVarName: slot.subtaskVar ?? null,
-    }));
+    return graphConfig.experiments.map((slot, idx) => {
+      const resolved = resolveExperimentSlot(slot, vars);
+      // Commit-mode runs resolve with timestamp:null; fill the latest timestamp so
+      // ${DATE}/${TIME}/${DATETIME} render (does not affect experimentKey).
+      if (resolved && resolved.tasktype !== 'Campaign' && resolved.timestamp == null) {
+        resolved.timestamp = this.#callbacks?.getLatestTimestamp?.(resolved.tasktype, resolved.commit) ?? null;
+      }
+      return {
+        resolved, slot, idx,
+        commitVarName:  slot.commitVar  ?? null,
+        subtaskVarName: slot.subtaskVar ?? null,
+      };
+    });
   }
 
   /**
@@ -316,7 +323,32 @@ class GraphManager {
       .reduce((v, t) => GraphManager.#ApplySingleTransform(v, t), value);
   }
 
+  /**
+   * Formats an epoch-millisecond timestamp using a pattern of YYYY/MM/DD/HH/mm/ss
+   * tokens (UTC, to match the campaign picker). Returns '' for a non-finite input.
+   */
+  static #FormatTimestamp(ms, pattern) {
+    if (!Number.isFinite(ms)) return '';
+    const d  = new Date(ms);
+    const p2 = n => String(n).padStart(2, '0');
+    const map = {
+      YYYY: String(d.getUTCFullYear()),
+      MM:   p2(d.getUTCMonth() + 1),
+      DD:   p2(d.getUTCDate()),
+      HH:   p2(d.getUTCHours()),
+      mm:   p2(d.getUTCMinutes()),
+      ss:   p2(d.getUTCSeconds()),
+    };
+    return pattern.replace(/YYYY|MM|DD|HH|mm|ss/g, t => map[t]);
+  }
+
   static #ApplySingleTransform(value, str) {
+    // format(pattern) — interpret value as epoch-ms and format it (for DATE/TIME/DATETIME)
+    const fmtMatch = str.match(/^format\((.+)\)$/);
+    if (fmtMatch) {
+      return GraphManager.#FormatTimestamp(Number(value), fmtMatch[1]);
+    }
+
     // beforeFirst(regex)
     const bfMatch = str.match(/^beforeFirst\((.+)\)$/);
     if (bfMatch) {
@@ -356,8 +388,11 @@ class GraphManager {
 
   /**
    * Interpolates a legend format template for an experiment.
-   * Tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}
-   * Any token accepts an optional transform: ${TOKEN:transformName} or ${TOKEN:beforeFirst(regex)}
+   * Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS},
+   *   ${SUBTASK_ALIAS}, ${USER}, ${CAMPAIGN_NAME}, ${DATE}, ${TIME}, ${DATETIME}.
+   * Any token accepts an optional transform chain (e.g. :uppercase, :beforeFirst(regex)).
+   * DATE/TIME/DATETIME additionally accept :format(<pattern>) with YYYY/MM/DD/HH/mm/ss;
+   * without it they default to YYYY-MM-DD / HH:mm:ss / YYYY-MM-DD HH:mm:ss.
    */
   static #InterpolateExperiment(fmt, resolved, slot, state) {
     const shortHash = CommitHelp.ShortHash(resolved.commit);
@@ -380,11 +415,27 @@ class GraphManager {
       SUBTASK_NAME:  resolved.subtask,
       COMMIT_ALIAS:  commitAlias,
       SUBTASK_ALIAS: subtaskAlias,
+      USER:          resolved.user ?? '',
+      CAMPAIGN_NAME: resolved.campaign ?? '',
     };
 
-    return fmt.replace(/\$\{(COMMIT_HASH|SUBTASK_TYPE|SUBTASK_NAME|COMMIT_ALIAS|SUBTASK_ALIAS)(?::([^}]*))?\}/gi, (_, token, transform) => {
-      return GraphManager.#ApplyTransform(tokens[token.toUpperCase()] ?? '', transform);
-    });
+    const ts = resolved.timestamp;
+    const dateDefaults = { DATE: 'YYYY-MM-DD', TIME: 'HH:mm:ss', DATETIME: 'YYYY-MM-DD HH:mm:ss' };
+
+    return fmt.replace(
+      /\$\{(COMMIT_HASH|SUBTASK_TYPE|SUBTASK_NAME|COMMIT_ALIAS|SUBTASK_ALIAS|USER|CAMPAIGN_NAME|DATE|TIME|DATETIME)(?::([^}]*))?\}/gi,
+      (_, token, transform) => {
+        const T = token.toUpperCase();
+        if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
+          if (ts == null) return '';
+          const hasFormat = transform && /(^|:)\s*format\(/i.test(transform);
+          const chain = hasFormat
+            ? transform
+            : (transform ? `format(${dateDefaults[T]}):${transform}` : `format(${dateDefaults[T]})`);
+          return GraphManager.#ApplyTransform(String(ts), chain);
+        }
+        return GraphManager.#ApplyTransform(tokens[T] ?? '', transform);
+      });
   }
 
   /**
@@ -407,14 +458,11 @@ class GraphManager {
    * Unknown tokens are left as-is. Variables with no value → empty string.
    */
   static InterpolateTitleFormat(fmt, variables, templateName) {
-    const today = new Date();
-    const dd    = String(today.getDate()).padStart(2, '0');
-    const mm    = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy  = today.getFullYear();
+    const now = Date.now();
+    const dateDefaults = { DATE: 'YYYY-MM-DD', TIME: 'HH:mm:ss', DATETIME: 'YYYY-MM-DD HH:mm:ss' };
 
     const map = {
       TEMPLATE: templateName ?? '',
-      DATE:     `${dd}-${mm}-${yyyy}`,
     };
 
     for (const [name, entry] of variables.commits) {
@@ -436,7 +484,15 @@ class GraphManager {
     }
 
     return fmt.replace(/\$\{([^:}]+)(?::([^}]*))?\}/gi, (match, token, transform) => {
-      const val = map[token.trim().toUpperCase()];
+      const T = token.trim().toUpperCase();
+      if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
+        const hasFormat = transform && /(^|:)\s*format\(/i.test(transform);
+        const chain = hasFormat
+          ? transform
+          : (transform ? `format(${dateDefaults[T]}):${transform}` : `format(${dateDefaults[T]})`);
+        return GraphManager.#ApplyTransform(String(now), chain);
+      }
+      const val = map[T];
       if (val === undefined) return match;
       return GraphManager.#ApplyTransform(val, transform);
     });
