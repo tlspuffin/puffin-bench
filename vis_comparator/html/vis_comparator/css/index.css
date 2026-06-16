@@ -1101,13 +1101,71 @@ select:focus {
   white-space: nowrap;
 }
 
-.campaign-picker-select {
-  width: 100%;
-  padding: 4px 6px;
-  font-size: 0.8rem;
-  border: 1px solid var(--color-border, #ccc);
+.campaign-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+.campaign-filter-bar .simple-dropdown { flex: 1; min-width: 0; }
+.campaign-filter-bar .commit-picker-trigger {
+  height: auto;
+  min-height: unset;
+  margin-bottom: 0;
+  padding: 3px 6px;
+  font-size: 0.72rem;
+  font-family: inherit;
   border-radius: 4px;
+}
+.campaign-filter-bar .commit-picker-trigger::after { font-size: 0.8rem; padding-left: 4px; }
+
+.campaign-picker-table {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.campaign-picker-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 0.9fr 1.2fr 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+  font-size: 0.78rem;
+}
+.campaign-picker-row:hover { background: rgba(102,126,234,0.08); }
+.campaign-picker-row.selected { background: rgba(102,126,234,0.16); }
+.campaign-picker-header {
+  position: sticky;
+  top: 0;
   background: var(--color-bg, #fff);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #888);
+  cursor: default;
+}
+.campaign-picker-header .campaign-cell { cursor: pointer; user-select: none; }
+.campaign-picker-unset { grid-template-columns: 1fr; color: var(--color-text-muted, #888); }
+.campaign-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-cell-commitShort { font-family: 'Courier New', monospace; color: var(--color-text-muted, #888); }
+.campaign-subtype-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  background: #2a9d8f;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-campaign-info {

@@ -833,12 +833,13 @@ class UI {
   }
 
   /**
-   * Campaign run selector. Each option is one campaign run (one zst).
+   * Rich campaign run selector (mirrors the commit picker style).
+   * Columns: username, campaign, commit (short), date, subtype (tag).
+   * Search bar + sortable column headers + per-column value filters.
+   * Each row is one campaign run (one zst).
+   *
    * `.value` is a runRef { type:'Campaign', commit, timestamp, user, campaign, subject }
    * or null; dispatches a native `change` event on selection.
-   *
-   * NOTE: minimal native-select implementation (Phase 3). Phase 4 replaces this
-   * with a rich columns/search/sort/filter picker keeping the same `.value` contract.
    *
    * @param {Array<{type,user,campaign,commit,timestamp,subjects:string[]}>} campaigns
    * @param {object} options
@@ -847,48 +848,208 @@ class UI {
    */
   CreateCampaignPicker(campaigns, options) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'campaign-picker';
+    wrapper.className = 'commit-picker campaign-picker';
     this.#ApplyOptions(wrapper, options?.container);
 
-    let _value = options?.selected ?? null;
-    Object.defineProperty(wrapper, 'value', { get: () => _value, set: (v) => { _value = v; } });
+    let _value   = options?.selected ?? null;
+    let _query   = '';
+    let _sortKey = 'date';
+    let _sortDir = -1;  // -1 desc (newest first), 1 asc
+    const _filters = { user: '', campaign: '', subject: '' };
 
-    const runToRef = (r) => ({
-      type: 'Campaign', commit: r.commit, timestamp: r.timestamp,
-      user: r.user, campaign: r.campaign,
-      subject: (r.subjects && r.subjects[0]) || null,
+    Object.defineProperty(wrapper, 'value', {
+      get: () => _value,
+      set: (v) => { _value = v; updateTrigger(); },
     });
-    const label = (r) => {
-      const date = new Date(Number(r.timestamp)).toISOString().slice(0, 16).replace('T', ' ');
-      const subj = (r.subjects && r.subjects[0]) ? ` · ${r.subjects[0]}` : '';
-      return `${r.user}/${r.campaign} — ${CommitHelp.ShortHash(r.commit)} (${date})${subj}`;
+
+    // ── Normalised rows ───────────────────────────────────────
+    const fmtDate = (ts) => new Date(Number(ts)).toISOString().slice(0, 16).replace('T', ' ');
+    const rows = [...(campaigns ?? [])].map(r => ({
+      ref: {
+        type: 'Campaign', commit: r.commit, timestamp: r.timestamp,
+        user: r.user, campaign: r.campaign,
+        subject: (r.subjects && r.subjects[0]) || null,
+      },
+      user:        r.user ?? '',
+      campaign:    r.campaign ?? '',
+      commitShort: CommitHelp.ShortHash(r.commit ?? ''),
+      date:        fmtDate(r.timestamp),
+      subject:     (r.subjects && r.subjects[0]) || '',
+      timestamp:   Number(r.timestamp),
+    }));
+    const distinct = (key) => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();
+
+    // ── Trigger + panel ───────────────────────────────────────
+    const trigger = document.createElement('div');
+    trigger.className = 'commit-picker-trigger';
+    trigger.tabIndex = 0;
+    wrapper.appendChild(trigger);
+
+    const panel = document.createElement('div');
+    panel.className = 'commit-picker-panel hidden';
+    wrapper.appendChild(panel);
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = 'Search user / campaign / commit / subtype…';
+    search.className = 'commit-picker-search';
+    panel.appendChild(search);
+
+    // Per-column value filters. These are custom in-DOM dropdowns (CreateSimpleDropdown)
+    // rather than native <select>s: a native <select>'s OS popup renders outside the panel
+    // DOM, so picking an option counted as an outside-click and closed the whole picker.
+    const FILTER_ALL = ' all';  // sentinel for the "no filter" row (truthy, can't collide with a real value)
+    const filterBar = document.createElement('div');
+    filterBar.className = 'campaign-filter-bar';
+    const makeFilter = (key, label) => {
+      const opts = [{ value: FILTER_ALL, text: `all ${label}`, selected: true }];
+      distinct(key).forEach(v => opts.push({ value: v, text: v }));
+      const dd = this.CreateSimpleDropdown(opts);
+      dd.addEventListener('change', () => {
+        _filters[key] = dd.value === FILTER_ALL ? '' : (dd.value ?? '');
+        renderRows();
+      });
+      filterBar.appendChild(dd);
     };
+    makeFilter('user', 'users');
+    makeFilter('campaign', 'campaigns');
+    makeFilter('subject', 'subtypes');
+    panel.appendChild(filterBar);
 
-    const select = document.createElement('select');
-    select.className = 'campaign-picker-select';
+    const table = document.createElement('div');
+    table.className = 'campaign-picker-table';
+    panel.appendChild(table);
 
-    const optNone = document.createElement('option');
-    optNone.value = '';
-    optNone.textContent = '(—)';
-    select.appendChild(optNone);
-
-    // Newest first.
-    const sorted = [...(campaigns ?? [])].sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
-    for (const r of sorted) {
-      const opt = document.createElement('option');
-      opt.value = String(r.timestamp);
-      opt.textContent = label(r);
-      select.appendChild(opt);
-    }
-    if (_value?.timestamp != null) select.value = String(_value.timestamp);
-
-    select.addEventListener('change', () => {
-      const ts = select.value;
-      _value = ts ? runToRef(sorted.find(r => String(r.timestamp) === ts)) : null;
-      wrapper.dispatchEvent(new Event('change'));
+    // ── Wiring ────────────────────────────────────────────────
+    trigger.addEventListener('click', () => panel.classList.contains('hidden') ? openPanel() : closePanel());
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); }
+      if (e.key === 'Escape') closePanel();
     });
+    search.addEventListener('input', () => { _query = search.value.toLowerCase(); renderRows(); });
 
-    wrapper.appendChild(select);
+    // Dismiss when clicking outside the picker. The filter dropdowns are in-DOM
+    // descendants of the wrapper, so selecting one never registers as an outside click.
+    const outsideHandler = (e) => {
+      if (!document.contains(wrapper)) { document.removeEventListener('click', outsideHandler, true); return; }
+      if (!wrapper.contains(e.target)) closePanel();
+    };
+    document.addEventListener('click', outsideHandler, true);
+
+    function openPanel() {
+      const rect = trigger.getBoundingClientRect();
+      const panelW = Math.max(rect.width, 560);
+      let left = rect.left;
+      if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
+      panel.style.top   = (rect.bottom + 4) + 'px';
+      panel.style.left  = left + 'px';
+      panel.style.width = panelW + 'px';
+      panel.classList.remove('hidden');
+      search.value = ''; _query = '';
+      renderRows();
+      search.focus();
+    }
+    function closePanel() { panel.classList.add('hidden'); }
+
+    function updateTrigger() {
+      if (!_value) { trigger.textContent = '(—)'; trigger.classList.add('empty'); return; }
+      trigger.classList.remove('empty');
+      const subj = _value.subject ? ` · ${_value.subject}` : '';
+      trigger.textContent = `${_value.user}/${_value.campaign} — ${CommitHelp.ShortHash(_value.commit)}${subj}`;
+    }
+
+    const COLS = [
+      { key: 'user',        label: 'User' },
+      { key: 'campaign',    label: 'Campaign' },
+      { key: 'commitShort', label: 'Commit' },
+      { key: 'date',        label: 'Date', sortKey: 'timestamp' },
+      { key: 'subject',     label: 'Subtype' },
+    ];
+
+    function renderRows() {
+      table.replaceChildren();
+
+      // Header (sortable).
+      const header = document.createElement('div');
+      header.className = 'campaign-picker-row campaign-picker-header';
+      COLS.forEach(col => {
+        const cell = document.createElement('div');
+        cell.className = `campaign-cell campaign-cell-${col.key}`;
+        const sk = col.sortKey ?? col.key;
+        cell.textContent = col.label + (_sortKey === sk ? (_sortDir === 1 ? ' ▲' : ' ▼') : '');
+        cell.onclick = () => {
+          if (_sortKey === sk) { _sortDir = -_sortDir; } else { _sortKey = sk; _sortDir = 1; }
+          renderRows();
+        };
+        header.appendChild(cell);
+      });
+      table.appendChild(header);
+
+      // Unset row.
+      const unset = document.createElement('div');
+      unset.className = 'campaign-picker-row campaign-picker-unset' + (_value ? '' : ' selected');
+      unset.textContent = '(—)';
+      unset.onclick = () => selectRef(null);
+      table.appendChild(unset);
+
+      // Filter + search.
+      let visible = rows.filter(r => {
+        if (_filters.user && r.user !== _filters.user) return false;
+        if (_filters.campaign && r.campaign !== _filters.campaign) return false;
+        if (_filters.subject && r.subject !== _filters.subject) return false;
+        if (_query) {
+          const hay = `${r.user} ${r.campaign} ${r.commitShort} ${r.date} ${r.subject}`.toLowerCase();
+          if (!hay.includes(_query)) return false;
+        }
+        return true;
+      });
+
+      // Sort.
+      visible.sort((a, b) => {
+        const va = a[_sortKey], vb = b[_sortKey];
+        const cmp = (typeof va === 'number' && typeof vb === 'number')
+          ? va - vb : String(va).localeCompare(String(vb));
+        return cmp * _sortDir;
+      });
+
+      visible.forEach(r => {
+        const row = document.createElement('div');
+        const isSel = _value && _value.timestamp === r.timestamp;
+        row.className = 'campaign-picker-row' + (isSel ? ' selected' : '');
+        row.onclick = () => selectRef(r.ref);
+        COLS.forEach(col => {
+          const cell = document.createElement('div');
+          cell.className = `campaign-cell campaign-cell-${col.key}`;
+          if (col.key === 'subject') {
+            const tag = document.createElement('span');
+            tag.className = 'campaign-subtype-tag';
+            tag.textContent = r.subject;
+            cell.appendChild(tag);
+          } else {
+            cell.textContent = r[col.key];
+          }
+          row.appendChild(cell);
+        });
+        table.appendChild(row);
+      });
+
+      if (visible.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'commit-picker-empty';
+        empty.textContent = rows.length === 0 ? 'No campaign runs' : 'No runs match';
+        table.appendChild(empty);
+      }
+    }
+
+    function selectRef(ref) {
+      _value = ref;
+      updateTrigger();
+      closePanel();
+      options?.callback?.(ref);
+      wrapper.dispatchEvent(new Event('change'));
+    }
+
+    updateTrigger();
     return wrapper;
   }
 
