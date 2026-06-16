@@ -17,6 +17,7 @@ import {
   clearModalCancel,
   dedupSubtasks,
   isVarReferenced,
+  experimentKey,
 } from './state.js';
 import { CommitHelp } from './commithelp.js';
 
@@ -151,7 +152,7 @@ function getGraphIDsUsingExperiment(state, expKey) {
   for (const [id, config] of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
-      if (def && `${def.commit}:${def.tasktype}:${def.subtask}` === expKey) { ids.push(id); break; }
+      if (def && experimentKey(def) === expKey) { ids.push(id); break; }
     }
   }
   return ids;
@@ -201,7 +202,7 @@ async function _refetchAndRedrawGraph(state, id, config) {
     resolved.map(exp => _apirest.LoadCommitMetricsValues(
       exp.tasktype, exp.commit, exp.subtask,
       config.min, config.max, config.delta,
-      resolvedMetrics
+      resolvedMetrics, exp.timestamp
     ))
   );
 
@@ -209,7 +210,7 @@ async function _refetchAndRedrawGraph(state, id, config) {
     resolved
       .map((exp, i) => ({ exp, data: results[i] }))
       .filter(p => p.data != null)
-      .map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
+      .map(p => [experimentKey(p.exp), p.data])
   );
 
   if (dataMap.size === 0) return;
@@ -534,7 +535,7 @@ function getActiveExperimentKeys(state) {
   for (const [, config] of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
-      if (def) keys.add(`${def.commit}:${def.tasktype}:${def.subtask}`);
+      if (def) keys.add(experimentKey(def));
     }
   }
   return keys;
@@ -774,7 +775,7 @@ async function openMetricVarModal(name, currentVal, state) {
   for (const [, config] of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
-      if (def) uniqueExps.set(`${def.commit}:${def.tasktype}:${def.subtask}`, def);
+      if (def) uniqueExps.set(experimentKey(def), def);
     }
   }
   // Also include all commit×subtask variable combinations
@@ -784,7 +785,7 @@ async function openMetricVarModal(name, currentVal, state) {
       if (!subtaskEntry?.value) continue;
       const { tasktype, subtask } = subtaskEntry.value;
       const def = { commit: commitEntry.value, tasktype, subtask };
-      uniqueExps.set(`${def.commit}:${def.tasktype}:${def.subtask}`, def);
+      uniqueExps.set(experimentKey(def), def);
     }
   }
 
@@ -851,7 +852,7 @@ async function openMetricVarModal(name, currentVal, state) {
 
   // Fetch metrics, then replace only the content area
   const metricsResults = experiments.length > 0
-    ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask)))
+    ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask, exp.timestamp)))
     : [];
 
   const union = new Set();

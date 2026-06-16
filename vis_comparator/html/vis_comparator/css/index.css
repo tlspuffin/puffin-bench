@@ -1149,6 +1149,13 @@ select:focus {
 }
 .campaign-picker-header .campaign-cell { cursor: pointer; user-select: none; }
 .campaign-picker-unset { grid-template-columns: 1fr; color: var(--color-text-muted, #888); }
+.campaign-picker-var {
+  grid-template-columns: 1fr;
+  font-family: monospace;
+  font-size: 0.74rem;
+  color: var(--color-primary, #667eea);
+  border-bottom: 1px solid rgba(102,126,234,0.15);
+}
 .campaign-cell {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1884,6 +1891,23 @@ input:disabled {
   flex: 1;
   min-width: 100px;
 }
+
+.experiment-mode-toggle {
+  align-self: flex-end;
+  margin-bottom: 1px;
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.experiment-mode-toggle:hover { background: rgba(102, 126, 234, 0.1); }
+
+.slot-field-disabled { opacity: 0.45; pointer-events: none; }
 
 .slot-field-label {
   font-size: 0.68rem;

@@ -140,8 +140,21 @@ export function resolveExperimentSlot(slot, variables) {
 }
 
 /**
+ * Stable identity key for a resolved experiment. Commit-mode runs key on
+ * commit:tasktype:subtask; campaign runs append the timestamp so two runs of the
+ * same campaign (same commit+subject, different timestamp) stay distinct.
+ * @param {{commit,tasktype,subtask,timestamp?}|null} resolved
+ * @returns {string|null}
+ */
+export function experimentKey(resolved) {
+  if (!resolved) return null;
+  const base = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+  return resolved.timestamp != null ? `${base}:${resolved.timestamp}` : base;
+}
+
+/**
  * Returns true if any graph's configuration references the given variable name.
- * @param {'commit'|'subtask'|'metric'} type
+ * @param {'commit'|'subtask'|'campaign'|'metric'} type
  */
 export function isVarReferenced(state, varName, type) {
   for (const [, config] of state.graphSettings) {
@@ -164,6 +177,7 @@ export function getKnownSubtasks(state) {
     const parts = key.split(':');
     if (parts.length < 3) continue;
     const tasktype = parts[1];
+    if (tasktype === 'Campaign') continue;  // campaign keys carry a timestamp; not commit subtasks
     const subtask  = parts.slice(2).join(':');
     const token    = `${tasktype}:${subtask}`;
     if (!seen.has(token)) { seen.add(token); result.push({ tasktype, subtask }); }

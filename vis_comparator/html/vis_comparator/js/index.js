@@ -5,7 +5,7 @@ import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
-import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor } from './state.js';
+import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, OpenInfoModal } from './dialogs.js';
 
@@ -213,7 +213,7 @@ async function restoreGraphs(savedSettings) {
       resolved.map(exp => apirest.LoadCommitMetricsValues(
         exp.tasktype, exp.commit, exp.subtask,
         graphConfig.min, graphConfig.max, graphConfig.delta,
-        resolvedMetrics
+        resolvedMetrics, exp.timestamp
       ))
     );
 
@@ -221,13 +221,13 @@ async function restoreGraphs(savedSettings) {
       resolved
         .map((exp, i) => ({ exp, data: results[i] }))
         .filter(p => p.data != null)
-        .map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
+        .map(p => [experimentKey(p.exp), p.data])
     );
 
     if (dataMap.size === 0) continue;
 
     for (const exp of resolved) {
-      const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
+      const expKey = experimentKey(exp);
       if (!state.commitRegistry.has(expKey)) {
         state.commitRegistry.set(expKey, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });
       }

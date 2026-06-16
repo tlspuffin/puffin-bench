@@ -1,7 +1,7 @@
 // Shared commit colour palette — imported by index.js for commitRegistry assignment.
 import {CommitHelp} from "./commithelp.js";
 import { ICONS, COMMIT_PALETTE, DASH_PALETTE } from './constants.js';
-import { resolveMetricEntry, resolveExperimentSlot } from './state.js';
+import { resolveMetricEntry, resolveExperimentSlot, experimentKey } from './state.js';
 
 /**
  * Manages Plotly graph instances displayed in the main area.
@@ -275,7 +275,7 @@ class GraphManager {
    *   3. commitRegistry[key].displayName (individual override)
    */
   #ExperimentDisplayName(resolved, slot, state) {
-    const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+    const expKey = experimentKey(resolved);
     const entry  = state?.commitRegistry?.get(expKey);
     if (entry?.displayName) return entry.displayName;
     const fmt = state?.legendFormat?.experiment;
@@ -534,7 +534,7 @@ class GraphManager {
     // ── Missing-data warning ──────────────────────────────────────
     // Show ⚠ if any resolved experiment has no data available (fetch failed or combination unknown)
     const missingExps = resolvedEntries
-      .filter(({ resolved }) => resolved && !dataMap?.get(`${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`))
+      .filter(({ resolved }) => resolved && !dataMap?.get(experimentKey(resolved)))
       .map(({ resolved }) => `${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`);
     if (missingExps.length > 0) {
       const warn = document.createElement('span');
@@ -564,7 +564,7 @@ class GraphManager {
     let timestamps = [];
     for (const { resolved } of resolvedEntries) {
       if (!resolved) continue;
-      const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+      const expKey = experimentKey(resolved);
       const data = dataMap?.get(expKey);
       if (data?.header) {
         const { min, max, step } = data.header;
@@ -589,7 +589,7 @@ class GraphManager {
         return;
       }
 
-      const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+      const expKey = experimentKey(resolved);
       const data   = dataMap?.get(expKey);
 
       // ── Placeholder: resolved experiment but data unavailable ─────

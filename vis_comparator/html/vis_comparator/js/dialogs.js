@@ -6,7 +6,7 @@
 
 import { ICONS, TASK_TYPES } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
+import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -261,7 +261,7 @@ async function rebuildMetricsUI(ctx) {
 
   const metricsResults = await Promise.all(
     resolvedWithIdx.map(({ resolved }) =>
-      _apirest.LoadCommitMetrics(resolved.tasktype, resolved.commit, resolved.subtask))
+      _apirest.LoadCommitMetrics(resolved.tasktype, resolved.commit, resolved.subtask, resolved.timestamp))
   );
 
   loadingDiv.remove();
@@ -547,7 +547,7 @@ export async function AddGraphique(prefill = null, editId = null) {
         const delta = +document.getElementById('time_delta_' + ctx.timeID).value;
 
         for (const exp of resolved) {
-          const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
+          const expKey = experimentKey(exp);
           if (!_state.commitRegistry.has(expKey)) {
             _state.commitRegistry.set(expKey, { color: nextCommitColor(_state.commitRegistry), displayName: null });
           }
@@ -569,7 +569,7 @@ export async function AddGraphique(prefill = null, editId = null) {
 
         const results = await Promise.all(
           resolved.map(exp => _apirest.LoadCommitMetricsValues(
-            exp.tasktype, exp.commit, exp.subtask, min, max, delta, fetchMetrics))
+            exp.tasktype, exp.commit, exp.subtask, min, max, delta, fetchMetrics, exp.timestamp))
         );
         const validPairs = resolved
           .map((exp, i) => ({ exp, data: results[i] }))
@@ -577,7 +577,7 @@ export async function AddGraphique(prefill = null, editId = null) {
 
         if (validPairs.length > 0) {
           const graphConfig = {
-            experiments: slots.filter(s => s.commitVar || s.commit || s.subtaskVar || s.tasktype),
+            experiments: slots.filter(s => s.commitVar || s.commit || s.subtaskVar || s.tasktype || s.campaignVar || s.campaignRun),
             metricsMode: ctx.metricsMode,
             metrics: ctx.selectedMetrics,
             min, max, delta,
@@ -587,7 +587,7 @@ export async function AddGraphique(prefill = null, editId = null) {
           };
 
           const dataMap = new Map(
-            validPairs.map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
+            validPairs.map(p => [experimentKey(p.exp), p.data])
           );
 
           if (editId !== null) {
@@ -654,7 +654,57 @@ export async function AddGraphique(prefill = null, editId = null) {
     });
   }
 
+  function slotField(labelText, el) {
+    const field = document.createElement('div');
+    field.className = 'slot-field';
+    const label = document.createElement('span');
+    label.className = 'slot-field-label';
+    label.textContent = labelText;
+    field.appendChild(label);
+    field.appendChild(el);
+    return field;
+  }
+
   function renderSlotRow(row, slot, slotIdx) {
+    const mode = slot.mode || ((slot.campaignVar || slot.campaignRun) ? 'campaign' : 'commit');
+
+    // ── Mode toggle (commit ⇄ campaign) ──────────────────────────
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'experiment-mode-toggle';
+    toggle.textContent = mode === 'campaign' ? 'Campaign' : 'Commit';
+    toggle.title = 'Toggle commit / campaign mode';
+    toggle.onclick = function() {
+      if (mode === 'campaign') {
+        slot.mode = 'commit';
+        slot.campaignVar = null; slot.campaignRun = null;
+      } else {
+        slot.mode = 'campaign';
+        slot.commit = null; slot.commitVar = null;
+        slot.tasktype = null; slot.subtask = null; slot.subtaskVar = null;
+      }
+      renderExperiments();
+      onExperimentChange();
+    };
+    row.appendChild(toggle);
+
+    if (mode === 'campaign') renderCampaignSlot(row, slot);
+    else renderCommitSlot(row, slot);
+
+    // ⚠ badge: resolved combination has no data from the server
+    if (ctx.invalidSlotIndices.has(slotIdx)) {
+      const resolved = resolveSlot(slot);
+      const warn = document.createElement('span');
+      warn.className = 'experiment-slot-warn';
+      warn.textContent = ICONS.WARN;
+      warn.title = resolved
+        ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
+        : 'No data';
+      row.appendChild(warn);
+    }
+  }
+
+  function renderCommitSlot(row, slot) {
     // Commit picker
     const initialSelected = slot.commitVar ? `_var_${slot.commitVar}` : (slot.commit ?? null);
     const commitSel = _ui.CreateCommitPicker(gitHistory, allCommits, {
@@ -698,35 +748,30 @@ export async function AddGraphique(prefill = null, editId = null) {
       onExperimentChange();
     });
 
-    const commitField = document.createElement('div');
-    commitField.className = 'slot-field';
-    const commitLabel = document.createElement('span');
-    commitLabel.className = 'slot-field-label';
-    commitLabel.textContent = 'Commit';
-    commitField.appendChild(commitLabel);
-    commitField.appendChild(commitSel);
-    row.appendChild(commitField);
+    row.appendChild(slotField('Commit', commitSel));
+    row.appendChild(slotField('Subtask', subtaskSel));
+  }
 
-    const subtaskField = document.createElement('div');
-    subtaskField.className = 'slot-field';
-    const subtaskLabel = document.createElement('span');
-    subtaskLabel.className = 'slot-field-label';
-    subtaskLabel.textContent = 'Subtask';
-    subtaskField.appendChild(subtaskLabel);
-    subtaskField.appendChild(subtaskSel);
-    row.appendChild(subtaskField);
-
-    // ⚠ badge: resolved combination has no data from the server
-    if (ctx.invalidSlotIndices.has(slotIdx)) {
-      const resolved = resolveSlot(slot);
-      const warn = document.createElement('span');
-      warn.className = 'experiment-slot-warn';
-      warn.textContent = ICONS.WARN;
-      warn.title = resolved
-        ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
-        : 'No data';
-      row.appendChild(warn);
-    }
+  function renderCampaignSlot(row, slot) {
+    // Single selector: campaign variables appear as rows alongside the direct runs
+    // (mirrors the commit picker). .value is a `_var_NAME` string or a direct runRef.
+    const initialSelected = slot.campaignVar ? `_var_${slot.campaignVar}` : (slot.campaignRun ?? null);
+    const runSel = _ui.CreateCampaignPicker(globalCampaigns, {
+      selected: initialSelected,
+      variables: _state.variables.campaigns,
+    });
+    runSel.addEventListener('change', function() {
+      const v = runSel.value;
+      if (typeof v === 'string' && v.startsWith('_var_')) {
+        slot.campaignVar = v.slice(5); slot.campaignRun = null;
+      } else if (v) {
+        slot.campaignRun = v; slot.campaignVar = null;
+      } else {
+        slot.campaignVar = null; slot.campaignRun = null;
+      }
+      onExperimentChange();
+    });
+    row.appendChild(slotField('Campaign', runSel));
   }
 
   function onExperimentChange() {

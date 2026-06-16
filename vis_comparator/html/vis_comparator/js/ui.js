@@ -951,11 +951,26 @@ class UI {
     }
     function closePanel() { panel.classList.add('hidden'); }
 
+    // One-line summary of a campaign runRef, including the date so two runs of the
+    // same campaign are distinguishable once selected.
+    function runSummary(ref) {
+      if (!ref) return '(undefined)';
+      const date = ref.timestamp != null ? ` (${fmtDate(ref.timestamp)})` : '';
+      const subj = ref.subject ? ` · ${ref.subject}` : '';
+      return `${ref.user}/${ref.campaign} — ${CommitHelp.ShortHash(ref.commit)}${date}${subj}`;
+    }
+    const isVarValue = (v) => typeof v === 'string' && v.startsWith('_var_');
+
     function updateTrigger() {
       if (!_value) { trigger.textContent = '(—)'; trigger.classList.add('empty'); return; }
       trigger.classList.remove('empty');
-      const subj = _value.subject ? ` · ${_value.subject}` : '';
-      trigger.textContent = `${_value.user}/${_value.campaign} — ${CommitHelp.ShortHash(_value.commit)}${subj}`;
+      if (isVarValue(_value)) {
+        const name  = _value.slice(5);
+        const entry = options?.variables?.get(name);
+        trigger.textContent = entry?.value ? `${name} = ${runSummary(entry.value)}` : `${name} (undefined)`;
+      } else {
+        trigger.textContent = runSummary(_value);
+      }
     }
 
     const COLS = [
@@ -992,6 +1007,20 @@ class UI {
       unset.onclick = () => selectRef(null);
       table.appendChild(unset);
 
+      // Campaign-variable rows (single selector — like the commit picker's variable rows).
+      if (options?.variables?.size > 0) {
+        for (const [name, entry] of options.variables) {
+          const val   = `_var_${name}`;
+          const label = `${name} = ${entry?.value ? runSummary(entry.value) : '(undefined)'}`;
+          if (_query && !label.toLowerCase().includes(_query)) continue;
+          const vrow = document.createElement('div');
+          vrow.className = 'campaign-picker-row campaign-picker-var' + (_value === val ? ' selected' : '');
+          vrow.textContent = label;
+          vrow.onclick = () => selectRef(val);
+          table.appendChild(vrow);
+        }
+      }
+
       // Filter + search.
       let visible = rows.filter(r => {
         if (_filters.user && r.user !== _filters.user) return false;
@@ -1014,7 +1043,7 @@ class UI {
 
       visible.forEach(r => {
         const row = document.createElement('div');
-        const isSel = _value && _value.timestamp === r.timestamp;
+        const isSel = _value && typeof _value === 'object' && _value.timestamp === r.timestamp;
         row.className = 'campaign-picker-row' + (isSel ? ' selected' : '');
         row.onclick = () => selectRef(r.ref);
         COLS.forEach(col => {
