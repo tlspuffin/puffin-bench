@@ -109,6 +109,12 @@ export function resolveExperimentSlot(slot, variables) {
         campaign:  run.campaign ?? null,
       };
     }
+    // A selected campaign run that resolves but has no subject can't be plotted
+    // (its archive metadata.json was missing/unreadable). Flag it so it's
+    // distinguishable from a genuinely unset variable rather than silently empty.
+    if (run && run.commit && run.timestamp != null && !run.subject) {
+      console.warn('Campaign run has no subject and cannot be plotted:', run);
+    }
     return null;
   }
 

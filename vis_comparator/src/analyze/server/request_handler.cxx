@@ -1,6 +1,7 @@
 #include "request_handler.hxx"
 #include "parts_handler.hxx"
 #include "../../utils/rapidjson.hxx"
+#include <algorithm>
 #include <fstream>
 #include <unordered_map>
 #include <string>
@@ -439,25 +440,6 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   ss << stream.rdbuf();
   std::string const body = ss.str();
 
-  // Response cache: identical (runId, params, body) for an unchanged run -> hit.
-  std::string const runTag = apis_->analyzeAPI_.GetRunTag(type, commitID, timestamp);
-  std::string cacheKey;
-  if (!runTag.empty()) {
-    cacheKey = type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
-        "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
-        "@" + runTag + "#" + body;
-    std::string cached;
-    if (valuesCache.Get(cacheKey, cached)) {
-      response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
-      response.setContentType("application/x-metrics-binary+json");
-      response.setContentLength64(cached.size());
-      std::ostream& ostr = response.send();
-      ostr.write(cached.data(), static_cast<std::streamsize>(cached.size()));
-      ostr.flush();
-      return;
-    }
-  }
-
   rapidjson::Document doc;
   doc.Parse(body.c_str());
   if (doc.HasParseError()) {
@@ -488,6 +470,39 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   if (metrics.empty() || error) {
     SendErrorResponse(response, 400, "Invalid json in request body");
     return;
+  }
+
+  // Response cache: key on the normalized request (runId, params, sorted selection)
+  // for an unchanged run -> hit. Built from parsed fields so byte differences in
+  // the body (whitespace, key/array order) still hit the same entry.
+  std::string const runTag = apis_->analyzeAPI_.GetRunTag(type, commitID, timestamp);
+  std::string cacheKey;
+  if (!runTag.empty()) {
+    auto joinU64 = [](std::vector<uint64_t> v) {
+      std::sort(v.begin(), v.end());
+      std::string s;
+      for (uint64_t x : v) { s += std::to_string(x); s += ','; }
+      return s;
+    };
+    std::vector<std::string> sortedMetrics = metrics;
+    std::sort(sortedMetrics.begin(), sortedMetrics.end());
+    std::string metricsJoined;
+    for (std::string const& m : sortedMetrics) { metricsJoined += m; metricsJoined += ','; }
+
+    cacheKey = type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
+        "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
+        "@" + runTag + "#agg=" + aggregate + ";runs=" + joinU64(runs) +
+        ";clients=" + joinU64(clients) + ";metrics=" + metricsJoined;
+    std::string cached;
+    if (valuesCache.Get(cacheKey, cached)) {
+      response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
+      response.setContentType("application/x-metrics-binary+json");
+      response.setContentLength64(cached.size());
+      std::ostream& ostr = response.send();
+      ostr.write(cached.data(), static_cast<std::streamsize>(cached.size()));
+      ostr.flush();
+      return;
+    }
   }
 
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;

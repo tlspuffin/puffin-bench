@@ -17,6 +17,20 @@ static std::regex const reStats("^((?:.*/)?(artefacts/(?:[^/]+/)*([0-9]+))-stats
 static std::regex const reTypePerf("^Perf.*$");
 static std::regex const reTypeVuln("^Vuln.*$");
 
+// Escapes regex metacharacters so a free-form subject name is matched literally.
+static std::string RegexEscape(std::string const& s) {
+  static std::string const specials = ".^$|()[]{}*+?\\";
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    if (specials.find(c) != std::string::npos) {
+      out.push_back('\\');
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+
 ns_Analyze::DataManager::DataType StringToDataType(std::string const& type) {
   if (type == "int32") {
     return ns_Analyze::DataManager::DataType::INT32;
@@ -240,8 +254,18 @@ void ns_Analyze::DataManager::BuildIndex() {
       doc.ParseStream(isw);
       if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("entries") &&
           doc["entries"].IsArray()) {
+        auto hasStr = [](rapidjson::Value const& v, char const* k) {
+          return v.HasMember(k) && v[k].IsString();
+        };
         for (auto const& e : doc["entries"].GetArray()) {
-          if (!e.IsObject()) {
+          // Treat any malformed/stale entry as a cache miss: skip it so the run
+          // gets re-parsed fresh during the walk below.
+          if (!e.IsObject() || !hasStr(e, "kind") || !hasStr(e, "type") ||
+              !hasStr(e, "commit") || !e.HasMember("timestamp") || !e["timestamp"].IsUint64() ||
+              !hasStr(e, "user") || !hasStr(e, "campaign") || !hasStr(e, "relpath") ||
+              !e.HasMember("mtime") || !e["mtime"].IsInt64() ||
+              !e.HasMember("size") || !e["size"].IsUint64() ||
+              !e.HasMember("subjects") || !e["subjects"].IsArray()) {
             continue;
           }
           RunEntry r{};
@@ -254,8 +278,13 @@ void ns_Analyze::DataManager::BuildIndex() {
           r.relpath   = std::filesystem::path(e["relpath"].GetString());
           r.mtime     = e["mtime"].GetInt64();
           r.size      = e["size"].GetUint64();
+          bool subjectsOk = true;
           for (auto const& s : e["subjects"].GetArray()) {
+            if (!s.IsString()) { subjectsOk = false; break; }
             r.subjects.push_back(s.GetString());
+          }
+          if (!subjectsOk) {
+            continue;
           }
           cache.emplace(r.relpath.string(), std::move(r));
         }
@@ -368,7 +397,6 @@ void ns_Analyze::DataManager::BuildIndex() {
       e.AddMember("subjects", subjects, alloc);
       entries.PushBack(e, alloc);
     }
-    doc.AddMember("version", 1, alloc);
     doc.AddMember("entries", entries, alloc);
 
     std::ofstream ofs(cachePath);
@@ -397,19 +425,6 @@ ns_Analyze::DataManager::RunEntry const* ns_Analyze::DataManager::Resolve(
     return nullptr;
   }
   return &runIndex_[ts->second];
-}
-
-ns_Analyze::DataManager::RunEntry const* ns_Analyze::DataManager::ResolveLatest(
-    std::string const& type, std::string const& commit) const {
-  auto t = runsByTriple_.find(type);
-  if (t == runsByTriple_.end()) {
-    return nullptr;
-  }
-  auto c = t->second.find(commit);
-  if (c == t->second.end() || c->second.empty()) {
-    return nullptr;
-  }
-  return &runIndex_[c->second.rbegin()->second];  // highest timestamp
 }
 
 std::vector<std::pair<std::string, uint64_t>>
@@ -465,16 +480,20 @@ std::vector<std::pair<std::string, uint64_t>>
 
 struct ns_Analyze::DataManager::SMetricsSummaries
 ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string const& commitID, uint64_t timestamp, std::string const& subject) {
-  struct SMetricsSummaries result {0};
   RunEntry const* run = Resolve(type, commitID, timestamp);
   if (run == nullptr) {
-    return result;
+    return SMetricsSummaries{0};
   }
-
   std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
   FileTARZST archive(binFilename);
+  return CommitMetrics(archive, subject);
+}
+
+struct ns_Analyze::DataManager::SMetricsSummaries
+ns_Analyze::DataManager::CommitMetrics(FileTARZST& archive, std::string const& subject) {
+  struct SMetricsSummaries result {0};
   std::vector<std::pair<std::string, uint64_t>> metadatasFilename =
-      archive.ListFiles(std::regex("^/*artefacts/"+subject+"/[^/]+/metadata.json$"));
+      archive.ListFiles(std::regex("^/*artefacts/"+RegexEscape(subject)+"/[^/]+/metadata.json$"));
 
   for(auto const& metadataFilename : metadatasFilename) {
     static std::regex reRunID(".*/([0-9]+)-stats.json.bin/.*");
@@ -504,7 +523,15 @@ ns_Analyze::DataManager::CommitValues(
     std::vector<std::string> const& metrics, std::string const& aggregate) {
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> result;
 
-  struct ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = CommitMetrics(type, commitID, timestamp, subject);
+  RunEntry const* run = Resolve(type, commitID, timestamp);
+  if (run == nullptr) {
+    return result;
+  }
+  std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
+  FileTARZST archive(binFilename);
+
+  // Reuse the same opened archive for the metrics summary and the values below.
+  struct ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = CommitMetrics(archive, subject);
 
   std::unordered_map<uint64_t, uint64_t> runsIDMap;
   bool findRun = !runs.empty();
@@ -527,15 +554,8 @@ ns_Analyze::DataManager::CommitValues(
     runsIDMap.emplace(runID, i);
   }
 
-  RunEntry const* run = Resolve(type, commitID, timestamp);
-  if (run == nullptr) {
-    return result;
-  }
-  std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
-  FileTARZST archive(binFilename);
-
   std::vector<std::pair<std::string, uint64_t>> metadatasFilename =
-      archive.ListFiles(std::regex("^/*artefacts/"+subject+"/[0-9]+-stats.json.bin/$"));
+      archive.ListFiles(std::regex("^/*artefacts/"+RegexEscape(subject)+"/[0-9]+-stats.json.bin/$"));
 
   std::unordered_map<uint64_t, std::filesystem::path> runsFolders;
   for(auto const& metadataFilename : metadatasFilename) {

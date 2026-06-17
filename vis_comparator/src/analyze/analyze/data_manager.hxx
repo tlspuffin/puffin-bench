@@ -94,8 +94,9 @@ private:
   void BuildIndex();
   RunEntry const* Resolve(std::string const& type, std::string const& commit,
       uint64_t timestamp) const;
-  RunEntry const* ResolveLatest(std::string const& type,
-      std::string const& commit) const;
+  // Computes the metrics summary for a subject from an already-open archive.
+  struct SMetricsSummaries CommitMetrics(FileTARZST& archive,
+      std::string const& subject);
 
   std::vector<struct SInterpolations> ExtractDataTS(FileTARZST& archive, 
       std::filesystem::path const& prefixPath, 

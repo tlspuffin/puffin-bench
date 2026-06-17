@@ -1086,9 +1086,10 @@ export function SaveAsTemplate(state) {
           title:       state.title,
           titleFormat,
           variables: {
-            commits:  new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            subtasks: new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            metrics:  new Map([...state.variables.metrics.entries()]),
+            commits:   new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+            subtasks:  new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+            campaigns: new Map([...state.variables.campaigns.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
+            metrics:   new Map([...state.variables.metrics.entries()]),
           },
           legendFormat:   state.legendFormat,
           graphSettings:  state.graphSettings,

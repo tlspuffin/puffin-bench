@@ -342,6 +342,22 @@ class GraphManager {
     return pattern.replace(/YYYY|MM|DD|HH|mm|ss/g, t => map[t]);
   }
 
+  /**
+   * Expands a DATE/TIME/DATETIME token from an epoch-ms source `ms`.
+   * Returns '' when ms is null/undefined. Applies the token's default pattern
+   * unless the transform chain already contains a format(...) call, then runs
+   * the remaining transforms.
+   */
+  static #ExpandDateToken(token, transform, ms) {
+    if (ms == null) return '';
+    const defaults = { DATE: 'YYYY-MM-DD', TIME: 'HH:mm:ss', DATETIME: 'YYYY-MM-DD HH:mm:ss' };
+    const hasFormat = transform && /(^|:)\s*format\(/i.test(transform);
+    const chain = hasFormat
+      ? transform
+      : (transform ? `format(${defaults[token]}):${transform}` : `format(${defaults[token]})`);
+    return GraphManager.#ApplyTransform(String(ms), chain);
+  }
+
   static #ApplySingleTransform(value, str) {
     // format(pattern) — interpret value as epoch-ms and format it (for DATE/TIME/DATETIME)
     const fmtMatch = str.match(/^format\((.+)\)$/);
@@ -420,19 +436,13 @@ class GraphManager {
     };
 
     const ts = resolved.timestamp;
-    const dateDefaults = { DATE: 'YYYY-MM-DD', TIME: 'HH:mm:ss', DATETIME: 'YYYY-MM-DD HH:mm:ss' };
 
     return fmt.replace(
       /\$\{(COMMIT_HASH|SUBTASK_TYPE|SUBTASK_NAME|COMMIT_ALIAS|SUBTASK_ALIAS|USER|CAMPAIGN_NAME|DATE|TIME|DATETIME)(?::([^}]*))?\}/gi,
       (_, token, transform) => {
         const T = token.toUpperCase();
         if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
-          if (ts == null) return '';
-          const hasFormat = transform && /(^|:)\s*format\(/i.test(transform);
-          const chain = hasFormat
-            ? transform
-            : (transform ? `format(${dateDefaults[T]}):${transform}` : `format(${dateDefaults[T]})`);
-          return GraphManager.#ApplyTransform(String(ts), chain);
+          return GraphManager.#ExpandDateToken(T, transform, ts);
         }
         return GraphManager.#ApplyTransform(tokens[T] ?? '', transform);
       });
@@ -459,7 +469,6 @@ class GraphManager {
    */
   static InterpolateTitleFormat(fmt, variables, templateName) {
     const now = Date.now();
-    const dateDefaults = { DATE: 'YYYY-MM-DD', TIME: 'HH:mm:ss', DATETIME: 'YYYY-MM-DD HH:mm:ss' };
 
     const map = {
       TEMPLATE: templateName ?? '',
@@ -486,11 +495,7 @@ class GraphManager {
     return fmt.replace(/\$\{([^:}]+)(?::([^}]*))?\}/gi, (match, token, transform) => {
       const T = token.trim().toUpperCase();
       if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
-        const hasFormat = transform && /(^|:)\s*format\(/i.test(transform);
-        const chain = hasFormat
-          ? transform
-          : (transform ? `format(${dateDefaults[T]}):${transform}` : `format(${dateDefaults[T]})`);
-        return GraphManager.#ApplyTransform(String(now), chain);
+        return GraphManager.#ExpandDateToken(T, transform, now);
       }
       const val = map[T];
       if (val === undefined) return match;
