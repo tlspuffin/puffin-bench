@@ -444,7 +444,10 @@ class GraphManager {
    * Tokens (case-insensitive): ${TEMPLATE}, ${DATE} (DD-MM-YYYY),
    *   ${<varname>_HASH}, ${<varname>_ALIAS} for commit variables,
    *   ${<varname>_NAME}, ${<varname>_TYPE}, ${<varname>_ALIAS} for subtask variables,
+   *   ${<varname>_USER}, ${<varname>_CAMPAIGN}, ${<varname>_COMMIT},
+   *   ${<varname>_SUBTYPE}, ${<varname>_DATE}, ${<varname>_ALIAS} for campaign variables,
    *   ${<varname>} for metric variables.
+   * ${<varname>_DATE} accepts a format(...) transform like ${DATE} (default YYYY-MM-DD).
    * Transforms (chained with :) are the same as legend format.
    * Unknown tokens are left as-is. Variables with no value → empty string.
    */
@@ -454,6 +457,9 @@ class GraphManager {
     const map = {
       TEMPLATE: templateName ?? '',
     };
+    // Date-valued tokens hold a raw epoch-ms (or null); expanded via #ExpandDateToken
+    // so they honour a format(...) transform and fall back to the DATE default.
+    const dateTokens = {};
 
     for (const [name, entry] of variables.commits) {
       const k    = name.toUpperCase();
@@ -469,6 +475,16 @@ class GraphManager {
       map[`${k}_TYPE`]  = type;
       map[`${k}_ALIAS`] = entry?.alias || sub;
     }
+    for (const [name, entry] of (variables.campaigns ?? [])) {
+      const k   = name.toUpperCase();
+      const run = entry?.value ?? null;
+      map[`${k}_USER`]     = run?.user ?? '';
+      map[`${k}_CAMPAIGN`] = run?.campaign ?? '';
+      map[`${k}_COMMIT`]   = run?.commit ? CommitHelp.ShortHash(run.commit) : '';
+      map[`${k}_SUBTYPE`]  = run?.subject ?? '';
+      dateTokens[`${k}_DATE`] = run?.timestamp ?? null;
+      map[`${k}_ALIAS`]    = entry?.alias || (run?.campaign ?? '');
+    }
     for (const [name, path] of variables.metrics) {
       map[name.toUpperCase()] = path ?? '';
     }
@@ -477,6 +493,9 @@ class GraphManager {
       const T = token.trim().toUpperCase();
       if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
         return GraphManager.#ExpandDateToken(T, transform, now);
+      }
+      if (T in dateTokens) {
+        return GraphManager.#ExpandDateToken('DATE', transform, dateTokens[T]);
       }
       const val = map[T];
       if (val === undefined) return match;

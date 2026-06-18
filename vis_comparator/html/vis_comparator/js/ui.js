@@ -142,9 +142,13 @@ class UI {
       panel.style.left  = left + 'px';
       panel.style.width = w + 'px';
       panel.classList.remove('hidden');
+      document.addEventListener('click', outsideHandler, true);
     }
 
-    function closePanel() { panel.classList.add('hidden'); }
+    function closePanel() {
+      panel.classList.add('hidden');
+      document.removeEventListener('click', outsideHandler, true);
+    }
 
     function selectValue(val) {
       _value = val;
@@ -163,11 +167,12 @@ class UI {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); }
     });
 
+    // Registered on open / removed on close (see openPanel/closePanel). The
+    // document.contains guard self-cleans if the wrapper is detached while open.
     const outsideHandler = (e) => {
       if (!document.contains(wrapper)) { document.removeEventListener('click', outsideHandler, true); return; }
       if (!wrapper.contains(e.target)) closePanel();
     };
-    document.addEventListener('click', outsideHandler, true);
 
     Object.defineProperty(wrapper, 'value', {
       get: () => _value,
@@ -626,7 +631,8 @@ class UI {
     });
     search.addEventListener('input', () => { _query = search.value.toLowerCase(); renderRows(); });
 
-    // Close on outside click; self-cleans when wrapper leaves the DOM.
+    // Registered on open / removed on close (see openPanel/closePanel). The
+    // document.contains guard self-cleans if the wrapper is detached while open.
     const outsideHandler = (e) => {
       if (!document.contains(wrapper)) {
         document.removeEventListener('click', outsideHandler, true);
@@ -634,7 +640,6 @@ class UI {
       }
       if (!wrapper.contains(e.target)) closePanel();
     };
-    document.addEventListener('click', outsideHandler, true);
 
     // ── Helpers ───────────────────────────────────────────────
     function openPanel() {
@@ -650,8 +655,12 @@ class UI {
       _query = '';
       renderRows();
       search.focus();
+      document.addEventListener('click', outsideHandler, true);
     }
-    function closePanel() { panel.classList.add('hidden'); }
+    function closePanel() {
+      panel.classList.add('hidden');
+      document.removeEventListener('click', outsideHandler, true);
+    }
 
     function updateTrigger() {
       if (!_value) {
@@ -930,11 +939,12 @@ class UI {
 
     // Dismiss when clicking outside the picker. The filter dropdowns are in-DOM
     // descendants of the wrapper, so selecting one never registers as an outside click.
+    // Registered on open / removed on close (see openPanel/closePanel); the
+    // document.contains guard self-cleans if the wrapper is detached while open.
     const outsideHandler = (e) => {
       if (!document.contains(wrapper)) { document.removeEventListener('click', outsideHandler, true); return; }
       if (!wrapper.contains(e.target)) closePanel();
     };
-    document.addEventListener('click', outsideHandler, true);
 
     function openPanel() {
       const rect = trigger.getBoundingClientRect();
@@ -948,8 +958,12 @@ class UI {
       search.value = ''; _query = '';
       renderRows();
       search.focus();
+      document.addEventListener('click', outsideHandler, true);
     }
-    function closePanel() { panel.classList.add('hidden'); }
+    function closePanel() {
+      panel.classList.add('hidden');
+      document.removeEventListener('click', outsideHandler, true);
+    }
 
     // One-line summary of a campaign runRef, including the date so two runs of the
     // same campaign are distinguishable once selected.
