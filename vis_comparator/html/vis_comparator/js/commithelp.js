@@ -53,6 +53,37 @@ class CommitHelp {
   static ShortHash(hash) {
     return hash.slice(0, 8);
   }
+
+  /**
+   * Formats an epoch-millisecond timestamp using a pattern of YYYY/MM/DD/HH/mm/ss
+   * tokens (UTC, to match the campaign picker). Returns '' for a non-finite input.
+   */
+  static FormatTimestamp(ms, pattern) {
+    if (!Number.isFinite(Number(ms))) return '';
+    const d  = new Date(Number(ms));
+    const p2 = n => String(n).padStart(2, '0');
+    const map = {
+      YYYY: String(d.getUTCFullYear()),
+      MM:   p2(d.getUTCMonth() + 1),
+      DD:   p2(d.getUTCDate()),
+      HH:   p2(d.getUTCHours()),
+      mm:   p2(d.getUTCMinutes()),
+      ss:   p2(d.getUTCSeconds()),
+    };
+    return pattern.replace(/YYYY|MM|DD|HH|mm|ss/g, t => map[t]);
+  }
+
+  /**
+   * Short, human-readable label for a campaign run.
+   * @param {{user,campaign,commit,timestamp,subject}} ref
+   */
+  static CampaignRunLabel(ref) {
+    const date = ref.timestamp != null
+      ? ` (${CommitHelp.FormatTimestamp(ref.timestamp, 'YYYY-MM-DD HH:mm')})`
+      : '';
+    const subj = ref.subject ? ` · ${ref.subject}` : '';
+    return `${ref.user}/${ref.campaign} — ${CommitHelp.ShortHash(ref.commit)}${date}${subj}`;
+  }
 }
 
 export { CommitHelp };

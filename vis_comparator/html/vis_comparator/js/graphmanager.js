@@ -324,25 +324,6 @@ class GraphManager {
   }
 
   /**
-   * Formats an epoch-millisecond timestamp using a pattern of YYYY/MM/DD/HH/mm/ss
-   * tokens (UTC, to match the campaign picker). Returns '' for a non-finite input.
-   */
-  static #FormatTimestamp(ms, pattern) {
-    if (!Number.isFinite(ms)) return '';
-    const d  = new Date(ms);
-    const p2 = n => String(n).padStart(2, '0');
-    const map = {
-      YYYY: String(d.getUTCFullYear()),
-      MM:   p2(d.getUTCMonth() + 1),
-      DD:   p2(d.getUTCDate()),
-      HH:   p2(d.getUTCHours()),
-      mm:   p2(d.getUTCMinutes()),
-      ss:   p2(d.getUTCSeconds()),
-    };
-    return pattern.replace(/YYYY|MM|DD|HH|mm|ss/g, t => map[t]);
-  }
-
-  /**
    * Expands a DATE/TIME/DATETIME token from an epoch-ms source `ms`.
    * Returns '' when ms is null/undefined. Applies the token's default pattern
    * unless the transform chain already contains a format(...) call, then runs
@@ -362,7 +343,7 @@ class GraphManager {
     // format(pattern) — interpret value as epoch-ms and format it (for DATE/TIME/DATETIME)
     const fmtMatch = str.match(/^format\((.+)\)$/);
     if (fmtMatch) {
-      return GraphManager.#FormatTimestamp(Number(value), fmtMatch[1]);
+      return CommitHelp.FormatTimestamp(Number(value), fmtMatch[1]);
     }
 
     // beforeFirst(regex)

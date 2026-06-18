@@ -88,6 +88,14 @@ export function nextCommitColor(commitRegistry) {
 }
 
 /**
+ * Whether a slot is configured in campaign or commit mode.
+ * @returns {'campaign'|'commit'}
+ */
+export function slotMode(slot) {
+  return (slot.mode === 'campaign' || slot.campaignVar || slot.campaignRun) ? 'campaign' : 'commit';
+}
+
+/**
  * Resolves a graph slot to a concrete run descriptor.
  * Commit mode → { commit, tasktype, subtask, timestamp:null, user:null, campaign:null }.
  * Campaign mode → fields taken from the selected run (tasktype='Campaign').
@@ -95,24 +103,24 @@ export function nextCommitColor(commitRegistry) {
  */
 export function resolveExperimentSlot(slot, variables) {
   // ── Campaign mode: a single run reference supplies everything ──────────────
-  if (slot.mode === 'campaign' || slot.campaignVar || slot.campaignRun) {
+  if (slotMode(slot) === 'campaign') {
     const run = slot.campaignVar
       ? (variables?.campaigns?.get(slot.campaignVar)?.value ?? null)
       : (slot.campaignRun ?? null);
-    if (run && run.commit && run.timestamp != null && run.subject) {
-      return {
-        commit:    run.commit,
-        tasktype:  run.type ?? 'Campaign',
-        subtask:   run.subject,
-        timestamp: run.timestamp,
-        user:      run.user ?? null,
-        campaign:  run.campaign ?? null,
-      };
-    }
-    // A selected campaign run that resolves but has no subject can't be plotted
-    // (its archive metadata.json was missing/unreadable). Flag it so it's
-    // distinguishable from a genuinely unset variable rather than silently empty.
-    if (run && run.commit && run.timestamp != null && !run.subject) {
+    if (run && run.commit && run.timestamp != null) {
+      if (run.subject) {
+        return {
+          commit:    run.commit,
+          tasktype:  run.type ?? 'Campaign',
+          subtask:   run.subject,
+          timestamp: run.timestamp,
+          user:      run.user ?? null,
+          campaign:  run.campaign ?? null,
+        };
+      }
+      // A selected campaign run that resolves but has no subject can't be plotted
+      // (its archive metadata.json was missing/unreadable). Flag it so it's
+      // distinguishable from a genuinely unset variable rather than silently empty.
       console.warn('Campaign run has no subject and cannot be plotted:', run);
     }
     return null;

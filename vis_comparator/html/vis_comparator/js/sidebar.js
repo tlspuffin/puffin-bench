@@ -406,25 +406,12 @@ function buildSubtaskVariableSection(state) {
   return section;
 }
 
-/** Short, human-readable label for a campaign run. */
+/** Short, human-readable label for a campaign run (`{user,campaign,commit,timestamp,subjects[]}`). */
 function campaignRunLabel(run) {
-  const date = run.timestamp != null
-    ? new Date(Number(run.timestamp)).toISOString().slice(0, 16).replace('T', ' ')
-    : '';
-  const subj = (run.subjects && run.subjects[0]) ? ` · ${run.subjects[0]}` : '';
-  return `${run.user}/${run.campaign} — ${CommitHelp.ShortHash(run.commit)} (${date})${subj}`;
-}
-
-/** Converts a campaign run (from /api/PR/campaigns) into a stored runRef. */
-function campaignRunToRef(run) {
-  return {
-    type:      'Campaign',
-    commit:    run.commit,
-    timestamp: run.timestamp,
-    user:      run.user,
-    campaign:  run.campaign,
-    subject:   (run.subjects && run.subjects[0]) || null,
-  };
+  return CommitHelp.CampaignRunLabel({
+    user: run.user, campaign: run.campaign, commit: run.commit,
+    timestamp: run.timestamp, subject: (run.subjects && run.subjects[0]) || null,
+  });
 }
 
 function buildCampaignVariableSection(state) {

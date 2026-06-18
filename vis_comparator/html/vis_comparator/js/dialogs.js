@@ -6,7 +6,7 @@
 
 import { ICONS, TASK_TYPES } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey } from './state.js';
+import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -666,7 +666,7 @@ export async function AddGraphique(prefill = null, editId = null) {
   }
 
   function renderSlotRow(row, slot, slotIdx) {
-    const mode = slot.mode || ((slot.campaignVar || slot.campaignRun) ? 'campaign' : 'commit');
+    const mode = slotMode(slot);
 
     // ── Mode toggle (commit ⇄ campaign) ──────────────────────────
     const toggle = document.createElement('button');

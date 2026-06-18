@@ -863,7 +863,7 @@ class UI {
     });
 
     // ── Normalised rows ───────────────────────────────────────
-    const fmtDate = (ts) => new Date(Number(ts)).toISOString().slice(0, 16).replace('T', ' ');
+    const fmtDate = (ts) => CommitHelp.FormatTimestamp(ts, 'YYYY-MM-DD HH:mm');
     const rows = [...(campaigns ?? [])].map(r => ({
       ref: {
         type: 'Campaign', commit: r.commit, timestamp: r.timestamp,
@@ -955,9 +955,7 @@ class UI {
     // same campaign are distinguishable once selected.
     function runSummary(ref) {
       if (!ref) return '(undefined)';
-      const date = ref.timestamp != null ? ` (${fmtDate(ref.timestamp)})` : '';
-      const subj = ref.subject ? ` · ${ref.subject}` : '';
-      return `${ref.user}/${ref.campaign} — ${CommitHelp.ShortHash(ref.commit)}${date}${subj}`;
+      return CommitHelp.CampaignRunLabel(ref);
     }
     const isVarValue = (v) => typeof v === 'string' && v.startsWith('_var_');
 
