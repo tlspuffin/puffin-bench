@@ -7,7 +7,7 @@ import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
 import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
-import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
+import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
 
 // ============================================================
 // CONFIGURATION
@@ -470,11 +470,12 @@ modalpage.addEventListener('click', function(e) {
   }
 });
 
-tryLoadTemplateFromURL().then(async function(loaded) {
+tryLoadViewFromURL().then(async function(loaded) {
   if (loaded) return;
+  // No explicit view — try an explicit template link.
+  if (await tryLoadTemplateFromURL()) return;
   // No explicit template — if the URL carries variables, offer matching templates.
-  const suggested = await SuggestTemplatesFromURL();
-  if (suggested) return;
+  if (await SuggestTemplatesFromURL()) return;
   // Otherwise create a default view so the user can start immediately.
   const defaultTitle = 'Vue_' + Date.now();
   await ResetState(state, { title: defaultTitle });

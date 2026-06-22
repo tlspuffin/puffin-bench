@@ -961,7 +961,49 @@ export function OpenView(restoreUI = false) {
         }
       });
     },
+    extraRowBtns: function(name) {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'view-list-action-btn';
+      copyBtn.textContent = ICONS.LINK;
+      copyBtn.title = 'Copy shareable view URL';
+      copyBtn.onclick = function(e) {
+        e.stopPropagation();
+        const url = buildViewURL(name);
+        navigator.clipboard.writeText(url).then(function() {
+          copyBtn.textContent = ICONS.CHECK;
+          setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
+        });
+      };
+      return [copyBtn];
+    },
   });
+}
+
+/** Builds a shareable URL that loads a saved view by name on page load. */
+function buildViewURL(viewName) {
+  const params = new URLSearchParams({ view: viewName });
+  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+}
+
+/**
+ * If the URL carries a `view` param, loads that saved view as a full-state snapshot
+ * (no variable overlay, unlike templates). Mirrors tryLoadTemplateFromURL.
+ * @returns {Promise<boolean>} true if a view was loaded
+ */
+export async function tryLoadViewFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const viewName = params.get('view');
+  if (!viewName) return false;
+
+  // Clean URL immediately so a failed load doesn't loop on every reload.
+  history.replaceState(null, '', window.location.pathname);
+
+  const newstate = await _apirest.LoadPage(viewName);
+  if (!newstate) return false;
+
+  await _resetState(_state, newstate);
+  _enableMainUI(true);
+  return true;
 }
 
 // ============================================================
