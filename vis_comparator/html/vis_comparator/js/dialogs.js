@@ -961,21 +961,63 @@ export function OpenView(restoreUI = false) {
       });
     },
     extraRowBtns: function(name) {
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'view-list-action-btn';
-      copyBtn.textContent = ICONS.LINK;
-      copyBtn.title = 'Copy shareable view URL';
-      copyBtn.onclick = function(e) {
-        e.stopPropagation();
-        const url = buildViewURL(name);
-        navigator.clipboard.writeText(url).then(function() {
-          copyBtn.textContent = ICONS.CHECK;
-          setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
-        });
-      };
-      return [copyBtn];
+      return [makeCopyURLBtn(() => buildViewURL(name), 'Copy shareable view URL')];
     },
   });
+}
+
+/**
+ * Copies text to the clipboard. Falls back to a temporary textarea +
+ * execCommand on non-secure contexts (e.g. served over plain HTTP from a
+ * non-localhost host) where navigator.clipboard is undefined.
+ * @returns {Promise<void>} resolves on success, rejects on failure
+ */
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise(function(resolve, reject) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    // Keep it out of view and out of the layout/scroll flow.
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.setAttribute('readonly', '');
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      if (document.execCommand('copy')) resolve();
+      else reject(new Error('Copy command was rejected'));
+    } catch (err) {
+      reject(err);
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  });
+}
+
+/**
+ * Builds a row-action button that copies a generated URL to the clipboard,
+ * flashing a checkmark on success and surfacing an error toast on failure.
+ * @param {() => string} urlFactory - produces the URL to copy when clicked
+ * @param {string} title - button tooltip
+ * @returns {HTMLButtonElement}
+ */
+function makeCopyURLBtn(urlFactory, title) {
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'view-list-action-btn';
+  copyBtn.textContent = ICONS.LINK;
+  copyBtn.title = title;
+  copyBtn.onclick = function(e) {
+    e.stopPropagation();
+    copyTextToClipboard(urlFactory()).then(function() {
+      copyBtn.textContent = ICONS.CHECK;
+      setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
+    }).catch(function(err) {
+      _errorManager.Error('Failed to copy URL: ' + err.message);
+    });
+  };
+  return copyBtn;
 }
 
 /** Builds a shareable URL that loads a saved view by name on page load. */
@@ -1054,19 +1096,7 @@ export function OpenTemplate(restoreUI = false) {
       });
     },
     extraRowBtns: function(name) {
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'view-list-action-btn';
-      copyBtn.textContent = ICONS.LINK;
-      copyBtn.title = 'Copy shareable URL (uses current variable values)';
-      copyBtn.onclick = function(e) {
-        e.stopPropagation();
-        const url = buildTemplateURL(name, _state);
-        navigator.clipboard.writeText(url).then(function() {
-          copyBtn.textContent = ICONS.CHECK;
-          setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
-        });
-      };
-      return [copyBtn];
+      return [makeCopyURLBtn(() => buildTemplateURL(name, _state), 'Copy shareable URL (uses current variable values)')];
     },
   });
 }
