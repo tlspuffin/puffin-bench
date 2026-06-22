@@ -138,11 +138,16 @@ export function refreshAllGraphAppearances(state) {
 
 /** Re-fetches and redraws all graphs that reference the given variable name. */
 export function refreshGraphsUsingVariable(state, varName) {
+  // Only experiment-defining variables (commit/subtask/campaign) can change the data
+  // extent; a metric-variable change must not refit a user's custom time range.
+  const isExperimentVar = state.variables.commits.has(varName)
+    || state.variables.subtasks.has(varName)
+    || state.variables.campaigns.has(varName);
   for (const [id, config] of state.graphSettings) {
     const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName || s.campaignVar === varName)
       || config.metrics.some(m => m?.variable === varName);
     if (usesVar) {
-      _refetchAndRedrawGraph(state, id, config).catch(err => console.error('[sidebar] refetch error:', err));
+      _refetchAndRedrawGraph(state, id, config, isExperimentVar).catch(err => console.error('[sidebar] refetch error:', err));
     }
   }
 }
@@ -184,7 +189,7 @@ export function refreshGraphsUsingMetric(state, metricPath) {
 }
 
 /** Resolves variables and re-fetches data for a graph, then redraws it in place. */
-async function _refetchAndRedrawGraph(state, id, config) {
+async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false) {
   const resolved = config.experiments
     .map(slot => resolveExperimentSlot(slot, state.variables))
     .filter(Boolean);
@@ -197,6 +202,14 @@ async function _refetchAndRedrawGraph(state, id, config) {
       .filter(m => m != null)
   )];
   if (resolvedMetrics.length === 0) return;
+
+  // An experiment change can alter the data extent; refit the range so we don't draw a
+  // trail of zeroes or truncate the tail. Mutates the live config in state.graphSettings.
+  // Skipped for metric-only changes so a user's custom time range is preserved.
+  if (recomputeRange) {
+    const range = await _apirest.ComputeTimeRange(resolved);
+    if (range) Object.assign(config, range);
+  }
 
   const results = await Promise.all(
     resolved.map(exp => _apirest.LoadCommitMetricsValues(

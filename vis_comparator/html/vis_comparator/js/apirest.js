@@ -1,4 +1,5 @@
 import { JSONHelp } from './jsonhelp.js';
+import { DEFAULT_DELTA_DIVISOR } from './constants.js';
 
 /**
  * REST API client for the analysis server.
@@ -407,6 +408,24 @@ class ApiREST {
     }
 
     return { metrics: null, maxTimeMicroS: -1 };
+  }
+
+  /**
+   * Probes the actual data extent of the given resolved experiments and derives a
+   * fitting time range. Takes the largest extent across all experiments so no series
+   * is truncated. Used to recompute a graph's range on template load / experiment change.
+   * @param {Array<{tasktype: string, commit: string, subtask: string, timestamp?: number}>} resolvedExps
+   * @returns {Promise<{min: number, max: number, delta: number}|null>}
+   *   A range derived from real data, or null if the extent is unknown (<= 0).
+   */
+  async ComputeTimeRange(resolvedExps) {
+    if (!resolvedExps || resolvedExps.length === 0) return null;
+    const metas = await Promise.all(resolvedExps.map(e =>
+      this.LoadCommitMetrics(e.tasktype, e.commit, e.subtask, e.timestamp)));
+    const max = metas.reduce((m, r) => Math.max(m, r?.maxTimeMicroS ?? -1), -1);
+    if (!(max > 0)) return null;
+    const delta = Math.max(1, Math.floor(max / DEFAULT_DELTA_DIVISOR));
+    return { min: 0, max, delta };
   }
 
   /**

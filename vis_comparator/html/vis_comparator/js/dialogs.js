@@ -4,7 +4,7 @@
  * Call initDialogs(deps) once at startup before any dialog function is used.
  */
 
-import { ICONS, TASK_TYPES } from './constants.js';
+import { ICONS, TASK_TYPES, DEFAULT_DELTA_DIVISOR } from './constants.js';
 import { HELP_HTML } from './help.js';
 import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey } from './state.js';
 import { UI } from './ui.js';
@@ -57,7 +57,6 @@ export function initDialogs(deps) {
 // CONSTANTS (dialog-local)
 // ============================================================
 
-const DEFAULT_DELTA_DIVISOR = 20_000;
 const MAX_EXPERIMENTS = 4;
 
 // ============================================================
@@ -233,7 +232,7 @@ function metricsMatch(a, b) {
   return false;
 }
 
-async function rebuildMetricsUI(ctx) {
+async function rebuildMetricsUI(ctx, forceTimeRecalc = false) {
   const previousMetrics = [...ctx.selectedMetrics];
   ctx.selectedMetrics = [];
   updateOkButton(ctx);
@@ -368,10 +367,10 @@ async function rebuildMetricsUI(ctx) {
     ctx.metricsUIContainer = metricsTree;
   }
 
-  if (!ctx.prefill) {
-    const firstMetrics = metricsResults[0];
-    if (firstMetrics?.maxTimeMicroS > 0) {
-      const maxT = firstMetrics.maxTimeMicroS;
+  if (forceTimeRecalc || !ctx.prefill) {
+    // Largest extent across all experiments, so no series is truncated.
+    const maxT = metricsResults.reduce((m, r) => Math.max(m, r?.maxTimeMicroS ?? -1), -1);
+    if (maxT > 0) {
       const d = Math.max(1, Math.floor(maxT / DEFAULT_DELTA_DIVISOR));
       const startEl = document.getElementById('time_start_' + ctx.timeID);
       const endEl   = document.getElementById('time_end_'   + ctx.timeID);
@@ -775,7 +774,7 @@ export async function AddGraphique(prefill = null, editId = null) {
   }
 
   function onExperimentChange() {
-    rebuildMetricsUI(ctx);
+    rebuildMetricsUI(ctx, true);
     updateOkButton(ctx);
   }
 }

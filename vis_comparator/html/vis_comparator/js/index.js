@@ -170,7 +170,9 @@ async function ResetState(state, newState, templateName = null) {
 
   UpdateHeader();
   if (migrated?.graphSettings?.size > 0) {
-    await restoreGraphs(migrated.graphSettings);
+    // Templates carry an authored time range that rarely matches the experiments they
+    // resolve to at load time; recompute it from real data. Views keep their saved range.
+    await restoreGraphs(migrated.graphSettings, /*recomputeRange=*/ templateName != null);
   }
   BuildSidebar(state);
 }
@@ -179,8 +181,10 @@ async function ResetState(state, newState, templateName = null) {
  * Re-fetches data and recreates all graphs from a saved graphSettings Map.
  * Called by ResetState after the global state (variables, commitRegistry) is applied.
  * @param {Map<number, object>} savedSettings
+ * @param {boolean} [recomputeRange=false] - When true (template load), refit each graph's
+ *   time range to the real data extent of its resolved experiments.
  */
-async function restoreGraphs(savedSettings) {
+async function restoreGraphs(savedSettings, recomputeRange = false) {
   for (const [, graphConfig] of savedSettings) {
     // Resolve concrete experiment entries (skip unresolvable slots)
     const resolved = graphConfig.experiments
@@ -207,6 +211,11 @@ async function restoreGraphs(savedSettings) {
       const id = await graphManager.AddGraph(graphConfig, new Map());
       state.graphSettings.set(id, graphConfig);
       continue;
+    }
+
+    if (recomputeRange) {
+      const range = await apirest.ComputeTimeRange(resolved);
+      if (range) Object.assign(graphConfig, range);
     }
 
     const results = await Promise.all(
