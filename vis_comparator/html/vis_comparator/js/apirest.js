@@ -40,7 +40,7 @@ class ApiREST {
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSONHelp.Stringify(data)
+          body: JSONHelp.Stringify(data, 2)
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -125,7 +125,7 @@ class ApiREST {
       const response = await fetch(`${this.#apiURI}/userdata/templates/${encodedName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSONHelp.Stringify(data),
+        body: JSONHelp.Stringify(data, 2),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

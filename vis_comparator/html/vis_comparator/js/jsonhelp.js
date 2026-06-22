@@ -11,10 +11,11 @@ class JSONHelp {
   /**
    * Serialises an object (possibly containing Map/Set values) to a JSON string.
    * @param {*} object
+   * @param {string|number} [space] - Indentation passed to JSON.stringify (e.g. 2 for multiline output)
    * @returns {string}
    */
-  static Stringify(object) {
-    return JSON.stringify(object, this.#Replacer);
+  static Stringify(object, space) {
+    return JSON.stringify(object, this.#Replacer, space);
   }
 
   /**

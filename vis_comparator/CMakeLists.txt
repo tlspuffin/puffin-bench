@@ -194,8 +194,8 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/sidebar.
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/state.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/state_js.h" VisComparator_HTML_State_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/ui.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/ui_js.h" VisComparator_HTML_UI_JS)
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/SingleTaskTemplate.dat" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/SingleTaskTemplate_dat.h" VisComparator_Template_SingleTask)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/TwoTasksTemplate.dat" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/TwoTasksTemplate_dat.h" VisComparator_Template_TwoTasks)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/SingleTaskTemplate.json" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/SingleTaskTemplate_json.h" VisComparator_Template_SingleTask)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/TwoTasksTemplate.json" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/TwoTasksTemplate_json.h" VisComparator_Template_TwoTasks)
 
 set(ANALYZE_SRC
   src/analyze/config.cxx 
@@ -210,8 +210,8 @@ set(ANALYZE_SRC
   ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/help_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/index_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/jsonhelp_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/sidebar_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/state_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/ui_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/SingleTaskTemplate_dat.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/TwoTasksTemplate_dat.h
+  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/SingleTaskTemplate_json.h
+  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/TwoTasksTemplate_json.h
 
   ${GENERATED_VERSION_C}
 )

@@ -14,8 +14,8 @@
 #include "embeded/vis_comparator/js/sidebar_js.h"
 #include "embeded/vis_comparator/js/state_js.h"
 #include "embeded/vis_comparator/js/ui_js.h"
-#include "embeded/vis_comparator/templates/SingleTaskTemplate_dat.h"
-#include "embeded/vis_comparator/templates/TwoTasksTemplate_dat.h"
+#include "embeded/vis_comparator/templates/SingleTaskTemplate_json.h"
+#include "embeded/vis_comparator/templates/TwoTasksTemplate_json.h"
 #include <fstream>
 #include <iostream>
 #include "Poco/Exception.h"
@@ -81,8 +81,8 @@ void ns_Server::Config::Validate(bool forceInstall) const {
         (userdata_ / "templates").string() + "\": " + ec.message());
   }
   for(auto const& [ file, data, size ] : {
-        std::tuple{ "templates/SingleTaskTemplate.dat", VisComparator_Template_SingleTask_data, VisComparator_Template_SingleTask_size },
-        std::tuple{ "templates/TwoTasksTemplate.dat", VisComparator_Template_TwoTasks_data, VisComparator_Template_TwoTasks_size }
+        std::tuple{ "templates/SingleTaskTemplate.json", VisComparator_Template_SingleTask_data, VisComparator_Template_SingleTask_size },
+        std::tuple{ "templates/TwoTasksTemplate.json", VisComparator_Template_TwoTasks_data, VisComparator_Template_TwoTasks_size }
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(userdata_ / file);

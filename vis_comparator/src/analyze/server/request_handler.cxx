@@ -617,7 +617,7 @@ void ns_Server::RequestHandlerAPISaveUserData::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
+      config_->userdata_ / (viewNameToStem(viewName) + ".json");
   std::istream& stream = request.stream();
 
   std::ofstream ofs(filePath, std::ios::binary);
@@ -644,7 +644,7 @@ void ns_Server::RequestHandlerAPILoadUserData::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
+      config_->userdata_ / (viewNameToStem(viewName) + ".json");
 
   rapidjson::Document doc;
   try {
@@ -679,7 +679,7 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
 
     for (auto const& entry : std::filesystem::directory_iterator(path)) {
       if (entry.is_regular_file()) {
-        if (entry.path().extension().string() != ".dat") {
+        if (entry.path().extension().string() != ".json") {
           continue;
         }
         std::string filename = stemToViewName(entry.path().stem().string());
@@ -710,7 +710,7 @@ void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
+      config_->userdata_ / (viewNameToStem(viewName) + ".json");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "View not found: " + filePath.string());
@@ -747,7 +747,7 @@ void ns_Server::RequestHandlerAPISaveTemplate::handleRequest(
   }
   std::filesystem::path const dir = getTemplatesDir(config_);
   std::filesystem::create_directories(dir);
-  std::filesystem::path const filePath = dir / (viewNameToStem(templateName) + ".dat");
+  std::filesystem::path const filePath = dir / (viewNameToStem(templateName) + ".json");
 
   std::istream& stream = request.stream();
   std::ofstream ofs(filePath, std::ios::binary);
@@ -780,7 +780,7 @@ void ns_Server::RequestHandlerAPILoadTemplate::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".dat");
+      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".json");
 
   rapidjson::Document doc;
   try {
@@ -808,7 +808,7 @@ void ns_Server::RequestHandlerAPIListTemplates::handleRequest(
   if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) {
     for (auto const& entry : std::filesystem::directory_iterator(dir)) {
       if (!entry.is_regular_file()) continue;
-      if (entry.path().extension().string() != ".dat") continue;
+      if (entry.path().extension().string() != ".json") continue;
       std::string filename = stemToViewName(entry.path().stem().string());
       rapidjson::Value filenameVal;
       filenameVal.SetString(filename.c_str(), filename.length(), allocator);
@@ -832,7 +832,7 @@ void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".dat");
+      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".json");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "Template not found: " + filePath.string());
