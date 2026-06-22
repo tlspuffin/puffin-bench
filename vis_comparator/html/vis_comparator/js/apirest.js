@@ -178,6 +178,24 @@ class ApiREST {
   }
 
   /**
+   * Lists the variable names of every saved template (per category), without
+   * fetching the full template definitions — used to match templates to a URL.
+   * @returns {Promise<{templates: Object<string, {commits:string[], subtasks:string[], campaigns:string[], metrics:string[]}>}|null>}
+   */
+  async ListTemplateVariables() {
+    try {
+      const response = await fetch(`${this.#apiURI}/userdata/templates-variables`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      this.#errorManager.Error('Failed to list template variables: ' + error.message);
+    }
+    return null;
+  }
+
+  /**
    * Deletes a saved template from the server.
    * @param {string} name - Template filename (no extension)
    * @returns {Promise<boolean>} true on success
@@ -276,6 +294,22 @@ class ApiREST {
   async LoadGitHistory() {
     try {
       const response = await fetch(`${this.#apiURI}/git/history`);
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Loads the git-log entry for a single commit via the backend proxy. Used to
+   * resolve a feature/PR commit's dev base (the response carries a `base` key).
+   * @param {string} commit - Commit hash
+   * @returns {Promise<object|null>} git-log object, or null on failure/unavailable
+   */
+  async LoadGitLog(commit) {
+    try {
+      const response = await fetch(`${this.#apiURI}/git/log/${encodeURIComponent(commit)}`);
       if (!response.ok) return null;
       return await response.json();
     } catch (_) {

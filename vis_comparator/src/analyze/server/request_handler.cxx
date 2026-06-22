@@ -820,6 +820,72 @@ void ns_Server::RequestHandlerAPIListTemplates::handleRequest(
   SendJSONResponse(response, doc);
 }
 
+// Returns, for every saved template, only the names of its variables per
+// category — enough for the client to match templates against a URL without
+// fetching every full template definition. Variables are stored as serialised
+// Maps: { "__type":"Map", "value":[ ["c1", {...}], ... ] }, so a variable name
+// is the first element of each entry pair.
+void ns_Server::RequestHandlerAPIListTemplateVariables::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const dir = getTemplatesDir(config_);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  auto& allocator = doc.GetAllocator();
+  rapidjson::Value templates(rapidjson::kObjectType);
+
+  static char const* const kCategories[] = {"commits", "subtasks", "campaigns", "metrics"};
+
+  if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) {
+    for (auto const& entry : std::filesystem::directory_iterator(dir)) {
+      if (!entry.is_regular_file()) continue;
+      if (entry.path().extension().string() != ".json") continue;
+
+      rapidjson::Document tdoc;
+      try {
+        ReadJSONFile(entry.path().string(), tdoc);
+      } catch (...) {
+        continue;  // skip unreadable / corrupt templates
+      }
+
+      rapidjson::Value const* variables = nullptr;
+      if (tdoc.IsObject() && tdoc.HasMember("variables") && tdoc["variables"].IsObject()) {
+        variables = &tdoc["variables"];
+      }
+
+      rapidjson::Value vars(rapidjson::kObjectType);
+      for (char const* cat : kCategories) {
+        rapidjson::Value names(rapidjson::kArrayType);
+        if (variables && variables->HasMember(cat)) {
+          auto const& m = (*variables)[cat];
+          if (m.IsObject() && m.HasMember("value") && m["value"].IsArray()) {
+            for (auto const& pair : m["value"].GetArray()) {
+              if (pair.IsArray() && pair.Size() >= 1 && pair[0].IsString()) {
+                rapidjson::Value n;
+                n.SetString(pair[0].GetString(), pair[0].GetStringLength(), allocator);
+                names.PushBack(n, allocator);
+              }
+            }
+          }
+        }
+        rapidjson::Value catKey(cat, allocator);
+        vars.AddMember(catKey, names, allocator);
+      }
+
+      std::string name = stemToViewName(entry.path().stem().string());
+      rapidjson::Value nameKey(name.c_str(), name.length(), allocator);
+      templates.AddMember(nameKey, vars, allocator);
+    }
+  }
+
+  doc.AddMember("templates", templates, allocator);
+  SendJSONResponse(response, doc);
+}
+
 void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
     Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
@@ -851,23 +917,16 @@ void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
   SendJSONResponse(response, doc);
 }
 
-// Get GIT history
-void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
-    Poco::Net::HTTPServerRequest& request,
-    Poco::Net::HTTPServerResponse& response) {
-
-  if (ManageCORS(request, response)) return;
-
-  std::string const& url = config_->git_history_url_;
-  if (url.empty()) {
-    response.setContentType("application/json");
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
-    response.send() << "[]";
-    return;
-  }
-
+// Proxies a GET to an upstream JSON URL and forwards the body verbatim. On any
+// failure (non-2xx upstream, exception) it replies 200 with `fallback` so the
+// frontend always receives valid JSON. `label` tags error logs. Exactly one of
+// the response.send() paths runs per call.
+static void ProxyGetJSON(std::string const& fullUrl, char const* label,
+    char const* fallback, Poco::Net::HTTPServerResponse& response) {
+  response.setContentType("application/json");
+  response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
   try {
-    Poco::URI uri(url);
+    Poco::URI uri(fullUrl);
     std::string path = uri.getPathAndQuery();
     if (path.empty()) path = "/";
 
@@ -891,24 +950,63 @@ void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
     std::istream& bodyStream = session->receiveResponse(resp);
 
     if (resp.getStatus() < 200 || resp.getStatus() >= 300) {
-      response.setContentType("application/json");
-      response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
-      response.send() << "[]";
+      response.send() << fallback;
       return;
     }
 
     std::stringstream ss;
     ss << bodyStream.rdbuf();
-
-    response.setContentType("application/json");
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
     response.send() << ss.str();
   } catch (std::exception const& e) {
-    std::cerr << "[git/history proxy] " << e.what() << std::endl;
+    std::cerr << "[" << label << "] " << e.what() << std::endl;
+    response.send() << fallback;
+  }
+}
+
+// Get GIT history
+void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& url = config_->git_history_url_;
+  if (url.empty()) {
     response.setContentType("application/json");
     response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
     response.send() << "[]";
+    return;
   }
+
+  ProxyGetJSON(url, "git/history proxy", "[]", response);
+}
+
+// Proxies the git-log endpoint for a single commit. The log URL is derived from
+// the configured history URL (".../api/git/history/<repo>" -> ".../api/git/log/
+// <repo>?commit=<id>"). Same CORS-driven proxy pattern as the history handler.
+void ns_Server::RequestHandlerAPIGetGitLog::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& url = config_->git_history_url_;
+  std::string const commit = std::get<0>(args_);
+
+  std::string::size_type const pos = url.find("/git/history/");
+  if (url.empty() || pos == std::string::npos) {
+    response.setContentType("application/json");
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send() << "{}";
+    return;
+  }
+
+  std::string logUrl = url;
+  logUrl.replace(pos, std::string("/git/history/").length(), "/git/log/");
+  Poco::URI logUri(logUrl);
+  logUri.addQueryParameter("commit", commit);
+
+  ProxyGetJSON(logUri.toString(), "git/log proxy", "{}", response);
 }
 
 

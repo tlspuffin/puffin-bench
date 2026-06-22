@@ -84,6 +84,53 @@ class CommitHelp {
     const subj = ref.subject ? ` · ${ref.subject}` : '';
     return `${ref.user}/${ref.campaign} — ${CommitHelp.ShortHash(ref.commit)}${date}${subj}`;
   }
+
+  /**
+   * Index of a commit in the (newest→oldest) git-history `commits` list, matched
+   * by short hash. Returns -1 if absent.
+   * @param {Array<{id:string}>} commits
+   * @param {string} id
+   */
+  static CommitsIndexOf(commits, id) {
+    if (!Array.isArray(commits) || !id) return -1;
+    const short = this.ShortHash(id);
+    return commits.findIndex(e => this.ShortHash(e.id) === short);
+  }
+
+  /**
+   * Index of the first (newest) entry on a given branch in the `commits` list.
+   * Returns -1 if the branch is absent.
+   * @param {Array<{id:string, branch:string}>} commits
+   * @param {string} branchName
+   */
+  static FirstBranchIndex(commits, branchName) {
+    if (!Array.isArray(commits)) return -1;
+    return commits.findIndex(e => e.branch === branchName);
+  }
+
+  /**
+   * Walks the `commits` list from `startIndex` toward older commits and returns
+   * the **data-layer hash** of the first one that has a Perf run, looked up in
+   * `perfByShort` (short hash → the exact commit hash the data backend uses).
+   * Returning the data-layer form — not the git-history `id` — is important: the
+   * timestamp/data lookups are keyed by the hashes from LoadCommits, which can be
+   * a different length than the full git id. Returns null if `perfByShort` is
+   * null/empty (the Perf list is unavailable — better to report "no compare
+   * target" than hand back a git hash the data backend can't resolve), if
+   * `startIndex` is out of range, or if no commit at/after it has a Perf run.
+   * @param {Array<{id:string}>} commits
+   * @param {number} startIndex
+   * @param {Map<string,string>|null} perfByShort - short hash → Perf commit hash
+   */
+  static NextPerfId(commits, startIndex, perfByShort) {
+    if (!Array.isArray(commits) || startIndex < 0 || startIndex >= commits.length) return null;
+    if (!perfByShort || perfByShort.size === 0) return null;
+    for (let i = startIndex; i < commits.length; i++) {
+      const hash = perfByShort.get(this.ShortHash(commits[i].id));
+      if (hash) return hash;
+    }
+    return null;
+  }
 }
 
 export { CommitHelp };

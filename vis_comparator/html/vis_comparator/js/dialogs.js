@@ -1110,21 +1110,16 @@ export function SaveAsTemplate(state) {
   nameInput.focus();
 }
 
-export async function tryLoadTemplateFromURL() {
-  const params = new URLSearchParams(window.location.search);
-  const templateName = params.get('template');
-  if (!templateName) return false;
-
-  // Clean URL immediately so a failed load doesn't loop on every reload.
-  history.replaceState(null, '', window.location.pathname);
-
-  const raw = await _apirest.LoadTemplate(templateName);
-  if (!raw) return false;
-
-  const tpl = raw;
-
-  // Populate commit variables from URL params (format: <varName>=<commitHash>, <varName>.alias=<alias>)
-  // An empty value (e.g. c1=) explicitly clears the default to null.
+/**
+ * Overlays URL query parameters onto a loaded template's variable Maps, in place.
+ * Only variable names that already exist in the template are affected; URL params
+ * for unknown variables are ignored. An empty value (e.g. c1=) clears to null.
+ * Formats: commits <name>=<hash> + <name>.alias; subtasks <name>=<tasktype>:<subtask>
+ * + <name>.alias; metrics <name>=<path>. (Campaign vars keep their template default.)
+ * @param {object} tpl - template with .variables.{commits,subtasks,metrics} Maps
+ * @param {URLSearchParams} params
+ */
+function applyURLParamsToTemplate(tpl, params) {
   if (tpl.variables?.commits instanceof Map) {
     for (const [name, entry] of tpl.variables.commits) {
       const hasVal   = params.has(name);
@@ -1137,8 +1132,6 @@ export async function tryLoadTemplateFromURL() {
       }
     }
   }
-  // Populate subtask variables from URL params (format: <varName>=<tasktype>:<subtask>, <varName>.alias=<alias>)
-  // An empty value explicitly clears the default to null.
   if (tpl.variables?.subtasks instanceof Map) {
     for (const [name, entry] of tpl.variables.subtasks) {
       const hasVal   = params.has(name);
@@ -1167,9 +1160,470 @@ export async function tryLoadTemplateFromURL() {
       if (params.has(name)) tpl.variables.metrics.set(name, params.get(name) || null);
     }
   }
+}
 
-  await _resetState(_state, tpl, templateName);
+export async function tryLoadTemplateFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const templateName = params.get('template');
+  if (!templateName) return false;
+
+  // Clean URL immediately so a failed load doesn't loop on every reload.
+  history.replaceState(null, '', window.location.pathname);
+
+  const raw = await _apirest.LoadTemplate(templateName);
+  if (!raw) return false;
+
+  applyURLParamsToTemplate(raw, params);
+
+  await _resetState(_state, raw, templateName);
   _enableMainUI(true);
+  return true;
+}
+
+// ============================================================
+// TEMPLATE SUGGESTION PANEL (URL with variables but no template)
+// ============================================================
+
+const URL_VAR_PATTERNS = [
+  [/^c\d+$/, 'commits'],
+  [/^s\d+$/, 'subtasks'],
+  [/^k\d+$/, 'campaigns'],
+  [/^m\d+$/, 'metrics'],
+];
+
+/**
+ * Classifies the variable names present in a URL by category (commits/subtasks/
+ * campaigns/metrics), based on their auto-naming prefix. Ignores `*.alias` keys
+ * and the `template` key.
+ * @param {URLSearchParams} params
+ * @returns {{commits:string[], subtasks:string[], campaigns:string[], metrics:string[]}}
+ */
+function parseURLVariables(params) {
+  const out = { commits: [], subtasks: [], campaigns: [], metrics: [] };
+  for (const key of params.keys()) {
+    if (key === 'template' || key.endsWith('.alias')) continue;
+    for (const [re, cat] of URL_VAR_PATTERNS) {
+      if (re.test(key)) { if (!out[cat].includes(key)) out[cat].push(key); break; }
+    }
+  }
+  return out;
+}
+
+/** Builds fresh variable Maps directly from URL params (no template defaults). */
+function buildVariablesFromParams(params) {
+  const commits = new Map(), subtasks = new Map(), campaigns = new Map(), metrics = new Map();
+  const defined = parseURLVariables(params);
+  for (const name of defined.commits) {
+    commits.set(name, { value: params.get(name) || null, alias: params.get(`${name}.alias`) || null });
+  }
+  for (const name of defined.subtasks) {
+    const val = params.get(name);
+    let value = null;
+    if (val) {
+      const i = val.indexOf(':');
+      if (i !== -1) value = { tasktype: val.slice(0, i), subtask: val.slice(i + 1) };
+    }
+    subtasks.set(name, { value, alias: params.get(`${name}.alias`) || null });
+  }
+  for (const name of defined.campaigns) {
+    campaigns.set(name, { value: null, alias: params.get(`${name}.alias`) || null });
+  }
+  for (const name of defined.metrics) metrics.set(name, params.get(name) || null);
+  return { commits, subtasks, campaigns, metrics };
+}
+
+/** Deep-clones a template's variable Maps so previews can be mutated safely. */
+function cloneTemplate(tpl) {
+  const cloneMap = (cat) => {
+    const src = tpl.variables?.[cat];
+    if (!(src instanceof Map)) return new Map();
+    return new Map([...src].map(([k, v]) =>
+      [k, (v && typeof v === 'object') ? { ...v } : v]));
+  };
+  return {
+    ...tpl,
+    variables: {
+      commits:   cloneMap('commits'),
+      subtasks:  cloneMap('subtasks'),
+      campaigns: cloneMap('campaigns'),
+      metrics:   cloneMap('metrics'),
+    },
+  };
+}
+
+/**
+ * True if a template (described by its per-category variable name lists, as
+ * returned by ListTemplateVariables) defines every variable name in `defined`.
+ * The template may define additional variables.
+ */
+function templateMatches(vars, defined) {
+  return ['commits', 'subtasks', 'campaigns', 'metrics'].every(cat =>
+    defined[cat].every(name => (vars?.[cat] ?? []).includes(name)));
+}
+
+/** Short, human-readable value for a single variable entry (for chips/preview). */
+function describeVarValue(cat, entry) {
+  if (cat === 'metrics') return entry || '(unset)';
+  const val = entry?.value;
+  if (val == null) return '(unset)';
+  if (cat === 'commits') {
+    return CommitHelp.ShortHash(val) + (entry.alias ? ` (${entry.alias})` : '');
+  }
+  if (cat === 'subtasks') {
+    return `${val.tasktype}:${val.subtask}` + (entry.alias ? ` (${entry.alias})` : '');
+  }
+  if (cat === 'campaigns') {
+    return (val.commit ? CommitHelp.CampaignRunLabel(val) : '(set)') + (entry.alias ? ` (${entry.alias})` : '');
+  }
+  return '(set)';
+}
+
+/**
+ * On-load panel shown when the URL carries variables but no template. Lists
+ * templates whose variable set is a superset of the URL's, lets the user drop
+ * URL variables, and (when only c1 is defined) offers "Compare with" actions
+ * that add a c2 commit variable. Returns false if the URL defines no variables.
+ * @returns {Promise<boolean>} true if the panel was shown
+ */
+export async function SuggestTemplatesFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const urlVars = parseURLVariables(params);
+  const total = urlVars.commits.length + urlVars.subtasks.length
+    + urlVars.campaigns.length + urlVars.metrics.length;
+  if (total === 0) return false;
+
+  // Clean the URL now that we've captured the variables.
+  history.replaceState(null, '', window.location.pathname);
+
+  // Working state (mutated by the panel).
+  const pendingParams = new URLSearchParams(params.toString());
+  let pendingC2 = null;          // { value, alias, source } | null
+  let selected  = null;          // { name, vars } | null
+
+  // These three are independent — fetch concurrently so the panel opens fast.
+  const [gitHistory, perfList, index] = await Promise.all([
+    _gitHistoryPromise,
+    _apirest.LoadCommits(TASK_TYPES.PERF),
+    _apirest.ListTemplateVariables(),
+  ]);
+  const commits = gitHistory?.commits ?? [];
+
+  // Perf commits indexed by short hash → the exact data-layer hash. Used to skip
+  // compare targets with no Perf run (stepping to the next older one that has
+  // one) and to return the commit in the form the data backend expects.
+  const perfByShort = new Map((perfList ?? []).map(h => [CommitHelp.ShortHash(h), h]));
+
+  // Resolves the "dev base" of a base commit c1 (Perf-adjusted): the dev commit
+  // its branch started from. See the three cases below.
+  async function resolveDevBase(c1) {
+    if (!c1) return null;
+    // (1) c1 is on main/dev → its ancestor is the next element in `commits`.
+    const ci = CommitHelp.CommitsIndexOf(commits, c1);
+    if (ci !== -1) return CommitHelp.NextPerfId(commits, ci + 1, perfByShort);
+    // (2) c1 is a known branch tip → use that branch's recorded base.
+    const tip = (gitHistory?.branches ?? []).find(
+      b => CommitHelp.ShortHash(b.id) === CommitHelp.ShortHash(c1));
+    if (tip?.base) return perfFromBase(tip.base);
+    // (3) otherwise ask the git-log endpoint; its response carries `base`.
+    const log = await _apirest.LoadGitLog(c1);
+    const base = log?.commits?.[0]?.base ?? log?.base ?? null;
+    return base ? perfFromBase(base) : null;
+  }
+  function perfFromBase(baseId) {
+    const bi = CommitHelp.CommitsIndexOf(commits, baseId);
+    if (bi !== -1) return CommitHelp.NextPerfId(commits, bi, perfByShort);
+    // base not on the main/dev line — normalise to the data-layer hash if known.
+    return perfByShort.get(CommitHelp.ShortHash(baseId)) ?? baseId;
+  }
+
+  // `index` (template variable names, for matching) was fetched above; full
+  // definitions are loaded lazily when a template is selected.
+  const catalog = Object.entries(index?.templates ?? {})
+    .map(([name, vars]) => ({ name, vars }));
+
+  // Cache of full template definitions, loaded on demand. A `null` value means
+  // the load was attempted and failed (so we don't retry on every render).
+  const templateCache = new Map();   // name -> tpl | null
+  async function ensureTpl(name) {
+    if (templateCache.has(name)) return templateCache.get(name);
+    const tpl = await _apirest.LoadTemplate(name);
+    templateCache.set(name, tpl ?? null);
+    return templateCache.get(name);
+  }
+
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+  _ui.Reset();
+  const container = document.createElement('div');
+  container.className = 'suggest-panel';
+
+  const close = function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage-visible');
+  };
+
+  // Escape / backdrop dismissal falls back to an empty default view so the app
+  // is never left blank.
+  const dismiss = async function() {
+    close();
+    await _resetState(_state, {
+      title: 'Vue_' + Date.now(),
+      variables: { commits: new Map(), subtasks: new Map(), campaigns: new Map(), metrics: new Map() },
+    }, null);
+    _enableMainUI(true);
+  };
+
+  function effectiveDefined() {
+    const d = parseURLVariables(pendingParams);
+    if (pendingC2 && !d.commits.includes('c2')) d.commits.push('c2');
+    return d;
+  }
+
+  async function loadResult(tpl, name) {
+    close();
+    await _resetState(_state, tpl, name);
+    _enableMainUI(true);
+  }
+
+  // Clones the (cached) selected template and overlays the URL params + the
+  // compare-with c2. Caller must ensure the template is loaded.
+  function buildSelectedClone() {
+    const clone = cloneTemplate(templateCache.get(selected.name));
+    applyURLParamsToTemplate(clone, pendingParams);
+    if (pendingC2 && clone.variables.commits instanceof Map) {
+      clone.variables.commits.set('c2', { value: pendingC2.value, alias: pendingC2.alias });
+    }
+    return clone;
+  }
+
+  // ── Render ──────────────────────────────────────────────────
+  function render() {
+    container.innerHTML = '';
+    container.appendChild(_ui.CreateTitle('Open from link', 'h3'));
+
+    const intro = document.createElement('p');
+    intro.className = 'suggest-intro';
+    intro.textContent = 'Select a template and pick a commit to compare to if wanted.';
+    container.appendChild(intro);
+
+    // ── Variables from the link ──
+    const varsTitle = document.createElement('div');
+    varsTitle.className = 'suggest-section-title';
+    varsTitle.textContent = 'Variables from this link';
+    container.appendChild(varsTitle);
+
+    const chips = document.createElement('div');
+    chips.className = 'suggest-var-chips';
+    const defined = parseURLVariables(pendingParams);
+    const definedVars = buildVariablesFromParams(pendingParams);
+    let chipCount = 0;
+    for (const cat of ['commits', 'subtasks', 'campaigns', 'metrics']) {
+      for (const name of defined[cat]) {
+        const entry = definedVars[cat].get(name);
+        chips.appendChild(buildChip(name, describeVarValue(cat, entry), () => {
+          pendingParams.delete(name);
+          pendingParams.delete(`${name}.alias`);
+          // The compare-with c2 is resolved relative to c1; if c1 is removed,
+          // drop the dangling comparator so it can't be loaded without a base.
+          if (name === 'c1') pendingC2 = null;
+          render();
+        }));
+        chipCount++;
+      }
+    }
+    if (chipCount === 0) {
+      const none = document.createElement('span');
+      none.className = 'suggest-empty';
+      none.textContent = 'No variables — all removed.';
+      chips.appendChild(none);
+    }
+    container.appendChild(chips);
+
+    // ── Compare with (only when c1 is the sole commit defined variable, others can be) ──
+    // The c2 comparator lives here as a toggle group: at most one selected,
+    // and clicking the active option again clears it back to none.
+    const onlyC1 = defined.commits.length === 1 && defined.commits[0] === 'c1';
+    if (onlyC1) {
+      const c1 = pendingParams.get('c1');
+      const cmpTitle = document.createElement('div');
+      cmpTitle.className = 'suggest-section-title';
+      cmpTitle.textContent = 'Compare with commit on branch';
+      container.appendChild(cmpTitle);
+
+      const compare_helper = document.createElement('p');
+      compare_helper.className = 'suggest-compare-helper';
+      compare_helper.textContent = 'main tip / dev tip: the latest commit on that branch. dev base: the dev commit this branch started from. If a commit has no Perf run, the next older one with a run is used.';
+      container.appendChild(compare_helper);
+
+      const row = document.createElement('div');
+      row.className = 'suggest-compare-row';
+
+      // main tip / dev tip resolve synchronously from the history; dev base may
+      // need an async git-log lookup, so it resolves on click.
+      const mainTip = CommitHelp.NextPerfId(commits, CommitHelp.FirstBranchIndex(commits, 'main'), perfByShort);
+      const devTip  = CommitHelp.NextPerfId(commits, CommitHelp.FirstBranchIndex(commits, 'dev'),  perfByShort);
+      const opts = [
+        { id: 'main', label: 'main tip', alias: 'main', value: mainTip, async: false },
+        { id: 'dev',  label: 'dev tip',  alias: 'dev',  value: devTip,  async: false },
+        { id: 'base', label: 'dev base', alias: 'base', value: null,    async: true  },
+      ];
+      for (const o of opts) {
+        const btn = document.createElement('button');
+        const active = pendingC2?.source === o.id;
+        btn.className = 'suggest-compare-btn' + (active ? ' selected' : '');
+        btn.textContent = o.label;
+        const enabled = o.async ? !!(c1 && gitHistory) : !!o.value;
+        if (!enabled) {
+          btn.disabled = true;
+          btn.title = 'Not available in git history';
+        } else if (o.async) {
+          if (active) btn.onclick = () => { pendingC2 = null; render(); };
+          else btn.onclick = async () => {
+            const value = await resolveDevBase(c1);
+            if (!value) { _errorManager.Error('Could not resolve a dev base for this commit.'); return; }
+            pendingC2 = { value, alias: o.alias, source: o.id };
+            render();
+          };
+        } else {
+          btn.title = `c2 = ${CommitHelp.ShortHash(o.value)}`;
+          btn.onclick = () => {
+            pendingC2 = active ? null : { value: o.value, alias: o.alias, source: o.id };
+            render();
+          };
+        }
+        row.appendChild(btn);
+      }
+      container.appendChild(row);
+    }
+
+    // ── Matching templates ──
+    const eff = effectiveDefined();
+    const matches = catalog.filter(t => templateMatches(t.vars, eff));
+    if (selected && !matches.some(m => m.name === selected.name)) selected = null;
+    // Default to the first match so a preview shows immediately.
+    if (!selected && matches.length) selected = matches[0];
+
+    const tplTitle = document.createElement('div');
+    tplTitle.className = 'suggest-section-title';
+    tplTitle.textContent = `Matching templates (${matches.length})`;
+    container.appendChild(tplTitle);
+
+    const listBox = document.createElement('div');
+    listBox.className = 'suggest-template-list';
+    if (matches.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'suggest-empty';
+      empty.textContent = 'No saved template defines these variables.';
+      listBox.appendChild(empty);
+    } else {
+      for (const m of matches) {
+        const rowBtn = document.createElement('button');
+        rowBtn.className = 'suggest-template-row' + (selected?.name === m.name ? ' selected' : '');
+        rowBtn.textContent = m.name;
+        rowBtn.onclick = () => { selected = m; render(); };
+        listBox.appendChild(rowBtn);
+      }
+    }
+    container.appendChild(listBox);
+
+    // ── Preview of the selected template ──
+    if (selected) {
+      const prevTitle = document.createElement('div');
+      prevTitle.className = 'suggest-section-title';
+      prevTitle.textContent = `Preview · ${selected.name}`;
+      container.appendChild(prevTitle);
+
+      const preview = document.createElement('div');
+      preview.className = 'suggest-preview';
+
+      if (!templateCache.has(selected.name)) {
+        // Not loaded yet — show a placeholder and fetch, then re-render.
+        const loading = document.createElement('p');
+        loading.className = 'suggest-empty';
+        loading.textContent = 'Loading preview…';
+        preview.appendChild(loading);
+        ensureTpl(selected.name).then(render);
+      } else if (!templateCache.get(selected.name)) {
+        const failed = document.createElement('p');
+        failed.className = 'suggest-empty';
+        failed.textContent = 'Failed to load this template.';
+        preview.appendChild(failed);
+      } else {
+        const clone = buildSelectedClone();
+        for (const cat of ['commits', 'subtasks', 'campaigns', 'metrics']) {
+          const map = clone.variables[cat];
+          if (!(map instanceof Map)) continue;
+          for (const [name, entry] of map) {
+            let tagText, tagClass;
+            if (name === 'c2' && pendingC2) {
+              tagText = 'compare with'; tagClass = 'compare';
+            } else if (pendingParams.has(name)) {
+              tagText = 'from link'; tagClass = 'from-url';
+            } else {
+              tagText = 'template default'; tagClass = 'from-template';
+            }
+            const pr = document.createElement('div');
+            pr.className = 'suggest-preview-row';
+            const nm = document.createElement('span');
+            nm.className = 'suggest-preview-name';
+            nm.textContent = name;
+            const vl = document.createElement('span');
+            vl.className = 'suggest-preview-value';
+            vl.textContent = describeVarValue(cat, entry);
+            const tag = document.createElement('span');
+            tag.className = 'suggest-source-tag ' + tagClass;
+            tag.textContent = tagText;
+            pr.append(nm, vl, tag);
+            preview.appendChild(pr);
+          }
+        }
+      }
+      container.appendChild(preview);
+    }
+
+    // ── Actions ──
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'modal-button-ok';
+    loadBtn.textContent = 'Load template';
+    // Enabled only once the selected template's full definition is loaded.
+    loadBtn.disabled = !selected || !templateCache.get(selected.name);
+    loadBtn.onclick = () => loadResult(buildSelectedClone(), selected.name);
+    actions.appendChild(loadBtn);
+
+    const blankBtn = document.createElement('button');
+    blankBtn.className = 'modal-button-cancel';
+    blankBtn.textContent = 'Continue without a template';
+    blankBtn.onclick = () => {
+      const vars = buildVariablesFromParams(pendingParams);
+      if (pendingC2) vars.commits.set('c2', { value: pendingC2.value, alias: pendingC2.alias });
+      loadResult({ title: 'Vue_' + Date.now(), variables: vars }, null);
+    };
+    actions.appendChild(blankBtn);
+
+    container.appendChild(actions);
+  }
+
+  function buildChip(name, valueText, onDelete) {
+    const chip = document.createElement('span');
+    chip.className = 'suggest-var-chip';
+    const label = document.createElement('span');
+    label.textContent = `${name} = ${valueText}`;
+    const del = document.createElement('button');
+    del.className = 'suggest-chip-del';
+    del.textContent = ICONS.CLOSE;
+    del.title = 'Remove this variable';
+    del.onclick = onDelete;
+    chip.append(label, del);
+    return chip;
+  }
+
+  render();
+  setModalCancel(dismiss);
+  modalpage.appendChild(container);
+  modalpage.classList.add('modalpage-visible');
   return true;
 }
 

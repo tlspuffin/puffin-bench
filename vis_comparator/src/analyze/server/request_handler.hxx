@@ -55,7 +55,9 @@ REQUESTHANDLER(APILoadTemplate, std::string const);
 REQUESTHANDLER(APISaveTemplate, std::string const);
 REQUESTHANDLER(APIDeleteTemplate, std::string const);
 REQUESTHANDLER(APIListTemplates);
+REQUESTHANDLER(APIListTemplateVariables);
 
 REQUESTHANDLER(APIGetGitHistory);
+REQUESTHANDLER(APIGetGitLog, std::string const);
 
 };
