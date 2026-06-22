@@ -451,17 +451,6 @@ function buildCampaignVariableSection(state) {
     });
     card.appendChild(campaignSel);
 
-    if (entry?.value) {
-      const info = document.createElement('div');
-      info.className = 'sidebar-campaign-info';
-      info.textContent = campaignRunLabel({
-        user: entry.value.user, campaign: entry.value.campaign,
-        commit: entry.value.commit, timestamp: entry.value.timestamp,
-        subjects: entry.value.subject ? [entry.value.subject] : [],
-      });
-      card.appendChild(info);
-    }
-
     buildAliasRow(card, entry?.alias, (newAlias) => {
       const cur = state.variables.campaigns.get(name) ?? { value: null, alias: null };
       state.variables.campaigns.set(name, { value: cur.value, alias: newAlias });

@@ -836,7 +836,7 @@ select:focus {
   align-items: center;
   gap: 12px;
   padding: 0px 15px;
-  margin-bottom: 8px;
+  margin-bottom: 0px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s ease;
@@ -1173,13 +1173,6 @@ select:focus {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.sidebar-campaign-info {
-  margin-top: 4px;
-  font-size: 0.72rem;
-  color: var(--color-text-muted, #888);
-  word-break: break-word;
 }
 
 .commit-picker-date {
