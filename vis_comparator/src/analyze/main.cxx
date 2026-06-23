@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
   Config config;
   bool forceInstall = false;
   bool onlyInstall = false;
-  std::string configFile = "vis_compartor-config.json";
+  std::string configFile = "vis_comparator-config.json";
   for(int i=1; i<argc; i++) {
     if (argv[i][0] != '-') {
       configFile = argv[i];
