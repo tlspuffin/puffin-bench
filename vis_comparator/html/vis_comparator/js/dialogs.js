@@ -215,7 +215,10 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
 function updateOkButton(ctx) {
   if (!ctx.btOk) return;
   const hasResolved = ctx.slots.some(s => resolveExperimentSlot(s, _state.variables) != null);
-  const hasMetrics  = ctx.selectedMetrics.length > 0;
+  // Require a live metrics UI: a preserved selection (kept across transient
+  // states) must not enable OK while no checkboxes are shown, e.g. when the
+  // resolved experiment has no metrics.
+  const hasMetrics  = ctx.selectedMetrics.length > 0 && ctx.metricsUIContainer != null;
   if (hasResolved && hasMetrics) UI.EnableElement(ctx.btOk);
   else UI.DisableElement(ctx.btOk);
 }
@@ -233,9 +236,12 @@ function metricsMatch(a, b) {
 }
 
 async function rebuildMetricsUI(ctx, forceTimeRecalc = false) {
+  // Snapshot the current selection but DON'T clear it yet: clearing is deferred
+  // until we are actually about to rebuild the checkbox tree (see below). This
+  // preserves the selection through transient states where no usable metrics UI
+  // is built (no resolved experiment, or an experiment with no data), so it can
+  // be restored once a valid experiment is defined again.
   const previousMetrics = [...ctx.selectedMetrics];
-  ctx.selectedMetrics = [];
-  updateOkButton(ctx);
 
   const slotResolutions = ctx.slots.map((slot, idx) => ({
     idx,
@@ -247,6 +253,7 @@ async function rebuildMetricsUI(ctx, forceTimeRecalc = false) {
       ctx.metricsUIContainer.remove();
       ctx.metricsUIContainer = null;
     }
+    updateOkButton(ctx);
     return;
   }
 
@@ -315,10 +322,17 @@ async function rebuildMetricsUI(ctx, forceTimeRecalc = false) {
 
   if (!syntheticMetrics.metrics || syntheticMetrics.metrics.size === 0) {
     if (ctx.metricsUIContainer) { ctx.metricsUIContainer.remove(); ctx.metricsUIContainer = null; }
+    updateOkButton(ctx);
     return;
   }
 
   if (ctx.metricsUIContainer) { ctx.metricsUIContainer.remove(); ctx.metricsUIContainer = null; }
+
+  // About to rebuild the tree: now clear the selection so checkbox callbacks
+  // start from an empty array. The restoration loop below re-adds the preserved
+  // entries from previousMetrics (or ctx.prefill on first edit).
+  ctx.selectedMetrics = [];
+  updateOkButton(ctx);
 
   const metricsTree = _ui.CreateMetrics(syntheticMetrics, {
     absent: ctx.metricsMode === 'OR' ? absentPaths : new Set(),
