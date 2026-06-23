@@ -1013,7 +1013,7 @@ function copyTextToClipboard(text) {
 /**
  * Builds a row-action button that copies a generated URL to the clipboard,
  * flashing a checkmark on success and surfacing an error toast on failure.
- * @param {() => string} urlFactory - produces the URL to copy when clicked
+ * @param {() => string|Promise<string>} urlFactory - produces the URL to copy when clicked
  * @param {string} title - button tooltip
  * @returns {HTMLButtonElement}
  */
@@ -1024,7 +1024,7 @@ function makeCopyURLBtn(urlFactory, title) {
   copyBtn.title = title;
   copyBtn.onclick = function(e) {
     e.stopPropagation();
-    copyTextToClipboard(urlFactory()).then(function() {
+    Promise.resolve(urlFactory()).then(copyTextToClipboard).then(function() {
       copyBtn.textContent = ICONS.CHECK;
       setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
     }).catch(function(err) {
@@ -1065,20 +1065,24 @@ export async function tryLoadViewFromURL() {
 // TEMPLATES
 // ============================================================
 
-function buildTemplateURL(templateName, state) {
-  const params = new URLSearchParams({ template: templateName });
-  for (const [name, entry] of state.variables.commits) {
-    if (entry?.value) params.set(name, entry.value);
-    if (entry?.alias) params.set(`${name}.alias`, entry.alias);
-  }
-  for (const [name, entry] of state.variables.subtasks) {
-    if (entry?.value) params.set(name, `${entry.value.tasktype}:${entry.value.subtask}`);
-    if (entry?.alias) params.set(`${name}.alias`, entry.alias);
-  }
-  for (const [name, val] of state.variables.metrics) {
-    if (val) params.set(name, val);
-  }
-  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+/**
+ * Builds a self-documenting "fill-in-the-blanks" URL for a template: it lists every
+ * variable the template defines with a placeholder token showing the expected format,
+ * so a recipient can see what they may fill in. The placeholders (and their `:`/`<>`
+ * separators) are kept raw — we assemble the query string by hand rather than via
+ * URLSearchParams.toString(), which would percent-encode them and ruin readability.
+ * @param {string} templateName
+ * @returns {Promise<string>}
+ */
+async function buildTemplateURL(templateName) {
+  const tpl = await _apirest.LoadTemplate(templateName);
+  const vars = tpl?.variables;
+  const parts = [`template=${encodeURIComponent(templateName)}`];
+  for (const [name] of vars?.commits   ?? []) parts.push(`${name}=<commit_hash>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.subtasks  ?? []) parts.push(`${name}=<tasktype>:<subtask>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.campaigns ?? []) parts.push(`${name}=<user>:<campaign>:<timestamp>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.metrics   ?? []) parts.push(`${name}=<metric_path>`);
+  return `${window.location.origin}${window.location.pathname}?${parts.join('&')}`;
 }
 
 export function OpenTemplate(restoreUI = false) {
@@ -1110,7 +1114,7 @@ export function OpenTemplate(restoreUI = false) {
       });
     },
     extraRowBtns: function(name) {
-      return [makeCopyURLBtn(() => buildTemplateURL(name, _state), 'Copy shareable URL (uses current variable values)')];
+      return [makeCopyURLBtn(() => buildTemplateURL(name), 'Copy a fill-in-the-blanks URL listing this template’s variables')];
     },
   });
 }
@@ -1200,51 +1204,133 @@ export function SaveAsTemplate(state) {
  * Only variable names that already exist in the template are affected; URL params
  * for unknown variables are ignored. An empty value (e.g. c1=) clears to null.
  * Formats: commits <name>=<hash> + <name>.alias; subtasks <name>=<tasktype>:<subtask>
- * + <name>.alias; metrics <name>=<path>. (Campaign vars keep their template default.)
- * @param {object} tpl - template with .variables.{commits,subtasks,metrics} Maps
+ * + <name>.alias; campaigns <name>=<user>:<campaign>:<timestamp> + <name>.alias;
+ * metrics <name>=<path>.
+ *
+ * Any param that can't be turned into a usable value — an unfilled `<…>` placeholder, a
+ * malformed subtask, or a campaign run with no match in globalCampaigns — is reported via
+ * an error toast naming the variable, and that variable is left unset.
+ * @param {object} tpl - template with .variables.{commits,subtasks,campaigns,metrics} Maps
  * @param {URLSearchParams} params
  */
 function applyURLParamsToTemplate(tpl, params) {
+  // A value still wrapped in angle brackets is an unedited placeholder from a copied URL.
+  const isPlaceholder = (v) => typeof v === 'string' && /^<.*>$/.test(v.trim());
+  const failures = [];
+  const fail = (name, reason) => failures.push(`Variable "${name}" could not be loaded from the URL: ${reason}.`);
+  // Placeholder aliases (e.g. c1.alias=<alias>) are treated as "not provided".
+  const readAlias = (name, entry) => {
+    if (!params.has(`${name}.alias`)) return entry?.alias ?? null;
+    const raw = params.get(`${name}.alias`);
+    return isPlaceholder(raw) ? null : (raw || null);
+  };
+
   if (tpl.variables?.commits instanceof Map) {
     for (const [name, entry] of tpl.variables.commits) {
-      const hasVal   = params.has(name);
-      const hasAlias = params.has(`${name}.alias`);
-      const alias = hasAlias ? (params.get(`${name}.alias`) || null) : (entry?.alias ?? null);
+      const hasVal = params.has(name);
+      const alias = readAlias(name, entry);
       if (hasVal) {
-        tpl.variables.commits.set(name, { value: params.get(name) || null, alias });
-      } else if (hasAlias) {
+        const raw = params.get(name);
+        if (isPlaceholder(raw)) {
+          fail(name, `value is still a placeholder (${raw})`);
+          tpl.variables.commits.set(name, { value: null, alias });
+        } else {
+          tpl.variables.commits.set(name, { value: raw || null, alias });
+        }
+      } else if (params.has(`${name}.alias`)) {
         tpl.variables.commits.set(name, { value: entry?.value ?? null, alias });
       }
     }
   }
   if (tpl.variables?.subtasks instanceof Map) {
     for (const [name, entry] of tpl.variables.subtasks) {
-      const hasVal   = params.has(name);
-      const hasAlias = params.has(`${name}.alias`);
-      const alias = hasAlias ? (params.get(`${name}.alias`) || null) : (entry?.alias ?? null);
+      const hasVal = params.has(name);
+      const alias = readAlias(name, entry);
       if (hasVal) {
-        const val = params.get(name);
-        if (val) {
-          const firstColon = val.indexOf(':');
-          if (firstColon !== -1) {
+        const raw = params.get(name);
+        if (!raw) {
+          tpl.variables.subtasks.set(name, { value: null, alias });
+        } else if (isPlaceholder(raw)) {
+          fail(name, `value is still a placeholder (${raw})`);
+          tpl.variables.subtasks.set(name, { value: null, alias });
+        } else {
+          const firstColon = raw.indexOf(':');
+          if (firstColon > 0 && firstColon < raw.length - 1) {
             tpl.variables.subtasks.set(name, {
-              value: { tasktype: val.slice(0, firstColon), subtask: val.slice(firstColon + 1) },
+              value: { tasktype: raw.slice(0, firstColon), subtask: raw.slice(firstColon + 1) },
               alias,
             });
+          } else {
+            fail(name, `expected <tasktype>:<subtask>, got "${raw}"`);
+            tpl.variables.subtasks.set(name, { value: null, alias });
           }
-        } else {
-          tpl.variables.subtasks.set(name, { value: null, alias });
         }
-      } else if (hasAlias) {
+      } else if (params.has(`${name}.alias`)) {
         tpl.variables.subtasks.set(name, { value: entry?.value ?? null, alias });
+      }
+    }
+  }
+  if (tpl.variables?.campaigns instanceof Map) {
+    for (const [name, entry] of tpl.variables.campaigns) {
+      const hasVal = params.has(name);
+      const alias = readAlias(name, entry);
+      if (hasVal) {
+        const raw = params.get(name);
+        if (!raw) {
+          tpl.variables.campaigns.set(name, { value: null, alias });
+        } else if (isPlaceholder(raw)) {
+          fail(name, `value is still a placeholder (${raw})`);
+          tpl.variables.campaigns.set(name, { value: null, alias });
+        } else {
+          const run = findCampaignRun(raw);
+          if (!run) fail(name, `no campaign run matches "${raw}"`);
+          tpl.variables.campaigns.set(name, { value: run, alias });
+        }
+      } else if (params.has(`${name}.alias`)) {
+        tpl.variables.campaigns.set(name, { value: entry?.value ?? null, alias });
       }
     }
   }
   if (tpl.variables?.metrics instanceof Map) {
     for (const [name] of tpl.variables.metrics) {
-      if (params.has(name)) tpl.variables.metrics.set(name, params.get(name) || null);
+      if (!params.has(name)) continue;
+      const raw = params.get(name);
+      if (isPlaceholder(raw)) {
+        fail(name, `value is still a placeholder (${raw})`);
+        tpl.variables.metrics.set(name, null);
+      } else {
+        tpl.variables.metrics.set(name, raw || null);
+      }
     }
   }
+
+  for (const msg of failures) _errorManager.Error(msg);
+}
+
+/**
+ * Resolves a `<user>:<campaign>:<timestamp>` URL token to a full campaign run object
+ * by matching it against the loaded globalCampaigns list. Returns null if the token is
+ * malformed or no run matches (e.g. the run list isn't loaded or the run is gone).
+ * @param {string} raw
+ * @returns {{type,commit,timestamp,user,campaign,subject}|null}
+ */
+function findCampaignRun(raw) {
+  const i = raw.indexOf(':'), j = raw.lastIndexOf(':');
+  if (i === -1 || i === j) return null;  // need exactly 3 parts
+  const user = raw.slice(0, i);
+  const campaign = raw.slice(i + 1, j);
+  const ts = Number(raw.slice(j + 1));
+  const r = globalCampaigns.find(c =>
+    String(c.user) === user && String(c.campaign) === campaign && Number(c.timestamp) === ts);
+  if (!r) return null;
+  return {
+    type:      'Campaign',
+    commit:    r.commit,
+    timestamp: r.timestamp,
+    user:      r.user,
+    campaign:  r.campaign,
+    subject:   (r.subjects && r.subjects[0]) || null,
+  };
 }
 
 export async function tryLoadTemplateFromURL() {

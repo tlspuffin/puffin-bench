@@ -290,8 +290,9 @@ let allCommitsPromise = Promise.all([
 
   return all;
 });
-// Load the campaign run list once; refresh the sidebar when it arrives.
-apirest.LoadCampaigns().then(list => {
+// Load the campaign run list once; refresh the sidebar when it arrives. The promise is
+// awaited before template-from-URL handling so campaign URL params can be resolved.
+const campaignsReady = apirest.LoadCampaigns().then(list => {
   globalCampaigns.length = 0;
   globalCampaigns.push(...(list ?? []));
   BuildSidebar(state);
@@ -481,7 +482,9 @@ modalpage.addEventListener('click', function(e) {
 
 tryLoadViewFromURL().then(async function(loaded) {
   if (loaded) return;
-  // No explicit view — try an explicit template link.
+  // No explicit view — try an explicit template link. Campaign URL params resolve against
+  // globalCampaigns, so make sure the run list has arrived first.
+  await campaignsReady;
   if (await tryLoadTemplateFromURL()) return;
   // No explicit template — if the URL carries variables, offer matching templates.
   if (await SuggestTemplatesFromURL()) return;
