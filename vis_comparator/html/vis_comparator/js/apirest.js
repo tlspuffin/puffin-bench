@@ -398,7 +398,7 @@ class ApiREST {
         }
       });
       const maxRunTime = data.runs.reduce((m, r) => Math.max(m, r.runTime), -Infinity);
-      const maxTimeMicroS = Math.ceil(maxRunTime * 1.1);
+      const maxTimeMicroS = Math.ceil(maxRunTime * 1.01);
       
       return { metrics: metricsFolders, maxTimeMicroS };
     } catch (error) {
