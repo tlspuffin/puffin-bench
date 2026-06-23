@@ -242,7 +242,7 @@ static void Fingerprint(std::filesystem::path const& zstPath, int64_t& mtime, ui
 }
 
 void ns_Analyze::DataManager::BuildIndex() {
-  std::filesystem::path const cachePath = rootpath_ / ".runindex.json";
+  std::filesystem::path const cachePath = rootpath_ / ".project/vis_comparator-index.json";
 
   // ── Load the persistent cache: relpath -> (RunEntry, fingerprint) ──────────
   std::unordered_map<std::string, RunEntry> cache;
