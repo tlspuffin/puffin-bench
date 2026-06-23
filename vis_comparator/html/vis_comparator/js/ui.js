@@ -907,7 +907,7 @@ class UI {
     // Per-column value filters. These are custom in-DOM dropdowns (CreateSimpleDropdown)
     // rather than native <select>s: a native <select>'s OS popup renders outside the panel
     // DOM, so picking an option counted as an outside-click and closed the whole picker.
-    const FILTER_ALL = ' all';  // sentinel for the "no filter" row (truthy, can't collide with a real value)
+    const FILTER_ALL = ' all';  // sentinel for the "no filter" row (truthy, can't collide with a real value)
     const filterBar = document.createElement('div');
     filterBar.className = 'campaign-filter-bar';
     const makeFilter = (key, label) => {
