@@ -243,6 +243,7 @@ static void Fingerprint(std::filesystem::path const& zstPath, int64_t& mtime, ui
 
 void ns_Analyze::DataManager::BuildIndex() {
   std::filesystem::path const cachePath = rootpath_ / ".project/vis_comparator-index.json";
+  std::cout << "[index] Building run index from " << rootpath_.string() << std::endl;
 
   // ── Load the persistent cache: relpath -> (RunEntry, fingerprint) ──────────
   std::unordered_map<std::string, RunEntry> cache;
@@ -291,6 +292,8 @@ void ns_Analyze::DataManager::BuildIndex() {
       }
     }
   }
+  std::cout << "[index] Loaded " << cache.size() << " cached entries from "
+            << cachePath.string() << std::endl;
 
   // ── Walk the data root for runs (one .zst with numeric stem + sibling .json) ─
   for (auto it = std::filesystem::recursive_directory_iterator(rootpath_);
@@ -334,6 +337,7 @@ void ns_Analyze::DataManager::BuildIndex() {
     }
 
     // ── Fresh parse ──────────────────────────────────────────────────────────
+    std::cout << "[index] Parsing run " << relKey << std::endl;
     RunEntry run{};
     run.timestamp = std::strtoull(taskID.c_str(), nullptr, 10);
     run.relpath   = relativePath;
@@ -366,6 +370,8 @@ void ns_Analyze::DataManager::BuildIndex() {
 
     runIndex_.push_back(std::move(run));
   }
+
+  std::cout << "[index] Indexed " << runIndex_.size() << " runs" << std::endl;
 
   // ── Build the runId resolution map ─────────────────────────────────────────
   for (size_t i = 0; i < runIndex_.size(); ++i) {
@@ -404,6 +410,7 @@ void ns_Analyze::DataManager::BuildIndex() {
       rapidjson::OStreamWrapper osw(ofs);
       rapidjson::Writer<rapidjson::OStreamWrapper> writer(osw);
       doc.Accept(writer);
+      std::cout << "[index] Wrote run index cache to " << cachePath.string() << std::endl;
     } else {
       LOGW("Could not write run index cache to " + cachePath.string());
     }
