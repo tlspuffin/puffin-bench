@@ -233,7 +233,14 @@ async function restoreGraphs(savedSettings, recomputeRange = false) {
         .map(p => [experimentKey(p.exp), p.data])
     );
 
-    if (dataMap.size === 0) continue;
+    if (dataMap.size === 0) {
+      // Experiments resolved but no data came back (e.g. the referenced commit/subtask
+      // has no results on this server). Render a placeholder so the graph still shows —
+      // matching the unresolved-variable cases above — rather than silently dropping it.
+      const id = await graphManager.AddGraph(graphConfig, new Map());
+      state.graphSettings.set(id, graphConfig);
+      continue;
+    }
 
     for (const exp of resolved) {
       const expKey = experimentKey(exp);

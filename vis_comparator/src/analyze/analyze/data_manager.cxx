@@ -405,6 +405,8 @@ void ns_Analyze::DataManager::BuildIndex() {
     }
     doc.AddMember("entries", entries, alloc);
 
+    std::error_code mkdirEc;
+    std::filesystem::create_directories(cachePath.parent_path(), mkdirEc);
     std::ofstream ofs(cachePath);
     if (ofs) {
       rapidjson::OStreamWrapper osw(ofs);

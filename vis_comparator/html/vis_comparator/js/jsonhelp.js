@@ -28,6 +28,11 @@ class JSONHelp {
   }
 
   static #Replacer(key, value) {
+    // Shrink saved files: omit null-valued object properties. Readers default any
+    // absent key to null (?? null / optional chaining). In an array the returned
+    // undefined is serialized by JSON.stringify as null, so Map entries encoded as
+    // [key, null] (e.g. metric variables) keep their key and null value.
+    if (value === null) return undefined;
     if (value instanceof Map) {
       return { __type: 'Map', value: Array.from(value.entries())};
     }

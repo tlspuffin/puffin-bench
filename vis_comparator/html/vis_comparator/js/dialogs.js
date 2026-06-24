@@ -1174,11 +1174,14 @@ export function SaveAsTemplate(state) {
         const tpl = {
           title:       state.title,
           titleFormat,
+          // A template is a blank shell: keep only the variable names, never their
+          // current values/aliases. The null bodies are dropped by the serializer
+          // (jsonhelp), and readers infer empty variables on load.
           variables: {
-            commits:   new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            subtasks:  new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            campaigns: new Map([...state.variables.campaigns.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            metrics:   new Map([...state.variables.metrics.entries()]),
+            commits:   new Map([...state.variables.commits.keys()].map(k => [k, { value: null, alias: null }])),
+            subtasks:  new Map([...state.variables.subtasks.keys()].map(k => [k, { value: null, alias: null }])),
+            campaigns: new Map([...state.variables.campaigns.keys()].map(k => [k, { value: null, alias: null }])),
+            metrics:   new Map([...state.variables.metrics.keys()].map(k => [k, null])),
           },
           legendFormat:   state.legendFormat,
           graphSettings:  state.graphSettings,
