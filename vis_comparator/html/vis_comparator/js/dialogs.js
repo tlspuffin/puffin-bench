@@ -1238,6 +1238,11 @@ function applyURLParamsToTemplate(tpl, params, fullHashes = []) {
         if (isPlaceholder(raw)) {
           fail(name, `value is still a placeholder (${raw})`);
           tpl.variables.commits.set(name, { value: null, alias });
+        } else if (parseDynamicRef(raw)) {
+          // A dynamic reference (e.g. @dev-base) is resolved in a later async pass
+          // (resolveDynamicCommitRefs), once anchor commits hold their literal hashes.
+          // Keep any alias the URL/template already carries.
+          tpl.variables.commits.set(name, { value: null, alias });
         } else {
           tpl.variables.commits.set(name, { value: raw ? CommitHelp.ResolveFullHash(raw, fullHashes) : null, alias });
         }
@@ -1337,6 +1342,42 @@ function findCampaignRun(raw) {
   };
 }
 
+/**
+ * Second pass over a template's commit variables: any whose URL value is a dynamic
+ * reference (e.g. `c2=@dev-base`) is resolved to a concrete data-layer hash, anchored
+ * to the resolved value of its anchor commit var (default c1). Must run after
+ * applyURLParamsToTemplate, so anchors already hold their literal hashes. Async because
+ * dev-base may hit the git-log endpoint. Unresolvable refs are reported via an error
+ * toast naming the variable and left unset, mirroring applyURLParamsToTemplate.
+ * @param {object} tpl
+ * @param {URLSearchParams} params
+ * @param {object} ctx - { commits, gitHistory, perfByShort, loadGitLog }
+ */
+/** True when any of the template's commit vars has an @-token URL value to resolve. */
+function templateHasDynamicRef(tpl, params) {
+  const commits = tpl.variables?.commits;
+  if (!(commits instanceof Map)) return false;
+  for (const [name] of commits) if (parseDynamicRef(params.get(name))) return true;
+  return false;
+}
+
+async function resolveDynamicCommitRefs(tpl, params, ctx) {
+  const commits = tpl.variables?.commits;
+  if (!(commits instanceof Map)) return;
+  for (const [name] of commits) {
+    const ref = parseDynamicRef(params.get(name));
+    if (!ref) continue;
+    const anchorHash = commits.get(ref.anchor)?.value ?? params.get(ref.anchor) ?? null;
+    const value = await CommitHelp.ResolveDynamicRef(ref.token, anchorHash, ctx);
+    const existing = commits.get(name);
+    if (!value) {
+      _errorManager.Error(`Variable "${name}" could not be loaded from the URL: dynamic reference "@${ref.token}" could not be resolved.`);
+      continue;
+    }
+    commits.set(name, { value, alias: existing?.alias ?? DYN_REF_DEFAULT_ALIAS[ref.token] });
+  }
+}
+
 export async function tryLoadTemplateFromURL() {
   const params = new URLSearchParams(window.location.search);
   const templateName = params.get('template');
@@ -1350,6 +1391,21 @@ export async function tryLoadTemplateFromURL() {
 
   const fullHashes = await _allCommitsPromise;
   applyURLParamsToTemplate(raw, params, fullHashes);
+
+  // git history + the Perf commit list are needed only to resolve dynamic commit
+  // refs; skip both fetches when no commit var carries an @-token (the common case).
+  if (templateHasDynamicRef(raw, params)) {
+    const [gitHistory, perfList] = await Promise.all([
+      _gitHistoryPromise,
+      _apirest.LoadCommits(TASK_TYPES.PERF),
+    ]);
+    await resolveDynamicCommitRefs(raw, params, {
+      commits: gitHistory?.commits ?? [],
+      gitHistory,
+      perfByShort: new Map((perfList ?? []).map(h => [CommitHelp.ShortHash(h), h])),
+      loadGitLog: (c) => _apirest.LoadGitLog(c),
+    });
+  }
 
   await _resetState(_state, raw, templateName);
   _enableMainUI(true);
@@ -1366,6 +1422,27 @@ const URL_VAR_PATTERNS = [
   [/^k\d+$/, 'campaigns'],
   [/^m\d+$/, 'metrics'],
 ];
+
+// Dynamic commit references usable as a commit variable's URL value instead of a
+// literal hash, e.g. `c2=@dev-base` or `c2=@dev-base:c3`. `main-tip`/`dev-tip` are
+// absolute; `dev-base` is computed relative to an anchor commit var (default c1).
+const DYN_REF_TOKENS = ['main-tip', 'dev-tip', 'dev-base'];
+const DYN_REF_RE = /^@([a-z-]+)(?::(c\d+))?$/i;
+const DYN_REF_DEFAULT_ALIAS = { 'main-tip': 'main', 'dev-tip': 'dev', 'dev-base': 'base' };
+
+/**
+ * Parses a commit variable's URL value as a dynamic reference. Returns
+ * { token, anchor } (anchor defaulting to 'c1') for a recognised `@token[:cX]`,
+ * or null for a literal hash / placeholder / unknown token.
+ * @param {string|null} raw
+ */
+function parseDynamicRef(raw) {
+  const m = typeof raw === 'string' && raw.trim().match(DYN_REF_RE);
+  if (!m) return null;
+  const token = m[1].toLowerCase();
+  if (!DYN_REF_TOKENS.includes(token)) return null;
+  return { token, anchor: m[2] || 'c1' };
+}
 
 /**
  * Classifies the variable names present in a URL by category (commits/subtasks/
@@ -1477,6 +1554,20 @@ export async function SuggestTemplatesFromURL() {
   let pendingC2 = null;          // { value, alias, source } | null
   let selected  = null;          // { name, vars } | null
 
+  // Dynamic @-tokens (e.g. c2=@dev-base) are only resolved on the template-URL
+  // path; here, where no template is named, comparison targets are chosen via the
+  // "Compare with" buttons instead. Drop any such commit values and tell the user.
+  const ignoredRefs = [];
+  for (const name of parseURLVariables(pendingParams).commits) {
+    if (!parseDynamicRef(pendingParams.get(name))) continue;
+    ignoredRefs.push(`${name}=${pendingParams.get(name)}`);
+    pendingParams.delete(name);
+    pendingParams.delete(`${name}.alias`);
+  }
+  if (ignoredRefs.length) {
+    _errorManager.Error(`Ignored dynamic reference${ignoredRefs.length > 1 ? 's' : ''} ${ignoredRefs.join(', ')}: they only work with a template in the URL. Use the "Compare with" buttons below.`);
+  }
+
   // These are independent — fetch concurrently so the panel opens fast.
   const [gitHistory, perfList, index, fullHashes] = await Promise.all([
     _gitHistoryPromise,
@@ -1491,28 +1582,8 @@ export async function SuggestTemplatesFromURL() {
   // one) and to return the commit in the form the data backend expects.
   const perfByShort = new Map((perfList ?? []).map(h => [CommitHelp.ShortHash(h), h]));
 
-  // Resolves the "dev base" of a base commit c1 (Perf-adjusted): the dev commit
-  // its branch started from. See the three cases below.
-  async function resolveDevBase(c1) {
-    if (!c1) return null;
-    // (1) c1 is on main/dev → its ancestor is the next element in `commits`.
-    const ci = CommitHelp.CommitsIndexOf(commits, c1);
-    if (ci !== -1) return CommitHelp.NextPerfId(commits, ci + 1, perfByShort);
-    // (2) c1 is a known branch tip → use that branch's recorded base.
-    const tip = (gitHistory?.branches ?? []).find(
-      b => CommitHelp.ShortHash(b.id) === CommitHelp.ShortHash(c1));
-    if (tip?.base) return perfFromBase(tip.base);
-    // (3) otherwise ask the git-log endpoint; its response carries `base`.
-    const log = await _apirest.LoadGitLog(c1);
-    const base = log?.commits?.[0]?.base ?? log?.base ?? null;
-    return base ? perfFromBase(base) : null;
-  }
-  function perfFromBase(baseId) {
-    const bi = CommitHelp.CommitsIndexOf(commits, baseId);
-    if (bi !== -1) return CommitHelp.NextPerfId(commits, bi, perfByShort);
-    // base not on the main/dev line — normalise to the data-layer hash if known.
-    return perfByShort.get(CommitHelp.ShortHash(baseId)) ?? baseId;
-  }
+  // Shared context for the dynamic compare-target resolvers in CommitHelp.
+  const dynCtx = { commits, gitHistory, perfByShort, loadGitLog: (c) => _apirest.LoadGitLog(c) };
 
   // `index` (template variable names, for matching) was fetched above; full
   // definitions are loaded lazily when a template is selected.
@@ -1638,8 +1709,8 @@ export async function SuggestTemplatesFromURL() {
 
       // main tip / dev tip resolve synchronously from the history; dev base may
       // need an async git-log lookup, so it resolves on click.
-      const mainTip = CommitHelp.NextPerfId(commits, CommitHelp.FirstBranchIndex(commits, 'main'), perfByShort);
-      const devTip  = CommitHelp.NextPerfId(commits, CommitHelp.FirstBranchIndex(commits, 'dev'),  perfByShort);
+      const mainTip = CommitHelp.ResolveBranchTip('main', commits, perfByShort);
+      const devTip  = CommitHelp.ResolveBranchTip('dev',  commits, perfByShort);
       const opts = [
         { id: 'main', label: 'main tip', alias: 'main', value: mainTip, async: false },
         { id: 'dev',  label: 'dev tip',  alias: 'dev',  value: devTip,  async: false },
@@ -1657,7 +1728,7 @@ export async function SuggestTemplatesFromURL() {
         } else if (o.async) {
           if (active) btn.onclick = () => { pendingC2 = null; render(); };
           else btn.onclick = async () => {
-            const value = await resolveDevBase(c1);
+            const value = await CommitHelp.ResolveDevBase(c1, dynCtx);
             if (!value) { _errorManager.Error('Could not resolve a dev base for this commit.'); return; }
             pendingC2 = { value, alias: o.alias, source: o.id };
             render();

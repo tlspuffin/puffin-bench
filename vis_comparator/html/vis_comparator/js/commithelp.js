@@ -147,6 +147,68 @@ class CommitHelp {
     }
     return null;
   }
+
+  /**
+   * Data-layer hash of the latest commit on a branch that has a Perf run (the
+   * branch "tip", stepping to the next older one when the very tip has no run).
+   * Returns null when the branch is absent or no commit on/after it has a run.
+   * @param {string} branch - e.g. 'main' or 'dev'
+   * @param {Array<{id:string, branch:string}>} commits
+   * @param {Map<string,string>|null} perfByShort
+   */
+  static ResolveBranchTip(branch, commits, perfByShort) {
+    return this.NextPerfId(commits, this.FirstBranchIndex(commits, branch), perfByShort);
+  }
+
+  /**
+   * Resolves the "dev base" of an anchor commit (Perf-adjusted): the dev commit
+   * its branch started from. Three cases, in order:
+   *   (1) anchor is on the main/dev line → its ancestor is the next element in `commits`.
+   *   (2) anchor is a known branch tip → use that branch's recorded `base`.
+   *   (3) otherwise ask the git-log endpoint; its response carries `base`.
+   * @param {string} anchorHash
+   * @param {{commits:Array, gitHistory:object|null, perfByShort:Map<string,string>, loadGitLog:(hash:string)=>Promise<object|null>}} ctx
+   * @returns {Promise<string|null>} data-layer hash or null
+   */
+  static async ResolveDevBase(anchorHash, ctx) {
+    if (!anchorHash) return null;
+    const { commits, gitHistory, perfByShort, loadGitLog } = ctx;
+    const perfFromBase = (baseId) => {
+      const bi = this.CommitsIndexOf(commits, baseId);
+      if (bi !== -1) return this.NextPerfId(commits, bi, perfByShort);
+      // base not on the main/dev line — normalise to the data-layer hash if known.
+      return perfByShort.get(this.ShortHash(baseId)) ?? baseId;
+    };
+    // (1) anchor is on main/dev → its ancestor is the next element in `commits`.
+    const ci = this.CommitsIndexOf(commits, anchorHash);
+    if (ci !== -1) return this.NextPerfId(commits, ci + 1, perfByShort);
+    // (2) anchor is a known branch tip → use that branch's recorded base.
+    const tip = (gitHistory?.branches ?? []).find(
+      b => this.ShortHash(b.id) === this.ShortHash(anchorHash));
+    if (tip?.base) return perfFromBase(tip.base);
+    // (3) otherwise ask the git-log endpoint; its response carries `base`.
+    const log = await loadGitLog(anchorHash);
+    const base = log?.commits?.[0]?.base ?? log?.base ?? null;
+    return base ? perfFromBase(base) : null;
+  }
+
+  /**
+   * Resolves a dynamic commit-reference token to a data-layer commit hash.
+   * `anchorHash` is the resolved hash the ref is computed relative to (used by
+   * 'dev-base'; ignored by the absolute tips). Returns null for unknown tokens.
+   * @param {'main-tip'|'dev-tip'|'dev-base'} token
+   * @param {string|null} anchorHash
+   * @param {object} ctx - see ResolveDevBase
+   * @returns {Promise<string|null>}
+   */
+  static async ResolveDynamicRef(token, anchorHash, ctx) {
+    switch (token) {
+      case 'main-tip': return this.ResolveBranchTip('main', ctx.commits, ctx.perfByShort);
+      case 'dev-tip':  return this.ResolveBranchTip('dev',  ctx.commits, ctx.perfByShort);
+      case 'dev-base': return this.ResolveDevBase(anchorHash, ctx);
+      default:         return null;
+    }
+  }
 }
 
 export { CommitHelp };
