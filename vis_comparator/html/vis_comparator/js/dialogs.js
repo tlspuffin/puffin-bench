@@ -1215,8 +1215,9 @@ export function SaveAsTemplate(state) {
  * an error toast naming the variable, and that variable is left unset.
  * @param {object} tpl - template with .variables.{commits,subtasks,campaigns,metrics} Maps
  * @param {URLSearchParams} params
+ * @param {string[]} fullHashes - known full commit hashes, to resolve shortened ones
  */
-function applyURLParamsToTemplate(tpl, params) {
+function applyURLParamsToTemplate(tpl, params, fullHashes = []) {
   // A value still wrapped in angle brackets is an unedited placeholder from a copied URL.
   const isPlaceholder = (v) => typeof v === 'string' && /^<.*>$/.test(v.trim());
   const failures = [];
@@ -1238,7 +1239,7 @@ function applyURLParamsToTemplate(tpl, params) {
           fail(name, `value is still a placeholder (${raw})`);
           tpl.variables.commits.set(name, { value: null, alias });
         } else {
-          tpl.variables.commits.set(name, { value: raw || null, alias });
+          tpl.variables.commits.set(name, { value: raw ? CommitHelp.ResolveFullHash(raw, fullHashes) : null, alias });
         }
       } else if (params.has(`${name}.alias`)) {
         tpl.variables.commits.set(name, { value: entry?.value ?? null, alias });
@@ -1347,7 +1348,8 @@ export async function tryLoadTemplateFromURL() {
   const raw = await _apirest.LoadTemplate(templateName);
   if (!raw) return false;
 
-  applyURLParamsToTemplate(raw, params);
+  const fullHashes = await _allCommitsPromise;
+  applyURLParamsToTemplate(raw, params, fullHashes);
 
   await _resetState(_state, raw, templateName);
   _enableMainUI(true);
@@ -1384,11 +1386,12 @@ function parseURLVariables(params) {
 }
 
 /** Builds fresh variable Maps directly from URL params (no template defaults). */
-function buildVariablesFromParams(params) {
+function buildVariablesFromParams(params, fullHashes = []) {
   const commits = new Map(), subtasks = new Map(), campaigns = new Map(), metrics = new Map();
   const defined = parseURLVariables(params);
   for (const name of defined.commits) {
-    commits.set(name, { value: params.get(name) || null, alias: params.get(`${name}.alias`) || null });
+    const raw = params.get(name);
+    commits.set(name, { value: raw ? CommitHelp.ResolveFullHash(raw, fullHashes) : null, alias: params.get(`${name}.alias`) || null });
   }
   for (const name of defined.subtasks) {
     const val = params.get(name);
@@ -1474,11 +1477,12 @@ export async function SuggestTemplatesFromURL() {
   let pendingC2 = null;          // { value, alias, source } | null
   let selected  = null;          // { name, vars } | null
 
-  // These three are independent — fetch concurrently so the panel opens fast.
-  const [gitHistory, perfList, index] = await Promise.all([
+  // These are independent — fetch concurrently so the panel opens fast.
+  const [gitHistory, perfList, index, fullHashes] = await Promise.all([
     _gitHistoryPromise,
     _apirest.LoadCommits(TASK_TYPES.PERF),
     _apirest.ListTemplateVariables(),
+    _allCommitsPromise,
   ]);
   const commits = gitHistory?.commits ?? [];
 
@@ -1563,7 +1567,7 @@ export async function SuggestTemplatesFromURL() {
   // compare-with c2. Caller must ensure the template is loaded.
   function buildSelectedClone() {
     const clone = cloneTemplate(templateCache.get(selected.name));
-    applyURLParamsToTemplate(clone, pendingParams);
+    applyURLParamsToTemplate(clone, pendingParams, fullHashes);
     if (pendingC2 && clone.variables.commits instanceof Map) {
       clone.variables.commits.set('c2', { value: pendingC2.value, alias: pendingC2.alias });
     }
@@ -1589,7 +1593,7 @@ export async function SuggestTemplatesFromURL() {
     const chips = document.createElement('div');
     chips.className = 'suggest-var-chips';
     const defined = parseURLVariables(pendingParams);
-    const definedVars = buildVariablesFromParams(pendingParams);
+    const definedVars = buildVariablesFromParams(pendingParams, fullHashes);
     let chipCount = 0;
     for (const cat of ['commits', 'subtasks', 'campaigns', 'metrics']) {
       for (const name of defined[cat]) {
@@ -1771,7 +1775,7 @@ export async function SuggestTemplatesFromURL() {
     blankBtn.className = 'modal-button-cancel';
     blankBtn.textContent = 'Continue without a template';
     blankBtn.onclick = () => {
-      const vars = buildVariablesFromParams(pendingParams);
+      const vars = buildVariablesFromParams(pendingParams, fullHashes);
       if (pendingC2) vars.commits.set('c2', { value: pendingC2.value, alias: pendingC2.alias });
       loadResult({ title: 'Vue_' + Date.now(), variables: vars }, null);
     };

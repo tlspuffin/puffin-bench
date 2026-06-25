@@ -272,13 +272,14 @@ function onLoading(delta, label) {
 const apirest = new ApiREST(config.apiBase, errorManager, onLoading);
 // Loaded once at startup; reused as a resolved Promise by all dropdowns.
 const gitHistoryPromise = apirest.LoadGitHistory();
-// Pre-fetch all available commits once for use in sidebar pill-selectors.
+// Pre-fetch all available commits once for use in sidebar pill-selectors. Resolves
+// to the bare commit-id list as soon as the two commit lists arrive; the subject
+// prefetch below is a detached sidebar-warming side-effect and must NOT gate this
+// promise (callers such as template-from-URL loading await it on the render path).
 let allCommitsPromise = Promise.all([
   apirest.LoadCommits(TASK_TYPES.PERF),
   apirest.LoadCommits(TASK_TYPES.VULN),
-]).then(async ([perf, vuln]) => {
-  const all = [...new Set([...perf, ...vuln])];
-
+]).then(([perf, vuln]) => {
   const recentPerf = perf.slice(0, 10);
   const recentVuln = vuln.slice(0, 10);
 
@@ -290,12 +291,14 @@ let allCommitsPromise = Promise.all([
     apirest.LoadCommitSubjects(TASK_TYPES.VULN, c).then(res => res.map(s => ({tasktype: TASK_TYPES.VULN, subtask: s.value})))
   ));
 
-  const results = await Promise.all(fetches);
-  const before = globalDynamicSubtasks.length;
-  dedupSubtasks(globalDynamicSubtasks, results.flat());
-  if (globalDynamicSubtasks.length > before) BuildSidebar(state);
+  // Fire-and-forget: warm the dynamic-subtask cache and refresh the sidebar when done.
+  Promise.all(fetches).then(results => {
+    const before = globalDynamicSubtasks.length;
+    dedupSubtasks(globalDynamicSubtasks, results.flat());
+    if (globalDynamicSubtasks.length > before) BuildSidebar(state);
+  });
 
-  return all;
+  return [...new Set([...perf, ...vuln])];
 });
 // Load the campaign run list once; refresh the sidebar when it arrives. The promise is
 // awaited before template-from-URL handling so campaign URL params can be resolved.

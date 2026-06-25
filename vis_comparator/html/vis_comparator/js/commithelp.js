@@ -55,6 +55,22 @@ class CommitHelp {
   }
 
   /**
+   * Resolves a possibly-shortened commit hash to the full hash the data backend
+   * uses, by prefix-matching against the known full-hash list. Returns `value`
+   * unchanged when it is empty, already an exact match, has no match, or is
+   * ambiguous (matches more than one) — callers then surface the usual
+   * "No data" warning rather than guessing.
+   * @param {string} value
+   * @param {string[]} fullHashes
+   */
+  static ResolveFullHash(value, fullHashes) {
+    if (!value || !Array.isArray(fullHashes)) return value;
+    if (fullHashes.includes(value)) return value;          // already full / exact
+    const matches = fullHashes.filter(h => h.startsWith(value));
+    return matches.length === 1 ? matches[0] : value;      // unique prefix wins
+  }
+
+  /**
    * Formats an epoch-millisecond timestamp using a pattern of YYYY/MM/DD/HH/mm/ss
    * tokens (UTC, to match the campaign picker). Returns '' for a non-finite input.
    */
