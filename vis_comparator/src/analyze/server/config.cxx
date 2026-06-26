@@ -83,7 +83,8 @@ void ns_Server::Config::Validate(bool forceInstall) const {
     throw std::runtime_error("Unable to create userdata directory \"" +
         (userdata_ / "templates").string() + "\": " + ec.message());
   }
-  for (auto const& f : VisComparator_Templates) {
+  for (size_t i = 0; i < VisComparator_Templates_count; ++i) {
+    EmbeddedFile const& f = VisComparator_Templates[i];
     install(std::filesystem::weakly_canonical(userdata_ / "templates" / f.name),
             f.data, f.size);
   }
@@ -100,7 +101,8 @@ void ns_Server::Config::Validate(bool forceInstall) const {
   }
 
   // Web assets (html/css/js): directories are derived from each file's relative path.
-  for (auto const& f : VisComparator_WebAssets) {
+  for (size_t i = 0; i < VisComparator_WebAssets_count; ++i) {
+    EmbeddedFile const& f = VisComparator_WebAssets[i];
     std::filesystem::path filePath =
         std::filesystem::weakly_canonical(html_ / "vis_comparator" / f.name);
     std::filesystem::create_directories(filePath.parent_path(), ec);

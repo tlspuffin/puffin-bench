@@ -191,11 +191,11 @@ set(VISCOMPARATOR_WEBASSETS_HEADER "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/w
 set(VISCOMPARATOR_TEMPLATES_HEADER "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/templates_all.h")
 
 EmbedDirAsArray("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator"
-  "${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/*"
-  "${VISCOMPARATOR_WEBASSETS_HEADER}" VisComparator_WebAssets)
+  "${VISCOMPARATOR_WEBASSETS_HEADER}" VisComparator_WebAssets
+  "*.html" "*.css" "*.js")
 EmbedDirAsArray("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates"
-  "${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/*.json"
-  "${VISCOMPARATOR_TEMPLATES_HEADER}" VisComparator_Templates)
+  "${VISCOMPARATOR_TEMPLATES_HEADER}" VisComparator_Templates
+  "*.json")
 
 set(ANALYZE_SRC
   src/analyze/config.cxx 

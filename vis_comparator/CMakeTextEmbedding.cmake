@@ -98,11 +98,19 @@ if(DEFINED GENERATE_AGGREGATE)
     math(EXPR _i "${_i} + 1")
   endforeach()
 
-  file(APPEND "${OUTPUT_HEADER}"
-    "\nstatic const EmbeddedFile ${ARRAY_NAME}[] = {\n"
-    "${_entries}"
-    "};\n"
-    "static const size_t ${ARRAY_NAME}_count = sizeof(${ARRAY_NAME}) / sizeof(${ARRAY_NAME}[0]);\n")
+  if(_entries STREQUAL "")
+    # No files matched: emit a valid, empty table (an empty C array is ill-formed).
+    # Iterate with the _count companion, never via range-for, so this stays usable.
+    file(APPEND "${OUTPUT_HEADER}"
+      "\nstatic const EmbeddedFile* const ${ARRAY_NAME} = nullptr;\n"
+      "static const size_t ${ARRAY_NAME}_count = 0;\n")
+  else()
+    file(APPEND "${OUTPUT_HEADER}"
+      "\nstatic const EmbeddedFile ${ARRAY_NAME}[] = {\n"
+      "${_entries}"
+      "};\n"
+      "static const size_t ${ARRAY_NAME}_count = sizeof(${ARRAY_NAME}) / sizeof(${ARRAY_NAME}[0]);\n")
+  endif()
   return()
 endif()
 
@@ -124,22 +132,33 @@ function(EmbedTextFileScript INPUT_TEXT OUTPUT_H VARPREFIX)
   )
 endfunction()
 
-# EmbedDirAsArray(<base_dir> <glob_expr> <output_header> <array_name>)
+# EmbedDirAsArray(<base_dir> <output_header> <array_name> <pattern>...)
 ##
-## Globs every file matching <glob_expr> (recursively) under <base_dir> and declares
-## a build rule that generates a single C++ header. The header contains each file's
-## content as a NUL-terminated string literal plus an array of EmbeddedFile entries:
+## Globs every file matching one of the trailing <pattern>s (each relative to and
+## recursive under <base_dir>, e.g. "*.js") and declares a build rule that generates
+## a single C++ header. The header contains each file's content as a NUL-terminated
+## string literal plus an array of EmbeddedFile entries:
 ##
 ##   static const EmbeddedFile <array_name>[]       = { { "<rel/path>", <data>, <size> }, ... };
 ##   static const size_t       <array_name>_count   = ...;
 ##
-## where "<rel/path>" is each file's path relative to <base_dir>.
+## where "<rel/path>" is each file's path relative to <base_dir>. Restricting to
+## explicit patterns keeps stray editor/backup/temp files out of the binary.
 ##
 ## CONFIGURE_DEPENDS makes CMake re-glob (re-configure) when files are added/removed,
 ## so dropping a new file into <base_dir> is picked up automatically on the next build.
 ## The custom command DEPENDS on every globbed file, so editing content regenerates too.
-function(EmbedDirAsArray BASE_DIR GLOB_EXPR OUTPUT_H ARRAY_NAME)
-  file(GLOB_RECURSE _files CONFIGURE_DEPENDS "${GLOB_EXPR}")
+function(EmbedDirAsArray BASE_DIR OUTPUT_H ARRAY_NAME)
+  set(_globs "")
+  foreach(_pat IN LISTS ARGN)
+    list(APPEND _globs "${BASE_DIR}/${_pat}")
+  endforeach()
+  file(GLOB_RECURSE _files CONFIGURE_DEPENDS ${_globs})
+
+  if(NOT _files)
+    message(WARNING "EmbedDirAsArray: no files matched [${ARGN}] under ${BASE_DIR}; "
+      "${ARRAY_NAME} will be empty.")
+  endif()
 
   get_filename_component(_out_dir "${OUTPUT_H}" DIRECTORY)
   file(MAKE_DIRECTORY "${_out_dir}")
