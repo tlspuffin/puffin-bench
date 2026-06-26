@@ -21,7 +21,9 @@
     },
     "publisher": {
       "default": {
-        "uri": "http://127.0.0.1:10083/api/notify",
+        "base_url": "http://127.0.0.1:10083",
+        "notify_endpoint": "/api/notify",
+        "view_endpoint": "/files/${PROJECT}#${TASK_ID}",
         "storage": "/home/olivier/Desktop/Archives"
       }
     },

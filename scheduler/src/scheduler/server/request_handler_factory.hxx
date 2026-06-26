@@ -46,7 +46,9 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       } else if (std::regex_match(uri, matches, std::regex(R"(/api/task/(\d+)/artefacts$)"))) {
         requestHandler = new RequestHandlerTaskGetArtefacts(matches[1].str());
       } else if (std::regex_match(uri, matches, std::regex(R"(/api/task/(\d+)/final_state$)"))) {
-        requestHandler = new RequestHandlerTaskGetFinalState(matches[1].str());
+        requestHandler = new RequestHandlerTaskGetState(true, matches[1].str());
+      } else if (std::regex_match(uri, matches, std::regex(R"(/api/task/(\d+)/state$)"))) {
+        requestHandler = new RequestHandlerTaskGetState(false, matches[1].str());
       } else if (uri == "/api/tasks/running") {
         requestHandler = new RequestHandlerTasksRunning;
       } else if (std::regex_match(uri, matches, std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))"))) {

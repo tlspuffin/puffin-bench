@@ -26,43 +26,45 @@ ns_API::UsersAPI::UsersAPI(ns_Schedule::Config const& config)
 }
 
 bool ns_API::UsersAPI::Add(ns_Schedule::Task* task, bool running) {
+  std::unique_lock lock(lockDB_);
   {
-    std::unique_lock lock(lockDB_);
-    {
-      rapidjson::Value valueEmpty(rapidjson::kObjectType);
-      if (!doc_.HasMember(task->user_.c_str())) {
-        doc_.AddMember(rapidjson::Value(task->user_.c_str(), alloc_), valueEmpty, alloc_);
-      }
+    rapidjson::Value valueEmpty(rapidjson::kObjectType);
+    if (!doc_.HasMember(task->user_.c_str())) {
+      doc_.AddMember(rapidjson::Value(task->user_.c_str(), alloc_), valueEmpty, alloc_);
     }
-    rapidjson::Value& user = doc_[task->user_.c_str()];
-    if (!user.IsObject()) {
-      throw std::runtime_error("users JSON fatal error, " + task->user_ + " is not an object");
-    }
-    {
-      rapidjson::Value valueEmpty(rapidjson::kObjectType);
-      if (!user.HasMember(task->job_type_.c_str())) {
-        user.AddMember(rapidjson::Value(task->job_type_.c_str(), alloc_), valueEmpty, alloc_);
-      }
-    }
-    rapidjson::Value& jobType = user[task->job_type_.c_str()];
-    if (!jobType.IsObject()) {
-      throw std::runtime_error("users JSON fatal error, " + task->user_ + "." + task->job_type_ + " is not an object");
-    }
-
-    std::string taskID = std::to_string(task->id_);
-    if (!jobType.HasMember(taskID.c_str())) {
-      rapidjson::Value valueEmpty(rapidjson::kObjectType);
-      jobType.AddMember(rapidjson::Value(taskID.c_str(), alloc_), valueEmpty, alloc_);
-    }
-    rapidjson::Value& value = jobType[taskID.c_str()];
-    value.RemoveMember("name");
-    value.AddMember("name", rapidjson::Value(task->name_.c_str(), alloc_), alloc_);
-    value.RemoveMember("running");
-    value.AddMember("running", running, alloc_);
-    value.RemoveMember("cancelled");
-    value.AddMember("cancelled", task->request_cancel_, alloc_);
   }
-  return Save();
+  rapidjson::Value& user = doc_[task->user_.c_str()];
+  if (!user.IsObject()) {
+    throw std::runtime_error("users JSON fatal error, " + task->user_ + " is not an object");
+  }
+  {
+    rapidjson::Value valueEmpty(rapidjson::kObjectType);
+    if (!user.HasMember(task->job_type_.c_str())) {
+      user.AddMember(rapidjson::Value(task->job_type_.c_str(), alloc_), valueEmpty, alloc_);
+    }
+  }
+  rapidjson::Value& jobType = user[task->job_type_.c_str()];
+  if (!jobType.IsObject()) {
+    throw std::runtime_error("users JSON fatal error, " + task->user_ + "." + task->job_type_ + " is not an object");
+  }
+
+  std::string taskID = std::to_string(task->id_);
+  if (!jobType.HasMember(taskID.c_str())) {
+    rapidjson::Value valueEmpty(rapidjson::kObjectType);
+    jobType.AddMember(rapidjson::Value(taskID.c_str(), alloc_), valueEmpty, alloc_);
+  }
+  rapidjson::Value& value = jobType[taskID.c_str()];
+  value.RemoveMember("name");
+  value.AddMember("name", rapidjson::Value(task->name_.c_str(), alloc_), alloc_);
+  value.RemoveMember("running");
+  value.AddMember("running", running, alloc_);
+  value.RemoveMember("cancelled");
+  value.AddMember("cancelled", task->request_cancel_, alloc_);
+  value.RemoveMember("publish_link");
+  value.AddMember("publish_link", rapidjson::Value(task->publish_link_.c_str(), alloc_), alloc_);
+  value.RemoveMember("flag");
+  value.AddMember("flag", rapidjson::Value(task->FlagJSON(), alloc_), alloc_);
+  return SaveNoLock();
 }
 
 std::vector<std::string> ns_API::UsersAPI::Users() {
@@ -96,49 +98,72 @@ bool ns_API::UsersAPI::UserJobTypes(std::string const& user, std::vector<std::st
 }
 
 bool ns_API::UsersAPI::UserTasks(std::string const& user, std::string const& jobType, 
-    std::vector<struct ns_API::UsersAPI::TaskInfos>& result) {
-  std::shared_lock lock(lockDB_);
-  if (!doc_.HasMember(user.c_str())) {
-    return false;
-  }
-  rapidjson::Value const& userJSON = doc_[user.c_str()];
-  if (!userJSON.IsObject()) {
-    throw std::runtime_error("users JSON fatal error, entry " + user + " is not an object");
-  }
-  if (!userJSON.HasMember(jobType.c_str())) {
-    return false;
-  }
-  rapidjson::Value const& jobTypeJSON = userJSON[jobType.c_str()];
-  if (!jobTypeJSON.IsObject()) {
-    throw std::runtime_error("users JSON fatal error, entry " + user + "." + jobType + " is not an object");
-  }
-  for(auto it=jobTypeJSON.MemberBegin(); it!=jobTypeJSON.MemberEnd(); ++it) {
-    if (!it->name.IsString()) {
-      throw std::runtime_error(
-          "users JSON fatal error, entry " + user + "." + jobType + " name is not a string");
+    rapidjson::Value& result, rapidjson::Document::AllocatorType& alloc) {
+  std::vector<std::string> toDelete;
+  {
+    std::shared_lock lock(lockDB_);
+    if (!doc_.HasMember(user.c_str())) {
+      return false;
     }
-    std::string id = it->name.GetString();
-    rapidjson::Value const& value = it->value;
-    if((!value.HasMember("name")) || (!value["name"].IsString())) {
-      throw std::runtime_error(
-          "users JSON fatal error, entry " + user + "." + jobType + "." + id + ".name have issue");
+    rapidjson::Value const& userJSON = doc_[user.c_str()];
+    if (!userJSON.IsObject()) {
+      throw std::runtime_error("users JSON fatal error, entry " + user + " is not an object");
     }
-    for(std::string field: std::vector<std::string>{"running", "cancelled"}) {
-      char const* fieldC = field.c_str();
-      if((!value.HasMember(fieldC)) || (!value[fieldC].IsBool())) {
+    if (!userJSON.HasMember(jobType.c_str())) {
+      return false;
+    }
+    rapidjson::Value const& jobTypeJSON = userJSON[jobType.c_str()];
+    if (!jobTypeJSON.IsObject()) {
+      throw std::runtime_error("users JSON fatal error, entry " + user + "." + jobType + " is not an object");
+    }
+    for(auto it=jobTypeJSON.MemberBegin(); it!=jobTypeJSON.MemberEnd(); ++it) {
+      if (!it->name.IsString()) {
         throw std::runtime_error(
-            "users JSON fatal error, entry " + user + "." + jobType + "." + id + "." + field + " have issue");
-        }
+            "users JSON fatal error, entry " + user + "." + jobType + " name is not a string");
+      }
+      std::string id = it->name.GetString();
+      rapidjson::Value const& value = it->value;
+      if((!value.HasMember("name")) || (!value["name"].IsString())) {
+        throw std::runtime_error(
+            "users JSON fatal error, entry " + user + "." + jobType + "." + id + ".name have issue");
+      }
+      for(std::string field: std::vector<std::string>{"running", "cancelled"}) {
+        char const* fieldC = field.c_str();
+        if((!value.HasMember(fieldC)) || (!value[fieldC].IsBool())) {
+          throw std::runtime_error(
+              "users JSON fatal error, entry " + user + "." + jobType + "." + id + "." + field + " have issue");
+          }
+      }
+      bool running = value["running"].GetBool();
+      bool cancelled = value["cancelled"].GetBool();
+      std::error_code ec;
+      bool entryOK = running || 
+          ((!cancelled) && std::filesystem::exists(storagePath_ / ( id + ".json"), ec)) || 
+          std::filesystem::exists(storagePath_ / "Canceled" / ( id + ".json"), ec);   
+      if (entryOK) {
+        rapidjson::Value entry;
+        entry.CopyFrom(value, alloc);
+        entry.AddMember("id", rapidjson::Value((uint64_t)std::strtoull(id.c_str(), nullptr, 10)), alloc);
+        result.PushBack(std::move(entry), alloc);
+      } else if (!ec) {
+        toDelete.push_back(id);
+      }
     }
-    result.emplace_back(ns_API::UsersAPI::TaskInfos{
-        std::strtoull(id.c_str(), nullptr, 10), value["name"].GetString(), value["running"].GetBool(), value["cancelled"].GetBool()
-    });
+  }
+  if (!toDelete.empty()) {
+    {
+      std::unique_lock lock(lockDB_);
+      rapidjson::Value& jobTypeJSON = doc_[user.c_str()][jobType.c_str()];
+      for (auto const& id : toDelete) {
+        jobTypeJSON.RemoveMember(id.c_str());
+      }
+      SaveNoLock();
+    }
   }
   return true;
 }
 
-bool ns_API::UsersAPI::Save() {
-  std::unique_lock lock(lockDB_);
+bool ns_API::UsersAPI::SaveNoLock() {
   std::string filename = (storagePath_ / "users.json").string();
   FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
   if (!fp) {

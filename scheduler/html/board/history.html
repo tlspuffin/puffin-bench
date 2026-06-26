@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>History Experiment Manager</title>
+  <link rel="stylesheet" href="history.css">
+  <link rel="stylesheet" href="taskcard.css">
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <h1 id="header-title">Scheduler History</h1>
+      <div class="header-actions">
+        <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="container-users" class="container-users"></div>
+    <div id="container-timesline" class="container-timesline"></div>
+    <div id="container-tasks" class="container-tasks"></div>
+  </div>
+
+  <script type="module" src="history.js"></script>
+</body>
+</html>

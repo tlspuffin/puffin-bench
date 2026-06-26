@@ -164,18 +164,21 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_
 
 #EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/custom/header.html" "${CMAKE_SOURCE_DIR}/embeded/html/board/custom/header_html.h" CustomHeader_HTML)
 
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h" Terminal_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/clipboard.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/clipboard_js.h" Clipboard_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.html" "${CMAKE_SOURCE_DIR}/embeded/html/board/board_html.h" Board_HTML)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.css" "${CMAKE_SOURCE_DIR}/embeded/html/board/board_css.h" Board_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/board_js.h" Board_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/taskcard.css" "${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_css.h" TaskCard_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/taskcard.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_js.h" TaskCard_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h" Terminal_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/launchers.css" "${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/launchers_css.h" Launchers_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/launchers.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/launchers_js.h" Launchers_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.html" "${CMAKE_SOURCE_DIR}/embeded/html/board/task_html.h" Task_HTML)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.css" "${CMAKE_SOURCE_DIR}/embeded/html/board/task_css.h" Task_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/task_js.h" Task_JS)
-
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.html" "${CMAKE_SOURCE_DIR}/embeded/html/board/history_html.h" History_HTML)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.css" "${CMAKE_SOURCE_DIR}/embeded/html/board/history_css.h" History_CSS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/history_js.h" History_JS)
 
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/tlspuffin/joblauncher.css" "${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/tlspuffin/joblauncher_css.h" TLSPuffinJobLauncher_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/tlspuffin/joblauncher.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/tlspuffin/joblauncher_js.h" TLSPuffinJobLauncher_JS)
@@ -193,7 +196,7 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/wolfssl_
 
 set(SCHEDULER_SRC 
   src/scheduler/config.cxx 
-  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_compressed.cxx
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_compressed.cxx src/utils/dir.cxx
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
@@ -206,9 +209,11 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/executor_sh.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/functions_sh.h
+  ${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h ${CMAKE_SOURCE_DIR}/embeded/html/board/clipboard_js.h
   ${CMAKE_SOURCE_DIR}/embeded/html/board/board_html.h ${CMAKE_SOURCE_DIR}/embeded/html/board/board_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/board_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_js.h ${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h
+  ${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/launchers_js.h
+  ${CMAKE_SOURCE_DIR}/embeded/html/board/history_html.h ${CMAKE_SOURCE_DIR}/embeded/html/board/history_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/history_js.h
   #${CMAKE_SOURCE_DIR}/embeded/html/board/custom/header_html.h
   ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/tlspuffin/joblauncher_css.h 
   ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/tlspuffin/joblauncher_js.h ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/config_js.h

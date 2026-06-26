@@ -77,15 +77,15 @@ The Local backend uses `LocalData`:
 ```cpp
 struct LocalData : ExecutorData {
   vector<uint64_t> cores_;           // assigned core indices
-  path     run_path_;                // <runPath>/<taskID>/
-  path     artefacts_path_;
+  path     run_path_;                // <runPath>/<taskID>/executor/<stepID>/
+  path     artefacts_file_;          // <run_path>/<stepID>-artefacts.json
   pid_t    pid_;
-  string   launcher_file_;           // generated launcher .sh (string, not path)
-  string   user_state_file_;         // persistent key/value for step
-  string   step_parameters_file_;    // JSON env file for executor.sh
+  path     launcher_file_;           // generated launcher script
+  path     user_state_file_;         // persistent key/value for step
+  path     step_parameters_file_;    // JSON env file for executor.sh
   enum EProcessStatus { Internal, External, External_Running } process_status_;
-  path     fatalerror_path_;         // written if step crashes fatally
-  path     done_path_;               // sentinel file written at step exit
+  path     fatalerror_file_;         // written if step crashes fatally
+  path     done_file_;               // sentinel file written at step exit
   vector<string> arguments_;         // argv passed to exec
   path     cgroup_path_;             // /sys/fs/cgroup/…/<taskID>/<stepID>
   FDCaptureThread fdCaptureThread_;
@@ -97,17 +97,23 @@ struct LocalData : ExecutorData {
 };
 ```
 
+All step files (`artefacts_file_`, `fatalerror_file_`, `done_file_`, `launcher_file_`, `user_state_file_`, `step_parameters_file_`) live inside `<runPath>/<taskID>/executor/<stepID>/` — a subdirectory per step rather than flat files at the executor root.
+
 Per-task state uses `LocalTaskData`:
 
 ```cpp
 struct LocalTaskData : ExecutorTaskData {
   path   cgroupPath_;             // task-level cgroup root
+  path   run_path_;               // <runPath>/<taskID>/executor/  (shared by all steps)
+  path   flag_file_;              // <run_path>/.flag  (written by Flag() in scripts)
   int8_t os_memory_load_;
   int8_t os_cores_load_;
   int8_t os_memory_max_load_;
   int8_t os_cores_max_load_;     // all as signed bytes (0-100 %)
 };
 ```
+
+`TaskFinalize()` reads `flag_file_` after all steps complete and stores the content in `Task::flag_`, which is then serialised into the task JSON and exposed via the users API.
 
 ---
 
@@ -164,6 +170,8 @@ The executor maintains a `vector<bool> coresFree_` of size `nbCoresMax_`.
           THEJOB_OUT_PATH, THEJOB_TOOLS_PATH,
           THEJOB_USER_FILES_PATH, THEJOB_ARTEFACTS_PATH,
           THEJOB_USER_STATE_FILE,
+          THEJOB_FLAG_FILE,    ← path to task-level flag file (shared across steps)
+          THEJOB_DONE_FILE,    ← path to step-level done sentinel
           step function name, step args, task args
 
 2. AssignCores(step)

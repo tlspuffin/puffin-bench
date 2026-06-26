@@ -32,7 +32,9 @@ public:
 
   void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc);
   std::tuple<std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>, std::list<ns_Schedule::Step*>> 
-  LoadStatus(rapidjson::Value const& tasksmanager, ns_Schedule::Schedule const* schedule);
+      LoadStatus(rapidjson::Value const& tasksmanager, ns_Schedule::Schedule const* schedule);
+
+  std::string GetTaskState(uint64_t taskID);
 
 private:
   ns_Schedule::Config const& config_;

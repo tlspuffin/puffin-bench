@@ -1,4 +1,5 @@
 import { Terminal } from './terminal.js';
+import { Clipboard } from './clipboard.js';
 
 const FileReadState = Object.freeze({
   Error_Access: 0, Error_Open: 1, Error_OverFlow: 2,
@@ -59,7 +60,7 @@ export class TaskCard {
   // ── Public ───────────────────────────────────────────────────
 
   // Returns an HTMLElement for the full task — caller inserts it into the DOM
-  Create(task) { 
+  Create(task) {
     const steps = this.#BuildSteps(task);
 
     const div = document.createElement('div');
@@ -71,7 +72,7 @@ export class TaskCard {
     const cancelButton = document.createElement('button');
     cancelButton.classList.add('card-attempt-cancel-btn');
     cancelButton.textContent = 'Cancel';
-    cancelButton.onclick = async () => { 
+    cancelButton.onclick = async () => {
         if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
           return;
         }
@@ -99,8 +100,8 @@ export class TaskCard {
       taskName = task.id;
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-label-id', 'task-value-name'],
-        ['Task ' + task.id, cancelButton]
+        ['task-value-name', 'task-label-id', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, cancelButton]
       ));
       if (username != '') {
         divCardHeader.appendChild(this.#CreateCardLine(
@@ -112,8 +113,8 @@ export class TaskCard {
     } else {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-value-name'],
-        [task.name, cancelButton]
+        ['task-value-name', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), task.name, cancelButton]
       ));
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
@@ -126,16 +127,25 @@ export class TaskCard {
     separator.classList.add('card-task-separator');
     divCardHeader.appendChild(separator);
 
-    const taskLoad = task.executor_data?.os_load;
-    if (taskLoad) {
-      divCardHeader.appendChild(this.#CreateCardLine(
-        null, 'task-loads',
-        ['task-loads-label', 'task-loads-value', 'task-loads-value'],
-        ['Load', 'Mem ' + taskLoad.memory + '%', 'CPU ' + taskLoad.cores + '%']
-      ));
-      const separator2 = document.createElement('div');
-      separator2.classList.add('card-task-separator');
-      divCardHeader.appendChild(separator2);
+    if (task?.state === 'Running') {
+      const nbCores = Object.values(task?.steps || {}).reduce((total, step) => {
+          if (step?.state === 'Running') {
+            return total + (step?.executor_data?.cores?.length || 0);
+          }
+          return total;
+      }, 0);
+
+      const taskLoad = task.executor_data?.os_load;
+      if (taskLoad) {
+        divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-loads',
+          ['task-loads-label', 'task-loads-value', 'task-loads-value'],
+          ['Load', `Mem ${taskLoad.memory} %`, `CPU  ${taskLoad.cores} % on ${nbCores} cores`]
+        ));
+        const separator2 = document.createElement('div');
+        separator2.classList.add('card-task-separator');
+        divCardHeader.appendChild(separator2);
+      }
     }
 
     divCardHeader.appendChild(this.#CreateCardLine(
@@ -158,20 +168,34 @@ export class TaskCard {
       const divStep = document.createElement('div');
       divStep.classList.add('card-step');
 
+      const divStepNameHeader = document.createElement('div');
+      divStepNameHeader.classList.add('card-step-main-name');
+      divStepNameHeader.style.cursor = 'default';
+
       const divStepName = document.createElement('div');
-      divStepName.classList.add('card-step-main-name');
-      divStepName.style.cursor = 'default';
+      divStepName.classList = 'card-attempt-header';
       const nameSpan = document.createElement('span');
       nameSpan.innerText = functionName;
+      divStepName.appendChild(nameSpan);
+      let size = 0;
+      byId.forEach(attempts => size += attempts.length);
+      if (size == 1) {
+        const [ step ] = byId.values().next().value;
+        const link = this.#CreateRunPathLink(step)
+        if (link !== null) {
+          divStepName.appendChild(link);
+        }
+      }
+
       const iconSpan = document.createElement('span');
       iconSpan.innerText = '➖';
-      divStepName.appendChild(nameSpan);
-      divStepName.appendChild(iconSpan);
-      divStepName.onclick = () => {
+      divStepNameHeader.appendChild(divStepName);
+      divStepNameHeader.appendChild(iconSpan);
+      divStepNameHeader.onclick = () => {
           divStep.classList.toggle('collapsed');
           iconSpan.innerText = divStep.classList.contains('collapsed') ? '➕' : ' ➖';
       };
-      divStep.appendChild(divStepName);
+      divStep.appendChild(divStepNameHeader);
 
       let hasRunning = false
       byId.forEach(attempts => {
@@ -376,17 +400,18 @@ export class TaskCard {
   }
 
   #CreateAttemptCard(step, taskName, taskCancelRequested) {
-    /*const div = document.createElement('div'); 
+    /*const div = document.createElement('div');
     div.innerText = `**** ${step} ${taskName} ${taskCancelRequested}`
     return div;*/
     const div = document.createElement('div');
     div.classList.add('card-attempt-item', `state-${step.state.toLowerCase()}`);
 
     if (step.nb_retry > 1) {
+      const link = this.#CreateRunPathLink(step);
       div.appendChild(this.#CreateCardLine(
           null, 'attempt-header',
-          ['attempt-name'],
-          [`Attempt ${step.attempt_id}`]
+          ['attempt-name', 'run-path'],
+          [`Attempt ${step.attempt_id}`, link ?? ""]
       ));
     }
 
@@ -470,7 +495,7 @@ export class TaskCard {
             if (!confirm(`Cancel step "${step.name}" ?`)) {
               return;
             }
-            await this.#CancelStep(step.task_id, step.uuid); 
+            await this.#CancelStep(step.task_id, step.uuid);
         };
         action.appendChild(cancelButton);
       }
@@ -494,8 +519,8 @@ export class TaskCard {
   }
 
 
-  #CreateStepsCard(steps, taskName, taskCancelRequested) { 
-    /*const div = document.createElement('div'); 
+  #CreateStepsCard(steps, taskName, taskCancelRequested) {
+    /*const div = document.createElement('div');
     div.innerText = `**** ${steps} ${taskName} ${taskCancelRequested}`
     return div;*/
     const div = document.createElement('div');
@@ -550,7 +575,7 @@ export class TaskCard {
     if (Object.keys(steps[0].args).length) {
       div.appendChild(this.#CreateCardLine(
           null, 'step-attempts-detail',
-          ['step-attempts-detail-name'], 
+          ['step-attempts-detail-name'],
           ['Arguments:']
       ));
       const argEntries = Object.entries(steps[0].args);
@@ -621,7 +646,7 @@ export class TaskCard {
 
     console.log('query');
     var response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${logsInfos[type].lastoffset}`, 
+        `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${logsInfos[type].lastoffset}`,
         { signal: logsInfos.abortController.signal });
 
     if (!response.ok) {
@@ -687,10 +712,10 @@ export class TaskCard {
       );
 
       if (channel.supportSeek) {
-        //document.getElementById(`${type}-content`).innerText += 
+        //document.getElementById(`${type}-content`).innerText +=
         channel.terminal.AppendText(decoded);
       } else  {
-        //document.getElementById(`${type}-content`).innerText = 
+        //document.getElementById(`${type}-content`).innerText =
         channel.terminal.SetText(decoded);
       }
     }
@@ -742,4 +767,32 @@ export class TaskCard {
 
     await this.#RetrieveFullStepLogs(this.#logsInfos, 10000000);
   }
+
+  #CreateTaskQuickLink(task) {
+    const link = document.createElement('p');
+    link.classList = 'card-run-path-details';
+    link.innerText = '🔗';
+    link.title = `${window.location.origin}/files/board/task.html?id=${task.id}`;
+    link.onclick = async (event) => {
+      event.stopPropagation();
+      Clipboard.Set(event.currentTarget.title);
+    }
+    return link;
+  }
+
+  #CreateRunPathLink(step) {
+    if (step?.state !== 'Running') {
+      return null;
+    }
+    const link = document.createElement('p');
+    link.classList = 'card-run-path-details';
+    link.innerText = '📋';
+    link.title = step?.executor_data?.run_path;
+    link.onclick = async (event) => {
+      event.stopPropagation();
+      Clipboard.Set(event.currentTarget.title);
+    }
+    return link;
+  }
+
 }

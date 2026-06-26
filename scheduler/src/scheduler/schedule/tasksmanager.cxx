@@ -195,6 +195,23 @@ ns_Schedule::TasksManager::LoadStatus(rapidjson::Value const& tasksmanager,
   return std::make_tuple<>(stepsPending, stepsRunning, stepsDone);
 }
 
+std::string ns_Schedule::TasksManager::GetTaskState(uint64_t taskID) {
+  std::lock_guard<std::mutex> lock(lock_);
+  for(Task const* task: tasks_) {
+    if (task->id_ == taskID) {
+      rapidjson::Document doc;
+      doc.SetObject();
+      rapidjson::Value taskJSON(rapidjson::kObjectType);
+      task->ToJSON(taskJSON, doc.GetAllocator(), nullptr);
+      rapidjson::StringBuffer buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      taskJSON.Accept(writer);
+      return buffer.GetString();
+    }
+  }
+  return "";
+}
+
 void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {
   std::unordered_set<ns_Schedule::Step*> uniqueSteps;
   for(auto rootStep: task->root_steps_) {

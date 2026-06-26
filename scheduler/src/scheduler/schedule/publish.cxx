@@ -1,6 +1,5 @@
 #include "publish.hxx"
 #include "../../utils/rapidjson.hxx"
-#include "../../utils/variables.hxx"
 #include "../../utils/logs.hxx"
 #include <memory>
 #include <iostream>
@@ -13,8 +12,9 @@
 #include <Poco/Net/HTTPResponse.h>
 
 ns_Schedule::Publish::Publish() 
-    : server_(), rootStorage_(), storage_(), checkServerCertificat_(false) {
-}
+    : baseURL_(), notifyEndpoint_(), viewEndpoint_(), rootStorage_(), storage_(), 
+    checkServerCertificat_(false) 
+{}
 
 ns_Schedule::Publish::Publish(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     rapidjson::Value const& config) : Publish() {
@@ -29,16 +29,18 @@ void ns_Schedule::Publish::ReadJSON(std::unordered_map<std::string, PublisherCon
 
   goal_ = GetOrDefault<std::string>(config, "goal", "");
 
-  server_ = GetOrDefault<std::string>(config, "server", "");
+  std::string const server = GetOrDefault<std::string>(config, "server", "");
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
   storage_  = std::filesystem::weakly_canonical(
       GetOrDefault<std::string>(config, "storage", ""));
   rootStorage_.clear();
 
-  auto const& itConfig = publishersConfig.find(server_);
+  auto const& itConfig = publishersConfig.find(server);
   if (itConfig != publishersConfig.end()) {
-    server_ = itConfig->second.uri_;
+    baseURL_ = itConfig->second.baseURL_;
+    notifyEndpoint_ = itConfig->second.notifyEndpoint_;
+    viewEndpoint_ = itConfig->second.viewEndpoint_;
     checkServerCertificat_ = itConfig->second.checkServerCertificat_;
     //storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
     //storage_ = storage_;
@@ -48,7 +50,9 @@ void ns_Schedule::Publish::ReadJSON(std::unordered_map<std::string, PublisherCon
 
 void ns_Schedule::Publish::ToJSON(rapidjson::Value& node, 
     rapidjson::Document::AllocatorType& alloc) const {
-  node.AddMember("server", rapidjson::Value(server_.c_str(), alloc), alloc);
+  node.AddMember("base_url", rapidjson::Value(baseURL_.c_str(), alloc), alloc);
+  node.AddMember("notify_endpoint", rapidjson::Value(notifyEndpoint_.c_str(), alloc), alloc);
+  node.AddMember("viewEndpoint_", rapidjson::Value(viewEndpoint_.c_str(), alloc), alloc);
   node.AddMember("check_server_certificat", checkServerCertificat_, alloc);
   node.AddMember("root_storage", rapidjson::Value(rootStorage_.c_str(), alloc), alloc);
   node.AddMember("storage", rapidjson::Value(storage_.c_str(), alloc), alloc);
@@ -88,7 +92,7 @@ void ns_Schedule::Publish::PublishResults(
     MoveFileAndCreateSymLink(taskJSONfile, destinationFile);
   }
 
-  if (server_.empty()) {
+  if (baseURL_.empty()) {
     return;
   }
   try {
@@ -100,16 +104,16 @@ void ns_Schedule::Publish::PublishResults(
     }
     PublishToServer(files, finalStoragePath);
   } catch(std::runtime_error const& e) {
-    LOGW << "Error with publish server " << server_ << "\n\t" << e.what() << Log::Flags::End;
+    LOGW << "Error with publish server " << baseURL_ + notifyEndpoint_ << "\n\t" << e.what() << Log::Flags::End;
   } catch(...) {
-    LOGW << "Unknown Error with publish server " << server_ << Log::Flags::End;
+    LOGW << "Unknown Error with publish server " << baseURL_ + notifyEndpoint_ << Log::Flags::End;
   }
 }
 
 void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files, 
     std::string const& archivePath) {
   try {
-    Poco::URI uri(server_);
+    Poco::URI uri(baseURL_ + notifyEndpoint_);
     std::unique_ptr<Poco::Net::HTTPClientSession> session;
     if (uri.getScheme() == "https") {
       Poco::Net::Context::Ptr context = new Poco::Net::Context(

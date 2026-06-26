@@ -37,7 +37,10 @@ tools_path_     = <toolsPath>
 | `root_steps_` | list\<Step*\> | Entry points (no dependencies) |
 | `args_` | unordered_map | Global key/value parameters |
 | `configurations_` | StepConfigurations | Named step configs with defaults |
+| `state_` | Task::State | Lifecycle state: `Pending`, `Running`, `Done`, `Cancelled` |
 | `publish_` | Publish | Result publication config |
+| `publish_link_` | string | View URL built from `publish_.ViewLink()` after archival |
+| `flag_` | string | JSON string set by `Flag()` in step scripts; read from `THEJOB_FLAG_FILE` by `TaskFinalize()` |
 | `request_cancel_` | bool | Set by `Cancel()`, polled by scheduler loop |
 | `md5_` | map\<string,string\> | MD5 checksums of uploaded input files |
 

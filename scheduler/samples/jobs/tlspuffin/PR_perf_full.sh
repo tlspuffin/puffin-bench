@@ -227,6 +227,8 @@ ExperimentSetupForCargo() {
   local -n ref_esfc_features=$1;
   shift
 
+  local featureLib=${ref_esfc_features};
+
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
@@ -238,13 +240,38 @@ ExperimentSetupForCargo() {
       echo "Failed to compute runtime info for vendor '${vendor}' '${ref_esfc_features}'"
       return 1;
   }
+
+  local library=$( echo "${vendor}" | cut -d: -f1 )
+  local library_version=""
   if ${cputs}; then
-    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "./.compil_info.json"
+    # "wolfssl:wolfssl580-asan" → wolfssl + 580
+    library_version=$( echo "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
   else
-    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "./.compil_info.json"
+    # ",?wolfssl540,?" → wolfssl + 540
+    # ",?libressl,?" → libressl + 333
+    if [ -n "${library}" ]; then
+      if [ "${library}" == "libressl" ]; then
+        featureLib=$( echo "${featureLib}" | sed "s/${library}/${library}0/g" )
+      fi
+      library_version=$( echo "${featureLib}" | sed -E "s/.*,?${library}([0-9][0-9a-zA-Z]*),?.*/\1/" )
+      if [ "${library_version}" == "${featureLib}" ] || [ -z "${library_version}" ]; then
+        library="NA";
+        library_version="NA";
+      elif [ "${library}" == "libressl" ]; then
+        library_version=$( echo "${library_version}" | sed "s/^.//" )
+        [ -z "${library_version}" ] && library_version="333";
+      fi
+    else
+      library="NA";
+      library_version="NA";
+    fi
   fi
+
+  local jsonCompilInfos="{ \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
+  if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
+    echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
+  fi
+  echo "${jsonCompilInfos}" > "${THEJOB_USER_STATE_FILE}";
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
 }
@@ -793,6 +820,7 @@ ExperimentWithCargo () {
 SummaryRun () {
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
 
+  local flagObjective='false';
   local json='{ "type": "perf", "libraries": [ ';
   local firstlib=1;
   while read -r libresults; do
@@ -801,7 +829,16 @@ SummaryRun () {
       json+=","
     fi
     firstlib=0
-    json+=" { \"name\": \"${lib}\", \"data\": [ ";
+
+    local cli_json='null'
+    local trust_objective=1
+    [ -s "${THEJOB_OUT_PATH}/cli-${lib}.json" ] && {
+      cli_json=$( cat "${THEJOB_OUT_PATH}/cli-${lib}.json" );
+      trust_objective=$( echo "${cli_json}" | 
+          jq 'if .library.name == "wolfssl" then if ((.library.version | tonumber?) // 541) > 540 then 1 else -1 end else 1 end' );
+    }
+
+    json+=" { \"name\": \"${lib}\", \"cli\": ${cli_json}, \"trust_objective\": ${trust_objective}, \"data\": [ ";
     local firstRun=1;
     while read -r i; do
       local idRun=$( echo "${i}" | sed 's:.*/\([0-9][0-9]*\)-stats.json$:\1:' )
@@ -823,7 +860,11 @@ SummaryRun () {
       local nbClients=$( echo "${endGlobalInfos}" | jq -r '.clients' )
       [ -z "${nbClients}" ] && nbClients=0;
       local objectiveSize=$( echo "${endGlobalInfos}" | jq -r '.objective_size' )
-      [ -z "${objectiveSize}" ] && objectiveSize=0;
+      if [ -z "${objectiveSize}" ]; then
+        objectiveSize=0;
+      elif (( trust_objective == 1 && objectiveSize > 0 )); then
+        flagObjective='true'
+      fi
 
       local coverages=''
       local nbDuration=0
@@ -838,9 +879,9 @@ SummaryRun () {
         echo "${endClientInfos}" | jq  >/dev/null 2>&1 || endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -2 | head -1 );
 
         local clientCovHit=''
-        clientCovHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit' ) || clientCovHit=$(echo "$endClientInfos" | jq -e -r '.coverage.discovered' ) || clientCovHit='';
+        clientCovHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit // .coverage.discovered // empty' ) || clientCovHit='';
         local clientCovMax=''
-        clientCovMax=$( echo "$endClientInfos" | jq -e -r '.coverage.max' ) || clientCovMax='';
+        clientCovMax=$( echo "$endClientInfos" | jq -e -r '.coverage.max // empty' ) || clientCovMax='';
         local clientCoverage=0
 
         [ -n "${clientCovHit}" ] && {
@@ -871,8 +912,11 @@ SummaryRun () {
     done < <(find "${libresults}" -name "*.json" | sort -V)
     json+=" ] }";
   done < <(find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -V)
-  json+=" ] }";
+  json+=" ], \"flag_objective\": ${flagObjective} }";
   echo "${json}" > summary.json;
   CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"
+  if [ "${flagObjective}" == 'true' ]; then
+    Flag '{"color": "#6f6f00"}';
+  fi
   return 0;
 }

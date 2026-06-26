@@ -4,6 +4,16 @@ This document explains how to configure new job types in the web dashboard and h
 
 ---
 
+## History Page
+
+`history.html` / `history.js` provide a read-only view of past tasks, accessible from the board. It queries `GET /api/user/<u>/<jobType>/tasks` and displays tasks grouped by user and job type on a timeline.
+
+Each task entry uses two fields from the API response:
+- `flag.color` — colours the task card (e.g. dark yellow `#6f6f00` when a perf objective was found)
+- `publish_link` — provides a clickable link to the published result
+
+---
+
 ## Overview
 
 The job launcher is a modal dialog opened from the board's `+` button. It lets the user:
@@ -53,6 +63,7 @@ Located at `html/board/launchers/tlspuffin/jobsconfig.json`, embedded in the lau
 | `script` | URL path | Bash step script to submit (fetched from `/files/…`) |
 | `files` | array of URL paths | Additional files to attach (e.g. patches, Nix expressions) |
 | `composite` | array of `value` | If set, this job type launches each listed sub-job in parallel; `config`/`script` are unused |
+| `job_label` | string or array | Template for the task name. Supports `${COMMIT:N}` (first N chars of commit) and `${CAMPAIGN-ID}`. For composite jobs, an array provides one label per sub-job. |
 
 All URL paths are resolved by the browser relative to the board origin, so `/files/jobsscripts/…` maps to `GET /files/jobsscripts/…` on the scheduler.
 
@@ -116,7 +127,7 @@ When the user clicks **Launch Task**, `joblauncher.js` branches on whether the s
 
 The launcher resolves each `value` in `composite` to its job definition and calls `#launchSingleJob()` for each **in parallel** (`Promise.all`). The `config`, `script`, and `files` fields on the composite entry itself are unused — they are carried by each sub-job definition.
 
-Each sub-task is submitted with name `"<baseName> - <sub.label>"` (e.g. `"Evaluate PR abc12345 - Vuln group A"`).
+Each sub-task name is resolved from `job_label[i]` if present (supports `${COMMIT:N}` and `${CAMPAIGN-ID}` templates), otherwise falls back to `"<baseName> - <sub.label>"`.
 
 After all launches complete, a single toast summarises each sub-job result:
 
@@ -143,6 +154,7 @@ The toast is `success` only if every sub-job returned HTTP 2xx.
 | `script` | Step script blob (filename = basename of `script` path) |
 | `files[]` | Each additional file blob (one entry per item in `files`) |
 | `args[COMMIT_ID]` | Selected commit hash |
+| `args[PROJECT]` | Project name (hardcoded to `"tlspuffin"` in the tlspuffin launcher) |
 
 ### Campaign-only form fields (`"campaign": true`)
 
@@ -185,8 +197,8 @@ This is passed as a JSON string in the form field. The server-side parser reads 
 ## Validation Rules
 
 The **Launch Task** button is disabled unless:
-- `user` is non-empty
+- `user` is non-empty (invalid characters are stripped in real-time with a visual reject animation)
 - A job type chip is selected
 - The commit field contains a known commit or a hex string ≥ 7 characters
 - If the commit is unknown (hex but not in the list): the "Unknown commit — launch anyway" checkbox is checked
-- For campaign jobs: `vendor` is non-empty
+- For campaign jobs: `vendor` is non-empty; `campaign_id` allows only `[a-zA-Z0-9_@-]` characters (enforced in real-time)

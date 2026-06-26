@@ -69,10 +69,12 @@ TLS uses `VERIFY_NONE` (client certificate verification is disabled).
   "userPath":     "users",
   "toolsPath":    "tools",
   "loopSleepMs":  100,
-  "publishers": {
+  "publisher": {
     "results-server": {
-      "server":  "https://publisher.example.com",
-      "storage": "/results/${JOB_TYPE}/${COMMIT_ID}/"
+      "base_url":        "https://publisher.example.com",
+      "notify_endpoint": "/api/notify",
+      "view_endpoint":   "/files/${PROJECT}#${TASK_ID}",
+      "storage":         "/var/lib/results"
     }
   },
   "executors": {
@@ -104,21 +106,25 @@ TLS uses `VERIFY_NONE` (client certificate verification is disabled).
 
 ### `publishers` subsection
 
-Named publisher targets referenced by `publish.publisher` in flow JSON files.
+Named publisher targets referenced by `publish.server` in flow JSON files.
 
 ```json
-"publishers": {
+"publisher": {
   "<name>": {
-    "server":  "<URL>",
-    "storage": "<path-template>"
+    "base_url":        "http://publisher.example.com",
+    "notify_endpoint": "/api/notify",
+    "view_endpoint":   "/files/${PROJECT}#${TASK_ID}",
+    "storage":         "/results/${JOB_TYPE}/${COMMIT_ID}/"
   }
 }
 ```
 
 | Key | Type | Description |
 |---|---|---|
-| `server` | URL | HTTP(S) URL of the remote publish server (e.g. `restsrv.publisher`). |
-| `storage` | path template | Local or remote destination path. Supports `${VAR}` variable substitution (e.g. `${JOB_TYPE}`, `${COMMIT_ID}`). |
+| `base_url` | URL | HTTP(S) base URL of the remote publish server. |
+| `notify_endpoint` | path | Endpoint appended to `base_url` for the HTTP notification POST sent after archival. |
+| `view_endpoint` | path template | Endpoint appended to `base_url` to build `publish_link` (the view URL stored in the task). Supports `${VAR}` substitution (`${PROJECT}`, `${TASK_ID}`, etc.). |
+| `storage` | path | Root directory on the server where task archives are stored. The per-task subdirectory is appended from `publish.storage` in the flow JSON. |
 
 ### `executors` subsection — Local executor
 
@@ -261,8 +267,10 @@ Provides commit history when external git service unavailable:
     "toolsPath":  "tools",
     "publishers": {
       "results": {
-        "server":  "http://publisher.internal:8081",
-        "storage": "results/${JOB_TYPE}/${COMMIT_ID}/"
+        "base_url":        "http://publisher.internal:8081",
+        "notify_endpoint": "/api/notify",
+        "view_endpoint":   "/files/${PROJECT}#${TASK_ID}",
+        "storage":         "/var/lib/results"
       }
     },
     "executors": {

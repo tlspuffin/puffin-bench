@@ -2,12 +2,13 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 
+#include "embeded/html/board/terminal_js.h"
+#include "embeded/html/board/clipboard_js.h"
 #include "embeded/html/board/board_html.h"
 #include "embeded/html/board/board_css.h"
 #include "embeded/html/board/board_js.h"
 #include "embeded/html/board/taskcard_css.h"
 #include "embeded/html/board/taskcard_js.h"
-#include "embeded/html/board/terminal_js.h"
 #include "embeded/html/board/launchers/launchers_css.h"
 #include "embeded/html/board/launchers/launchers_js.h"
 //#include "embeded/html/board/custom/header_html.h"
@@ -19,6 +20,9 @@
 #include "embeded/html/board/task_html.h"
 #include "embeded/html/board/task_css.h"
 #include "embeded/html/board/task_js.h"
+#include "embeded/html/board/history_html.h"
+#include "embeded/html/board/history_css.h"
+#include "embeded/html/board/history_js.h"
 #include "embeded/html/jobsscripts/tlspuffin/PR_campaign_json.h"
 #include "embeded/html/jobsscripts/tlspuffin/PR_perf_cargo_json.h"
 #include "embeded/html/jobsscripts/tlspuffin/PR_perf_full_sh.h"
@@ -85,12 +89,13 @@ void ns_Server::Config::Validate(bool forceInstall) const {
   std::filesystem::create_directory(html_/ "jobsscripts", ec);
   std::filesystem::create_directory(html_/ "jobsscripts" / "tlspuffin", ec);
   for(auto const& [ file, data, size ] : {
+      std::tuple{ "board/terminal.js", Terminal_JS_data, Terminal_JS_size },
+      std::tuple{ "board/clipboard.js", Clipboard_JS_data, Clipboard_JS_size },
       std::tuple{ "board/board.html", Board_HTML_data, Board_HTML_size },
       std::tuple{ "board/board.css", Board_CSS_data, Board_CSS_size },
       std::tuple{ "board/board.js", Board_JS_data, Board_JS_size },
       std::tuple{ "board/taskcard.css", TaskCard_CSS_data, TaskCard_CSS_size },
       std::tuple{ "board/taskcard.js", TaskCard_JS_data, TaskCard_JS_size },
-      std::tuple{ "board/terminal.js", Terminal_JS_data, Terminal_JS_size },
       std::tuple{ "board/launchers/launchers.css", Launchers_CSS_data, Launchers_CSS_size },
       std::tuple{ "board/launchers/launchers.js", Launchers_JS_data, Launchers_JS_size },
       //std::tuple{ "board/custom/header.html", CustomHeader_HTML_data, CustomHeader_HTML_size },
@@ -99,6 +104,9 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       std::tuple{ "board/task.html", Task_HTML_data, Task_HTML_size },
       std::tuple{ "board/task.css", Task_CSS_data, Task_CSS_size },
       std::tuple{ "board/task.js", Task_JS_data, Task_JS_size },
+      std::tuple{ "board/history.html", History_HTML_data, History_HTML_size },
+      std::tuple{ "board/history.css", History_CSS_data, History_CSS_size },
+      std::tuple{ "board/history.js", History_JS_data, History_JS_size },
       std::tuple{ "jobsscripts/tlspuffin/PR_campaign.json", PRCampaign_JSON_data, PRCampaign_JSON_size },
       std::tuple{ "jobsscripts/tlspuffin/PR_perf_cargo.json", PRPerfCargo_JSON_data, PRPerfCargo_JSON_size },
       std::tuple{ "jobsscripts/tlspuffin/PR_perf_full.sh", PRPerfFull_SH_data, PRPerfFull_SH_size },

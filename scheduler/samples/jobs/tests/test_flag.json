@@ -1,0 +1,9 @@
+{
+  "name": "Test Flag",
+  "flow": [
+    { "step": "CheckFlagNoArg" },
+    { "step": "SetFlag" },
+    { "step": "OverwriteFlag" },
+    { "step": "Summary" }
+  ]
+}

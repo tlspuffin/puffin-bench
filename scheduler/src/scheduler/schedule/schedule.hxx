@@ -40,6 +40,8 @@ public:
       std::string const& type, std::string const& taskID,
       uint64_t stepUUID, std::string const& stepID, 
       struct FileExtractedText& data);
+  bool GetTaskData(std::string const& task_id, 
+    std::string& fileStateJSON, std::string& fileArtefacts);
   bool GetTaskFinalData(std::string const& task_id, 
     std::string& fileStateJSON, std::string& fileArtefacts) const;
 

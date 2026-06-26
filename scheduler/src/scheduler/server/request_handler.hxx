@@ -50,7 +50,7 @@ REQUESTHANDLER(TaskOutputs, std::string const, uint64_t,
 REQUESTHANDLER(TaskCancel, uint64_t);
 REQUESTHANDLER(TaskCancelStep, uint64_t, uint64_t);
 REQUESTHANDLER(TaskGetArtefacts, std::string const);
-REQUESTHANDLER(TaskGetFinalState, std::string const);
+REQUESTHANDLER(TaskGetState, bool, std::string const);
 REQUESTHANDLER(UsersList);
 REQUESTHANDLER(UserJobsTypeList, std::string const);
 REQUESTHANDLER(UserTasksList, std::string const, std::string const);

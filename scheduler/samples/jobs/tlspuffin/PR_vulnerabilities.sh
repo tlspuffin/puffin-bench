@@ -202,7 +202,7 @@ SaveSummary() {
     }' "${output}" | jq -c '.' 2>/dev/null )
 
   echo "${summary}" > "${output}"
-  [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&2
+  [ -r "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json" ] && cat "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json" >> "${output}" || echo "Missing \"${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json\"" >&2
 
   local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
   [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && echo '{"run_error":"fuzzer timeout"}' >> "${output}"

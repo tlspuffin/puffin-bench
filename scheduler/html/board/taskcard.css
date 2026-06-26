@@ -185,6 +185,11 @@
   gap: 1rem;
 }
 
+.card-attempt-header {
+  display: flex;
+  gap: 1em;
+}
+
 .card-attempt-item {
   background: #404040;
   border-radius: 8px;
@@ -242,7 +247,7 @@
   text-transform: uppercase;
 }
 
-.card-attempt-detail-value, 
+.card-attempt-detail-value,
 .card-attempt-detail-value-state {
   color: #fff;
   font-family: monospace;
@@ -288,6 +293,12 @@
 
 .card-attempt-cancel-btn:hover {
   background: #d32f2f;
+}
+
+.card-run-path-details {
+  margin: 0px;
+  cursor: pointer;
+  user-select: none;
 }
 
 .cores-list {
@@ -470,4 +481,3 @@
 .logs-scroll-overlay::-webkit-scrollbar-thumb:hover {
   background: #666;
 }
-

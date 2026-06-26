@@ -325,7 +325,7 @@ void ns_Server::RequestHandlerTaskGetArtefacts::handleRequest(Poco::Net::HTTPSer
   }
 }
 
-void ns_Server::RequestHandlerTaskGetFinalState::handleRequest(Poco::Net::HTTPServerRequest& request,
+void ns_Server::RequestHandlerTaskGetState::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   if (ManageCORS(request, response)) {
     return;
@@ -333,15 +333,30 @@ void ns_Server::RequestHandlerTaskGetFinalState::handleRequest(Poco::Net::HTTPSe
   std::ostream* out = nullptr;
   Poco::Net::HTTPResponse::HTTPStatus status = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
   try {
-    std::string taskID = std::get<0>(args_);
+    bool final = std::get<0>(args_);
+    std::string taskID = std::get<1>(args_);
     std::string fileStateJSON;
     std::string fileArtefacts;
-    if (!apis_->scheduleAPI_.GetTaskFinalData(taskID, fileStateJSON, fileArtefacts)) {
+    if (!apis_->scheduleAPI_.GetTaskData(taskID, fileStateJSON, fileArtefacts)) {
       status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
       throw std::runtime_error("task does not exist");
     }
-    response.set("Content-Disposition", "attachment; filename=\"" + taskID + ".json\"");
-    SendFile(fileStateJSON, response, out);
+    if (fileArtefacts.empty()) {
+      if (final) {
+        status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
+        throw std::runtime_error("task does not exist");
+      }
+      response.setChunkedTransferEncoding(true);
+      response.setContentType("application/json; charset=utf-8");
+      response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+      response.set("Pragma", "no-cache");
+      out = &(response.send());
+      *out << R"({"task": )" << fileStateJSON << "}";
+      out->flush();
+    } else {
+      response.set("Content-Disposition", "attachment; filename=\"" + taskID + ".json\"");
+      SendFile(fileStateJSON, response, out);
+    }
   } catch(std::runtime_error const& e) {
     if (out == nullptr) {
       response.setStatus(status);
@@ -431,20 +446,20 @@ void ns_Server::RequestHandlerUserTasksList::handleRequest(Poco::Net::HTTPServer
   std::string user = std::get<0>(args_);
   std::string jobType = std::get<1>(args_);
   try {
-    std::vector<struct ns_API::UsersAPI::TaskInfos> tasks;
-    if (!apis_->usersAPI_.UserTasks(user, jobType, tasks)) {
+    rapidjson::Document doc(rapidjson::kObjectType);
+    auto& allocator = doc.GetAllocator();
+    rapidjson::Value data(rapidjson::kArrayType);
+    if (!apis_->usersAPI_.UserTasks(user, jobType, data, allocator)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("step cancel failed");
     }
+    doc.AddMember("success", true, allocator);
+    doc.AddMember("data", data, allocator);
     out = &(response.send());
-    *out << R"({"success": true, "data": [)";
-    for (size_t i = 0; i < tasks.size(); ++i) {
-      if (i > 0) {
-        *out << ",";
-      }
-      *out << tasks[i].ToJSON();
-    }
-    *out << "]}";
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+    doc.Accept(writer);
+    *out << sb.GetString();
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     out = &(response.send());

@@ -2,6 +2,8 @@
 #include <string>
 #include <filesystem>
 #include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 void ReadJSONFile(std::string const& file, rapidjson::Document& doc);
 
@@ -79,4 +81,18 @@ inline std::filesystem::path GetPath(
     rapidjson::Value const& obj, char const* name) {
   return std::filesystem::weakly_canonical(
       std::filesystem::path(Get<std::string>(obj, name)));
+}
+
+inline std::string ParseJSONObject(rapidjson::Value const& root, char const* name, bool mandatory) {
+  auto it = root.FindMember(name);
+  if (it == root.MemberEnd() || !it->value.IsObject()) {
+    if (mandatory) {
+      throw std::runtime_error(std::string("Missing field ") + name + " in JSON data");
+    }
+    return "{}";
+  }
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+  it->value.Accept(writer);
+  return sb.GetString();
 }

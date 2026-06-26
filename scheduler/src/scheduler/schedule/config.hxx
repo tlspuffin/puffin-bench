@@ -10,7 +10,9 @@
 namespace ns_Schedule {
 
 struct PublisherConfig {
-  std::string uri_;
+  std::string baseURL_;
+  std::string notifyEndpoint_;
+  std::string viewEndpoint_;
   bool checkServerCertificat_;
   std::filesystem::path storage_;
 };

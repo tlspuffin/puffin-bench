@@ -227,6 +227,8 @@ ExperimentSetupForCargo() {
   local -n ref_esfc_features=$1;
   shift
 
+  local featureLib=${ref_esfc_features};
+
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
@@ -238,13 +240,38 @@ ExperimentSetupForCargo() {
       echo "Failed to compute runtime info for vendor '${vendor}' '${ref_esfc_features}'"
       return 1;
   }
+
+  local library=$( echo "${vendor}" | cut -d: -f1 )
+  local library_version=""
   if ${cputs}; then
-    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "./.compil_info.json"
+    # "wolfssl:wolfssl580-asan" → wolfssl + 580
+    library_version=$( echo "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
   else
-    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "./.compil_info.json"
+    # ",?wolfssl540,?" → wolfssl + 540
+    # ",?libressl,?" → libressl + 333
+    if [ -n "${library}" ]; then
+      if [ "${library}" == "libressl" ]; then
+        featureLib=$( echo "${featureLib}" | sed "s/${library}/${library}0/g" )
+      fi
+      library_version=$( echo "${featureLib}" | sed -E "s/.*,?${library}([0-9][0-9a-zA-Z]*),?.*/\1/" )
+      if [ "${library_version}" == "${featureLib}" ] || [ -z "${library_version}" ]; then
+        library="NA";
+        library_version="NA";
+      elif [ "${library}" == "libressl" ]; then
+        library_version=$( echo "${library_version}" | sed "s/^.//" )
+        [ -z "${library_version}" ] && library_version="333";
+      fi
+    else
+      library="NA";
+      library_version="NA";
+    fi
   fi
+
+  local jsonCompilInfos="{ \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
+  if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
+    echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
+  fi
+  echo "${jsonCompilInfos}" > "${THEJOB_USER_STATE_FILE}";
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
 }
@@ -966,7 +993,7 @@ SaveSummary() {
     }' "${output}" | jq -c '.' 2>/dev/null )
 
   echo "${summary}" > "${output}"
-  [ -r "./.compil_info.json" ] && cat "./.compil_info.json" >> "${output}" || echo "Missing .compil_info.json file" >&2
+  [ -r "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json" ] && cat "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json" >> "${output}" || echo "Missing \"${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json\"" >&2
 
   local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
   [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && echo '{"run_error":"fuzzer timeout"}' >> "${output}"

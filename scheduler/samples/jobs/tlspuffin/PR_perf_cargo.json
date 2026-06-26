@@ -1,22 +1,24 @@
 {
   "publish": {
     "server": "default",
-    "storage": "tlspuffin/PR/${COMMIT_ID}/Perf/",
+    "storage": "${PROJECT}/PR/${COMMIT_ID}/Perf/",
     "goal": "Perf PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
     "LibreSSL": {
       "args": {
-        "experiment": "LibreSSL 333",
+        "experiment": "LibreSSL",
         "required_features": "introspection",
-        "features": "asan,libressl"
+        "features": "asan,libressl",
+        "vendor": "libressl:libressl421-asan"
       }
     },
     "BoringSSL": {
       "args": {
-        "experiment": "BoringSSL 202403",
+        "experiment": "BoringSSL",
         "required_features": "introspection",
-        "features": "asan,boringssl202403"
+        "features": "asan,boringssl202403",
+        "vendor": "boringssl:boringssl20260508-asan"
       }
     },
     "OpenSSL": {

@@ -207,6 +207,14 @@
 .jl-refresh-btn.jl-refresh-pr:hover:not(:disabled) { color: #ffb84d; }
 @keyframes jl-spin { to { transform: rotate(360deg); } }
 
+@keyframes jl-reject {
+  0%, 100% { transform: translateX(0);    border-color: var(--jl-border-light); }
+  20%      { transform: translateX(-5px); border-color: #f44336; }
+  50%      { transform: translateX( 5px); border-color: #f44336; }
+  80%      { transform: translateX(-3px); border-color: #f44336; }
+}
+.jl-input-reject { animation: jl-reject 0.3s ease; }
+
 /* ── Commit input ── */
 .jl-commit-input {
   width: 100%;

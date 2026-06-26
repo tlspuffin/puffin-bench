@@ -61,7 +61,9 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
   if (scheduleConfig->HasMember("publisher") && (*scheduleConfig)["publisher"].IsObject()) {
     for (auto const& [ key, jsonConfig ] : (*scheduleConfig)["publisher"].GetObject()) {
       struct PublisherConfig publisherConfig;
-      publisherConfig.uri_ = Get<std::string>(jsonConfig, "uri");
+      publisherConfig.baseURL_ = Get<std::string>(jsonConfig, "base_url");
+      publisherConfig.notifyEndpoint_ = Get<std::string>(jsonConfig, "notify_endpoint");
+      publisherConfig.viewEndpoint_ = Get<std::string>(jsonConfig, "view_endpoint");
       publisherConfig.storage_ = GetPath(jsonConfig, "storage");
       publisherConfig.checkServerCertificat_ = GetOrDefault<bool>(jsonConfig, "check_server_certificat", false);
       publishers_.emplace(key.GetString(), publisherConfig);
@@ -92,7 +94,9 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
   rapidjson::Value publishersJSONConfig(rapidjson::kObjectType);
   for(auto const&[publisherName, publisherConfig]: publishers_) {
     rapidjson::Value publisherJSONConfig(rapidjson::kObjectType);
-    publisherJSONConfig.AddMember("uri", rapidjson::Value(publisherConfig.uri_.c_str(), alloc), alloc);
+    publisherJSONConfig.AddMember("base_url", rapidjson::Value(publisherConfig.baseURL_.c_str(), alloc), alloc);
+    publisherJSONConfig.AddMember("notify_endpoint", rapidjson::Value(publisherConfig.notifyEndpoint_.c_str(), alloc), alloc);
+    publisherJSONConfig.AddMember("view_endpoint", rapidjson::Value(publisherConfig.viewEndpoint_.c_str(), alloc), alloc);
     publisherJSONConfig.AddMember("storage", rapidjson::Value(publisherConfig.storage_.c_str(), alloc), alloc);
     publisherJSONConfig.AddMember("check_server_certificat", publisherConfig.checkServerCertificat_, alloc);
     publishersJSONConfig.AddMember(rapidjson::Value(publisherName.c_str(), alloc), publisherJSONConfig, alloc);

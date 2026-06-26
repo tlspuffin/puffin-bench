@@ -119,6 +119,7 @@ export class JobLauncher {
     this.#usernameInput.autocomplete = 'off';
     this.#usernameInput.value = localStorage.getItem('jl-username') ?? '';
     this.#usernameInput.addEventListener('input', () => {
+      this.#rejectInput(this.#usernameInput);
       localStorage.setItem('jl-username', this.#usernameInput.value.trim());
       this.#validate();
     });
@@ -354,7 +355,11 @@ export class JobLauncher {
     this.#campaignIdInput.placeholder = 'e.g. my-campaign-2025';
     this.#campaignIdInput.spellcheck = false;
     this.#campaignIdInput.autocomplete = 'off';
-    this.#campaignIdInput.addEventListener('input', () => this.#validate());
+    this.#campaignIdInput.addEventListener('input', () => {
+      this.#rejectInput(this.#campaignIdInput, /[^a-zA-Z0-9_@-]/g);
+      this.#autoUpdateTitle();
+      this.#validate();
+    });
     campaignIdRow.append(campaignIdLabel, this.#campaignIdInput);
 
     const implRow = this.#el('div', 'jl-field-row');
@@ -596,7 +601,7 @@ export class JobLauncher {
     this.#refreshBtn.classList.toggle('jl-refresh-pr', isPR);
     if (isPR && this.#prApiInfos) {
       //const reset = new Date(this.#prApiInfos.apiResetTS * 1000).toLocaleString();
-      const resetDate = new Date(this.#prApiInfos.apiResetTS * 1000).toLocaleString([], { 
+      const resetDate = new Date(this.#prApiInfos.apiResetTS * 1000).toLocaleString(navigator.languages, { 
           month: '2-digit', day: '2-digit',
           hour: '2-digit', minute: '2-digit', hour12: false});
       this.#refreshBtn.title =
@@ -668,6 +673,12 @@ export class JobLauncher {
 
   // ── Auto title ────────────────────────────────────────────────────────────
 
+  #resolveLabel(template, commit) {
+    return template
+      .replace(/\$?\{COMMIT:(\d+)\}/g, (_, n) => commit.slice(0, +n))
+      .replace(/\$\{CAMPAIGN-ID\}/g, () => this.#campaignIdInput.value.trim() || 'campaign');
+  }
+
   #autoUpdateTitle() {
     if (this.#titleModified) return;
     const commit = this.#commitInput.value.trim().slice(0, 14);
@@ -677,6 +688,10 @@ export class JobLauncher {
     if (this.#selectedType) {
       const jobDef = this.#jobDefs.find(j => j.value === this.#selectedType);
       if (jobDef) {
+        if (typeof jobDef.job_label === 'string') {
+          this.#taskNameInput.value = this.#resolveLabel(jobDef.job_label, commit);
+          return;
+        }
         this.#taskNameInput.value = jobDef.composite?.length
           ? [jobDef.label, label].filter(Boolean).join(' ')
           : [jobDef.label, label].filter(Boolean).join(' - ');
@@ -726,7 +741,12 @@ export class JobLauncher {
       if (jobDef.composite?.length) {
         const subJobs = jobDef.composite.map(v => this.#jobDefs.find(j => j.value === v)).filter(Boolean);
         const results = await Promise.all(
-          subJobs.map(sub => this.#launchSingleJob(commit, sub, `${baseName} - ${sub.label}`))
+          subJobs.map((sub, i) => {
+            const subName = Array.isArray(jobDef.job_label) && jobDef.job_label[i]
+              ? this.#resolveLabel(jobDef.job_label[i], commit)
+              : `${baseName} - ${sub.label}`;
+            return this.#launchSingleJob(commit, sub, subName);
+          })
         );
         const allOk = results.every(r => r.ok);
         const lines = results.map((r, i) =>
@@ -781,6 +801,7 @@ export class JobLauncher {
         fd.append('files[]', blobs[2 + i], jobDef.files[i].split('/').pop());
 
       fd.append('args[COMMIT_ID]', commit);
+      fd.append('args[PROJECT]', 'tlspuffin');
       if (isCampaign) {
         fd.append('args[CAMPAIGN_ID]', this.#campaignIdInput.value.trim());
         fd.append('args[SAVE_CORPUS]', 1);
@@ -867,6 +888,20 @@ export class JobLauncher {
   }
 
   // ── Utils ─────────────────────────────────────────────────────────────────
+
+  #rejectInput(el, allowed = /[^a-zA-Z0-9_-]/g) {
+    const raw       = el.value;
+    const start     = el.selectionStart;
+    const sanitized = raw.replace(allowed, '');
+    if (sanitized === raw) return;
+    el.value = sanitized;
+    const newCursor = raw.slice(0, start).replace(allowed, '').length;
+    el.setSelectionRange(newCursor, newCursor);
+    el.classList.remove('jl-input-reject');
+    void el.offsetWidth; // force reflow to restart animation
+    el.classList.add('jl-input-reject');
+    el.addEventListener('animationend', () => el.classList.remove('jl-input-reject'), { once: true });
+  }
 
   #el(tag, ...classes) {
     const el = document.createElement(tag);

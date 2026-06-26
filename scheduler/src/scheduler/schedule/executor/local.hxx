@@ -22,6 +22,9 @@ public:
   int8_t os_cores_load_;
   int8_t os_memory_max_load_;
   int8_t os_cores_max_load_;
+
+  std::filesystem::path run_path_;
+  std::filesystem::path flag_file_;
 };
 
 class LocalData : public ExecutorData {
@@ -39,7 +42,7 @@ public:
 
   std::vector<uint64_t> cores_;
   std::filesystem::path run_path_;
-  std::filesystem::path artefacts_path_;
+  std::filesystem::path artefacts_file_;
   pid_t pid_;
 
   std::string launcher_file_;
@@ -47,8 +50,8 @@ public:
   std::string step_parameters_file_;
 
   EProcessStatus process_status_;
-  std::filesystem::path fatalerror_path_;
-  std::filesystem::path done_path_;
+  std::filesystem::path fatalerror_file_;
+  std::filesystem::path done_file_;
   std::vector<std::string> arguments_;
 
   std::filesystem::path cgroup_path_;
@@ -70,7 +73,7 @@ public:
   ~Local();
 
   bool TaskPrepareToRun(ns_Schedule::Task* task);
-  bool TaskFinalize(ExecutorTaskData* data);
+  bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data);
 
   std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps);
   void Execute(ns_Schedule::Step& step);

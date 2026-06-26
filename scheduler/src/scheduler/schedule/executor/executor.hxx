@@ -50,7 +50,7 @@ public:
   std::string Name() const;
 
   virtual bool TaskPrepareToRun(ns_Schedule::Task* task) = 0;
-  virtual bool TaskFinalize(ExecutorTaskData* data) = 0;
+  virtual bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data) = 0;
 
   virtual std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& tasks) = 0;
   virtual void Execute(ns_Schedule::Step& step) = 0;

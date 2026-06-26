@@ -5,6 +5,7 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/variables.hxx"
+#include "../../utils/dir.hxx"
 #include <unordered_set>
 #include <fstream>
 #include <regex>
@@ -34,8 +35,9 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     monitors_path_(monitorsRootPath),
     args_(args), configurations_(), executor_data_(nullptr), 
     root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
-    request_cancel_(false), cancel_source_(),
-    publish_(), md5_(std::move(md5))
+    request_cancel_(false), cancel_source_(), publish_(), 
+    md5_(std::move(md5)), state_(Task::State::Pending), publish_link_(), 
+    flag_()
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
@@ -47,7 +49,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   variables.emplace("task_id", std::to_string(id_));
   name_ = ResolveVariables(name_, variables);
   name_.erase(std::remove_if(name_.begin(), name_.end(), [](char c) {
-    return !std::isalnum(c) && c != '-' && c != '_' && c != '.' && c != ' ';
+    return !std::isalnum(c) && c != '@' && c != '-' && c != '_' && c != '.' && c != ' ';
   }), name_.end());
 
   executor_name_ = GetOrDefault<std::string>(
@@ -212,6 +214,10 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     }
     md5_[md5.name.GetString()] = md5.value.GetString();
   }
+
+  state_ = StateStringToEnum(Get<std::string>(config, "state"));
+  publish_link_ = Get<std::string>(config, "publish_link");
+  flag_ = ParseJSONObject(config, "flag", false);
 }
 
 ns_Schedule::Task::~Task() {
@@ -227,6 +233,7 @@ void ns_Schedule::Task::Cancel(std::string const& source) {
   if (!request_cancel_) {
     cancel_source_ = source;
   }
+  state_ = Task::State::Cancelled;
   request_cancel_ = true;
   LOGI << "Cancel task " << id_ << " 1st source:" << cancel_source_ << Log::Flags::End;
 }
@@ -245,6 +252,8 @@ bool ns_Schedule::Task::PrepareToRun() {
         stepsFile.string());
   }
 
+  state_ = Task::State::Running;
+
   return true;
 }
 
@@ -261,6 +270,10 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
   try {
     if (!std::filesystem::create_directory(finalSavePath)) {
       throw std::runtime_error("Unable to create save directory (" + finalSavePath.string() + ")");
+    }
+
+    if (state_ == Task::State::Running) {
+      state_ = Task::State::Done;
     }
 
     rapidjson::Document doc;
@@ -300,7 +313,9 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
   variables.emplace("TASK_USER", user_);
   variables.emplace("TASK_JOB_TYPE", job_type_);
 
-  executor_->TaskFinalize(executor_data_);
+  publish_link_ = publish_.ViewLink(variables);
+
+  executor_->TaskFinalize(this, executor_data_);
 
   for(std::filesystem::path const& path: 
       { run_root_path_, functions_path_, files_path_ }) {
@@ -396,6 +411,10 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
         rapidjson::Value(file.c_str(), alloc), rapidjson::Value(md5.c_str(), alloc), alloc);
   }
   out.AddMember("md5", md5Object, alloc);
+
+  out.AddMember("state", rapidjson::Value(StateEnumToString(state_).c_str(), alloc), alloc);
+  out.AddMember("publish_link", rapidjson::Value(publish_link_.c_str(), alloc), alloc);
+  out.AddMember("flag", rapidjson::Value(FlagJSON(), alloc), alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {
@@ -634,7 +653,7 @@ std::unordered_map<std::string, std::string>
 ns_Schedule::Task::LoadGlobalParameters(std::filesystem::path const& file) {
   std::ifstream ifs(file);
   if (!ifs.is_open()) {
-    throw std::runtime_error("[Task::LoadGlobalParameters] Unable to open paramerters file: " + 
+    throw std::runtime_error("[Task::LoadGlobalParameters] Unable to open parameters file: " + 
         file.string());
   }
   std::regex pairRegex(R"raw((\w+)="([^"]*)")raw");
@@ -663,4 +682,24 @@ void ns_Schedule::Task::SaveGlobalParameters(
     ofs << parameter.first << "=\"" << parameter.second << "\" ";
   }
   ofs.close();
+}
+
+std::string ns_Schedule::Task::StateEnumToString(ns_Schedule::Task::State state) {
+  static std::unordered_map<ns_Schedule::Task::State, std::string> map {
+      { Task::State::Pending, "Pending" }, 
+      { Task::State::Running, "Running" }, 
+      { Task::State::Done, "Done" }, 
+      { Task::State::Cancelled, "Cancelled" },
+  };
+  return map.at(state);
+}
+
+ns_Schedule::Task::State ns_Schedule::Task::StateStringToEnum(std::string const& state) {
+  static std::unordered_map<std::string, ns_Schedule::Task::State> map {
+      { "Pending", Task::State::Pending }, 
+      { "Running", Task::State::Running }, 
+      { "Done", Task::State::Done }, 
+      { "Cancelled", Task::State::Cancelled },
+  };
+  return map.at(state);
 }
