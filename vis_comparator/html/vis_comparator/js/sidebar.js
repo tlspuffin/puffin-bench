@@ -131,7 +131,7 @@ export function BuildSidebar(state) {
 
 /** Re-renders traces for all graphs (appearance only, no re-fetch). */
 export function refreshAllGraphAppearances(state) {
-  for (const id of state.graphSettings.keys()) {
+  for (const { id } of state.graphSettings) {
     _graphManager.RefreshGraphAppearance(id);
   }
 }
@@ -143,7 +143,7 @@ export function refreshGraphsUsingVariable(state, varName) {
   const isExperimentVar = state.variables.commits.has(varName)
     || state.variables.subtasks.has(varName)
     || state.variables.campaigns.has(varName);
-  for (const [id, config] of state.graphSettings) {
+  for (const { id, config } of state.graphSettings) {
     const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName || s.campaignVar === varName)
       || config.metrics.some(m => m?.variable === varName);
     if (usesVar) {
@@ -154,7 +154,7 @@ export function refreshGraphsUsingVariable(state, varName) {
 
 function getGraphIDsUsingExperiment(state, expKey) {
   const ids = [];
-  for (const [id, config] of state.graphSettings) {
+  for (const { id, config } of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
       if (def && experimentKey(def) === expKey) { ids.push(id); break; }
@@ -172,7 +172,7 @@ export function refreshGraphsUsingExperiment(state, expKey) {
 
 function getGraphIDsUsingMetric(state, metricPath) {
   const ids = [];
-  for (const [id, config] of state.graphSettings) {
+  for (const { id, config } of state.graphSettings) {
     const uses = config.metrics.some(m =>
       resolveMetricEntry(m, state.variables.metrics) === metricPath
     );
@@ -521,7 +521,7 @@ function buildMetricVariableSection(state) {
 // Resolves variable slots; ignores unresolved variables.
 function getActiveExperimentKeys(state) {
   const keys = new Set();
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
       if (def) keys.add(experimentKey(def));
@@ -638,7 +638,7 @@ function buildExperimentLegend(state) {
 // Returns the set of resolved metric paths currently active across all graphs.
 function getActiveMetrics(state) {
   const paths = new Set();
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     for (const m of config.metrics) {
       const path = resolveMetricEntry(m, state.variables.metrics);
       if (path) paths.add(path);
@@ -761,7 +761,7 @@ async function openMetricVarModal(name, currentVal, state) {
 
   // Collect all unique resolved experiments across all graphs and variables
   const uniqueExps = new Map();
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
       if (def) uniqueExps.set(experimentKey(def), def);

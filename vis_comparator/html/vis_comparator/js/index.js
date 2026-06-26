@@ -5,7 +5,7 @@ import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
-import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey } from './state.js';
+import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, removeGraph } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
 
@@ -151,7 +151,7 @@ async function ResetState(state, newState, templateName = null) {
   const migrated = newState;
   graphManager.DelAllGraph();
   state.title          = migrated?.title          ?? 'Vue_' + Date.now();
-  state.graphSettings  = new Map();
+  state.graphSettings  = [];
   state.variables      = migrated?.variables      ?? {
     commits: new Map(), subtasks: new Map(), campaigns: new Map(), metrics: new Map(),
   };
@@ -169,23 +169,43 @@ async function ResetState(state, newState, templateName = null) {
   }
 
   UpdateHeader();
-  if (migrated?.graphSettings?.size > 0) {
+  const configList = asConfigList(migrated?.graphSettings);
+  if (configList.length > 0) {
     // Templates carry an authored time range that rarely matches the experiments they
     // resolve to at load time; recompute it from real data. Views keep their saved range.
-    await restoreGraphs(migrated.graphSettings, /*recomputeRange=*/ templateName != null);
+    await restoreGraphs(configList, /*recomputeRange=*/ templateName != null);
   }
   BuildSidebar(state);
 }
 
 /**
- * Re-fetches data and recreates all graphs from a saved graphSettings Map.
+ * Normalises a loaded graphSettings value into an ordered list of graph configs.
+ * New files store an array of { id, config }; legacy files store a Map<id, config>
+ * (revived by JSONHelp). Saved ids are discarded — fresh ids are issued on render.
+ * @param {Map|Array|undefined} saved
+ * @returns {object[]} ordered graph configs
+ */
+function asConfigList(saved) {
+  if (saved instanceof Map) return [...saved.values()];          // legacy files
+  if (Array.isArray(saved)) return saved.map(e => e.config ?? e); // new ({id,config}) or bare
+  return [];
+}
+
+/** Re-orders state.graphSettings to match the current on-screen (DOM) order. */
+function resyncGraphOrder() {
+  const order = graphManager.GetDomOrderedIds();
+  state.graphSettings.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+}
+
+/**
+ * Re-fetches data and recreates all graphs from an ordered list of graph configs.
  * Called by ResetState after the global state (variables, commitRegistry) is applied.
- * @param {Map<number, object>} savedSettings
+ * @param {object[]} configList - ordered graph configs (ids are issued fresh on render)
  * @param {boolean} [recomputeRange=false] - When true (template load), refit each graph's
  *   time range to the real data extent of its resolved experiments.
  */
-async function restoreGraphs(savedSettings, recomputeRange = false) {
-  for (const [, graphConfig] of savedSettings) {
+async function restoreGraphs(configList, recomputeRange = false) {
+  for (const graphConfig of configList) {
     // Resolve concrete experiment entries (skip unresolvable slots)
     const resolved = graphConfig.experiments
       .map(slot => resolveExperimentSlot(slot, state.variables))
@@ -195,7 +215,7 @@ async function restoreGraphs(savedSettings, recomputeRange = false) {
       // All experiment variables unresolved (template with null vars) — render placeholders
       // so the config is tracked in state.graphSettings for later variable resolution.
       const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.set(id, graphConfig);
+      state.graphSettings.push({ id, config: graphConfig });
       continue;
     }
 
@@ -209,7 +229,7 @@ async function restoreGraphs(savedSettings, recomputeRange = false) {
     if (resolvedMetrics.length === 0) {
       // All metric variables unresolved — render placeholders.
       const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.set(id, graphConfig);
+      state.graphSettings.push({ id, config: graphConfig });
       continue;
     }
 
@@ -238,7 +258,7 @@ async function restoreGraphs(savedSettings, recomputeRange = false) {
       // has no results on this server). Render a placeholder so the graph still shows —
       // matching the unresolved-variable cases above — rather than silently dropping it.
       const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.set(id, graphConfig);
+      state.graphSettings.push({ id, config: graphConfig });
       continue;
     }
 
@@ -250,7 +270,7 @@ async function restoreGraphs(savedSettings, recomputeRange = false) {
     }
 
     const id = await graphManager.AddGraph(graphConfig, dataMap);
-    state.graphSettings.set(id, graphConfig);
+    state.graphSettings.push({ id, config: graphConfig });
   }
 }
 
@@ -309,7 +329,13 @@ const campaignsReady = apirest.LoadCampaigns().then(list => {
 });
 const ui = new UI();
 const graphManager = new GraphManager(main, {
-  delete:    function(id) { state.graphSettings.delete(id); BuildSidebar(state); },
+  delete:    function(id) { removeGraph(state, id); BuildSidebar(state); },
+  duplicate: function(newId, config) {
+    state.graphSettings.push({ id: newId, config }); // appended; resync sorts it into place
+    resyncGraphOrder();
+    BuildSidebar(state);
+  },
+  reorder:   function() { resyncGraphOrder(); },
   getState:  function()   { return state; },
   editGraph: function(id) { EditGraph(id); },
   getLatestTimestamp: function(type, commit) { return apirest.LatestTimestampSync(type, commit); },

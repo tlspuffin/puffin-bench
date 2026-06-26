@@ -6,7 +6,7 @@
 
 import { ICONS, TASK_TYPES, DEFAULT_DELTA_DIVISOR } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey } from './state.js';
+import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey, findGraph } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -604,11 +604,12 @@ export async function AddGraphique(prefill = null, editId = null) {
           );
 
           if (editId !== null) {
-            _state.graphSettings.set(editId, graphConfig);
+            const entry = findGraph(_state, editId);
+            if (entry) entry.config = graphConfig;
             await _graphManager.UpdateGraph(editId, graphConfig, dataMap);
           } else {
             const id = await _graphManager.AddGraph(graphConfig, dataMap);
-            _state.graphSettings.set(id, graphConfig);
+            _state.graphSettings.push({ id, config: graphConfig });
           }
         }
 
@@ -794,7 +795,7 @@ export async function AddGraphique(prefill = null, editId = null) {
 }
 
 export async function EditGraph(id) {
-  const existingConfig = _state.graphSettings.get(id);
+  const existingConfig = findGraph(_state, id)?.config;
   if (!existingConfig) return;
   _enableMainUI(false);
   await AddGraphique(existingConfig, id);

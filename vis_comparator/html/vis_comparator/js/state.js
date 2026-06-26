@@ -31,7 +31,7 @@ export const globalCampaigns = [];
 
 export const state = {
   title: 'No Title_' + Date.now(),
-  graphSettings: new Map(),
+  graphSettings: [],  // ordered [{ id, config }] — array order == DOM order == save order
   variables: {
     commits:   new Map(),  // name → { value: commitID | null, alias: string | null }
     subtasks:  new Map(),  // name → { value: { tasktype, subtask } | null, alias: string | null }
@@ -169,12 +169,23 @@ export function experimentKey(resolved) {
     ? `${base}:${resolved.timestamp}` : base;
 }
 
+/** Returns the { id, config } graph entry with the given id, or undefined. */
+export function findGraph(state, id) {
+  return state.graphSettings.find(g => g.id === id);
+}
+
+/** Removes the graph entry with the given id from state.graphSettings (in place). */
+export function removeGraph(state, id) {
+  const i = state.graphSettings.findIndex(g => g.id === id);
+  if (i >= 0) state.graphSettings.splice(i, 1);
+}
+
 /**
  * Returns true if any graph's configuration references the given variable name.
  * @param {'commit'|'subtask'|'campaign'|'metric'} type
  */
 export function isVarReferenced(state, varName, type) {
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     if (type === 'commit' && config.experiments.some(s => s.commitVar === varName)) return true;
     if (type === 'subtask' && config.experiments.some(s => s.subtaskVar === varName)) return true;
     if (type === 'campaign' && config.experiments.some(s => s.campaignVar === varName)) return true;

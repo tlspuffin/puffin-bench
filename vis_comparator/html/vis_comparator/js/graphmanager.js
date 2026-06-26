@@ -17,6 +17,10 @@ class GraphManager {
   #configs;
   #document;
   #callbacks;
+  // Re-entrant scroll-anchoring suppression for MoveGraph: count in-flight restores so
+  // rapid moves capture the true prior value once and restore only after the last one.
+  #moveAnchorPending = 0;
+  #moveAnchorPrev = '';
   static #nextid = 0;
 
   // Four distinct colours for up to 4 experiments. Beyond 4, colours cycle.
@@ -28,9 +32,11 @@ class GraphManager {
   /**
    * @param {HTMLElement} container  - Container element where graph divs are appended
    * @param {object}      callbacks  - {
-   *   delete(id),          called when a graph is removed
-   *   getState(),          returns current app state ({ variables, commitRegistry })
-   *   editGraph(id),       called when the ⚙ button is clicked (optional)
+   *   delete(id),               called when a graph is removed
+   *   duplicate(newId, config), called after a graph is duplicated (optional)
+   *   reorder(),                called after graphs are reordered on screen (optional)
+   *   getState(),               returns current app state ({ variables, commitRegistry })
+   *   editGraph(id),            called when the ⚙ button is clicked (optional)
    * }
    */
   constructor(container, callbacks) {
@@ -45,9 +51,11 @@ class GraphManager {
    * Adds a graph (single or multi-experiment) to the page.
    * @param {object}              graphConfig - Canonical config (experiments array, metricsMode, metrics, …)
    * @param {Map<string, object>} dataMap     - "commit:type:subject" → { header, series }
+   * @param {number|null}         afterId     - Insert the new container right after this graph's
+   *                                            container; appended to the end when null/unknown.
    * @returns {Promise<number>} Numeric graph ID
    */
-  async AddGraph(graphConfig, dataMap) {
+  async AddGraph(graphConfig, dataMap, afterId = null) {
     const id = GraphManager.#nextid++;
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
 
@@ -57,7 +65,9 @@ class GraphManager {
       showRawToggle:  true,
       showCIToggle:   true,
     });
-    this.#document.appendChild(graphContainer);
+    const afterEl = afterId != null ? this.#configs.get(afterId)?.graphContainer : null;
+    if (afterEl) afterEl.after(graphContainer);
+    else this.#document.appendChild(graphContainer);
 
     const stored = { graphConfig, dataMap, graphContainer, graphArea, hiddenGroups: new Set() };
     this.#configs.set(id, stored);
@@ -104,6 +114,60 @@ class GraphManager {
     for (const id of Array.from(this.#configs.keys())) {
       this.DelGraph(id);
     }
+  }
+
+  /**
+   * Creates a copy of an existing graph directly below it, reusing the source's
+   * already-fetched data (no server round trip). The config is deep-cloned so the
+   * copy can be edited independently. Notifies the duplicate callback so app state
+   * can track the new graph.
+   * @param {number} id
+   */
+  async DuplicateGraph(id) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const clonedConfig = structuredClone(stored.graphConfig);
+    const newId = await this.AddGraph(clonedConfig, stored.dataMap, /*afterId=*/ id);
+    this.#callbacks?.duplicate?.(newId, clonedConfig);
+  }
+
+  /**
+   * Moves a graph one slot up or down on the page, then notifies the reorder callback.
+   * @param {number} id
+   * @param {number} dir  -1 = up, +1 = down
+   */
+  MoveGraph(id, dir) {
+    const el = this.#configs.get(id)?.graphContainer;
+    if (!el) return;
+    const sibling = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+    if (!sibling) return;                       // already at an end — nothing to do
+
+    // Reordering mutates the DOM, which makes the browser's scroll anchoring nudge
+    // scrollTop and visually shift the page. Disable anchoring on the container so the
+    // scroll position stays put across the move. It must stay disabled *through* the
+    // layout that processes this mutation: rAF callbacks run before that frame's layout,
+    // so we restore on the frame after (double rAF) to keep deletes/redraws anchoring.
+    // Capture the prior value only when no restore is in flight, so rapid consecutive
+    // moves don't capture the transient 'none' and leave anchoring stranded off.
+    const container = el.parentNode;
+    if (this.#moveAnchorPending === 0) this.#moveAnchorPrev = container.style.overflowAnchor;
+    this.#moveAnchorPending++;
+    container.style.overflowAnchor = 'none';
+
+    if (dir < 0) container.insertBefore(el, sibling);
+    else         container.insertBefore(sibling, el);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (--this.#moveAnchorPending === 0) container.style.overflowAnchor = this.#moveAnchorPrev;
+    }));
+    this.#callbacks?.reorder?.();
+  }
+
+  /** Returns graph IDs in their current on-screen (DOM) order. */
+  GetDomOrderedIds() {
+    return Array.from(this.#document.querySelectorAll(':scope > .graph-container'))
+      .map(el => Number(el.id.replace('graph-container_', '')))
+      .filter(domId => this.#configs.has(domId));
   }
 
   /** Notifies Plotly of a container size change for all graphs. */
@@ -815,6 +879,17 @@ class GraphManager {
     }
   }
 
+  /** Builds a title-bar icon button. */
+  static #MakeIconBtn({ id, icon, title, onclick, className = 'graph-icon-btn' }) {
+    const btn = document.createElement('button');
+    btn.className   = className;
+    btn.id          = id;
+    btn.textContent = icon;
+    btn.title       = title;
+    btn.onclick     = onclick;
+    return btn;
+  }
+
   #BuildGraphContainer(id, options) {
     const container = document.createElement('div');
     container.id        = 'graph-container_' + id;
@@ -843,43 +918,51 @@ class GraphManager {
         const controlsDiv = document.createElement('div');
         controlsDiv.className = 'graph-title-controls';
 
+        // ▲ Move up · ▼ Move down · ⧉ Duplicate
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_up_' + id, icon: ICONS.ARROW_UP, title: 'Move up',
+          onclick: this.MoveGraph.bind(this, id, -1),
+        }));
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_down_' + id, icon: ICONS.ARROW_DOWN, title: 'Move down',
+          onclick: this.MoveGraph.bind(this, id, +1),
+        }));
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_duplicate_' + id, icon: ICONS.COPY, title: 'Duplicate graph',
+          onclick: () => this.DuplicateGraph(id),
+        }));
+
         // ⚙ Edit button (Phase E) — only when editGraph callback is provided
         if (this.#callbacks?.editGraph) {
-          const eltEdit = document.createElement('button');
-          eltEdit.className   = 'graph-icon-btn graph-icon-btn-edit';
-          eltEdit.id          = 'graph_ui_edit_' + id;
-          eltEdit.textContent = ICONS.GEAR;
-          eltEdit.title       = 'Edit graph settings';
-          eltEdit.onclick     = () => this.#callbacks.editGraph(id);
-          controlsDiv.appendChild(eltEdit);
+          controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+            id: 'graph_ui_edit_' + id, icon: ICONS.GEAR, title: 'Edit graph settings',
+            className: 'graph-icon-btn graph-icon-btn-edit',
+            onclick: () => this.#callbacks.editGraph(id),
+          }));
         }
 
         // ➖ Collapse button
-        const eltCollapse = document.createElement('button');
-        eltCollapse.className   = 'graph-icon-btn';
-        eltCollapse.id          = 'graph_ui_collapse_' + id;
-        eltCollapse.textContent = ICONS.MINUS;
-        eltCollapse.title       = 'Minimize';
-        eltCollapse.onclick = function() {
-          const isVisible = graphArea.style.display !== 'none';
-          graphArea.style.display = isVisible ? 'none' : '';
-          // Also collapse/expand the toggle bar (Split Y-Axes / All Runs / Confidence Bands)
-          const toggleBar = container.querySelector('.graph-toggle-bar');
-          if (toggleBar) toggleBar.style.display = isVisible ? 'none' : '';
-          eltCollapse.textContent = isVisible ? ICONS.PLUS : ICONS.MINUS;
-          eltCollapse.title       = isVisible ? 'Expand'  : 'Minimize';
-          if (!isVisible) Plotly.Plots.resize(graphArea);
-        };
+        const eltCollapse = GraphManager.#MakeIconBtn({
+          id: 'graph_ui_collapse_' + id, icon: ICONS.MINUS, title: 'Minimize',
+          onclick: function() {
+            const isVisible = graphArea.style.display !== 'none';
+            graphArea.style.display = isVisible ? 'none' : '';
+            // Also collapse/expand the toggle bar (Split Y-Axes / All Runs / Confidence Bands)
+            const toggleBar = container.querySelector('.graph-toggle-bar');
+            if (toggleBar) toggleBar.style.display = isVisible ? 'none' : '';
+            eltCollapse.textContent = isVisible ? ICONS.PLUS : ICONS.MINUS;
+            eltCollapse.title       = isVisible ? 'Expand'  : 'Minimize';
+            if (!isVisible) Plotly.Plots.resize(graphArea);
+          },
+        });
         controlsDiv.appendChild(eltCollapse);
 
         // ✖ Delete button
-        const eltDelete = document.createElement('button');
-        eltDelete.className   = 'graph-icon-btn graph-icon-btn-delete';
-        eltDelete.id          = 'graph_ui_delete_' + id;
-        eltDelete.textContent = ICONS.CLOSE_HEAVY;
-        eltDelete.title       = 'Delete graph';
-        eltDelete.onclick     = this.DelGraph.bind(this, id);
-        controlsDiv.appendChild(eltDelete);
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_delete_' + id, icon: ICONS.CLOSE_HEAVY, title: 'Delete graph',
+          className: 'graph-icon-btn graph-icon-btn-delete',
+          onclick: this.DelGraph.bind(this, id),
+        }));
 
         titleBar.appendChild(controlsDiv);
       }

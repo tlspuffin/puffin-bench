@@ -25,6 +25,9 @@ export const ICONS = Object.freeze({
   GEAR:         '⚙',
   PLUS:         '➕',
   MINUS:        '➖',
+  COPY:         '⧉',
+  ARROW_UP:     '▲',
+  ARROW_DOWN:   '▼',
   FOLDER_OPEN:  '➖',
   FOLDER_SHUT:  '➕',
 });
