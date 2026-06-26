@@ -120,6 +120,16 @@ if [ -z "${THEJOB_USER_STATE_FILE}" ]; then
   exit 1
 fi
 
+if [ -z "${THEJOB_FLAG_FILE}" ]; then
+  echo "Missing flag file"
+  exit 1
+fi
+
+if [ -z "${THEJOB_DONE_FILE}" ]; then
+  echo "Missing done file"
+  exit 1
+fi
+
 if [ ! -r "${THEJOB_ENV_PATH}" ]; then
   if [ -z "${THEJOB_ENV_PATH}" ]; then
     echo "Required env file is missing"
@@ -168,6 +178,6 @@ if [[ "${THEJOB_UNIQ_STEP}" == "1" ]]; then
   echo "${THEJOB_GLBPARMS}" > "${THEJOB_ENV_PATH}"
 fi
 
-echo ${THEJOB_RETVAL} > .done.tmp
-mv .done.tmp .done
+echo ${THEJOB_RETVAL} > "${THEJOB_DONE_FILE}.tmp"
+mv "${THEJOB_DONE_FILE}.tmp" "${THEJOB_DONE_FILE}"
 exit ${THEJOB_RETVAL}

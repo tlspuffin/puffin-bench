@@ -1,0 +1,292 @@
+{
+  "title": "TwoTasks 2 commits 1 subtask",
+  "titleFormat": "TwoTasks - ${DATE} - ${C1_HASH}/${C2_HASH} - ${S1_TYPE}/${S1_NAME}",
+  "variables": {
+    "commits": {
+      "__type": "Map",
+      "value": [
+        [
+          "c1",
+          {}
+        ],
+        [
+          "c2",
+          {}
+        ]
+      ]
+    },
+    "subtasks": {
+      "__type": "Map",
+      "value": [
+        [
+          "s1",
+          {}
+        ]
+      ]
+    },
+    "campaigns": {
+      "__type": "Map",
+      "value": []
+    },
+    "metrics": {
+      "__type": "Map",
+      "value": []
+    }
+  },
+  "legendFormat": {
+    "experiment": "${COMMIT_ALIAS} − ${SUBTASK_ALIAS}",
+    "metric": "${METRIC:afterLast(\\.):pascalcase}"
+  },
+  "graphSettings": [
+    {
+      "id": 33,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          },
+          {
+            "commitVar": "c2",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "global.corpus_size",
+          "global.objective_size"
+        ],
+        "min": 0,
+        "max": 3709625740,
+        "delta": 185481,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": false
+      }
+    },
+    {
+      "id": 34,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          },
+          {
+            "commitVar": "c2",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "global.exec_per_sec",
+          "global.total_execs"
+        ],
+        "min": 0,
+        "max": 3709625740,
+        "delta": 185481,
+        "showRaw": false,
+        "showCI": false,
+        "splitAxes": true
+      }
+    },
+    {
+      "id": 35,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          },
+          {
+            "commitVar": "c2",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.trace.max_term_size",
+          "client.trace.mean_term_size",
+          "client.trace.min_term_size"
+        ],
+        "min": 0,
+        "max": 3709625740,
+        "delta": 185481,
+        "showRaw": false,
+        "showCI": false,
+        "splitAxes": false
+      }
+    },
+    {
+      "id": 36,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          },
+          {
+            "commitVar": "c2",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.trace.max_trace_length",
+          "client.trace.mean_trace_length",
+          "client.trace.min_trace_length"
+        ],
+        "min": 0,
+        "max": 3709625740,
+        "delta": 185481,
+        "showRaw": false,
+        "showCI": false,
+        "splitAxes": false
+      }
+    },
+    {
+      "id": 37,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          },
+          {
+            "commitVar": "c2",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.coverage.hit",
+          "client.coverage.max"
+        ],
+        "min": 0,
+        "max": 3709625740,
+        "delta": 185481,
+        "showRaw": false,
+        "showCI": false,
+        "splitAxes": true
+      }
+    }
+  ],
+  "commitRegistry": {
+    "__type": "Map",
+    "value": [
+      [
+        "2d000bfe0:Perf:BoringSSL",
+        {
+          "color": "#1f77b4"
+        }
+      ],
+      [
+        "2dad52a3c:Perf:BoringSSL",
+        {
+          "color": "#ff7f0e"
+        }
+      ]
+    ]
+  },
+  "metricLegend": {
+    "__type": "Map",
+    "value": [
+      [
+        "global.corpus_size",
+        {
+          "visible": true
+        }
+      ],
+      [
+        "global.objective_size",
+        {}
+      ],
+      [
+        "client.corpus_size",
+        {}
+      ],
+      [
+        "client.objective_size",
+        {}
+      ],
+      [
+        "global.exec_per_sec",
+        {}
+      ],
+      [
+        "global.total_execs",
+        {}
+      ],
+      [
+        "client.exec_per_sec",
+        {}
+      ],
+      [
+        "client.total_execs",
+        {}
+      ],
+      [
+        "client.trace.max_nb_payload",
+        {}
+      ],
+      [
+        "client.trace.mean_nb_payload",
+        {}
+      ],
+      [
+        "client.trace.min_payload_size",
+        {}
+      ],
+      [
+        "client.trace.mean_payload_size",
+        {}
+      ],
+      [
+        "client.trace.max_payload_size",
+        {}
+      ],
+      [
+        "client.trace.max_term_size",
+        {
+          "visible": true
+        }
+      ],
+      [
+        "client.trace.mean_term_size",
+        {
+          "visible": true
+        }
+      ],
+      [
+        "client.trace.min_term_size",
+        {
+          "visible": true
+        }
+      ],
+      [
+        "client.trace.min_trace_length",
+        {}
+      ],
+      [
+        "client.trace.mean_trace_length",
+        {}
+      ],
+      [
+        "client.trace.max_trace_length",
+        {}
+      ],
+      [
+        "client.coverage.hit",
+        {
+          "displayName": "CoverageHit"
+        }
+      ],
+      [
+        "client.coverage.max",
+        {
+          "displayName": "CoverageMax"
+        }
+      ]
+    ]
+  }
+}

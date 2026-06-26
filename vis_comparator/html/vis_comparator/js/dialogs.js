@@ -4,9 +4,9 @@
  * Call initDialogs(deps) once at startup before any dialog function is used.
  */
 
-import { ICONS, TASK_TYPES } from './constants.js';
+import { ICONS, TASK_TYPES, DEFAULT_DELTA_DIVISOR } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, resolveMetricEntry, nextCommitColor, migrateStateIfNeeded, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks } from './state.js';
+import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey, slotKey, findGraph, fetchMetricSet } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -57,7 +57,6 @@ export function initDialogs(deps) {
 // CONSTANTS (dialog-local)
 // ============================================================
 
-const DEFAULT_DELTA_DIVISOR = 20_000;
 const MAX_EXPERIMENTS = 4;
 
 // ============================================================
@@ -178,8 +177,13 @@ function buildSubtaskOptions(selectedTasktype, selectedSubtask, selectedVar, dyn
  */
 async function loadDynamicSubtasks(slot, subtaskSel) {
   let resolvedCommit = slot.commit;
+  // The pinned run travels with the commit variable, or sits on a literal slot.
+  // A pinned commit variable narrows *this slot's* subtasks to its run (fork-2).
+  let pinnedTs = slot.timestamp ?? null;
   if (slot.commitVar) {
-    resolvedCommit = _state.variables.commits.get(slot.commitVar)?.value;
+    const entry = _state.variables.commits.get(slot.commitVar);
+    resolvedCommit = entry?.value;
+    pinnedTs = entry?.timestamp ?? null;
   }
   if (!resolvedCommit) {
     const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, []);
@@ -192,12 +196,14 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
   subtaskSel.disabled = true;
   subtaskSel.classList.add('select-loading');
   try {
-    const [perfSubjs, vulnSubjs] = await Promise.all([
-      _apirest.LoadCommitSubjects(TASK_TYPES.PERF, resolvedCommit),
-      _apirest.LoadCommitSubjects(TASK_TYPES.VULN, resolvedCommit)
-    ]);
-    perfSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.PERF, subtask: s.value }));
-    vulnSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.VULN, subtask: s.value }));
+    // A pinned timestamp limits discovery to that one run (only its type has a run
+    // at that ts; the others return []). Unpinned (null) falls back to each type's
+    // latest run. Iterating TASK_TYPES keeps this correct as new types are added.
+    const types = Object.values(TASK_TYPES);
+    const results = await Promise.all(
+      types.map(t => _apirest.LoadCommitSubjects(t, resolvedCommit, pinnedTs)));
+    types.forEach((t, i) =>
+      (results[i] ?? []).forEach(s => dynamicKnown.push({ tasktype: t, subtask: s.value })));
   } finally {
     subtaskSel.disabled = false;
     subtaskSel.classList.remove('select-loading');
@@ -216,7 +222,10 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
 function updateOkButton(ctx) {
   if (!ctx.btOk) return;
   const hasResolved = ctx.slots.some(s => resolveExperimentSlot(s, _state.variables) != null);
-  const hasMetrics  = ctx.selectedMetrics.length > 0;
+  // Require a live metrics UI: a preserved selection (kept across transient
+  // states) must not enable OK while no checkboxes are shown, e.g. when the
+  // resolved experiment has no metrics.
+  const hasMetrics  = ctx.selectedMetrics.length > 0 && ctx.metricsUIContainer != null;
   if (hasResolved && hasMetrics) UI.EnableElement(ctx.btOk);
   else UI.DisableElement(ctx.btOk);
 }
@@ -233,10 +242,13 @@ function metricsMatch(a, b) {
   return false;
 }
 
-async function rebuildMetricsUI(ctx) {
+async function rebuildMetricsUI(ctx, forceTimeRecalc = false) {
+  // Snapshot the current selection but DON'T clear it yet: clearing is deferred
+  // until we are actually about to rebuild the checkbox tree (see below). This
+  // preserves the selection through transient states where no usable metrics UI
+  // is built (no resolved experiment, or an experiment with no data), so it can
+  // be restored once a valid experiment is defined again.
   const previousMetrics = [...ctx.selectedMetrics];
-  ctx.selectedMetrics = [];
-  updateOkButton(ctx);
 
   const slotResolutions = ctx.slots.map((slot, idx) => ({
     idx,
@@ -248,6 +260,7 @@ async function rebuildMetricsUI(ctx) {
       ctx.metricsUIContainer.remove();
       ctx.metricsUIContainer = null;
     }
+    updateOkButton(ctx);
     return;
   }
 
@@ -261,7 +274,7 @@ async function rebuildMetricsUI(ctx) {
 
   const metricsResults = await Promise.all(
     resolvedWithIdx.map(({ resolved }) =>
-      _apirest.LoadCommitMetrics(resolved.tasktype, resolved.commit, resolved.subtask))
+      _apirest.LoadCommitMetrics(resolved.tasktype, resolved.commit, resolved.subtask, resolved.timestamp))
   );
 
   loadingDiv.remove();
@@ -316,10 +329,17 @@ async function rebuildMetricsUI(ctx) {
 
   if (!syntheticMetrics.metrics || syntheticMetrics.metrics.size === 0) {
     if (ctx.metricsUIContainer) { ctx.metricsUIContainer.remove(); ctx.metricsUIContainer = null; }
+    updateOkButton(ctx);
     return;
   }
 
   if (ctx.metricsUIContainer) { ctx.metricsUIContainer.remove(); ctx.metricsUIContainer = null; }
+
+  // About to rebuild the tree: now clear the selection so checkbox callbacks
+  // start from an empty array. The restoration loop below re-adds the preserved
+  // entries from previousMetrics (or ctx.prefill on first edit).
+  ctx.selectedMetrics = [];
+  updateOkButton(ctx);
 
   const metricsTree = _ui.CreateMetrics(syntheticMetrics, {
     absent: ctx.metricsMode === 'OR' ? absentPaths : new Set(),
@@ -368,10 +388,10 @@ async function rebuildMetricsUI(ctx) {
     ctx.metricsUIContainer = metricsTree;
   }
 
-  if (!ctx.prefill) {
-    const firstMetrics = metricsResults[0];
-    if (firstMetrics?.maxTimeMicroS > 0) {
-      const maxT = firstMetrics.maxTimeMicroS;
+  if (forceTimeRecalc || !ctx.prefill) {
+    // Largest extent across all experiments, so no series is truncated.
+    const maxT = metricsResults.reduce((m, r) => Math.max(m, r?.maxTimeMicroS ?? -1), -1);
+    if (maxT > 0) {
       const d = Math.max(1, Math.floor(maxT / DEFAULT_DELTA_DIVISOR));
       const startEl = document.getElementById('time_start_' + ctx.timeID);
       const endEl   = document.getElementById('time_end_'   + ctx.timeID);
@@ -546,10 +566,12 @@ export async function AddGraphique(prefill = null, editId = null) {
         const max   = +document.getElementById('time_end_'   + ctx.timeID).value;
         const delta = +document.getElementById('time_delta_' + ctx.timeID).value;
 
-        for (const exp of resolved) {
-          const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
-          if (!_state.commitRegistry.has(expKey)) {
-            _state.commitRegistry.set(expKey, { color: nextCommitColor(_state.commitRegistry), displayName: null });
+        for (const slot of slots) {
+          const exp = resolveSlot(slot);
+          if (!exp) continue;
+          const key = slotKey(slot, exp);
+          if (!_state.commitRegistry.has(key)) {
+            _state.commitRegistry.set(key, { color: nextCommitColor(_state.commitRegistry), displayName: null });
           }
         }
 
@@ -567,9 +589,15 @@ export async function AddGraphique(prefill = null, editId = null) {
           return;
         }
 
+        // Preserve the x-axis metric across an edit and fetch it alongside the y-metrics.
+        const xMetric = prefill ? (prefill.xMetric ?? null) : null;
+        const valueMetrics = fetchMetricSet(fetchMetrics, { xMetric });
+        // Preserve the CI level across an edit; new graphs default to 95%.
+        const ciLevel = prefill ? (prefill.ciLevel ?? 95) : 95;
+
         const results = await Promise.all(
           resolved.map(exp => _apirest.LoadCommitMetricsValues(
-            exp.tasktype, exp.commit, exp.subtask, min, max, delta, fetchMetrics))
+            exp.tasktype, exp.commit, exp.subtask, min, max, delta, valueMetrics, exp.timestamp, ciLevel))
         );
         const validPairs = resolved
           .map((exp, i) => ({ exp, data: results[i] }))
@@ -577,25 +605,28 @@ export async function AddGraphique(prefill = null, editId = null) {
 
         if (validPairs.length > 0) {
           const graphConfig = {
-            experiments: slots.filter(s => s.commitVar || s.commit || s.subtaskVar || s.tasktype),
+            experiments: slots.filter(s => s.commitVar || s.commit || s.subtaskVar || s.tasktype || s.campaignVar || s.campaignRun),
             metricsMode: ctx.metricsMode,
             metrics: ctx.selectedMetrics,
             min, max, delta,
             showRaw:   prefill ? prefill.showRaw   : (validPairs.length === 1),
             showCI:    prefill ? prefill.showCI    : false,
             splitAxes: prefill ? prefill.splitAxes : true,
+            xMetric:   xMetric,
+            ciLevel:   ciLevel,
           };
 
           const dataMap = new Map(
-            validPairs.map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
+            validPairs.map(p => [experimentKey(p.exp), p.data])
           );
 
           if (editId !== null) {
-            _state.graphSettings.set(editId, graphConfig);
+            const entry = findGraph(_state, editId);
+            if (entry) entry.config = graphConfig;
             await _graphManager.UpdateGraph(editId, graphConfig, dataMap);
           } else {
             const id = await _graphManager.AddGraph(graphConfig, dataMap);
-            _state.graphSettings.set(id, graphConfig);
+            _state.graphSettings.push({ id, config: graphConfig });
           }
         }
 
@@ -654,22 +685,76 @@ export async function AddGraphique(prefill = null, editId = null) {
     });
   }
 
+  function slotField(labelText, el) {
+    const field = document.createElement('div');
+    field.className = 'slot-field';
+    const label = document.createElement('span');
+    label.className = 'slot-field-label';
+    label.textContent = labelText;
+    field.appendChild(label);
+    field.appendChild(el);
+    return field;
+  }
+
   function renderSlotRow(row, slot, slotIdx) {
+    const mode = slotMode(slot);
+
+    // ── Mode toggle (commit ⇄ campaign) ──────────────────────────
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'experiment-mode-toggle';
+    toggle.textContent = mode === 'campaign' ? 'Campaign' : 'Commit';
+    toggle.title = 'Toggle commit / campaign mode';
+    toggle.onclick = function() {
+      if (mode === 'campaign') {
+        slot.mode = 'commit';
+        slot.campaignVar = null; slot.campaignRun = null;
+      } else {
+        slot.mode = 'campaign';
+        slot.commit = null; slot.commitVar = null;
+        slot.tasktype = null; slot.subtask = null; slot.subtaskVar = null;
+      }
+      renderExperiments();
+      onExperimentChange();
+    };
+    row.appendChild(toggle);
+
+    if (mode === 'campaign') renderCampaignSlot(row, slot);
+    else renderCommitSlot(row, slot);
+
+    // ⚠ badge: resolved combination has no data from the server
+    if (ctx.invalidSlotIndices.has(slotIdx)) {
+      const resolved = resolveSlot(slot);
+      const warn = document.createElement('span');
+      warn.className = 'experiment-slot-warn';
+      warn.textContent = ICONS.WARN;
+      warn.title = resolved
+        ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
+        : 'No data';
+      row.appendChild(warn);
+    }
+  }
+
+  function renderCommitSlot(row, slot) {
     // Commit picker
     const initialSelected = slot.commitVar ? `_var_${slot.commitVar}` : (slot.commit ?? null);
     const commitSel = _ui.CreateCommitPicker(gitHistory, allCommits, {
       selected: initialSelected,
+      selectedTimestamp: slot.commitVar ? null : (slot.timestamp ?? null),
       variables: _state.variables.commits,
+      getRunCount: (commit) => _apirest.RunCountSync(commit),
+      loadRuns: (commit) => _apirest.LoadRuns(commit),
     });
 
     commitSel.addEventListener('change', function() {
       const val = commitSel.value;
       if (!val) {
-        slot.commitVar = null; slot.commit = null;
+        slot.commitVar = null; slot.commit = null; slot.timestamp = null;
       } else if (val.startsWith('_var_')) {
-        slot.commitVar = val.slice(5); slot.commit = null;
+        // Variable mode: the pinned run travels with the variable, not the slot.
+        slot.commitVar = val.slice(5); slot.commit = null; slot.timestamp = null;
       } else {
-        slot.commitVar = null; slot.commit = val;
+        slot.commitVar = null; slot.commit = val; slot.timestamp = commitSel.timestamp ?? null;
       }
       onExperimentChange();
       loadDynamicSubtasks(slot, subtaskSel);
@@ -698,45 +783,40 @@ export async function AddGraphique(prefill = null, editId = null) {
       onExperimentChange();
     });
 
-    const commitField = document.createElement('div');
-    commitField.className = 'slot-field';
-    const commitLabel = document.createElement('span');
-    commitLabel.className = 'slot-field-label';
-    commitLabel.textContent = 'Commit';
-    commitField.appendChild(commitLabel);
-    commitField.appendChild(commitSel);
-    row.appendChild(commitField);
+    row.appendChild(slotField('Commit', commitSel));
+    row.appendChild(slotField('Subtask', subtaskSel));
+  }
 
-    const subtaskField = document.createElement('div');
-    subtaskField.className = 'slot-field';
-    const subtaskLabel = document.createElement('span');
-    subtaskLabel.className = 'slot-field-label';
-    subtaskLabel.textContent = 'Subtask';
-    subtaskField.appendChild(subtaskLabel);
-    subtaskField.appendChild(subtaskSel);
-    row.appendChild(subtaskField);
-
-    // ⚠ badge: resolved combination has no data from the server
-    if (ctx.invalidSlotIndices.has(slotIdx)) {
-      const resolved = resolveSlot(slot);
-      const warn = document.createElement('span');
-      warn.className = 'experiment-slot-warn';
-      warn.textContent = ICONS.WARN;
-      warn.title = resolved
-        ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
-        : 'No data';
-      row.appendChild(warn);
-    }
+  function renderCampaignSlot(row, slot) {
+    // Single selector: campaign variables appear as rows alongside the direct runs
+    // (mirrors the commit picker). .value is a `_var_NAME` string or a direct runRef.
+    const initialSelected = slot.campaignVar ? `_var_${slot.campaignVar}` : (slot.campaignRun ?? null);
+    const runSel = _ui.CreateCampaignPicker(globalCampaigns, {
+      selected: initialSelected,
+      variables: _state.variables.campaigns,
+    });
+    runSel.addEventListener('change', function() {
+      const v = runSel.value;
+      if (typeof v === 'string' && v.startsWith('_var_')) {
+        slot.campaignVar = v.slice(5); slot.campaignRun = null;
+      } else if (v) {
+        slot.campaignRun = v; slot.campaignVar = null;
+      } else {
+        slot.campaignVar = null; slot.campaignRun = null;
+      }
+      onExperimentChange();
+    });
+    row.appendChild(slotField('Campaign', runSel));
   }
 
   function onExperimentChange() {
-    rebuildMetricsUI(ctx);
+    rebuildMetricsUI(ctx, true);
     updateOkButton(ctx);
   }
 }
 
 export async function EditGraph(id) {
-  const existingConfig = _state.graphSettings.get(id);
+  const existingConfig = findGraph(_state, id)?.config;
   if (!existingConfig) return;
   _enableMainUI(false);
   await AddGraphique(existingConfig, id);
@@ -793,6 +873,8 @@ export function buildFileListModal(restoreUI, opts) {
   container.appendChild(listContainer);
 
   let allFiles = [];
+  let selectedName = null;
+  let openBtn = null; // assigned when the action bar is built (below)
 
   function closeModal() {
     clearModalCancel();
@@ -808,6 +890,8 @@ export function buildFileListModal(restoreUI, opts) {
 
   function renderList() {
     listContainer.innerHTML = '';
+    selectedName = null;
+    if (openBtn) openBtn.disabled = true;
     const filterText = filterInput.value.toLowerCase();
     let files = allFiles.filter(f => f.toLowerCase().includes(filterText));
     files = [...files].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
@@ -832,6 +916,8 @@ export function buildFileListModal(restoreUI, opts) {
           r.classList.remove('selected');
         });
         row.classList.add('selected');
+        selectedName = name;
+        if (openBtn) openBtn.disabled = false;
       };
       nameBtn.ondblclick = function() { opts.onLoad(name, closeModal); };
 
@@ -863,9 +949,25 @@ export function buildFileListModal(restoreUI, opts) {
 
   setModalCancel(dismissModal);
 
-  container.appendChild(_ui.CreateActions(false, {
-    ok: { text: 'Close', callback: dismissModal }
-  }));
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+
+  openBtn = document.createElement('button');
+  openBtn.className = 'modal-button-ok';
+  openBtn.innerText = 'Open';
+  openBtn.disabled = true; // enabled once a row is selected
+  openBtn.onclick = function() {
+    if (selectedName != null) opts.onLoad(selectedName, closeModal);
+  };
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal-button-cancel';
+  closeBtn.innerText = 'Close';
+  closeBtn.onclick = dismissModal;
+
+  actions.appendChild(openBtn);
+  actions.appendChild(closeBtn);
+  container.appendChild(actions);
 
   opts.fetchFiles().then(function(answer) {
     if (answer?.files) {
@@ -916,27 +1018,115 @@ export function OpenView(restoreUI = false) {
         }
       });
     },
+    extraRowBtns: function(name) {
+      return [makeCopyURLBtn(() => buildViewURL(name), 'Copy shareable view URL')];
+    },
   });
+}
+
+/**
+ * Copies text to the clipboard. Falls back to a temporary textarea +
+ * execCommand on non-secure contexts (e.g. served over plain HTTP from a
+ * non-localhost host) where navigator.clipboard is undefined.
+ * @returns {Promise<void>} resolves on success, rejects on failure
+ */
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise(function(resolve, reject) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    // Keep it out of view and out of the layout/scroll flow.
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.setAttribute('readonly', '');
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      if (document.execCommand('copy')) resolve();
+      else reject(new Error('Copy command was rejected'));
+    } catch (err) {
+      reject(err);
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  });
+}
+
+/**
+ * Builds a row-action button that copies a generated URL to the clipboard,
+ * flashing a checkmark on success and surfacing an error toast on failure.
+ * @param {() => string|Promise<string>} urlFactory - produces the URL to copy when clicked
+ * @param {string} title - button tooltip
+ * @returns {HTMLButtonElement}
+ */
+function makeCopyURLBtn(urlFactory, title) {
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'view-list-action-btn';
+  copyBtn.textContent = ICONS.LINK;
+  copyBtn.title = title;
+  copyBtn.onclick = function(e) {
+    e.stopPropagation();
+    Promise.resolve(urlFactory()).then(copyTextToClipboard).then(function() {
+      copyBtn.textContent = ICONS.CHECK;
+      setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
+    }).catch(function(err) {
+      _errorManager.Error('Failed to copy URL: ' + err.message);
+    });
+  };
+  return copyBtn;
+}
+
+/** Builds a shareable URL that loads a saved view by name on page load. */
+function buildViewURL(viewName) {
+  const params = new URLSearchParams({ view: viewName });
+  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+}
+
+/**
+ * If the URL carries a `view` param, loads that saved view as a full-state snapshot
+ * (no variable overlay, unlike templates). Mirrors tryLoadTemplateFromURL.
+ * @returns {Promise<boolean>} true if a view was loaded
+ */
+export async function tryLoadViewFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const viewName = params.get('view');
+  if (!viewName) return false;
+
+  // Clean URL immediately so a failed load doesn't loop on every reload.
+  history.replaceState(null, '', window.location.pathname);
+
+  const newstate = await _apirest.LoadPage(viewName);
+  if (!newstate) return false;
+
+  await _resetState(_state, newstate);
+  _enableMainUI(true);
+  return true;
 }
 
 // ============================================================
 // TEMPLATES
 // ============================================================
 
-function buildTemplateURL(templateName, state) {
-  const params = new URLSearchParams({ template: templateName });
-  for (const [name, entry] of state.variables.commits) {
-    if (entry?.value) params.set(name, entry.value);
-    if (entry?.alias) params.set(`${name}.alias`, entry.alias);
-  }
-  for (const [name, entry] of state.variables.subtasks) {
-    if (entry?.value) params.set(name, `${entry.value.tasktype}:${entry.value.subtask}`);
-    if (entry?.alias) params.set(`${name}.alias`, entry.alias);
-  }
-  for (const [name, val] of state.variables.metrics) {
-    if (val) params.set(name, val);
-  }
-  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+/**
+ * Builds a self-documenting "fill-in-the-blanks" URL for a template: it lists every
+ * variable the template defines with a placeholder token showing the expected format,
+ * so a recipient can see what they may fill in. The placeholders (and their `:`/`<>`
+ * separators) are kept raw — we assemble the query string by hand rather than via
+ * URLSearchParams.toString(), which would percent-encode them and ruin readability.
+ * @param {string} templateName
+ * @returns {Promise<string>}
+ */
+async function buildTemplateURL(templateName) {
+  const tpl = await _apirest.LoadTemplate(templateName);
+  const vars = tpl?.variables;
+  const parts = [`template=${encodeURIComponent(templateName)}`];
+  for (const [name] of vars?.commits   ?? []) parts.push(`${name}=<commit_hash[@timestamp]>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.subtasks  ?? []) parts.push(`${name}=<tasktype>:<subtask>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.campaigns ?? []) parts.push(`${name}=<user>:<campaign>:<timestamp>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.metrics   ?? []) parts.push(`${name}=<metric_path>`);
+  return `${window.location.origin}${window.location.pathname}?${parts.join('&')}`;
 }
 
 export function OpenTemplate(restoreUI = false) {
@@ -968,19 +1158,7 @@ export function OpenTemplate(restoreUI = false) {
       });
     },
     extraRowBtns: function(name) {
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'view-list-action-btn';
-      copyBtn.textContent = ICONS.LINK;
-      copyBtn.title = 'Copy shareable URL (uses current variable values)';
-      copyBtn.onclick = function(e) {
-        e.stopPropagation();
-        const url = buildTemplateURL(name, _state);
-        navigator.clipboard.writeText(url).then(function() {
-          copyBtn.textContent = ICONS.CHECK;
-          setTimeout(function() { copyBtn.textContent = ICONS.LINK; }, 2000);
-        });
-      };
-      return [copyBtn];
+      return [makeCopyURLBtn(() => buildTemplateURL(name), 'Copy a fill-in-the-blanks URL listing this template’s variables')];
     },
   });
 }
@@ -1011,8 +1189,9 @@ export function SaveAsTemplate(state) {
   fmtInput.className = 'modal-text-input';
   fmtInput.placeholder = state.title;
   fmtInput.title =
-    'Tokens: ${TEMPLATE}, ${DATE}, ${C1_HASH}, ${C1_ALIAS}, ${S1_NAME}, ${S1_TYPE}, ${S1_ALIAS}, ${M1}…\n' +
-    'Transforms (chain with :): uppercase, lowercase, camelcase, kebabcase, beforeFirst(regex), afterLast(regex)\n' +
+    'Tokens: ${TEMPLATE}, ${DATE}, ${TIME}, ${DATETIME}, ${C1_HASH}, ${C1_ALIAS}, ${S1_NAME}, ${S1_TYPE}, ${S1_ALIAS}, ${M1}…\n' +
+    'Transforms (chain with :): uppercase, lowercase, camelcase, kebabcase, beforeFirst(regex), afterLast(regex), format(pattern)\n' +
+    'Date/time default to YYYY-MM-DD / HH:mm:ss; override with :format(YYYY/MM/DD)\n' +
     'Ex: ${C1_ALIAS} − ${C2_ALIAS} (${DATE})';
   container.appendChild(fmtLabel);
   container.appendChild(fmtInput);
@@ -1039,10 +1218,14 @@ export function SaveAsTemplate(state) {
         const tpl = {
           title:       state.title,
           titleFormat,
+          // A template is a blank shell: keep only the variable names, never their
+          // current values/aliases. The null bodies are dropped by the serializer
+          // (jsonhelp), and readers infer empty variables on load.
           variables: {
-            commits:  new Map([...state.variables.commits.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            subtasks: new Map([...state.variables.subtasks.entries()].map(([k, v]) => [k, { value: v?.value ?? null, alias: v?.alias ?? null }])),
-            metrics:  new Map([...state.variables.metrics.entries()]),
+            commits:   new Map([...state.variables.commits.keys()].map(k => [k, { value: null, alias: null }])),
+            subtasks:  new Map([...state.variables.subtasks.keys()].map(k => [k, { value: null, alias: null }])),
+            campaigns: new Map([...state.variables.campaigns.keys()].map(k => [k, { value: null, alias: null }])),
+            metrics:   new Map([...state.variables.metrics.keys()].map(k => [k, null])),
           },
           legendFormat:   state.legendFormat,
           graphSettings:  state.graphSettings,
@@ -1063,6 +1246,202 @@ export function SaveAsTemplate(state) {
   nameInput.focus();
 }
 
+/**
+ * Overlays URL query parameters onto a loaded template's variable Maps, in place.
+ * Only variable names that already exist in the template are affected; URL params
+ * for unknown variables are ignored. An empty value (e.g. c1=) clears to null.
+ * Formats: commits <name>=<hash> + <name>.alias; subtasks <name>=<tasktype>:<subtask>
+ * + <name>.alias; campaigns <name>=<user>:<campaign>:<timestamp> + <name>.alias;
+ * metrics <name>=<path>.
+ *
+ * Any param that can't be turned into a usable value — an unfilled `<…>` placeholder, a
+ * malformed subtask, or a campaign run with no match in globalCampaigns — is reported via
+ * an error toast naming the variable, and that variable is left unset.
+ * @param {object} tpl - template with .variables.{commits,subtasks,campaigns,metrics} Maps
+ * @param {URLSearchParams} params
+ * @param {string[]} fullHashes - known full commit hashes, to resolve shortened ones
+ */
+/**
+ * Parses a commit URL token `<hash>[@<timestamp>]` into `{ value, timestamp }`.
+ * The `@<timestamp>` suffix is optional and only recognised when numeric; its
+ * absence means the latest (dynamic) run. The hash is resolved to a full hash.
+ * @param {string} raw
+ * @param {string[]} fullHashes
+ * @returns {{value: string|null, timestamp: number|null}}
+ */
+function parseCommitToken(raw, fullHashes = []) {
+  if (!raw) return { value: null, timestamp: null };
+  const at = raw.lastIndexOf('@');
+  let hash = raw, ts = null;
+  if (at > 0) {
+    const tsStr = raw.slice(at + 1);
+    if (/^[0-9]+$/.test(tsStr)) { hash = raw.slice(0, at); ts = Number(tsStr); }
+  }
+  return { value: CommitHelp.ResolveFullHash(hash, fullHashes), timestamp: ts };
+}
+
+function applyURLParamsToTemplate(tpl, params, fullHashes = []) {
+  // A value still wrapped in angle brackets is an unedited placeholder from a copied URL.
+  const isPlaceholder = (v) => typeof v === 'string' && /^<.*>$/.test(v.trim());
+  const failures = [];
+  const fail = (name, reason) => failures.push(`Variable "${name}" could not be loaded from the URL: ${reason}.`);
+  // Placeholder aliases (e.g. c1.alias=<alias>) are treated as "not provided".
+  const readAlias = (name, entry) => {
+    if (!params.has(`${name}.alias`)) return entry?.alias ?? null;
+    const raw = params.get(`${name}.alias`);
+    return isPlaceholder(raw) ? null : (raw || null);
+  };
+
+  if (tpl.variables?.commits instanceof Map) {
+    for (const [name, entry] of tpl.variables.commits) {
+      const hasVal = params.has(name);
+      const alias = readAlias(name, entry);
+      if (hasVal) {
+        const raw = params.get(name);
+        if (isPlaceholder(raw)) {
+          fail(name, `value is still a placeholder (${raw})`);
+          tpl.variables.commits.set(name, { value: null, timestamp: null, alias });
+        } else if (parseDynamicRef(raw)) {
+          // A dynamic reference (e.g. @dev-base) is resolved in a later async pass
+          // (resolveDynamicCommitRefs), once anchor commits hold their literal hashes.
+          // Keep any alias the URL/template already carries.
+          tpl.variables.commits.set(name, { value: null, timestamp: null, alias });
+        } else {
+          const { value, timestamp } = parseCommitToken(raw, fullHashes);
+          tpl.variables.commits.set(name, { value, timestamp, alias });
+        }
+      } else if (params.has(`${name}.alias`)) {
+        tpl.variables.commits.set(name, { value: entry?.value ?? null, timestamp: entry?.timestamp ?? null, alias });
+      }
+    }
+  }
+  if (tpl.variables?.subtasks instanceof Map) {
+    for (const [name, entry] of tpl.variables.subtasks) {
+      const hasVal = params.has(name);
+      const alias = readAlias(name, entry);
+      if (hasVal) {
+        const raw = params.get(name);
+        if (!raw) {
+          tpl.variables.subtasks.set(name, { value: null, alias });
+        } else if (isPlaceholder(raw)) {
+          fail(name, `value is still a placeholder (${raw})`);
+          tpl.variables.subtasks.set(name, { value: null, alias });
+        } else {
+          const firstColon = raw.indexOf(':');
+          if (firstColon > 0 && firstColon < raw.length - 1) {
+            tpl.variables.subtasks.set(name, {
+              value: { tasktype: raw.slice(0, firstColon), subtask: raw.slice(firstColon + 1) },
+              alias,
+            });
+          } else {
+            fail(name, `expected <tasktype>:<subtask>, got "${raw}"`);
+            tpl.variables.subtasks.set(name, { value: null, alias });
+          }
+        }
+      } else if (params.has(`${name}.alias`)) {
+        tpl.variables.subtasks.set(name, { value: entry?.value ?? null, alias });
+      }
+    }
+  }
+  if (tpl.variables?.campaigns instanceof Map) {
+    for (const [name, entry] of tpl.variables.campaigns) {
+      const hasVal = params.has(name);
+      const alias = readAlias(name, entry);
+      if (hasVal) {
+        const raw = params.get(name);
+        if (!raw) {
+          tpl.variables.campaigns.set(name, { value: null, alias });
+        } else if (isPlaceholder(raw)) {
+          fail(name, `value is still a placeholder (${raw})`);
+          tpl.variables.campaigns.set(name, { value: null, alias });
+        } else {
+          const run = findCampaignRun(raw);
+          if (!run) fail(name, `no campaign run matches "${raw}"`);
+          tpl.variables.campaigns.set(name, { value: run, alias });
+        }
+      } else if (params.has(`${name}.alias`)) {
+        tpl.variables.campaigns.set(name, { value: entry?.value ?? null, alias });
+      }
+    }
+  }
+  if (tpl.variables?.metrics instanceof Map) {
+    for (const [name] of tpl.variables.metrics) {
+      if (!params.has(name)) continue;
+      const raw = params.get(name);
+      if (isPlaceholder(raw)) {
+        fail(name, `value is still a placeholder (${raw})`);
+        tpl.variables.metrics.set(name, null);
+      } else {
+        tpl.variables.metrics.set(name, raw || null);
+      }
+    }
+  }
+
+  for (const msg of failures) _errorManager.Error(msg);
+}
+
+/**
+ * Resolves a `<user>:<campaign>:<timestamp>` URL token to a full campaign run object
+ * by matching it against the loaded globalCampaigns list. Returns null if the token is
+ * malformed or no run matches (e.g. the run list isn't loaded or the run is gone).
+ * @param {string} raw
+ * @returns {{type,commit,timestamp,user,campaign,subject}|null}
+ */
+function findCampaignRun(raw) {
+  const i = raw.indexOf(':'), j = raw.lastIndexOf(':');
+  if (i === -1 || i === j) return null;  // need exactly 3 parts
+  const user = raw.slice(0, i);
+  const campaign = raw.slice(i + 1, j);
+  const ts = Number(raw.slice(j + 1));
+  const r = globalCampaigns.find(c =>
+    String(c.user) === user && String(c.campaign) === campaign && Number(c.timestamp) === ts);
+  if (!r) return null;
+  return {
+    type:      'Campaign',
+    commit:    r.commit,
+    timestamp: r.timestamp,
+    user:      r.user,
+    campaign:  r.campaign,
+    subject:   (r.subjects && r.subjects[0]) || null,
+  };
+}
+
+/**
+ * Second pass over a template's commit variables: any whose URL value is a dynamic
+ * reference (e.g. `c2=@dev-base`) is resolved to a concrete data-layer hash, anchored
+ * to the resolved value of its anchor commit var (default c1). Must run after
+ * applyURLParamsToTemplate, so anchors already hold their literal hashes. Async because
+ * dev-base may hit the git-log endpoint. Unresolvable refs are reported via an error
+ * toast naming the variable and left unset, mirroring applyURLParamsToTemplate.
+ * @param {object} tpl
+ * @param {URLSearchParams} params
+ * @param {object} ctx - { commits, gitHistory, perfByShort, loadGitLog }
+ */
+/** True when any of the template's commit vars has an @-token URL value to resolve. */
+function templateHasDynamicRef(tpl, params) {
+  const commits = tpl.variables?.commits;
+  if (!(commits instanceof Map)) return false;
+  for (const [name] of commits) if (parseDynamicRef(params.get(name))) return true;
+  return false;
+}
+
+async function resolveDynamicCommitRefs(tpl, params, ctx) {
+  const commits = tpl.variables?.commits;
+  if (!(commits instanceof Map)) return;
+  for (const [name] of commits) {
+    const ref = parseDynamicRef(params.get(name));
+    if (!ref) continue;
+    const anchorHash = commits.get(ref.anchor)?.value ?? params.get(ref.anchor) ?? null;
+    const value = await CommitHelp.ResolveDynamicRef(ref.token, anchorHash, ctx);
+    const existing = commits.get(name);
+    if (!value) {
+      _errorManager.Error(`Variable "${name}" could not be loaded from the URL: dynamic reference "@${ref.token}" could not be resolved.`);
+      continue;
+    }
+    commits.set(name, { value, timestamp: null, alias: existing?.alias ?? DYN_REF_DEFAULT_ALIAS[ref.token] });
+  }
+}
+
 export async function tryLoadTemplateFromURL() {
   const params = new URLSearchParams(window.location.search);
   const templateName = params.get('template');
@@ -1074,56 +1453,492 @@ export async function tryLoadTemplateFromURL() {
   const raw = await _apirest.LoadTemplate(templateName);
   if (!raw) return false;
 
-  // Migrate to new format before applying URL params
-  const tpl = migrateStateIfNeeded(raw);
+  const fullHashes = await _allCommitsPromise;
+  applyURLParamsToTemplate(raw, params, fullHashes);
 
-  // Populate commit variables from URL params (format: <varName>=<commitHash>, <varName>.alias=<alias>)
-  // An empty value (e.g. c1=) explicitly clears the default to null.
-  if (tpl.variables?.commits instanceof Map) {
-    for (const [name, entry] of tpl.variables.commits) {
-      const hasVal   = params.has(name);
-      const hasAlias = params.has(`${name}.alias`);
-      const alias = hasAlias ? (params.get(`${name}.alias`) || null) : (entry?.alias ?? null);
-      if (hasVal) {
-        tpl.variables.commits.set(name, { value: params.get(name) || null, alias });
-      } else if (hasAlias) {
-        tpl.variables.commits.set(name, { value: entry?.value ?? null, alias });
-      }
-    }
-  }
-  // Populate subtask variables from URL params (format: <varName>=<tasktype>:<subtask>, <varName>.alias=<alias>)
-  // An empty value explicitly clears the default to null.
-  if (tpl.variables?.subtasks instanceof Map) {
-    for (const [name, entry] of tpl.variables.subtasks) {
-      const hasVal   = params.has(name);
-      const hasAlias = params.has(`${name}.alias`);
-      const alias = hasAlias ? (params.get(`${name}.alias`) || null) : (entry?.alias ?? null);
-      if (hasVal) {
-        const val = params.get(name);
-        if (val) {
-          const firstColon = val.indexOf(':');
-          if (firstColon !== -1) {
-            tpl.variables.subtasks.set(name, {
-              value: { tasktype: val.slice(0, firstColon), subtask: val.slice(firstColon + 1) },
-              alias,
-            });
-          }
-        } else {
-          tpl.variables.subtasks.set(name, { value: null, alias });
-        }
-      } else if (hasAlias) {
-        tpl.variables.subtasks.set(name, { value: entry?.value ?? null, alias });
-      }
-    }
-  }
-  if (tpl.variables?.metrics instanceof Map) {
-    for (const [name] of tpl.variables.metrics) {
-      if (params.has(name)) tpl.variables.metrics.set(name, params.get(name) || null);
-    }
+  // git history + the Perf commit list are needed only to resolve dynamic commit
+  // refs; skip both fetches when no commit var carries an @-token (the common case).
+  if (templateHasDynamicRef(raw, params)) {
+    const [gitHistory, perfList] = await Promise.all([
+      _gitHistoryPromise,
+      _apirest.LoadCommits(TASK_TYPES.PERF),
+    ]);
+    await resolveDynamicCommitRefs(raw, params, {
+      commits: gitHistory?.commits ?? [],
+      gitHistory,
+      perfByShort: new Map((perfList ?? []).map(h => [CommitHelp.ShortHash(h), h])),
+      loadGitLog: (c) => _apirest.LoadGitLog(c),
+    });
   }
 
-  await _resetState(_state, tpl, templateName);
+  await _resetState(_state, raw, templateName);
   _enableMainUI(true);
+  return true;
+}
+
+// ============================================================
+// TEMPLATE SUGGESTION PANEL (URL with variables but no template)
+// ============================================================
+
+const URL_VAR_PATTERNS = [
+  [/^c\d+$/, 'commits'],
+  [/^s\d+$/, 'subtasks'],
+  [/^k\d+$/, 'campaigns'],
+  [/^m\d+$/, 'metrics'],
+];
+
+// Dynamic commit references usable as a commit variable's URL value instead of a
+// literal hash, e.g. `c2=@dev-base` or `c2=@dev-base:c3`. `main-tip`/`dev-tip` are
+// absolute; `dev-base` is computed relative to an anchor commit var (default c1).
+const DYN_REF_TOKENS = ['main-tip', 'dev-tip', 'dev-base'];
+const DYN_REF_RE = /^@([a-z-]+)(?::(c\d+))?$/i;
+const DYN_REF_DEFAULT_ALIAS = { 'main-tip': 'main', 'dev-tip': 'dev', 'dev-base': 'base' };
+
+/**
+ * Parses a commit variable's URL value as a dynamic reference. Returns
+ * { token, anchor } (anchor defaulting to 'c1') for a recognised `@token[:cX]`,
+ * or null for a literal hash / placeholder / unknown token.
+ * @param {string|null} raw
+ */
+function parseDynamicRef(raw) {
+  const m = typeof raw === 'string' && raw.trim().match(DYN_REF_RE);
+  if (!m) return null;
+  const token = m[1].toLowerCase();
+  if (!DYN_REF_TOKENS.includes(token)) return null;
+  return { token, anchor: m[2] || 'c1' };
+}
+
+/**
+ * Classifies the variable names present in a URL by category (commits/subtasks/
+ * campaigns/metrics), based on their auto-naming prefix. Ignores `*.alias` keys
+ * and the `template` key.
+ * @param {URLSearchParams} params
+ * @returns {{commits:string[], subtasks:string[], campaigns:string[], metrics:string[]}}
+ */
+function parseURLVariables(params) {
+  const out = { commits: [], subtasks: [], campaigns: [], metrics: [] };
+  for (const key of params.keys()) {
+    if (key === 'template' || key.endsWith('.alias')) continue;
+    for (const [re, cat] of URL_VAR_PATTERNS) {
+      if (re.test(key)) { if (!out[cat].includes(key)) out[cat].push(key); break; }
+    }
+  }
+  return out;
+}
+
+/** Builds fresh variable Maps directly from URL params (no template defaults). */
+function buildVariablesFromParams(params, fullHashes = []) {
+  const commits = new Map(), subtasks = new Map(), campaigns = new Map(), metrics = new Map();
+  const defined = parseURLVariables(params);
+  for (const name of defined.commits) {
+    const raw = params.get(name);
+    const { value, timestamp } = parseCommitToken(raw, fullHashes);
+    commits.set(name, { value, timestamp, alias: params.get(`${name}.alias`) || null });
+  }
+  for (const name of defined.subtasks) {
+    const val = params.get(name);
+    let value = null;
+    if (val) {
+      const i = val.indexOf(':');
+      if (i !== -1) value = { tasktype: val.slice(0, i), subtask: val.slice(i + 1) };
+    }
+    subtasks.set(name, { value, alias: params.get(`${name}.alias`) || null });
+  }
+  for (const name of defined.campaigns) {
+    const raw = params.get(name);
+    campaigns.set(name, { value: raw ? findCampaignRun(raw) : null, alias: params.get(`${name}.alias`) || null });
+  }
+  for (const name of defined.metrics) metrics.set(name, params.get(name) || null);
+  return { commits, subtasks, campaigns, metrics };
+}
+
+/** Deep-clones a template's variable Maps so previews can be mutated safely. */
+function cloneTemplate(tpl) {
+  const cloneMap = (cat) => {
+    const src = tpl.variables?.[cat];
+    if (!(src instanceof Map)) return new Map();
+    return new Map([...src].map(([k, v]) =>
+      [k, (v && typeof v === 'object') ? { ...v } : v]));
+  };
+  return {
+    ...tpl,
+    variables: {
+      commits:   cloneMap('commits'),
+      subtasks:  cloneMap('subtasks'),
+      campaigns: cloneMap('campaigns'),
+      metrics:   cloneMap('metrics'),
+    },
+  };
+}
+
+/**
+ * True if a template (described by its per-category variable name lists, as
+ * returned by ListTemplateVariables) defines every variable name in `defined`.
+ * The template may define additional variables.
+ */
+function templateMatches(vars, defined) {
+  return ['commits', 'subtasks', 'campaigns', 'metrics'].every(cat =>
+    defined[cat].every(name => (vars?.[cat] ?? []).includes(name)));
+}
+
+/** Short, human-readable value for a single variable entry (for chips/preview). */
+function describeVarValue(cat, entry) {
+  if (cat === 'metrics') return entry || '(unset)';
+  const val = entry?.value;
+  if (val == null) return '(unset)';
+  if (cat === 'commits') {
+    return CommitHelp.ShortHash(val) + (entry.alias ? ` (${entry.alias})` : '');
+  }
+  if (cat === 'subtasks') {
+    return `${val.tasktype}:${val.subtask}` + (entry.alias ? ` (${entry.alias})` : '');
+  }
+  if (cat === 'campaigns') {
+    return (val.commit ? CommitHelp.CampaignRunLabel(val) : '(set)') + (entry.alias ? ` (${entry.alias})` : '');
+  }
+  return '(set)';
+}
+
+/**
+ * On-load panel shown when the URL carries variables but no template. Lists
+ * templates whose variable set is a superset of the URL's, lets the user drop
+ * URL variables, and (when only c1 is defined) offers "Compare with" actions
+ * that add a c2 commit variable. Returns false if the URL defines no variables.
+ * @returns {Promise<boolean>} true if the panel was shown
+ */
+export async function SuggestTemplatesFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const urlVars = parseURLVariables(params);
+  const total = urlVars.commits.length + urlVars.subtasks.length
+    + urlVars.campaigns.length + urlVars.metrics.length;
+  if (total === 0) return false;
+
+  // Clean the URL now that we've captured the variables.
+  history.replaceState(null, '', window.location.pathname);
+
+  // Working state (mutated by the panel).
+  const pendingParams = new URLSearchParams(params.toString());
+  let pendingC2 = null;          // { value, alias, source } | null
+  let selected  = null;          // { name, vars } | null
+
+  // Dynamic @-tokens (e.g. c2=@dev-base) are only resolved on the template-URL
+  // path; here, where no template is named, comparison targets are chosen via the
+  // "Compare with" buttons instead. Drop any such commit values and tell the user.
+  const ignoredRefs = [];
+  for (const name of parseURLVariables(pendingParams).commits) {
+    if (!parseDynamicRef(pendingParams.get(name))) continue;
+    ignoredRefs.push(`${name}=${pendingParams.get(name)}`);
+    pendingParams.delete(name);
+    pendingParams.delete(`${name}.alias`);
+  }
+  if (ignoredRefs.length) {
+    _errorManager.Error(`Ignored dynamic reference${ignoredRefs.length > 1 ? 's' : ''} ${ignoredRefs.join(', ')}: they only work with a template in the URL. Use the "Compare with" buttons below.`);
+  }
+
+  // These are independent — fetch concurrently so the panel opens fast.
+  const [gitHistory, perfList, index, fullHashes] = await Promise.all([
+    _gitHistoryPromise,
+    _apirest.LoadCommits(TASK_TYPES.PERF),
+    _apirest.ListTemplateVariables(),
+    _allCommitsPromise,
+  ]);
+  const commits = gitHistory?.commits ?? [];
+
+  // Perf commits indexed by short hash → the exact data-layer hash. Used to skip
+  // compare targets with no Perf run (stepping to the next older one that has
+  // one) and to return the commit in the form the data backend expects.
+  const perfByShort = new Map((perfList ?? []).map(h => [CommitHelp.ShortHash(h), h]));
+
+  // Shared context for the dynamic compare-target resolvers in CommitHelp.
+  const dynCtx = { commits, gitHistory, perfByShort, loadGitLog: (c) => _apirest.LoadGitLog(c) };
+
+  // `index` (template variable names, for matching) was fetched above; full
+  // definitions are loaded lazily when a template is selected.
+  const catalog = Object.entries(index?.templates ?? {})
+    .map(([name, vars]) => ({ name, vars }));
+
+  // Cache of full template definitions, loaded on demand. A `null` value means
+  // the load was attempted and failed (so we don't retry on every render).
+  const templateCache = new Map();   // name -> tpl | null
+  async function ensureTpl(name) {
+    if (templateCache.has(name)) return templateCache.get(name);
+    const tpl = await _apirest.LoadTemplate(name);
+    templateCache.set(name, tpl ?? null);
+    return templateCache.get(name);
+  }
+
+  const modalpage = document.getElementById('modalpage');
+  modalpage.innerHTML = '';
+  _ui.Reset();
+  const container = document.createElement('div');
+  container.className = 'suggest-panel';
+
+  const close = function() {
+    clearModalCancel();
+    modalpage.classList.remove('modalpage-visible');
+  };
+
+  // Escape / backdrop dismissal falls back to an empty default view so the app
+  // is never left blank.
+  const dismiss = async function() {
+    close();
+    await _resetState(_state, {
+      title: 'Vue_' + Date.now(),
+      variables: { commits: new Map(), subtasks: new Map(), campaigns: new Map(), metrics: new Map() },
+    }, null);
+    _enableMainUI(true);
+  };
+
+  function effectiveDefined() {
+    const d = parseURLVariables(pendingParams);
+    if (pendingC2 && !d.commits.includes('c2')) d.commits.push('c2');
+    return d;
+  }
+
+  async function loadResult(tpl, name) {
+    close();
+    await _resetState(_state, tpl, name);
+    _enableMainUI(true);
+  }
+
+  // Clones the (cached) selected template and overlays the URL params + the
+  // compare-with c2. Caller must ensure the template is loaded.
+  function buildSelectedClone() {
+    const clone = cloneTemplate(templateCache.get(selected.name));
+    applyURLParamsToTemplate(clone, pendingParams, fullHashes);
+    if (pendingC2 && clone.variables.commits instanceof Map) {
+      clone.variables.commits.set('c2', { value: pendingC2.value, alias: pendingC2.alias });
+    }
+    return clone;
+  }
+
+  // ── Render ──────────────────────────────────────────────────
+  function render() {
+    container.innerHTML = '';
+    container.appendChild(_ui.CreateTitle('Open from link', 'h3'));
+
+    const intro = document.createElement('p');
+    intro.className = 'suggest-intro';
+    intro.textContent = 'Select a template and pick a commit to compare to if wanted.';
+    container.appendChild(intro);
+
+    // ── Variables from the link ──
+    const varsTitle = document.createElement('div');
+    varsTitle.className = 'suggest-section-title';
+    varsTitle.textContent = 'Variables from this link';
+    container.appendChild(varsTitle);
+
+    const chips = document.createElement('div');
+    chips.className = 'suggest-var-chips';
+    const defined = parseURLVariables(pendingParams);
+    const definedVars = buildVariablesFromParams(pendingParams, fullHashes);
+    let chipCount = 0;
+    for (const cat of ['commits', 'subtasks', 'campaigns', 'metrics']) {
+      for (const name of defined[cat]) {
+        const entry = definedVars[cat].get(name);
+        chips.appendChild(buildChip(name, describeVarValue(cat, entry), () => {
+          pendingParams.delete(name);
+          pendingParams.delete(`${name}.alias`);
+          // The compare-with c2 is resolved relative to c1; if c1 is removed,
+          // drop the dangling comparator so it can't be loaded without a base.
+          if (name === 'c1') pendingC2 = null;
+          render();
+        }));
+        chipCount++;
+      }
+    }
+    if (chipCount === 0) {
+      const none = document.createElement('span');
+      none.className = 'suggest-empty';
+      none.textContent = 'No variables — all removed.';
+      chips.appendChild(none);
+    }
+    container.appendChild(chips);
+
+    // ── Compare with (only when c1 is the sole commit defined variable, others can be) ──
+    // The c2 comparator lives here as a toggle group: at most one selected,
+    // and clicking the active option again clears it back to none.
+    const onlyC1 = defined.commits.length === 1 && defined.commits[0] === 'c1';
+    if (onlyC1) {
+      const c1 = pendingParams.get('c1');
+      const cmpTitle = document.createElement('div');
+      cmpTitle.className = 'suggest-section-title';
+      cmpTitle.textContent = 'Compare with commit on branch';
+      container.appendChild(cmpTitle);
+
+      const compare_helper = document.createElement('p');
+      compare_helper.className = 'suggest-compare-helper';
+      compare_helper.textContent = 'main tip / dev tip: the latest commit on that branch. dev base: the dev commit this branch started from. If a commit has no Perf run, the next older one with a run is used.';
+      container.appendChild(compare_helper);
+
+      const row = document.createElement('div');
+      row.className = 'suggest-compare-row';
+
+      // main tip / dev tip resolve synchronously from the history; dev base may
+      // need an async git-log lookup, so it resolves on click.
+      const mainTip = CommitHelp.ResolveBranchTip('main', commits, perfByShort);
+      const devTip  = CommitHelp.ResolveBranchTip('dev',  commits, perfByShort);
+      const opts = [
+        { id: 'main', label: 'main tip', alias: 'main', value: mainTip, async: false },
+        { id: 'dev',  label: 'dev tip',  alias: 'dev',  value: devTip,  async: false },
+        { id: 'base', label: 'dev base', alias: 'base', value: null,    async: true  },
+      ];
+      for (const o of opts) {
+        const btn = document.createElement('button');
+        const active = pendingC2?.source === o.id;
+        btn.className = 'suggest-compare-btn' + (active ? ' selected' : '');
+        btn.textContent = o.label;
+        const enabled = o.async ? !!(c1 && gitHistory) : !!o.value;
+        if (!enabled) {
+          btn.disabled = true;
+          btn.title = 'Not available in git history';
+        } else if (o.async) {
+          if (active) btn.onclick = () => { pendingC2 = null; render(); };
+          else btn.onclick = async () => {
+            const value = await CommitHelp.ResolveDevBase(c1, dynCtx);
+            if (!value) { _errorManager.Error('Could not resolve a dev base for this commit.'); return; }
+            pendingC2 = { value, alias: o.alias, source: o.id };
+            render();
+          };
+        } else {
+          btn.title = `c2 = ${CommitHelp.ShortHash(o.value)}`;
+          btn.onclick = () => {
+            pendingC2 = active ? null : { value: o.value, alias: o.alias, source: o.id };
+            render();
+          };
+        }
+        row.appendChild(btn);
+      }
+      container.appendChild(row);
+    }
+
+    // ── Matching templates ──
+    const eff = effectiveDefined();
+    const matches = catalog.filter(t => templateMatches(t.vars, eff));
+    if (selected && !matches.some(m => m.name === selected.name)) selected = null;
+    // Default to the first match so a preview shows immediately.
+    if (!selected && matches.length) selected = matches[0];
+
+    const tplTitle = document.createElement('div');
+    tplTitle.className = 'suggest-section-title';
+    tplTitle.textContent = `Matching templates (${matches.length})`;
+    container.appendChild(tplTitle);
+
+    const listBox = document.createElement('div');
+    listBox.className = 'suggest-template-list';
+    if (matches.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'suggest-empty';
+      empty.textContent = 'No saved template defines these variables.';
+      listBox.appendChild(empty);
+    } else {
+      for (const m of matches) {
+        const rowBtn = document.createElement('button');
+        rowBtn.className = 'suggest-template-row' + (selected?.name === m.name ? ' selected' : '');
+        rowBtn.textContent = m.name;
+        rowBtn.onclick = () => { selected = m; render(); };
+        listBox.appendChild(rowBtn);
+      }
+    }
+    container.appendChild(listBox);
+
+    // ── Preview of the selected template ──
+    if (selected) {
+      const prevTitle = document.createElement('div');
+      prevTitle.className = 'suggest-section-title';
+      prevTitle.textContent = `Preview · ${selected.name}`;
+      container.appendChild(prevTitle);
+
+      const preview = document.createElement('div');
+      preview.className = 'suggest-preview';
+
+      if (!templateCache.has(selected.name)) {
+        // Not loaded yet — show a placeholder and fetch, then re-render.
+        const loading = document.createElement('p');
+        loading.className = 'suggest-empty';
+        loading.textContent = 'Loading preview…';
+        preview.appendChild(loading);
+        ensureTpl(selected.name).then(render);
+      } else if (!templateCache.get(selected.name)) {
+        const failed = document.createElement('p');
+        failed.className = 'suggest-empty';
+        failed.textContent = 'Failed to load this template.';
+        preview.appendChild(failed);
+      } else {
+        const clone = buildSelectedClone();
+        for (const cat of ['commits', 'subtasks', 'campaigns', 'metrics']) {
+          const map = clone.variables[cat];
+          if (!(map instanceof Map)) continue;
+          for (const [name, entry] of map) {
+            let tagText, tagClass;
+            if (name === 'c2' && pendingC2) {
+              tagText = 'compare with'; tagClass = 'compare';
+            } else if (pendingParams.has(name)) {
+              tagText = 'from link'; tagClass = 'from-url';
+            } else {
+              tagText = 'template default'; tagClass = 'from-template';
+            }
+            const pr = document.createElement('div');
+            pr.className = 'suggest-preview-row';
+            const nm = document.createElement('span');
+            nm.className = 'suggest-preview-name';
+            nm.textContent = name;
+            const vl = document.createElement('span');
+            vl.className = 'suggest-preview-value';
+            vl.textContent = describeVarValue(cat, entry);
+            const tag = document.createElement('span');
+            tag.className = 'suggest-source-tag ' + tagClass;
+            tag.textContent = tagText;
+            pr.append(nm, vl, tag);
+            preview.appendChild(pr);
+          }
+        }
+      }
+      container.appendChild(preview);
+    }
+
+    // ── Actions ──
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'modal-button-ok';
+    loadBtn.textContent = 'Load template';
+    // Enabled only once the selected template's full definition is loaded.
+    loadBtn.disabled = !selected || !templateCache.get(selected.name);
+    loadBtn.onclick = () => loadResult(buildSelectedClone(), selected.name);
+    actions.appendChild(loadBtn);
+
+    const blankBtn = document.createElement('button');
+    blankBtn.className = 'modal-button-cancel';
+    blankBtn.textContent = 'Continue without a template';
+    blankBtn.onclick = () => {
+      const vars = buildVariablesFromParams(pendingParams, fullHashes);
+      if (pendingC2) vars.commits.set('c2', { value: pendingC2.value, alias: pendingC2.alias });
+      loadResult({ title: 'Vue_' + Date.now(), variables: vars }, null);
+    };
+    actions.appendChild(blankBtn);
+
+    container.appendChild(actions);
+  }
+
+  function buildChip(name, valueText, onDelete) {
+    const chip = document.createElement('span');
+    chip.className = 'suggest-var-chip';
+    const label = document.createElement('span');
+    label.textContent = `${name} = ${valueText}`;
+    const del = document.createElement('button');
+    del.className = 'suggest-chip-del';
+    del.textContent = ICONS.CLOSE;
+    del.title = 'Remove this variable';
+    del.onclick = onDelete;
+    chip.append(label, del);
+    return chip;
+  }
+
+  render();
+  setModalCancel(dismiss);
+  modalpage.appendChild(container);
+  modalpage.classList.add('modalpage-visible');
   return true;
 }
 

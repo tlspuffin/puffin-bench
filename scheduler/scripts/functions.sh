@@ -223,6 +223,18 @@ StopMonitor() {
   mv "${monitor_output_tmp}" "${monitor_output}"
 }
 
+Flag() {
+  if [ -z "${1+x}" ]; then
+    echo "Flag require a string as parameter"
+    echo "Flag require a string as parameter" >&2
+    return 1;
+  fi
+  local msg="$1";
+  local filetmpname="${THEJOB_FLAG_FILE}.${THEJOB_STEP_NUMID}.${THEJOB_STEP_RANK_ID}.${THEJOB_STEP_ATTEMPT_ID}"
+  echo "${msg}" > "${filetmpname}"
+  mv "${filetmpname}" "${THEJOB_FLAG_FILE}"
+}
+
 SetupEnv() {
   THEJOB_SH_CONFIG_DATA=$( cat "${THEJOB_SH_CONFIG_FILE}" )
   eval ${THEJOB_SH_CONFIG_DATA}

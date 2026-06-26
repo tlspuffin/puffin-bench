@@ -67,12 +67,21 @@ body {
   gap: 16px;
 }
 
-.header-left {
+.header-brand {
+  flex-shrink: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  opacity: 0.92;
+  white-space: nowrap;
+}
+
+.header-center {
   display: flex;
   align-items: center;
   gap: 0;
   min-width: 0;
   flex: 1;
+  justify-content: center;
 }
 
 .header-toolbar {
@@ -452,6 +461,21 @@ body {
   align-self: center; /* color input has no text baseline — center it explicitly */
 }
 
+.legend-var-badge {
+  display: inline-block;
+  background: #eef1f5;
+  border: 1px solid #c7ccd4;
+  color: #333;
+  font-size: 0.65rem;
+  font-family: monospace;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  vertical-align: middle;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
 .commit-legend-ident {
   font-family: monospace;
   font-size: 0.75rem;
@@ -827,7 +851,7 @@ select:focus {
   align-items: center;
   gap: 12px;
   padding: 0px 15px;
-  margin-bottom: 8px;
+  margin-bottom: 0px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s ease;
@@ -971,7 +995,25 @@ select:focus {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 360px;
 }
+
+/* Drag grip on the bottom-left corner: the panel is anchored to the right side
+   of the screen, so resizing keeps the right edge fixed and grows leftward. */
+.picker-resize-handle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: ew-resize;
+  z-index: 1;
+  background:
+    linear-gradient(45deg, transparent 0 4px, var(--color-text-muted, #888) 4px 5px,
+                    transparent 5px 7px, var(--color-text-muted, #888) 7px 8px, transparent 8px);
+  opacity: 0.55;
+}
+.picker-resize-handle:hover { opacity: 1; }
 .commit-picker-panel.hidden { display: none; }
 
 /* ── Simple dropdown (generic custom select) ──────────────────── */
@@ -1083,6 +1125,144 @@ select:focus {
   font-family: 'Courier New', monospace;
   font-size: 0.78rem;
   color: var(--color-text-muted, #888);
+}
+
+.commit-pr-number {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #8338ec;
+  white-space: nowrap;
+}
+
+/* "×N" badge + chevron shown on commits that have several runs. */
+.commit-run-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--color-primary, #667eea);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.commit-run-chevron {
+  font-size: 0.7rem;
+  color: var(--color-text-muted, #888);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Expanded run sublist rows under a multi-run commit. */
+.commit-picker-run-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 28px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  background: var(--color-bg-subtle, #f6f6f6);
+}
+.commit-picker-run-row:hover { background: var(--color-bg-subtle, #e8e8e8); }
+.commit-picker-run-row.selected { background: rgba(102,126,234,0.14); }
+.commit-picker-run-row.loading {
+  color: var(--color-text-muted, #888);
+  font-style: italic;
+  cursor: default;
+}
+.commit-run-num {
+  font-weight: 600;
+  color: var(--color-primary, #667eea);
+  white-space: nowrap;
+}
+.commit-run-date {
+  font-family: 'Courier New', monospace;
+  color: var(--color-text-muted, #666);
+}
+.commit-run-type {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #555);
+  background: rgba(0,0,0,0.06);
+  white-space: nowrap;
+}
+
+.campaign-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+.campaign-filter-bar .simple-dropdown { flex: 1; min-width: 0; }
+.campaign-filter-bar .commit-picker-trigger {
+  height: auto;
+  min-height: unset;
+  margin-bottom: 0;
+  padding: 3px 6px;
+  font-size: 0.72rem;
+  font-family: inherit;
+  border-radius: 4px;
+}
+.campaign-filter-bar .commit-picker-trigger::after { font-size: 0.8rem; padding-left: 4px; }
+
+.campaign-picker-table {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.campaign-picker-row {
+  display: grid;
+  grid-template-columns: 1fr 2.2fr 0.9fr 1.2fr 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+  font-size: 0.78rem;
+}
+.campaign-picker-row:hover { background: rgba(102,126,234,0.08); }
+.campaign-picker-row.selected { background: rgba(102,126,234,0.16); }
+.campaign-picker-header {
+  position: sticky;
+  top: 0;
+  background: var(--color-bg, #fff);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #888);
+  cursor: default;
+}
+.campaign-picker-header .campaign-cell { cursor: pointer; user-select: none; }
+.campaign-picker-unset { grid-template-columns: 1fr; color: var(--color-text-muted, #888); }
+.campaign-picker-var {
+  grid-template-columns: 1fr;
+  font-family: monospace;
+  font-size: 0.74rem;
+  color: var(--color-primary, #667eea);
+  border-bottom: 1px solid rgba(102,126,234,0.15);
+}
+.campaign-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-cell-commitShort { font-family: 'Courier New', monospace; color: var(--color-text-muted, #888); }
+.campaign-subtype-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  background: #2a9d8f;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .commit-picker-date {
@@ -1457,6 +1637,8 @@ select.select-loading {
   font-size: 0.82rem;
   font-weight: 600;
   padding: 4px 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
   border-radius: 999px;
   border: 2px solid rgba(44, 62, 80, 0.25);
   background: #f4f5f7;
@@ -1493,6 +1675,61 @@ select.select-loading {
   opacity: 0.35;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+/* X-axis selector in the graph toggle bar */
+/* Shared pill picker (label + <select>) used by the CI-level and X-axis selectors
+   in the graph toggle bar. The <select> box is matched to .graph-toggle-btn so the
+   pickers line up vertically with the toggle buttons. */
+.graph-pill-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-dark);
+  cursor: pointer;
+  user-select: none;
+}
+
+.graph-pill-select .graph-pill-label {
+  opacity: 0.75;
+}
+
+.graph-pill-select select {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
+  width: auto;                 /* override global select { width: 100% } — size to content */
+  margin: 0;                   /* override global select { margin-bottom: 20px } — align in bar */
+  border-radius: 999px;
+  border: 2px solid rgba(44, 62, 80, 0.25);
+  background: #f4f5f7;
+  color: var(--color-text-dark);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+  max-width: 220px;
+}
+
+.graph-pill-select select:hover {
+  border-color: var(--color-primary);
+  background: white;
+}
+
+/* Push the X-axis picker to the right end of the bar. */
+.graph-xaxis-select {
+  margin-left: auto;
+}
+
+/* Fixed width so the box stays stable: its options are populated lazily on first
+   hover/focus, so a content-sized width (auto or 100%) would jump from "Time" to
+   the widest metric name the moment the cursor enters. The open dropdown still
+   shows full option text regardless of this width. */
+.graph-xaxis-select select {
+  width: 150px;
 }
 
 /* =================================================================
@@ -1734,6 +1971,210 @@ select.select-loading {
   font-size: 0.9rem;
 }
 
+/* =================================================================
+   Template suggestion panel (URL with variables, no template)
+   ================================================================= */
+
+.suggest-panel {
+  min-width: 420px;
+  max-width: 640px;
+}
+
+.suggest-intro {
+  color: var(--color-text-faint);
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+}
+
+.suggest-section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-faint);
+  margin: 14px 0 6px;
+}
+
+.suggest-var-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggest-var-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eef3ff;
+  color: var(--color-primary);
+  border: 1px solid #d4e0ff;
+  border-radius: 14px;
+  padding: 3px 4px 3px 10px;
+  font-size: 0.85rem;
+}
+
+.suggest-chip-del {
+  background: none;
+  border: none;
+  color: var(--color-delete);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 2px 4px;
+  margin: 0;
+  border-radius: 50%;
+}
+
+.suggest-chip-del:hover {
+  background: #fde8e8;
+}
+
+.suggest-compare-helper {
+  margin: -2px 0 8px;
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--color-text-faint);
+}
+
+.suggest-compare-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.suggest-compare-btn {
+  background: none;
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.suggest-compare-btn:hover:not(:disabled) {
+  background: #f0f4ff;
+}
+
+.suggest-compare-btn.selected {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.suggest-compare-btn.selected:hover {
+  background: var(--color-primary);
+}
+
+.suggest-compare-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--color-text-faint);
+  color: var(--color-text-faint);
+}
+
+.suggest-template-list {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.suggest-template-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #f0f0f0;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  padding: 9px 14px;
+  cursor: pointer;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-template-row:last-child {
+  border-bottom: none;
+}
+
+.suggest-template-row:hover {
+  background: #f0f4ff;
+  color: var(--color-primary);
+}
+
+.suggest-template-row.selected {
+  background: #e8eeff;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.suggest-empty {
+  text-align: center;
+  color: var(--color-text-faint);
+  padding: 14px;
+  font-style: italic;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.suggest-preview {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 4px 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.suggest-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  font-size: 0.88rem;
+}
+
+.suggest-preview-name {
+  font-weight: 600;
+  min-width: 32px;
+  color: var(--color-primary);
+}
+
+.suggest-preview-value {
+  flex: 1;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-source-tag {
+  font-size: 0.72rem;
+  padding: 1px 7px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.suggest-source-tag.from-url {
+  background: #eef3ff;
+  color: var(--color-primary);
+}
+
+.suggest-source-tag.from-template {
+  background: var(--color-bg-page);
+  color: var(--color-text-faint);
+}
+
+.suggest-source-tag.compare {
+  background: #e3f5f1;
+  color: #2a9d8f;
+}
+
 /* Disabled inputs */
 input:disabled {
   opacity: 0.5;
@@ -1794,6 +2235,23 @@ input:disabled {
   flex: 1;
   min-width: 100px;
 }
+
+.experiment-mode-toggle {
+  align-self: flex-end;
+  margin-bottom: 1px;
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.experiment-mode-toggle:hover { background: rgba(102, 126, 234, 0.1); }
+
+.slot-field-disabled { opacity: 0.45; pointer-events: none; }
 
 .slot-field-label {
   font-size: 0.68rem;

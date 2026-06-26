@@ -1,4 +1,5 @@
 import { JSONHelp } from './jsonhelp.js';
+import { DEFAULT_DELTA_DIVISOR, TASK_TYPES } from './constants.js';
 
 /**
  * REST API client for the analysis server.
@@ -8,6 +9,14 @@ class ApiREST {
   #apiURI;
   #errorManager;
   #onLoading;
+  // "type/commit" -> latest timestamp, populated by LoadCommits. Lets commit-mode
+  // callers omit the timestamp and have it resolved to the newest run.
+  #commitLatest = new Map();
+  // "type/commit" -> number of runs, populated by LoadCommits. Summed across all
+  // loaded types by RunCountSync to drive the commit picker's "×N" badge.
+  #commitRunCount = new Map();
+  // Session cache of the campaign run list.
+  #campaigns = null;
 
   /**
    * @param {string}   apiURI       - Base API URL, e.g. '/api/PR'
@@ -35,7 +44,7 @@ class ApiREST {
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSONHelp.Stringify(data)
+          body: JSONHelp.Stringify(data, 2)
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -120,7 +129,7 @@ class ApiREST {
       const response = await fetch(`${this.#apiURI}/userdata/templates/${encodedName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSONHelp.Stringify(data),
+        body: JSONHelp.Stringify(data, 2),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -173,6 +182,24 @@ class ApiREST {
   }
 
   /**
+   * Lists the variable names of every saved template (per category), without
+   * fetching the full template definitions — used to match templates to a URL.
+   * @returns {Promise<{templates: Object<string, {commits:string[], subtasks:string[], campaigns:string[], metrics:string[]}>}|null>}
+   */
+  async ListTemplateVariables() {
+    try {
+      const response = await fetch(`${this.#apiURI}/userdata/templates-variables`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      this.#errorManager.Error('Failed to list template variables: ' + error.message);
+    }
+    return null;
+  }
+
+  /**
    * Deletes a saved template from the server.
    * @param {string} name - Template filename (no extension)
    * @returns {Promise<boolean>} true on success
@@ -205,9 +232,99 @@ class ApiREST {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       const data = await response.json();
-      return data.commits;
+      // Server now returns [{ commit, timestamp }]. Cache the latest timestamp
+      // per commit and return the bare commit id list (back-compat for callers).
+      const commits = [];
+      for (const entry of data.commits ?? []) {
+        this.#commitLatest.set(`${commitType}/${entry.commit}`, entry.timestamp);
+        if (entry.count != null) {
+          this.#commitRunCount.set(`${commitType}/${entry.commit}`, entry.count);
+        }
+        commits.push(entry.commit);
+      }
+      return commits;
     } catch (error) {
       this.#errorManager.Error('Failed to load commits: ' + error.message);
+    }
+    return [];
+  }
+
+  /**
+   * Synchronous latest-timestamp lookup from the cache populated by LoadCommits
+   * (called for all types at startup). Returns null if not cached.
+   * @param {string} commitType
+   * @param {string} commitID
+   * @returns {number|null}
+   */
+  LatestTimestampSync(commitType, commitID) {
+    return this.#commitLatest.get(`${commitType}/${commitID}`) ?? null;
+  }
+
+  /**
+   * Total number of runs for a commit across all loaded types (Perf + Vuln),
+   * from the counts cached by LoadCommits. Drives the commit picker "×N" badge.
+   * Returns 0 when the commit is unknown / not yet loaded.
+   * @param {string} commitID
+   * @returns {number}
+   */
+  RunCountSync(commitID) {
+    let total = 0;
+    for (const type of Object.values(TASK_TYPES)) {
+      total += this.#commitRunCount.get(`${type}/${commitID}`) ?? 0;
+    }
+    return total;
+  }
+
+  /**
+   * Loads every run of a commit across all types (type-agnostic), newest first.
+   * Used by the commit picker to list runs when a commit has more than one.
+   * @param {string} commitID
+   * @returns {Promise<Array<{timestamp: number, type: string}>>} newest-first, or [] on failure
+   */
+  async LoadRuns(commitID) {
+    try {
+      const response = await fetch(`${this.#apiURI}/runs/${encodeURIComponent(commitID)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      return data.runs ?? [];
+    } catch (error) {
+      this.#errorManager.Error('Failed to load runs: ' + error.message);
+    }
+    return [];
+  }
+
+  /**
+   * Resolves the latest timestamp for a (type, commit) run, fetching the commit
+   * list once if not already cached. Returns null when the run is unknown.
+   * @param {string} commitType
+   * @param {string} commitID
+   * @returns {Promise<number|null>}
+   */
+  async #latestTimestamp(commitType, commitID) {
+    const key = `${commitType}/${commitID}`;
+    if (!this.#commitLatest.has(key)) {
+      await this.LoadCommits(commitType);
+    }
+    return this.#commitLatest.get(key) ?? null;
+  }
+
+  /**
+   * Loads the list of campaign runs (one entry per run/zst), cached for the session.
+   * @returns {Promise<Array<{type,user,campaign,commit,timestamp,subjects:string[]}>>}
+   */
+  async LoadCampaigns() {
+    if (this.#campaigns) return this.#campaigns;
+    try {
+      const response = await fetch(`${this.#apiURI}/campaigns`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      this.#campaigns = await response.json();
+      return this.#campaigns;
+    } catch (error) {
+      this.#errorManager.Error('Failed to load campaigns: ' + error.message);
     }
     return [];
   }
@@ -227,15 +344,35 @@ class ApiREST {
   }
 
   /**
+   * Loads the git-log entry for a single commit via the backend proxy. Used to
+   * resolve a feature/PR commit's dev base (the response carries a `base` key).
+   * @param {string} commit - Commit hash
+   * @returns {Promise<object|null>} git-log object, or null on failure/unavailable
+   */
+  async LoadGitLog(commit) {
+    try {
+      const response = await fetch(`${this.#apiURI}/git/log/${encodeURIComponent(commit)}`);
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
    * Loads the list of test subjects (benchmark names) for a given commit.
    * @param {string} commitType - Dataset type, e.g. 'Perf'
    * @param {string} commitID   - Commit hash
    * @returns {Promise<Array<{value: string, text: string}>>} Subject options, or [] on failure
    */
-  async LoadCommitSubjects(commitType, commitID) {
+  async LoadCommitSubjects(commitType, commitID, timestamp) {
     this.#onLoading?.(+1, 'Chargement des subtasks…');
     try {
-      const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}`);
+      const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
+      // No run of this type for the commit (e.g. a Perf-only commit probed for Vuln):
+      // return no subjects rather than erroring.
+      if (ts == null) return [];
+      const response = await fetch(`${this.#apiURI}/subjects/${commitType}/${commitID}/${ts}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -263,11 +400,13 @@ class ApiREST {
    *   maxTimeMicroS — upper bound of the time axis in microseconds.
    *   Returns {metrics: null, maxTimeMicroS: -1} on failure.
    */
-  async LoadCommitMetrics(commitType, commitID, commitSubject) {
+  async LoadCommitMetrics(commitType, commitID, commitSubject, timestamp) {
     this.#onLoading?.(+1, 'Chargement des métriques…');
     try {
+      const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
+      if (ts == null) return { metrics: null, maxTimeMicroS: -1 };
       const response = await fetch(
-        `${this.#apiURI}/metrics/${commitType}/${commitID}/${commitSubject}`
+        `${this.#apiURI}/metrics/${commitType}/${commitID}/${ts}/${commitSubject}`
       );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -300,7 +439,7 @@ class ApiREST {
         }
       });
       const maxRunTime = data.runs.reduce((m, r) => Math.max(m, r.runTime), -Infinity);
-      const maxTimeMicroS = Math.ceil(maxRunTime * 1.1);
+      const maxTimeMicroS = Math.ceil(maxRunTime);
       
       return { metrics: metricsFolders, maxTimeMicroS };
     } catch (error) {
@@ -313,6 +452,29 @@ class ApiREST {
   }
 
   /**
+   * Probes the actual data extent of the given resolved experiments and derives a
+   * fitting time range. Takes the largest extent across all experiments so no series
+   * is truncated. Used to recompute a graph's range on template load / experiment change.
+   * @param {Array<{tasktype: string, commit: string, subtask: string, timestamp?: number}>} resolvedExps
+   * @returns {Promise<{min: number, max: number, delta: number}|null>}
+   *   A range derived from real data, or null if the extent is unknown (<= 0).
+   */
+  async ComputeTimeRange(resolvedExps) {
+    if (!resolvedExps || resolvedExps.length === 0) return null;
+    const metas = await Promise.all(resolvedExps.map(e =>
+      this.LoadCommitMetrics(e.tasktype, e.commit, e.subtask, e.timestamp)));
+    const max = metas.reduce((m, r) => Math.max(m, r?.maxTimeMicroS ?? -1), -1);
+    if (!(max > 0)) return null;
+    const delta = Math.max(1, Math.floor(max / DEFAULT_DELTA_DIVISOR));
+    // Extend to the next step boundary strictly past the data extent so the grid always
+    // has a point at/after the final sample (the exclusive `t < max` loop would otherwise
+    // stop one step short and drop the tail). One extra step instead of a percentage
+    // factor keeps the trailing flat region to a single point rather than many.
+    const alignedMax = (Math.floor(max / delta) + 1) * delta;
+    return { min: 0, max: alignedMax, delta };
+  }
+
+  /**
    * Fetches time-series data for selected metrics from the server.
    * The response uses a custom binary format (see #ParseBinaryResponse).
    * @param {string}   commitType      - Dataset type
@@ -322,16 +484,19 @@ class ApiREST {
    * @param {number}   timeMax         - End time in microseconds
    * @param {number}   timeStep        - Time step in microseconds
    * @param {string[]} selectedMetrics - Dot-path metric names to fetch
+   * @param {number}   [ciLevel=95]    - Confidence-interval level (percent) for the CI bands
    * @returns {Promise<{header: object, series: object}|null>}
    *   header — JSON metadata from the binary response;
    *   series — map of metric name to array of run arrays.
    *   Returns null on failure.
    */
   async LoadCommitMetricsValues(commitType, commitID, commitSubject, timeMin, timeMax, timeStep,
-      selectedMetrics) {
+      selectedMetrics, timestamp, ciLevel = 95) {
     this.#onLoading?.(+1, 'Chargement des données…');
     try {
-      const url = `${this.#apiURI}/values/${commitType}/${commitID}/${commitSubject}/${timeMin}/${timeMax}/${timeStep}`;
+      const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
+      if (ts == null) return null;
+      const url = `${this.#apiURI}/values/${commitType}/${commitID}/${ts}/${commitSubject}/${timeMin}/${timeMax}/${timeStep}`;
 
       const response = await fetch(url, {
         method: 'POST',
@@ -342,7 +507,7 @@ class ApiREST {
           runs: [],
           clients: [],
           metrics: selectedMetrics,
-          aggregate: 'sum'
+          ciLevel
         })
       });
       if (!response.ok) {

@@ -32,6 +32,7 @@
       "job_type": "perf",
       "color":    "#4CAF50",
       "campaign": false,
+      "package":  ["tlspuffin", "sshpuffin"],
       "config":   "/files/jobsscripts/tlspuffin/PR_perf_cargo.json",
       "script":   "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
       "files":    [
@@ -41,20 +42,23 @@
     },
     {
       "value":     "evaluate-pr",
-      "label":     "Evaluate PR",
+      "label":     "PR",
       "color":     "#F43F5E",
       "campaign":  false,
-      "composite": ["vuln-a", "perf"]
+      "composite": ["vuln-a", "perf"],
+      "job_label": ["PR@{COMMIT:6}-VulnA", "PR@{COMMIT:6}-Perf"]
     },
     {
-      "value":    "campaign",
-      "label":    "Campaign",
-      "job_type": "campaign",
-      "color":    "#a78bfa",
-      "campaign": true,
-      "config":   "/files/jobsscripts/tlspuffin/PR_campaign.json",
-      "script":   "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
-      "files":    [
+      "value":     "campaign",
+      "label":     "Campaign",
+      "job_type":  "campaign",
+      "job_label": "Camp@${COMMIT:6} ${CAMPAIGN-ID}",
+      "color":     "#a78bfa",
+      "campaign":  true,
+      "package":  ["tlspuffin", "sshpuffin"],
+      "config":    "/files/jobsscripts/tlspuffin/PR_campaign.json",
+      "script":    "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
+      "files":     [
         "/files/jobsscripts/tlspuffin/shell.nix",
         "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
       ]

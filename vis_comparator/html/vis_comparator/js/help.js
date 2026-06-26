@@ -33,9 +33,10 @@ export const HELP_HTML = `
 
   <p><strong>1. Experiments</strong> — pick up to 4 commit + subtask pairs. Each row is one experiment.</p>
   <ul>
-    <li>Select a <em>commit</em> from the rich picker (shows branch, date, commit message).</li>
+    <li>Select a <em>commit</em> from the rich picker (shows branch, PR number, date, commit message). Type to search, or use the <em>main/dev</em>, <em>branches</em>, <em>PRs</em>, and <em>All</em> tabs to filter.</li>
     <li>Select a <em>subtask</em> (task type / benchmark name). The list populates once a commit is chosen.</li>
     <li>Either field can reference a <em>variable</em> defined in the sidebar (see <em>Variables</em> below).</li>
+    <li>Use the <strong>mode button</strong> at the start of a row to switch it between <em>Commit</em> and <em>Campaign</em> mode. In Campaign mode you pick a single campaign run (or campaign variable) that supplies the commit, subtype, and timestamp together, instead of a commit + subtask.</li>
     <li>A <span style="color:#e08c00">⚠</span> badge means the selected combination has no data on the server.</li>
     <li>Click <strong>+ Add experiment</strong> to add more rows (max 4). Click ✕ to remove one.</li>
   </ul>
@@ -64,7 +65,7 @@ export const HELP_HTML = `
   <p>Below the title bar, three toggle buttons control rendering options:</p>
   <ul>
     <li><strong>Split Y-Axes</strong> — give each metric its own Y-axis (useful when scales differ). Disabled for single-metric graphs.</li>
-    <li><strong>All Runs</strong> — overlay every individual benchmark run as a faint dotted trace.</li>
+    <li><strong>All Runs</strong> — overlay every individual client run as a faint dotted trace.</li>
     <li><strong>Confidence Bands</strong> — shade the 95% confidence interval around the mean.</li>
   </ul>
 </div>
@@ -76,7 +77,7 @@ export const HELP_HTML = `
     lets you define named variables. Once defined, a variable can be picked anywhere a commit, subtask, or
     metric is expected. Changing a variable's value instantly re-fetches and redraws all graphs that use it.
   </p>
-  <p>Use the <strong>+</strong> button in each section header to add a variable. Auto-named <code>c1</code>, <code>s1</code>, <code>m1</code>…</p>
+  <p>Use the <strong>+</strong> button in each section header to add a variable. Auto-named <code>c1</code>, <code>s1</code>, <code>k1</code>, <code>m1</code>…</p>
 
   <p><strong>Commit variables</strong> (e.g. <code>c1</code>)</p>
   <ul>
@@ -91,6 +92,13 @@ export const HELP_HTML = `
     <li>Select a task type + subtask pair. The list is populated from commits already loaded.</li>
     <li>Set an optional <em>Alias</em> (e.g. <code>BASELINE</code>).</li>
     <li>Same ↺ / ✕ behaviour as commit variables.</li>
+  </ul>
+
+  <p><strong>Campaign variables</strong> (e.g. <code>k1</code>)</p>
+  <ul>
+    <li>Pick a campaign run from the campaign picker — search or filter by user, campaign, commit, or subtype, and sort by any column.</li>
+    <li>A selected run supplies its commit, subtype, and timestamp together; the chosen run is shown below the picker.</li>
+    <li>Set an optional <em>Alias</em>. Same ↺ / ✕ behaviour (✕ blocked if used by a graph).</li>
   </ul>
 
   <p><strong>Metric variables</strong> (e.g. <code>m1</code>)</p>
@@ -110,7 +118,8 @@ export const HELP_HTML = `
     <li><strong>Display name</strong> — override the generated label in graph legends (leave blank to use the format template).</li>
     <li><strong>Format</strong> — a template string applied to all experiments without an explicit display name.</li>
   </ul>
-  <p>Experiment format tokens: <code>${"${COMMIT_HASH}"}</code>, <code>${"${SUBTASK_TYPE}"}</code>, <code>${"${SUBTASK_NAME}"}</code>, <code>${"${COMMIT_ALIAS}"}</code>, <code>${"${SUBTASK_ALIAS}"}</code>.</p>
+  <p>Experiment format tokens: <code>${"${COMMIT_HASH}"}</code>, <code>${"${SUBTASK_TYPE}"}</code>, <code>${"${SUBTASK_NAME}"}</code>, <code>${"${COMMIT_ALIAS}"}</code>, <code>${"${SUBTASK_ALIAS}"}</code>, <code>${"${USER}"}</code>, <code>${"${CAMPAIGN_NAME}"}</code>, <code>${"${DATE}"}</code>, <code>${"${TIME}"}</code>, <code>${"${DATETIME}"}</code>.</p>
+  <p>Date/time tokens accept <code>:format(&lt;pattern&gt;)</code> with <code>YYYY MM DD HH mm ss</code> (e.g. <code>${"${DATE:format(YYYY/MM/DD)}"}</code>); without it they default to <code>YYYY-MM-DD</code> / <code>HH:mm:ss</code> / <code>YYYY-MM-DD HH:mm:ss</code>. <code>${"${USER}"}</code> and <code>${"${CAMPAIGN_NAME}"}</code> are empty for non-campaign experiments.</p>
   <p>Default: <code>${"${COMMIT_ALIAS} − ${SUBTASK_ALIAS}"}</code></p>
 </div>
 
@@ -171,7 +180,9 @@ export const HELP_HTML = `
     Title tokens: <code>${"${TEMPLATE}"}</code>, <code>${"${DATE}"}</code>,
     <code>${"${&lt;varname&gt;_HASH}"}</code> / <code>${"${&lt;varname&gt;_ALIAS}"}</code> (commit vars),
     <code>${"${&lt;varname&gt;_NAME}"}</code> / <code>${"${&lt;varname&gt;_TYPE}"}</code> / <code>${"${&lt;varname&gt;_ALIAS}"}</code> (subtask vars),
-    <code>${"${&lt;varname&gt;}"}</code> (metric vars). Same transforms apply.
+    <code>${"${&lt;varname&gt;_USER}"}</code> / <code>${"${&lt;varname&gt;_CAMPAIGN}"}</code> / <code>${"${&lt;varname&gt;_COMMIT}"}</code> / <code>${"${&lt;varname&gt;_SUBTYPE}"}</code> / <code>${"${&lt;varname&gt;_DATE}"}</code> / <code>${"${&lt;varname&gt;_ALIAS}"}</code> (campaign vars),
+    <code>${"${&lt;varname&gt;}"}</code> (metric vars). Same transforms apply;
+    <code>${"${DATE}"}</code> and a campaign <code>${"${&lt;varname&gt;_DATE}"}</code> accept <code>:format(&lt;pattern&gt;)</code> (default <code>YYYY-MM-DD</code>).
   </p>
 </div>
 

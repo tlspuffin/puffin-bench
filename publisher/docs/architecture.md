@@ -121,9 +121,9 @@ Persists processed state in `.project/.index.json`. Structure:
   }
 }
 ```
-Methods: `HaveCachedJSON()`, `HaveIndexed()`, `Add()`, `Load()`, `Save()`.
+Methods: `HaveIndexed()`, `Add()`, `Load()`, `Save()`.
 
-`ScanStorage()` (periodic scan) skips a file if `HaveCachedJSON()` returns true (already indexed **and** output JSON present on disk) or if it is in `filesInError_`. `ScanFiles()` (`POST /api/notify` path) checks neither the index nor `filesInError_` — notified files are always reprocessed, allowing a forced retry via notify even after a failure.
+`ScanStorage()` (periodic scan) skips a file if `HaveIndexed()` returns true (already indexed **and** output JSON present on disk) or if it is in `filesInError_`. `ScanFiles()` (`POST /api/notify` path) checks neither the index nor `filesInError_` — notified files are always reprocessed, allowing a forced retry via notify even after a failure.
 
 ---
 

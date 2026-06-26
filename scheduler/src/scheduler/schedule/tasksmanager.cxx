@@ -75,7 +75,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   ns_Schedule::Task* task = new ns_Schedule::Task(
     task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
     config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, 
-    user, jobType, md5, schedule);
+    user, jobType, md5, config_.apiURL_, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);
@@ -193,6 +193,23 @@ ns_Schedule::TasksManager::LoadStatus(rapidjson::Value const& tasksmanager,
     }
   }
   return std::make_tuple<>(stepsPending, stepsRunning, stepsDone);
+}
+
+std::string ns_Schedule::TasksManager::GetTaskState(uint64_t taskID) {
+  std::lock_guard<std::mutex> lock(lock_);
+  for(Task const* task: tasks_) {
+    if (task->id_ == taskID) {
+      rapidjson::Document doc;
+      doc.SetObject();
+      rapidjson::Value taskJSON(rapidjson::kObjectType);
+      task->ToJSON(taskJSON, doc.GetAllocator(), nullptr);
+      rapidjson::StringBuffer buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      taskJSON.Accept(writer);
+      return buffer.GetString();
+    }
+  }
+  return "";
 }
 
 void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {

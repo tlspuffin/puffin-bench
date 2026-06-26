@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage": "tlspuffin/PR/${COMMIT_ID}/Vuln/",
+    "storage": "${PACKAGE}/PR/${COMMIT_ID}/Vuln/",
     "goal": "Vuln PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
@@ -20,6 +20,9 @@
       }
     }
   },
+  "args": {
+    "TYPE": "vuln"
+  },
   "name" : "Vulnerabilities (group B) search - ${COMMIT_ID}",
   "flow" : [
     {
@@ -34,7 +37,10 @@
         "configuration": {
           "nb_cores": 1,
           "nb_retry": 90
-        }
+        },
+        "streams": [
+          { "name": "error", "path": "current_log/error.log" }
+        ]
       },
       {
         "step": "ForcedBuild"

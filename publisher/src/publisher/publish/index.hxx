@@ -18,8 +18,11 @@ public:
 
   bool Add(std::string const& key, uint64_t timestamp, std::string const& file,
       std::unordered_set<std::string>& libsManaged);
-  bool HaveCachedJSON(std::string const& key);
-  bool HaveIndexed(std::string const& key);
+  bool HaveIndexed(std::string const& srcFile);
+
+  bool Remove(std::filesystem::path const& rootDataPath, std::string const& key, bool deleteSourceFiles);
+
+  bool Delete(std::filesystem::path const& dataDirectory);
 
   std::vector<std::string> List();
 

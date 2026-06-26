@@ -2,6 +2,7 @@ import { TaskCard } from './taskcard.js';
 
 let taskCard;
 let dataUrl = null;
+const btn = document.createElement('a');
 
 function GetQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
@@ -58,19 +59,22 @@ async function Refresh() {
   const task = await FetchTask();
 
   const container = document.getElementById('container-running-steps');
+  btn.style.display = 'none';
   container.innerHTML = '';
   if (task) {
+    if ((task.state === 'Done') || (task.state === 'Cancelled')) {
+      btn.style.display = '';
+    }
     container.appendChild(taskCard.Create(task));
   }
 }
 
 function Main() {
   const id = GetQueryParam('id');
-  dataUrl = id ? `/api/task/${id}/final_state` : GetQueryParam('data');
+  dataUrl = id ? `/api/task/${id}/state` : GetQueryParam('data');
 
   if (id) {
-    const btn = document.createElement('a');
-    btn.classList.add('btn-download-artefacts');
+    btn.className = 'btn-download-artefacts';
     btn.href = `/api/task/${id}/artefacts`;
     btn.download = `${id}-artefacts.tgz`;
     btn.textContent = '⛏ Download Artefacts';

@@ -1,0 +1,310 @@
+{
+  "title": "OneTask",
+  "titleFormat": "OneTask - ${DATE} - ${C1_HASH} - ${S1_TYPE}/${S1_NAME}",
+  "variables": {
+    "commits": {
+      "__type": "Map",
+      "value": [
+        [
+          "c1",
+          {}
+        ]
+      ]
+    },
+    "subtasks": {
+      "__type": "Map",
+      "value": [
+        [
+          "s1",
+          {}
+        ]
+      ]
+    },
+    "campaigns": {
+      "__type": "Map",
+      "value": []
+    },
+    "metrics": {
+      "__type": "Map",
+      "value": []
+    }
+  },
+  "legendFormat": {
+    "experiment": "${COMMIT_ALIAS} − ${SUBTASK_ALIAS}",
+    "metric": "${METRIC:afterLast(\\.):pascalcase}"
+  },
+  "graphSettings": [
+    {
+      "id": 17,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.corpus_size",
+          "client.objective_size",
+          "global.corpus_size",
+          "global.objective_size"
+        ],
+        "min": 0,
+        "max": 3642587953,
+        "delta": 182129,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": true
+      }
+    },
+    {
+      "id": 18,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "global.total_execs",
+          "global.exec_per_sec",
+          "client.total_execs",
+          "client.exec_per_sec"
+        ],
+        "min": 0,
+        "max": 3642587953,
+        "delta": 182129,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": true
+      }
+    },
+    {
+      "id": 19,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.trace.min_trace_length",
+          "client.trace.mean_trace_length",
+          "client.trace.max_trace_length"
+        ],
+        "min": 0,
+        "max": 3642587953,
+        "delta": 182129,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": false
+      }
+    },
+    {
+      "id": 20,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.trace.min_term_size",
+          "client.trace.mean_term_size",
+          "client.trace.max_term_size"
+        ],
+        "min": 0,
+        "max": 3642587953,
+        "delta": 182129,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": false
+      }
+    },
+    {
+      "id": 21,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.coverage.max",
+          "client.coverage.hit"
+        ],
+        "min": 0,
+        "max": 3642587953,
+        "delta": 182129,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": false
+      }
+    },
+    {
+      "id": 22,
+      "config": {
+        "experiments": [
+          {
+            "commitVar": "c1",
+            "subtaskVar": "s1"
+          }
+        ],
+        "metricsMode": "AND",
+        "metrics": [
+          "client.errors.term_error",
+          "client.errors.put_error",
+          "client.errors.io_error",
+          "client.errors.fn_error"
+        ],
+        "min": 0,
+        "max": 3642587953,
+        "delta": 182129,
+        "showRaw": true,
+        "showCI": false,
+        "splitAxes": false
+      }
+    }
+  ],
+  "commitRegistry": {
+    "__type": "Map",
+    "value": [
+      [
+        "2d000bfe0:Perf:OpenSSL",
+        {
+          "color": "#1f77b4"
+        }
+      ]
+    ]
+  },
+  "metricLegend": {
+    "__type": "Map",
+    "value": [
+      [
+        "client.corpus_size",
+        {
+          "displayName": "ClientCorpusSize"
+        }
+      ],
+      [
+        "client.objective_size",
+        {
+          "displayName": "ClientObjectiveSize"
+        }
+      ],
+      [
+        "global.corpus_size",
+        {
+          "displayName": "GlobalCorpusSize"
+        }
+      ],
+      [
+        "global.objective_size",
+        {
+          "displayName": "GlobalObjectiveSize"
+        }
+      ],
+      [
+        "global.total_execs",
+        {
+          "displayName": "GlobalTotalExecs"
+        }
+      ],
+      [
+        "global.exec_per_sec",
+        {
+          "displayName": "GlobalExecPerSec"
+        }
+      ],
+      [
+        "client.total_execs",
+        {
+          "displayName": "ClientTotalExecs"
+        }
+      ],
+      [
+        "client.exec_per_sec",
+        {
+          "displayName": "ClientExecPerSec"
+        }
+      ],
+      [
+        "client.trace.mean_trace_length",
+        {}
+      ],
+      [
+        "client.trace.mean_term_size",
+        {}
+      ],
+      [
+        "client.trace.mean_payload_size",
+        {}
+      ],
+      [
+        "client.trace.mean_nb_payload",
+        {}
+      ],
+      [
+        "client.trace.min_trace_length",
+        {}
+      ],
+      [
+        "client.trace.max_trace_length",
+        {}
+      ],
+      [
+        "client.trace.min_term_size",
+        {}
+      ],
+      [
+        "client.trace.max_term_size",
+        {}
+      ],
+      [
+        "client.coverage.max",
+        {
+          "displayName": "CoverageMax"
+        }
+      ],
+      [
+        "client.coverage.hit",
+        {
+          "displayName": "CoverageHit"
+        }
+      ],
+      [
+        "client.errors.term_error",
+        {}
+      ],
+      [
+        "client.errors.term_bug_error",
+        {}
+      ],
+      [
+        "client.errors.stream_error",
+        {}
+      ],
+      [
+        "client.errors.put_error",
+        {}
+      ],
+      [
+        "client.errors.io_error",
+        {}
+      ],
+      [
+        "client.errors.fn_error",
+        {}
+      ]
+    ]
+  }
+}

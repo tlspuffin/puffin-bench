@@ -4,6 +4,7 @@
     "key": "security/site.key",
     "cert": "security/site.pem",
     "CA": "security/CA.pem",
+    "hostname": "localhost", 
     "port": 10082, 
     "html": "html"
   },
@@ -21,7 +22,9 @@
     },
     "publisher": {
       "default": {
-        "uri": "http://127.0.0.1:10083/api/notify",
+        "base_url": "http://127.0.0.1:10083",
+        "notify_endpoint": "/api/notify",
+        "view_endpoint": "/files/${PACKAGE}#${TASK_ID}",
         "storage": "/home/olivier/Desktop/Archives"
       }
     },

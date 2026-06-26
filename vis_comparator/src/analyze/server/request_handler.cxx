@@ -1,9 +1,12 @@
 #include "request_handler.hxx"
 #include "parts_handler.hxx"
 #include "../../utils/rapidjson.hxx"
+#include <algorithm>
 #include <fstream>
 #include <unordered_map>
 #include <string>
+#include <list>
+#include <mutex>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Net/HTTPServerRequest.h>
@@ -16,6 +19,48 @@
 #include <Poco/Net/HTTPResponse.h>
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
+
+// Simple thread-safe LRU cache of serialized endpoint responses. The cache key
+// embeds the run's (mtime,size) fingerprint, so a changed run yields a new key
+// (the stale entry is evicted by LRU pressure).
+class ResponseCache {
+public:
+  explicit ResponseCache(size_t maxEntries) : maxEntries_(maxEntries) {}
+
+  bool Get(std::string const& key, std::string& out) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(key);
+    if (it == map_.end()) {
+      return false;
+    }
+    order_.splice(order_.begin(), order_, it->second.second);
+    out = it->second.first;
+    return true;
+  }
+
+  void Put(std::string const& key, std::string value) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(key);
+    if (it != map_.end()) {
+      it->second.first = std::move(value);
+      order_.splice(order_.begin(), order_, it->second.second);
+      return;
+    }
+    order_.push_front(key);
+    map_.emplace(key, std::make_pair(std::move(value), order_.begin()));
+    while (map_.size() > maxEntries_) {
+      map_.erase(order_.back());
+      order_.pop_back();
+    }
+  }
+
+private:
+  size_t maxEntries_;
+  std::mutex mutex_;
+  std::list<std::string> order_;  // front = most recently used
+  std::unordered_map<std::string,
+      std::pair<std::string, std::list<std::string>::iterator>> map_;
+};
 
 static std::string decodeViewName(const std::string& encoded) {
   std::string decoded;
@@ -90,16 +135,53 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
   std::ostream* out = nullptr;
   try {
     Poco::URI uri(request.getURI());
-    std::string path = uri.getPath();
-    path = path.substr(prefix.size());
+    std::string urlPath = uri.getPath();
+    // Strip the "/files" prefix. What remains is "/<protocol>[/<asset...>]".
+    std::string rest = urlPath.substr(prefix.size());
 
-    if (path.compare("/") == 0) {
-      path = "index.html";
-    } else if (path[0] == '/') {
-      path = path.substr(1);
+    if (rest.empty() || rest == "/") {
+      response.setContentType("text/plain");
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send() << "404 - No protocol in URL (expected /files/<protocol>)\n";
+      return;
     }
 
-    std::filesystem::path filename = config_->html_ / path;
+    // First path segment = protocol; the remainder is the asset within the UI.
+    std::string afterSlash = rest.substr(1);            // drop leading '/'
+    size_t const slashPos = afterSlash.find('/');
+    std::string const protocol =
+        (slashPos == std::string::npos) ? afterSlash : afterSlash.substr(0, slashPos);
+
+    // The protocol segment is virtual: it only selects the dataset. Validate it
+    // against the on-disk data folders and return a clear 404 otherwise.
+    if (!apis_->ProtocolExists(protocol)) {
+      response.setContentType("text/plain");
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send() << "404 - Unknown protocol '" << protocol << "'\n";
+      return;
+    }
+
+    // Bare "/files/<protocol>" (no trailing slash): redirect to the slash form so
+    // the relative asset references in index.html (css/…, js/…) resolve under
+    // /files/<protocol>/ instead of /files/.
+    if (slashPos == std::string::npos) {
+      response.redirect(prefix + "/" + protocol + "/");
+      return;
+    }
+
+    // Remainder after the protocol; a trailing slash (empty remainder) serves index.
+    std::string assetRel = afterSlash.substr(slashPos + 1);
+    if (assetRel.empty()) {
+      assetRel = "index.html";
+    }
+
+    // The UI lives under html/vis_comparator; vendored shared assets (third-party/…,
+    // e.g. plotly) sit alongside it under html/. Requests for the latter resolve to
+    // that shared copy so every protocol serves the same bundle.
+    std::filesystem::path filename =
+        (assetRel.rfind("third-party/", 0) == 0)
+            ? config_->html_ / assetRel
+            : config_->html_ / "vis_comparator" / assetRel;
     try {
       filename = std::filesystem::canonical(filename);
     } catch(...) {
@@ -196,25 +278,106 @@ static void SendErrorResponse(Poco::Net::HTTPServerResponse& response,
   out.flush();
 }
 
+// Resolves the AnalyzeAPI for the handler's protocol, or sends a 404 and returns
+// nullptr so the caller can bail out. Every data endpoint goes through this.
+static ns_API::AnalyzeAPI* ResolveProtocol(ns_API::APIS* apis,
+    std::string const& protocol, Poco::Net::HTTPServerResponse& response) {
+  try {
+    return &apis->GetProtocol(protocol);
+  } catch (ns_API::UnknownProtocolError const& e) {
+    SendErrorResponse(response, 404, e.what());
+    return nullptr;
+  }
+}
+
 void ns_Server::RequestHandlerAPIListCommits::handleRequest(
     Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& type = std::get<0>(args_);
-  std::vector<std::string> commits = apis_->analyzeAPI_.GetCommits(type);
+  std::vector<ns_Analyze::DataManager::SCommitInfo> commits = api->GetCommits(type);
 
   rapidjson::Document doc;
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
 
   rapidjson::Value commitsArray(rapidjson::kArrayType);
-  for (auto const& commit : commits) {
-    commitsArray.PushBack(rapidjson::Value(commit.c_str(), allocator), allocator);
+  for (auto const& info : commits) {
+    rapidjson::Value obj(rapidjson::kObjectType);
+    obj.AddMember("commit", rapidjson::Value(info.commit.c_str(), allocator), allocator);
+    obj.AddMember("timestamp", info.latest, allocator);
+    obj.AddMember("count", info.count, allocator);
+    commitsArray.PushBack(obj, allocator);
   }
 
   doc.AddMember("commits", commitsArray, allocator);
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIGetCommitRuns::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
+  std::string const& commit = std::get<0>(args_);
+  std::vector<std::pair<uint64_t, std::string>> runs = api->GetRuns(commit);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  auto& allocator = doc.GetAllocator();
+
+  rapidjson::Value runsArray(rapidjson::kArrayType);
+  for (auto const& [timestamp, type] : runs) {
+    rapidjson::Value obj(rapidjson::kObjectType);
+    obj.AddMember("timestamp", timestamp, allocator);
+    obj.AddMember("type", rapidjson::Value(type.c_str(), allocator), allocator);
+    runsArray.PushBack(obj, allocator);
+  }
+
+  doc.AddMember("runs", runsArray, allocator);
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIListCampaigns::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
+  std::vector<ns_Analyze::DataManager::RunEntry> campaigns =
+      api->GetCampaigns();
+
+  rapidjson::Document doc;
+  doc.SetArray();
+  auto& allocator = doc.GetAllocator();
+
+  for (auto const& run : campaigns) {
+    rapidjson::Value obj(rapidjson::kObjectType);
+    obj.AddMember("type", rapidjson::Value(run.type.c_str(), allocator), allocator);
+    obj.AddMember("user", rapidjson::Value(run.user.c_str(), allocator), allocator);
+    obj.AddMember("campaign", rapidjson::Value(run.campaign.c_str(), allocator), allocator);
+    obj.AddMember("commit", rapidjson::Value(run.commit.c_str(), allocator), allocator);
+    obj.AddMember("timestamp", run.timestamp, allocator);
+    rapidjson::Value subjects(rapidjson::kArrayType);
+    for (auto const& s : run.subjects) {
+      subjects.PushBack(rapidjson::Value(s.c_str(), allocator), allocator);
+    }
+    obj.AddMember("subjects", subjects, allocator);
+    doc.PushBack(obj, allocator);
+  }
+
   SendJSONResponse(response, doc);
 }
 
@@ -224,10 +387,14 @@ void ns_Server::RequestHandlerAPIGetCommitSubjects::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
-  std::vector<std::pair<std::string, uint64_t>> subjects = 
-      apis_->analyzeAPI_.GetCommitSubjects(type, commitID);
+  uint64_t timestamp = std::get<2>(args_);
+  std::vector<std::pair<std::string, uint64_t>> subjects =
+      api->GetCommitSubjects(type, commitID, timestamp);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -246,11 +413,15 @@ void ns_Server::RequestHandlerAPIGetCommitMetrics::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
-  std::string const& subject = std::get<2>(args_);
-  ns_Analyze::DataManager::SMetricsSummaries metricsSummaries = 
-      apis_->analyzeAPI_.GetCommitMetrics(type, commitID, subject);
+  uint64_t timestamp = std::get<2>(args_);
+  std::string const& subject = std::get<3>(args_);
+  ns_Analyze::DataManager::SMetricsSummaries metricsSummaries =
+      api->GetCommitMetrics(type, commitID, timestamp, subject);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -343,30 +514,29 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
+  static ResponseCache valuesCache(256);
+
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
-  std::string const& subject = std::get<2>(args_);
-  uint64_t min = std::get<3>(args_);
-  uint64_t max = std::get<4>(args_);
-  uint64_t step = std::get<5>(args_);
-  std::string aggregate = "";
+  uint64_t timestamp = std::get<2>(args_);
+  std::string const& subject = std::get<3>(args_);
+  uint64_t min = std::get<4>(args_);
+  uint64_t max = std::get<5>(args_);
+  uint64_t step = std::get<6>(args_);
 
   std::istream& stream = request.stream();
   std::stringstream ss;
   ss << stream.rdbuf();
+  std::string const body = ss.str();
+
   rapidjson::Document doc;
-  doc.Parse(ss.str().c_str());
+  doc.Parse(body.c_str());
   if (doc.HasParseError()) {
     SendErrorResponse(response, 400, "Invalid json in request body");
     return;
-  }
-
-  if (doc.HasMember("aggregate")) {
-    if (!doc["aggregate"].IsString()) {
-      SendErrorResponse(response, 400, "Invalid json in request body");
-      return;
-    }
-    aggregate = doc["aggregate"].GetString();
   }
 
   bool error;
@@ -386,10 +556,59 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     return;
   }
 
+  // Confidence-interval level for the mean/CI bands. Optional; defaults to 95%.
+  // Only the predefined set is accepted; anything else falls back to 95.
+  int ciLevel = 95;
+  if (doc.HasMember("ciLevel") && doc["ciLevel"].IsInt()) {
+    int const requested = doc["ciLevel"].GetInt();
+    switch (requested) {
+      case 60: case 70: case 80: case 90: case 95: case 98: case 99:
+        ciLevel = requested;
+        break;
+      default:
+        ciLevel = 95;
+        break;
+    }
+  }
+
+  // Response cache: key on the normalized request (runId, params, sorted selection)
+  // for an unchanged run -> hit. Built from parsed fields so byte differences in
+  // the body (whitespace, key/array order) still hit the same entry.
+  std::string const runTag = api->GetRunTag(type, commitID, timestamp);
+  std::string cacheKey;
+  if (!runTag.empty()) {
+    auto joinU64 = [](std::vector<uint64_t> v) {
+      std::sort(v.begin(), v.end());
+      std::string s;
+      for (uint64_t x : v) { s += std::to_string(x); s += ','; }
+      return s;
+    };
+    std::vector<std::string> sortedMetrics = metrics;
+    std::sort(sortedMetrics.begin(), sortedMetrics.end());
+    std::string metricsJoined;
+    for (std::string const& m : sortedMetrics) { metricsJoined += m; metricsJoined += ','; }
+
+    cacheKey = protocol_ + "|" + type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
+        "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
+        "@" + runTag + "#runs=" + joinU64(runs) +
+        ";clients=" + joinU64(clients) + ";metrics=" + metricsJoined +
+        ";ci=" + std::to_string(ciLevel);
+    std::string cached;
+    if (valuesCache.Get(cacheKey, cached)) {
+      response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
+      response.setContentType("application/x-metrics-binary+json");
+      response.setContentLength64(cached.size());
+      std::ostream& ostr = response.send();
+      ostr.write(cached.data(), static_cast<std::streamsize>(cached.size()));
+      ostr.flush();
+      return;
+    }
+  }
+
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;
   try {
-    values = apis_->analyzeAPI_.GetCommitValues(type, commitID, subject, min, max, step,
-        runs, clients, metrics, aggregate);
+    values = api->GetCommitValues(type, commitID, timestamp, subject, min, max, step,
+        runs, clients, metrics, ciLevel);
   } catch (std::exception const& e) {
     std::cerr << "[GetCommitValues] exception: " << e.what() << std::endl;
     SendErrorResponse(response, 500, std::string("Internal error: ") + e.what());
@@ -404,7 +623,6 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   doc.AddMember("max", max, allocator);
   doc.AddMember("step", step, allocator);
   doc.AddMember("count", ((max - min) + step - 1) / step, allocator);
-  doc.AddMember("aggregate", rapidjson::Value(aggregate.c_str(), allocator), allocator);
 
   rapidjson::Value runsArray(rapidjson::kArrayType);
   for(uint64_t runID: runs) {
@@ -457,26 +675,40 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     }
   }
 
-  response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
-  response.setContentType("application/x-metrics-binary+json");
-  response.setContentLength64(dataSize);
-  std::ostream& ostr = response.send();
-
-  ostr.write(reinterpret_cast<const char*>(&jsonSizeLE), sizeof(jsonSizeLE));
-  ostr.write(jsonHeader.data(), static_cast<std::streamsize>(jsonHeader.size()));
-
+  // Assemble the full binary payload once (so it can be cached and written).
+  std::string payload;
+  payload.reserve(dataSize);
+  payload.append(reinterpret_cast<const char*>(&jsonSizeLE), sizeof(jsonSizeLE));
+  payload.append(jsonHeader.data(), jsonHeader.size());
   for (const auto& [name, series]: values) {
     for (const auto& serie: series) {
       if (std::holds_alternative<std::vector<uint64_t>>(serie.values_)) {
         std::vector<uint64_t> const& data = std::get<std::vector<uint64_t>>(serie.values_);
-        ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint64_t));
+        payload.append(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint64_t));
       } else {
         std::vector<double> const& data = std::get<std::vector<double>>(serie.values_);
-        ostr.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
+        payload.append(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(double));
       }
     }
   }
+
+  if (!cacheKey.empty()) {
+    valuesCache.Put(cacheKey, payload);
+  }
+
+  response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
+  response.setContentType("application/x-metrics-binary+json");
+  response.setContentLength64(payload.size());
+  std::ostream& ostr = response.send();
+  ostr.write(payload.data(), static_cast<std::streamsize>(payload.size()));
   ostr.flush();
+}
+
+// Per-protocol directory for saved views (userdata_/<protocol>). Views are
+// namespaced by protocol; templates (getTemplatesDir) stay shared across them.
+static std::filesystem::path getUserdataDir(ns_Server::Config const* config,
+    std::string const& protocol) {
+  return config->userdata_ / protocol;
 }
 
 void ns_Server::RequestHandlerAPISaveUserData::handleRequest(
@@ -485,13 +717,18 @@ void ns_Server::RequestHandlerAPISaveUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
   std::string viewName = decodeViewName(std::get<0>(args_));
   if (!isValidViewName(viewName)) {
     SendErrorResponse(response, 400, "Invalid view name");
     return;
   }
-  std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
+  std::filesystem::path const dir = getUserdataDir(config_, protocol_);
+  std::filesystem::create_directories(dir);
+  std::filesystem::path const filePath = dir / (viewNameToStem(viewName) + ".json");
   std::istream& stream = request.stream();
 
   std::ofstream ofs(filePath, std::ios::binary);
@@ -512,13 +749,17 @@ void ns_Server::RequestHandlerAPILoadUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
   std::string viewName = decodeViewName(std::get<0>(args_));
   if (!isValidViewName(viewName)) {
     SendErrorResponse(response, 400, "Invalid view name");
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
+      getUserdataDir(config_, protocol_) / (viewNameToStem(viewName) + ".json");
 
   rapidjson::Document doc;
   try {
@@ -537,7 +778,11 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
-  std::string const& path = config_->userdata_;
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
+  std::filesystem::path const path = getUserdataDir(config_, protocol_);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -546,14 +791,17 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
   try {
     rapidjson::Value files(rapidjson::kArrayType);
 
+    // A protocol with no saved views yet simply has no directory: return an
+    // empty list rather than erroring.
     if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
-      SendErrorResponse(response, 500, "Userdata directory not found");
+      doc.AddMember("files", files, allocator);
+      SendJSONResponse(response, doc);
       return;
     }
 
     for (auto const& entry : std::filesystem::directory_iterator(path)) {
       if (entry.is_regular_file()) {
-        if (entry.path().extension().string() != ".dat") {
+        if (entry.path().extension().string() != ".json") {
           continue;
         }
         std::string filename = stemToViewName(entry.path().stem().string());
@@ -578,13 +826,17 @@ void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
   std::string viewName = decodeViewName(std::get<0>(args_));
   if (!isValidViewName(viewName)) {
     SendErrorResponse(response, 400, "Invalid view name");
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".dat");
+      getUserdataDir(config_, protocol_) / (viewNameToStem(viewName) + ".json");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "View not found: " + filePath.string());
@@ -621,7 +873,7 @@ void ns_Server::RequestHandlerAPISaveTemplate::handleRequest(
   }
   std::filesystem::path const dir = getTemplatesDir(config_);
   std::filesystem::create_directories(dir);
-  std::filesystem::path const filePath = dir / (viewNameToStem(templateName) + ".dat");
+  std::filesystem::path const filePath = dir / (viewNameToStem(templateName) + ".json");
 
   std::istream& stream = request.stream();
   std::ofstream ofs(filePath, std::ios::binary);
@@ -654,7 +906,7 @@ void ns_Server::RequestHandlerAPILoadTemplate::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".dat");
+      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".json");
 
   rapidjson::Document doc;
   try {
@@ -682,7 +934,7 @@ void ns_Server::RequestHandlerAPIListTemplates::handleRequest(
   if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) {
     for (auto const& entry : std::filesystem::directory_iterator(dir)) {
       if (!entry.is_regular_file()) continue;
-      if (entry.path().extension().string() != ".dat") continue;
+      if (entry.path().extension().string() != ".json") continue;
       std::string filename = stemToViewName(entry.path().stem().string());
       rapidjson::Value filenameVal;
       filenameVal.SetString(filename.c_str(), filename.length(), allocator);
@@ -691,6 +943,72 @@ void ns_Server::RequestHandlerAPIListTemplates::handleRequest(
   }
 
   doc.AddMember("files", files, allocator);
+  SendJSONResponse(response, doc);
+}
+
+// Returns, for every saved template, only the names of its variables per
+// category — enough for the client to match templates against a URL without
+// fetching every full template definition. Variables are stored as serialised
+// Maps: { "__type":"Map", "value":[ ["c1", {...}], ... ] }, so a variable name
+// is the first element of each entry pair.
+void ns_Server::RequestHandlerAPIListTemplateVariables::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::filesystem::path const dir = getTemplatesDir(config_);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  auto& allocator = doc.GetAllocator();
+  rapidjson::Value templates(rapidjson::kObjectType);
+
+  static char const* const kCategories[] = {"commits", "subtasks", "campaigns", "metrics"};
+
+  if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) {
+    for (auto const& entry : std::filesystem::directory_iterator(dir)) {
+      if (!entry.is_regular_file()) continue;
+      if (entry.path().extension().string() != ".json") continue;
+
+      rapidjson::Document tdoc;
+      try {
+        ReadJSONFile(entry.path().string(), tdoc);
+      } catch (...) {
+        continue;  // skip unreadable / corrupt templates
+      }
+
+      rapidjson::Value const* variables = nullptr;
+      if (tdoc.IsObject() && tdoc.HasMember("variables") && tdoc["variables"].IsObject()) {
+        variables = &tdoc["variables"];
+      }
+
+      rapidjson::Value vars(rapidjson::kObjectType);
+      for (char const* cat : kCategories) {
+        rapidjson::Value names(rapidjson::kArrayType);
+        if (variables && variables->HasMember(cat)) {
+          auto const& m = (*variables)[cat];
+          if (m.IsObject() && m.HasMember("value") && m["value"].IsArray()) {
+            for (auto const& pair : m["value"].GetArray()) {
+              if (pair.IsArray() && pair.Size() >= 1 && pair[0].IsString()) {
+                rapidjson::Value n;
+                n.SetString(pair[0].GetString(), pair[0].GetStringLength(), allocator);
+                names.PushBack(n, allocator);
+              }
+            }
+          }
+        }
+        rapidjson::Value catKey(cat, allocator);
+        vars.AddMember(catKey, names, allocator);
+      }
+
+      std::string name = stemToViewName(entry.path().stem().string());
+      rapidjson::Value nameKey(name.c_str(), name.length(), allocator);
+      templates.AddMember(nameKey, vars, allocator);
+    }
+  }
+
+  doc.AddMember("templates", templates, allocator);
   SendJSONResponse(response, doc);
 }
 
@@ -706,7 +1024,7 @@ void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
     return;
   }
   std::filesystem::path const filePath =
-      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".dat");
+      getTemplatesDir(config_) / (viewNameToStem(templateName) + ".json");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "Template not found: " + filePath.string());
@@ -725,23 +1043,16 @@ void ns_Server::RequestHandlerAPIDeleteTemplate::handleRequest(
   SendJSONResponse(response, doc);
 }
 
-// Get GIT history
-void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
-    Poco::Net::HTTPServerRequest& request,
-    Poco::Net::HTTPServerResponse& response) {
-
-  if (ManageCORS(request, response)) return;
-
-  std::string const& url = config_->git_history_url_;
-  if (url.empty()) {
-    response.setContentType("application/json");
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
-    response.send() << "[]";
-    return;
-  }
-
+// Proxies a GET to an upstream JSON URL and forwards the body verbatim. On any
+// failure (non-2xx upstream, exception) it replies 200 with `fallback` so the
+// frontend always receives valid JSON. `label` tags error logs. Exactly one of
+// the response.send() paths runs per call.
+static void ProxyGetJSON(std::string const& fullUrl, char const* label,
+    char const* fallback, Poco::Net::HTTPServerResponse& response) {
+  response.setContentType("application/json");
+  response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
   try {
-    Poco::URI uri(url);
+    Poco::URI uri(fullUrl);
     std::string path = uri.getPathAndQuery();
     if (path.empty()) path = "/";
 
@@ -765,40 +1076,61 @@ void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
     std::istream& bodyStream = session->receiveResponse(resp);
 
     if (resp.getStatus() < 200 || resp.getStatus() >= 300) {
-      response.setContentType("application/json");
-      response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
-      response.send() << "[]";
+      response.send() << fallback;
       return;
     }
 
     std::stringstream ss;
     ss << bodyStream.rdbuf();
-
-    response.setContentType("application/json");
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
     response.send() << ss.str();
   } catch (std::exception const& e) {
-    std::cerr << "[git/history proxy] " << e.what() << std::endl;
-    response.setContentType("application/json");
-    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
-    response.send() << "[]";
+    std::cerr << "[" << label << "] " << e.what() << std::endl;
+    response.send() << fallback;
   }
 }
 
-
-// POST /api/refresh
-/*void ns_Server::RequestHandlerAPIRefresh::handleRequest(
+// Get GIT history
+void ns_Server::RequestHandlerAPIGetGitHistory::handleRequest(
     Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
 
   if (ManageCORS(request, response)) return;
 
-  apis_->analyzeAPI_.datasetManager_.Refresh();
+  std::string const& url = config_->git_history_url_;
+  if (url.empty()) {
+    response.setContentType("application/json");
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send() << "[]";
+    return;
+  }
 
-  rapidjson::Document doc;
-  doc.SetObject();
-  auto& allocator = doc.GetAllocator();
-  doc.AddMember("status", "ok", allocator);
-  doc.AddMember("message", "Dataset hierarchy refreshed", allocator);
-  SendJSONResponse(response, doc);
-}*/
+  ProxyGetJSON(url, "git/history proxy", "[]", response);
+}
+
+// Proxies the git-log endpoint for a single commit. The log URL is derived from
+// the configured history URL (".../api/git/history/<repo>" -> ".../api/git/log/
+// <repo>?commit=<id>"). Same CORS-driven proxy pattern as the history handler.
+void ns_Server::RequestHandlerAPIGetGitLog::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& url = config_->git_history_url_;
+  std::string const commit = std::get<0>(args_);
+
+  std::string::size_type const pos = url.find("/git/history/");
+  if (url.empty() || pos == std::string::npos) {
+    response.setContentType("application/json");
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
+    response.send() << "{}";
+    return;
+  }
+
+  std::string logUrl = url;
+  logUrl.replace(pos, std::string("/git/history/").length(), "/git/log/");
+  Poco::URI logUri(logUrl);
+  logUri.addQueryParameter("commit", commit);
+
+  ProxyGetJSON(logUri.toString(), "git/log proxy", "{}", response);
+}

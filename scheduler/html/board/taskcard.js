@@ -1,26 +1,10 @@
-import { Terminal } from './terminal.js';
-
-const FileReadState = Object.freeze({
-  Error_Access: 0, Error_Open: 1, Error_OverFlow: 2,
-  NotExecuted: 3, Ok: 4, EndOfFile: 5
-});
+import { logsManager } from './logsmanager.js';
+import { Clipboard } from './clipboard.js';
 
 export class TaskCard {
 
-  // Modal DOM references
-  #modal;
-  #modalStepName;
-  #logButtons;  // { stdout: HTMLElement, stderr: HTMLElement }
-  #containers;  // { stdout: HTMLElement, stderr: HTMLElement }
-  #contents;    // { stdout: HTMLElement, stderr: HTMLElement }
-
-  // Logs state — one per instance
-  #logsInfos;
-
   // Options
   #onRefresh;
-
-  static #sharedModal = null;
 
   /**
    * @param {object}   options
@@ -28,38 +12,12 @@ export class TaskCard {
    */
   constructor(options = {}) {
     this.#onRefresh = options.onRefresh ?? (() => {});
-
-    this.#CreateModal();
-
-    this.#logsInfos = {
-        timerID: null,
-        abortController: null,
-        id: 0,
-        step: null,
-        type: 'stdout',
-        stdout: {
-            terminal: new Terminal('stdout-container'),
-            decoder: new TextDecoder("utf-8"),
-            lastoffset: 0,
-            state: 0,
-            supportSeek: true,
-            startOffset: 0,
-        },
-        stderr: {
-            terminal: new Terminal('stderr-container'),
-            decoder: new TextDecoder("utf-8"),
-            lastoffset: 0,
-            state: 0,
-            supportSeek: true,
-            startOffset: 0,
-        },
-    };
   }
 
   // ── Public ───────────────────────────────────────────────────
 
   // Returns an HTMLElement for the full task — caller inserts it into the DOM
-  Create(task) { 
+  Create(task) {
     const steps = this.#BuildSteps(task);
 
     const div = document.createElement('div');
@@ -71,7 +29,7 @@ export class TaskCard {
     const cancelButton = document.createElement('button');
     cancelButton.classList.add('card-attempt-cancel-btn');
     cancelButton.textContent = 'Cancel';
-    cancelButton.onclick = async () => { 
+    cancelButton.onclick = async () => {
         if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
           return;
         }
@@ -99,8 +57,8 @@ export class TaskCard {
       taskName = task.id;
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-label-id', 'task-value-name'],
-        ['Task ' + task.id, cancelButton]
+        ['task-value-name', 'task-label-id', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, cancelButton]
       ));
       if (username != '') {
         divCardHeader.appendChild(this.#CreateCardLine(
@@ -112,8 +70,8 @@ export class TaskCard {
     } else {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-value-name'],
-        [task.name, cancelButton]
+        ['task-value-name', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), task.name, cancelButton]
       ));
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
@@ -126,16 +84,25 @@ export class TaskCard {
     separator.classList.add('card-task-separator');
     divCardHeader.appendChild(separator);
 
-    const taskLoad = task.executor_data?.os_load;
-    if (taskLoad) {
-      divCardHeader.appendChild(this.#CreateCardLine(
-        null, 'task-loads',
-        ['task-loads-label', 'task-loads-value', 'task-loads-value'],
-        ['Load', 'Mem ' + taskLoad.memory + '%', 'CPU ' + taskLoad.cores + '%']
-      ));
-      const separator2 = document.createElement('div');
-      separator2.classList.add('card-task-separator');
-      divCardHeader.appendChild(separator2);
+    if (task?.state === 'Running') {
+      const nbCores = Object.values(task?.steps || {}).reduce((total, step) => {
+          if (step?.state === 'Running') {
+            return total + (step?.executor_data?.cores?.length || 0);
+          }
+          return total;
+      }, 0);
+
+      const taskLoad = task.executor_data?.os_load;
+      if (taskLoad) {
+        divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-loads',
+          ['task-loads-label', 'task-loads-value', 'task-loads-value'],
+          ['Load', `Mem ${taskLoad.memory} %`, `CPU  ${taskLoad.cores} % on ${nbCores} cores`]
+        ));
+        const separator2 = document.createElement('div');
+        separator2.classList.add('card-task-separator');
+        divCardHeader.appendChild(separator2);
+      }
     }
 
     divCardHeader.appendChild(this.#CreateCardLine(
@@ -158,20 +125,34 @@ export class TaskCard {
       const divStep = document.createElement('div');
       divStep.classList.add('card-step');
 
+      const divStepNameHeader = document.createElement('div');
+      divStepNameHeader.classList.add('card-step-main-name');
+      divStepNameHeader.style.cursor = 'default';
+
       const divStepName = document.createElement('div');
-      divStepName.classList.add('card-step-main-name');
-      divStepName.style.cursor = 'default';
+      divStepName.classList = 'card-attempt-header';
       const nameSpan = document.createElement('span');
       nameSpan.innerText = functionName;
+      divStepName.appendChild(nameSpan);
+      let size = 0;
+      byId.forEach(attempts => size += attempts.length);
+      if (size == 1) {
+        const [ step ] = byId.values().next().value;
+        const link = this.#CreateRunPathLink(step)
+        if (link !== null) {
+          divStepName.appendChild(link);
+        }
+      }
+
       const iconSpan = document.createElement('span');
       iconSpan.innerText = '➖';
-      divStepName.appendChild(nameSpan);
-      divStepName.appendChild(iconSpan);
-      divStepName.onclick = () => {
+      divStepNameHeader.appendChild(divStepName);
+      divStepNameHeader.appendChild(iconSpan);
+      divStepNameHeader.onclick = () => {
           divStep.classList.toggle('collapsed');
           iconSpan.innerText = divStep.classList.contains('collapsed') ? '➕' : ' ➖';
       };
-      divStep.appendChild(divStepName);
+      divStep.appendChild(divStepNameHeader);
 
       let hasRunning = false
       byId.forEach(attempts => {
@@ -189,96 +170,6 @@ export class TaskCard {
     div.appendChild(divCardSteps);
 
     return div;
-  }
-
-
-  CloseModal() {
-    if (this.#logsInfos.timerID != null) {
-      window.clearTimeout(this.#logsInfos.timerID);
-      this.#logsInfos.timerID = null;
-    }
-    if (this.#logsInfos.abortController != null) {
-      this.#logsInfos.abortController.abort();
-      this.#logsInfos.abortController = null;
-    }
-    this.#modal.classList.remove('show');
-  }
-
-  SwitchOutput(newOutput) {
-    const prev = this.#logsInfos.type;
-    if (prev == newOutput) {
-      return;
-    }
-    this.#logButtons[prev].classList.remove('active');
-    this.#containers[prev].classList.remove('active');
-    this.#contents[prev].classList.remove('active');
-
-    this.#logsInfos.type = newOutput;
-
-    this.#logButtons[newOutput].classList.add('active');
-    this.#containers[newOutput].classList.add('active');
-    this.#contents[newOutput].classList.add('active');
-
-    if (this.#logsInfos.timerID != null) {
-      window.clearTimeout(this.#logsInfos.timerID);
-    }
-    this.#RetrieveFullStepLogs(this.#logsInfos, 10000000);
-  }
-
-  // ── Private — modal setup ────────────────────────────────────
-
-  // Creates the modal DOM and appends it to document.body
-  #CreateModal() {
-    if (!TaskCard.#sharedModal) {
-      const modal = document.createElement('div');
-      modal.classList.add('modal-overlay');
-      modal.innerHTML = `
-          <div class="modal-content">
-            <div class="modal-header">
-              <h3>Step Logs - <span id="step-name"></span></h3>
-              <button class="modal-close" id="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-              <div class="logs-tabs">
-                <button class="tab-btn active" id="log-stdout">STDOUT</button>
-                <button class="tab-btn"        id="log-stderr">STDERR</button>
-              </div>
-              <div class="logs-content">
-                <div class="logs-container active" id="stdout-container">
-                  <div class="logs-scroll-overlay" id="stdout-scroll-overlay"></div>
-                  <pre id="stdout-content"></pre>
-                </div>
-              <div class="logs-container" id="stderr-container">
-                <div class="logs-scroll-overlay" id="stderr-scroll-overlay"></div>
-                  <pre id="stderr-content"></pre>
-                </div>
-              </div>
-            </div>
-          </div>`;
-      document.body.appendChild(modal);
-      modal.addEventListener('wheel', e => e.preventDefault(), { passive: false });
-
-      modal.querySelector(`#modal-close`).onclick = () => this.CloseModal();
-      TaskCard.#sharedModal = modal;
-    }
-
-    this.#modal = TaskCard.#sharedModal;
-    this.#modalStepName = this.#modal.querySelector(`#step-name`);
-    this.#logButtons = {
-        stdout: this.#modal.querySelector(`#log-stdout`),
-        stderr: this.#modal.querySelector(`#log-stderr`),
-    };
-    this.#containers = {
-        stdout: this.#modal.querySelector(`#stdout-container`),
-        stderr: this.#modal.querySelector(`#stderr-container`),
-    };
-    this.#contents = {
-        stdout: this.#modal.querySelector(`#stdout-content`),
-        stderr: this.#modal.querySelector(`#stderr-content`),
-    };
-
-    this.#logButtons.stdout.onclick = () => this.SwitchOutput('stdout');
-    this.#logButtons.stderr.onclick = () => this.SwitchOutput('stderr');
   }
 
   // ── Private — step grouping ──────────────────────────────────
@@ -299,10 +190,6 @@ export class TaskCard {
   }
 
   // ── Private — pure helpers ───────────────────────────────────
-
-  #StepID(step) {
-    return step.step_id + '-' + step.rank_id + '-' + step.attempt_id;
-  }
 
   #Duration(step) {
     if (step.time_points_ms && step.time_points_ms[0]) {
@@ -376,17 +263,18 @@ export class TaskCard {
   }
 
   #CreateAttemptCard(step, taskName, taskCancelRequested) {
-    /*const div = document.createElement('div'); 
+    /*const div = document.createElement('div');
     div.innerText = `**** ${step} ${taskName} ${taskCancelRequested}`
     return div;*/
     const div = document.createElement('div');
     div.classList.add('card-attempt-item', `state-${step.state.toLowerCase()}`);
 
     if (step.nb_retry > 1) {
+      const link = this.#CreateRunPathLink(step);
       div.appendChild(this.#CreateCardLine(
           null, 'attempt-header',
-          ['attempt-name'],
-          [`Attempt ${step.attempt_id}`]
+          ['attempt-name', 'run-path'],
+          [`Attempt ${step.attempt_id}`, link ?? ""]
       ));
     }
 
@@ -458,7 +346,7 @@ export class TaskCard {
       const logsButton = document.createElement('button');
       logsButton.classList.add('card-attempt-logs-btn');
       logsButton.textContent = 'Logs';
-      logsButton.onclick = () => { this.#OpenLogs(step, taskName); };
+      logsButton.onclick = () => { logsManager.Open(step, taskName); };
 
       action.appendChild(logsButton);
 
@@ -470,7 +358,7 @@ export class TaskCard {
             if (!confirm(`Cancel step "${step.name}" ?`)) {
               return;
             }
-            await this.#CancelStep(step.task_id, step.uuid); 
+            await this.#CancelStep(step.task_id, step.uuid);
         };
         action.appendChild(cancelButton);
       }
@@ -493,9 +381,8 @@ export class TaskCard {
     return div;
   }
 
-
-  #CreateStepsCard(steps, taskName, taskCancelRequested) { 
-    /*const div = document.createElement('div'); 
+  #CreateStepsCard(steps, taskName, taskCancelRequested) {
+    /*const div = document.createElement('div');
     div.innerText = `**** ${steps} ${taskName} ${taskCancelRequested}`
     return div;*/
     const div = document.createElement('div');
@@ -550,7 +437,7 @@ export class TaskCard {
     if (Object.keys(steps[0].args).length) {
       div.appendChild(this.#CreateCardLine(
           null, 'step-attempts-detail',
-          ['step-attempts-detail-name'], 
+          ['step-attempts-detail-name'],
           ['Arguments:']
       ));
       const argEntries = Object.entries(steps[0].args);
@@ -612,134 +499,33 @@ export class TaskCard {
     //}
   }
 
-  // ── Private — log retrieval ──────────────────────────────────
+  // ── Private — link helper ──────────────────────────────────
 
-  async #RetrieveStepLogs(logsInfos, type, size) {
-    const taskID = logsInfos.step.task_id;
-    const stepUUID = logsInfos.step.uuid;
-    const stepID = this.#StepID(logsInfos.step);
-
-    console.log('query');
-    var response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}/${stepUUID}/${stepID}/output/${type}/${size}/${logsInfos[type].lastoffset}`, 
-        { signal: logsInfos.abortController.signal });
-
-    if (!response.ok) {
-      return [false, 0, null];
+  #CreateTaskQuickLink(task) {
+    const link = document.createElement('p');
+    link.classList = 'card-run-path-details';
+    link.innerText = '🔗';
+    link.title = `${window.location.origin}/files/board/task.html?id=${task.id}`;
+    link.onclick = async (event) => {
+      event.stopPropagation();
+      Clipboard.Set(event.currentTarget.title);
     }
-    var data = await response.json();
-    if (!data.success) {
-      return [false, 0, null];
-    }
-
-    logsInfos[type].state = data.state;
-    logsInfos[type].supportSeek = data.support_seek;
-    logsInfos[type].startOffset = data.start_offset;
-    if (data.support_seek) {
-      logsInfos[type].lastoffset += data.size;
-    }
-
-    return [true, data.state, atob(data.data)];
+    return link;
   }
 
-  async #RetrieveFullStepLogs(logsInfos, size) {
-    if (logsInfos.timerID != null) {
-      window.clearTimeout(logsInfos.timerID);
-      logsInfos.timerID = null;
+  #CreateRunPathLink(step) {
+    if (step?.state !== 'Running') {
+      return null;
     }
-    if (logsInfos.abortController != null) {
-      logsInfos.abortController.abort();
+    const link = document.createElement('p');
+    link.classList = 'card-run-path-details';
+    link.innerText = '📋';
+    link.title = step?.executor_data?.run_path;
+    link.onclick = async (event) => {
+      event.stopPropagation();
+      Clipboard.Set(event.currentTarget.title);
     }
-    logsInfos.abortController = new AbortController();
-
-    const type = logsInfos.type;
-    const channel = logsInfos[type];
-
-    var success = true;
-    var state = FileReadState.Ok;
-    var data;
-    while(success && (state === FileReadState.Ok)) {
-      const wasLive = !channel.supportSeek;
-
-      try {
-        [success, state, data] = await this.#RetrieveStepLogs(logsInfos, type, size);
-      } catch(error) {
-        return [false, 0, null];
-      }
-
-      if (!success || data.length === 0) {
-        break;
-      }
-
-      if (wasLive && logsInfos[type].supportSeek) {
-        logsInfos[type].terminal.SetText("");
-        logsInfos[type].decoder = new TextDecoder("utf-8");
-        logsInfos[type].lastoffset = 0;
-        [success, state, data] = await this.#RetrieveStepLogs(logsInfos, type, size);
-        if (!success || data.length === 0) break;
-      }
-
-      console.log('update', data.length);
-
-      const decoded = channel.decoder.decode(
-          Uint8Array.from(data, c => c.charCodeAt(0)),
-          { stream: state === FileReadState.Ok }
-      );
-
-      if (channel.supportSeek) {
-        //document.getElementById(`${type}-content`).innerText += 
-        channel.terminal.AppendText(decoded);
-      } else  {
-        //document.getElementById(`${type}-content`).innerText = 
-        channel.terminal.SetText(decoded);
-      }
-    }
-    if ((!channel.supportSeek) || (state !== FileReadState.EndOfFile)) {
-      logsInfos.timerID = window.setTimeout(() => this.#RetrieveFullStepLogs(logsInfos, size), 5000);
-    }
+    return link;
   }
 
-  async #OpenLogs(step, taskName) {
-    const id = step.task_id + '-' + step.uuid;
-    if (this.#logsInfos.id !== id) {
-      if (this.#logsInfos.timerID != null) {
-        window.clearTimeout(this.#logsInfos.timerID);
-      }
-      if (this.#logsInfos.abortController != null) {
-        this.#logsInfos.abortController.abort();
-      }
-      this.#logsInfos.timerID         = null;
-      this.#logsInfos.abortController = null;
-      this.#logsInfos.id              = id;
-      this.#logsInfos.step            = step;
-      this.#logsInfos.type            = 'stdout';
-      for (const type of ['stdout', 'stderr']) {
-        this.#logsInfos[type].terminal.SetText('');
-        this.#logsInfos[type].decoder     = new TextDecoder('utf-8');
-        this.#logsInfos[type].lastoffset  = 0;
-        this.#logsInfos[type].state       = 0;
-        this.#logsInfos[type].supportSeek = true;
-        this.#logsInfos[type].startOffset = 0;
-      }
-    }
-
-    let stepName = step.name;
-    if (step.id !== '' && step.id !== '.') stepName += ` ${step.id}`;
-    stepName += ` (${taskName})`;
-
-    // Activate current tab, deactivate the other
-    const active = this.#logsInfos.type;
-    const inactive = active === 'stdout' ? 'stderr' : 'stdout';
-    this.#logButtons[active].classList.add('active');
-    this.#containers[active].classList.add('active');
-    this.#contents[active].classList.add('active');
-    this.#logButtons[inactive].classList.remove('active');
-    this.#containers[inactive].classList.remove('active');
-    this.#contents[inactive].classList.remove('active');
-
-    this.#modalStepName.innerText = stepName;
-    this.#modal.classList.add('show');
-
-    await this.#RetrieveFullStepLogs(this.#logsInfos, 10000000);
-  }
 }

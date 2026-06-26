@@ -63,6 +63,17 @@ public:
 
   std::map<std::string, std::string> md5_;
 
+  enum class State { 
+    Pending, 
+    Running, 
+    Done, 
+    Cancelled, 
+  } state_;
+  std::string publish_link_;
+  std::string flag_;
+
+  std::string apiURL_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 
@@ -75,7 +86,7 @@ public:
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
       std::unordered_map<std::string, std::string>& args, 
       std::string const& user, std::string const& jobType, 
-      std::map<std::string, std::string> md5, 
+      std::map<std::string, std::string> md5, std::string apiURL, 
       ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
@@ -97,6 +108,8 @@ public:
 
   struct ns_Schedule::SRessourcesSummary UpdateStats(std::vector<ns_Schedule::Step*> steps);
 
+  rapidjson::Document FlagJSON() const;
+
 private:
   bool CreateRunFolders();
 
@@ -109,6 +122,18 @@ private:
   static void SaveGlobalParameters(
       std::unordered_map<std::string, std::string> const& parameters, 
       std::filesystem::path const& file);
+
+  static std::string StateEnumToString(ns_Schedule::Task::State state);
+  static State StateStringToEnum(std::string const& state);
 };
+
+inline rapidjson::Document Task::FlagJSON() const  {
+  rapidjson::Document flagDoc;
+  flagDoc.Parse((flag_.empty() ? "{}" : flag_).c_str());
+  if (flagDoc.HasParseError()) {
+    flagDoc.Parse("{}");
+  }
+  return flagDoc;
+}
 
 };

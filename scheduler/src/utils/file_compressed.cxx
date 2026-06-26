@@ -2,11 +2,19 @@
 #include "logs.hxx"
 #include <fstream>
 #include <stdexcept>
+#include <filesystem>
 #include <archive_entry.h>
 
 FileCompressed::FileCompressed(std::string const& filename) 
-    : filename_(filename), archive_(nullptr), inArchiveFilename_(), inArchiveFilesize_(0)
+    : filename_(filename), memory_(nullptr), memorySize_(0), archive_(nullptr), 
+    inArchiveFilename_(), inArchiveFilesize_(0)
 {}
+
+FileCompressed::FileCompressed(unsigned char const* data, size_t dataSize) 
+    : filename_(), memory_(data), memorySize_(dataSize), archive_(nullptr), 
+    inArchiveFilename_(), inArchiveFilesize_(0)
+{
+}
 
 FileCompressed::~FileCompressed() {
   StopExtractFileData();
@@ -17,7 +25,7 @@ std::unordered_map<std::string, uint64_t> FileCompressed::ListFiles(std::regex c
   archive_read_support_format_all(archive);
   archive_read_support_filter_all(archive);
 
-  if (archive_read_open_filename(archive, filename_.c_str(), 10240) != ARCHIVE_OK) {
+  if (OpenArchive(archive) != ARCHIVE_OK) {
     throw std::runtime_error("Error, unable to open file " + filename_);
   }
 
@@ -49,7 +57,7 @@ int64_t FileCompressed::ExtractFileData(std::string const& filename, uint64_t co
     archive_ = archive_read_new();
     archive_read_support_format_all(archive_);
     archive_read_support_filter_all(archive_);
-    if (archive_read_open_filename(archive_, filename_.c_str(), 10240) != ARCHIVE_OK) {
+    if (OpenArchive(archive_) != ARCHIVE_OK) {
       throw std::runtime_error("Error, unable to open file " + filename_);
     }
 
@@ -103,4 +111,18 @@ void FileCompressed::ExtractFile(std::string const& srcfile, std::string const& 
     ofs.write(buffer.data(), size);
     size = ExtractFileData(srcfile, buffer.size(), buffer.data(), nullptr);
   }
+}
+
+std::vector<std::string> FileCompressed::ExtractAll(std::string const& targetDir, bool overwrite) {
+  std::vector<std::string> result;
+  for (auto const& [name, size] : ListFiles()) {
+    std::filesystem::path dst = std::filesystem::path(targetDir) / name;
+    if (!overwrite && std::filesystem::exists(dst)) {
+      continue;
+    }
+    std::filesystem::create_directories(dst.parent_path());
+    ExtractFile(name, dst.string());
+    result.push_back(name);
+  }
+  return result;
 }

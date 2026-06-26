@@ -36,16 +36,22 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
 
   RequestHandler* requestHandler = nullptr;
 
-  static const std::regex regListCommits("^/api/PR/commits/([^/]+)$");
-  static const std::regex regGetCommitSubjects("^/api/PR/subjects/([^/]+)/([^/]+)$");
-  static const std::regex regGetCommitMetrics("^/api/PR/metrics/([^/]+)/([^/]+)/([^/]+)$");
+  // Every /api route now carries the protocol as its first capture group
+  // (^/api/<protocol>/PR/…); the concrete args follow, shifted by one.
+  static const std::regex regListCommits("^/api/([^/]+)/PR/commits/([^/]+)$");
+  static const std::regex regGetCommitRuns("^/api/([^/]+)/PR/runs/([^/]+)$");
+  static const std::regex regListCampaigns("^/api/([^/]+)/PR/campaigns$");
+  static const std::regex regGetCommitSubjects("^/api/([^/]+)/PR/subjects/([^/]+)/([^/]+)/([0-9]+)$");
+  static const std::regex regGetCommitMetrics("^/api/([^/]+)/PR/metrics/([^/]+)/([^/]+)/([0-9]+)/([^/]+)$");
   static const std::regex regGetCommitMetricsValues(
-      "^/api/PR/values/([^/]+)/([^/]+)/([^/]+)/([0-9]+)/([0-9]+)/([0-9]+)$");
-  static const std::regex regSaveLoadUserData("^/api/PR/userdata/([^/]+)$");
-  static const std::regex regListUserData("^/api/PR/userdata/*$");
-  static const std::regex regSaveLoadTemplate("^/api/PR/userdata/templates/([^/]+)$");
-  static const std::regex regListTemplates("^/api/PR/userdata/templates/*$");
-  static const std::regex regGetGitHistory("^/api/PR/git/history$");
+      "^/api/([^/]+)/PR/values/([^/]+)/([^/]+)/([0-9]+)/([^/]+)/([0-9]+)/([0-9]+)/([0-9]+)$");
+  static const std::regex regSaveLoadUserData("^/api/([^/]+)/PR/userdata/([^/]+)$");
+  static const std::regex regListUserData("^/api/([^/]+)/PR/userdata/*$");
+  static const std::regex regSaveLoadTemplate("^/api/([^/]+)/PR/userdata/templates/([^/]+)$");
+  static const std::regex regListTemplates("^/api/([^/]+)/PR/userdata/templates/*$");
+  static const std::regex regListTemplateVariables("^/api/([^/]+)/PR/userdata/templates-variables$");
+  static const std::regex regGetGitHistory("^/api/([^/]+)/PR/git/history$");
+  static const std::regex regGetGitLog("^/api/([^/]+)/PR/git/log/([^/]+)$");
 
   std::smatch match;
 
@@ -53,44 +59,57 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     if (path.find("/api/") == 0) {
       if (method == "GET") {
         if (std::regex_search(path, match, regListCommits)) {
-          requestHandler = new RequestHandlerAPIListCommits(match[1].str());
+          requestHandler = new RequestHandlerAPIListCommits(match[2].str());
+        } else if (std::regex_search(path, match, regGetCommitRuns)) {
+          requestHandler = new RequestHandlerAPIGetCommitRuns(match[2].str());
+        } else if (std::regex_search(path, match, regListCampaigns)) {
+          requestHandler = new RequestHandlerAPIListCampaigns();
         } else if (std::regex_search(path, match, regGetCommitSubjects)) {
           requestHandler = new RequestHandlerAPIGetCommitSubjects(
-              match[1].str(), match[2].str());
+              match[2].str(), match[3].str(),
+              std::strtoull(match[4].str().c_str(), nullptr, 10));
         } else if (std::regex_search(path, match, regGetCommitMetrics)) {
           requestHandler = new RequestHandlerAPIGetCommitMetrics(
-              match[1].str(), match[2].str(), match[3].str());
+              match[2].str(), match[3].str(),
+              std::strtoull(match[4].str().c_str(), nullptr, 10), match[5].str());
         } else if (std::regex_search(path, match, regGetGitHistory)) {
           requestHandler = new RequestHandlerAPIGetGitHistory();
+        } else if (std::regex_search(path, match, regGetGitLog)) {
+          requestHandler = new RequestHandlerAPIGetGitLog(match[2].str());
+        } else if (std::regex_search(path, match, regListTemplateVariables)) {
+          requestHandler = new RequestHandlerAPIListTemplateVariables();
         } else if (std::regex_search(path, match, regSaveLoadTemplate)) {
-          requestHandler = new RequestHandlerAPILoadTemplate(match[1].str());
+          requestHandler = new RequestHandlerAPILoadTemplate(match[2].str());
         } else if (std::regex_search(path, match, regListTemplates)) {
           requestHandler = new RequestHandlerAPIListTemplates();
         } else if (std::regex_search(path, match, regSaveLoadUserData)) {
-          requestHandler = new RequestHandlerAPILoadUserData(match[1].str());
+          requestHandler = new RequestHandlerAPILoadUserData(match[2].str());
         } else if (std::regex_search(path, match, regListUserData)) {
           requestHandler = new RequestHandlerAPIListUserData();
         }
       } else if (method == "DELETE") {
         if (std::regex_search(path, match, regSaveLoadTemplate)) {
-          requestHandler = new RequestHandlerAPIDeleteTemplate(match[1].str());
+          requestHandler = new RequestHandlerAPIDeleteTemplate(match[2].str());
         } else if (std::regex_search(path, match, regSaveLoadUserData)) {
-          requestHandler = new RequestHandlerAPIDeleteUserData(match[1].str());
+          requestHandler = new RequestHandlerAPIDeleteUserData(match[2].str());
         }
       } else if (method == "POST") {
         if (std::regex_search(path, match, regSaveLoadTemplate)) {
-          requestHandler = new RequestHandlerAPISaveTemplate(match[1].str());
+          requestHandler = new RequestHandlerAPISaveTemplate(match[2].str());
         } else if (std::regex_search(path, match, regGetCommitMetricsValues)) {
           requestHandler = new RequestHandlerAPIGetCommitMetricsValues(
-              match[1].str(), match[2].str(), match[3].str(), 
-              std::strtoull(match[4].str().c_str(), nullptr, 10), 
-              std::strtoull(match[5].str().c_str(), nullptr, 10), 
-              std::strtoull(match[6].str().c_str(), nullptr, 10));
+              match[2].str(), match[3].str(),
+              std::strtoull(match[4].str().c_str(), nullptr, 10), match[5].str(),
+              std::strtoull(match[6].str().c_str(), nullptr, 10),
+              std::strtoull(match[7].str().c_str(), nullptr, 10),
+              std::strtoull(match[8].str().c_str(), nullptr, 10));
         } else if (std::regex_search(path, match, regSaveLoadUserData)) {
-          requestHandler = new RequestHandlerAPISaveUserData(match[1].str());
-        } else if (path == "/api/refresh") {
-          //requestHandler = new RequestHandlerAPIRefresh();
+          requestHandler = new RequestHandlerAPISaveUserData(match[2].str());
         }
+      }
+      // The matching regex left the protocol in group 1; carry it to the handler.
+      if (requestHandler != nullptr) {
+        requestHandler->SetProtocol(match[1].str());
       }
     }
     else if (method == "GET" && path.find("/files/") == 0) {

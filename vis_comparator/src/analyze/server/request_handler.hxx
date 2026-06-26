@@ -23,15 +23,19 @@ namespace ns_Server {
 class RequestHandler : public Poco::Net::HTTPRequestHandler {
 
 public:
-  void Configure(ns_Server::Config const& config, 
+  void Configure(ns_Server::Config const& config,
       ns_API::APIS& apis);
+  // Protocol segment parsed from the request URL (e.g. "tlspuffin"). Empty for
+  // routes that carry no protocol. Set by the factory for /api/<protocol>/… routes.
+  void SetProtocol(std::string const& protocol) { protocol_ = protocol; }
 
 protected:
   ns_Server::Config const* config_;
   ns_API::APIS* apis_;
+  std::string protocol_;
 };
 
-inline void RequestHandler::Configure(ns_Server::Config const& config, 
+inline void RequestHandler::Configure(ns_Server::Config const& config,
     ns_API::APIS& apis) {
   config_ = &config;
   apis_ = &apis;
@@ -41,9 +45,11 @@ REQUESTHANDLER(Error);
 REQUESTHANDLER(Files, std::string const);
 
 REQUESTHANDLER(APIListCommits, std::string const);
-REQUESTHANDLER(APIGetCommitSubjects, std::string const, std::string const);
-REQUESTHANDLER(APIGetCommitMetrics, std::string const, std::string const, std::string const);
-REQUESTHANDLER(APIGetCommitMetricsValues, std::string const, std::string const, std::string const, uint64_t, uint64_t, uint64_t);
+REQUESTHANDLER(APIGetCommitRuns, std::string const);
+REQUESTHANDLER(APIListCampaigns);
+REQUESTHANDLER(APIGetCommitSubjects, std::string const, std::string const, uint64_t);
+REQUESTHANDLER(APIGetCommitMetrics, std::string const, std::string const, uint64_t, std::string const);
+REQUESTHANDLER(APIGetCommitMetricsValues, std::string const, std::string const, uint64_t, std::string const, uint64_t, uint64_t, uint64_t);
 
 REQUESTHANDLER(APILoadUserData, std::string const);
 REQUESTHANDLER(APISaveUserData, std::string const);
@@ -54,7 +60,9 @@ REQUESTHANDLER(APILoadTemplate, std::string const);
 REQUESTHANDLER(APISaveTemplate, std::string const);
 REQUESTHANDLER(APIDeleteTemplate, std::string const);
 REQUESTHANDLER(APIListTemplates);
+REQUESTHANDLER(APIListTemplateVariables);
 
 REQUESTHANDLER(APIGetGitHistory);
+REQUESTHANDLER(APIGetGitLog, std::string const);
 
 };

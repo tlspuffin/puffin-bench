@@ -10,6 +10,74 @@ function buildOption(configOption) {
   return option;
 }
 
+// localStorage keys for the user-resized width of each picker type.
+const PICKER_WIDTH_KEYS = {
+  campaign: 'vc.campaignPicker.width',
+  commit:   'vc.commitPicker.width',
+};
+
+/** Returns the persisted picker width, or null if unset/invalid. 360 mirrors the CSS min-width. */
+function readStoredPickerWidth(key) {
+  const v = Number(localStorage.getItem(key));
+  return Number.isFinite(v) && v >= 360 ? v : null;
+}
+
+/**
+ * Persists the user-dragged width of a picker panel. A debounced ResizeObserver
+ * avoids writing on every frame of the drag; it only saves while the panel is open
+ * (the programmatic width-set on each open just re-confirms the current value).
+ */
+function persistPickerWidth(key, panel) {
+  let t = null;
+  const ro = new ResizeObserver(() => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      if (!panel.classList.contains('hidden')) {
+        localStorage.setItem(key, String(Math.round(panel.offsetWidth)));
+      }
+    }, 150);
+  });
+  ro.observe(panel);
+}
+
+/**
+ * Adds a bottom-left drag handle that resizes the panel horizontally. The panel is
+ * anchored to the right side of the screen, so the right edge stays fixed and the
+ * panel grows leftward as the handle is dragged left. Width is clamped to the CSS
+ * min-width and to the available space up to 8px from the left viewport edge.
+ */
+function attachPickerResizeHandle(panel) {
+  const handle = document.createElement('div');
+  handle.className = 'picker-resize-handle';
+  panel.appendChild(handle);
+
+  const MIN_W = 360;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = panel.getBoundingClientRect();
+    const rightEdge = rect.right;     // stays fixed while dragging
+    const startX = e.clientX;
+    const startWidth = rect.width;
+    const maxW = rightEdge - 8;        // don't run off the left edge of the viewport
+
+    const onMove = (ev) => {
+      const delta = startX - ev.clientX;            // drag left → wider
+      const newWidth = Math.max(MIN_W, Math.min(maxW, startWidth + delta));
+      panel.style.width = newWidth + 'px';
+      panel.style.left  = (rightEdge - newWidth) + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+      document.body.style.cursor = '';
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+    document.body.style.cursor = 'ew-resize';
+  });
+}
+
 /**
  * DOM component factory for modal forms.
  * Uses an internal counter (#id) to generate unique element IDs.
@@ -142,9 +210,13 @@ class UI {
       panel.style.left  = left + 'px';
       panel.style.width = w + 'px';
       panel.classList.remove('hidden');
+      document.addEventListener('click', outsideHandler, true);
     }
 
-    function closePanel() { panel.classList.add('hidden'); }
+    function closePanel() {
+      panel.classList.add('hidden');
+      document.removeEventListener('click', outsideHandler, true);
+    }
 
     function selectValue(val) {
       _value = val;
@@ -163,11 +235,12 @@ class UI {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); }
     });
 
+    // Registered on open / removed on close (see openPanel/closePanel). The
+    // document.contains guard self-cleans if the wrapper is detached while open.
     const outsideHandler = (e) => {
       if (!document.contains(wrapper)) { document.removeEventListener('click', outsideHandler, true); return; }
       if (!wrapper.contains(e.target)) closePanel();
     };
-    document.addEventListener('click', outsideHandler, true);
 
     Object.defineProperty(wrapper, 'value', {
       get: () => _value,
@@ -570,13 +643,21 @@ class UI {
     this.#ApplyOptions(wrapper, options?.container);
 
     let _value = options?.selected ?? null;
+    let _timestamp = options?.selectedTimestamp ?? null;  // pinned run, null = latest
     let _activeTab = 'all';
     let _rows = [];   // populated asynchronously from gitHistoryPromise
     let _query = '';
+    let _expandedHash = null;          // hash whose run sublist is expanded, or null
+    const _runsCache = new Map();      // hash -> Array<{timestamp,type}> (lazy /runs)
 
     Object.defineProperty(wrapper, 'value', {
       get: () => _value,
       set: (v) => { _value = v; updateTrigger(); },
+    });
+    // Pinned timestamp of the current selection (null = latest/dynamic).
+    Object.defineProperty(wrapper, 'timestamp', {
+      get: () => _timestamp,
+      set: (v) => { _timestamp = v ?? null; updateTrigger(); },
     });
 
     // ── Trigger ───────────────────────────────────────────────
@@ -589,6 +670,8 @@ class UI {
     const panel = document.createElement('div');
     panel.className = 'commit-picker-panel hidden';
     wrapper.appendChild(panel);
+    persistPickerWidth(PICKER_WIDTH_KEYS.commit, panel);
+    attachPickerResizeHandle(panel);
 
     const search = document.createElement('input');
     search.type = 'text';
@@ -603,7 +686,7 @@ class UI {
     // ── Filter tabs ───────────────────────────────────────────
     const tabs = document.createElement('div');
     tabs.className = 'commit-picker-tabs';
-    [{ id: 'main', label: 'main/dev' }, { id: 'pr', label: 'PR heads' }, { id: 'all', label: 'All' }].forEach(def => {
+    [{ id: 'main', label: 'main/dev' }, { id: 'branch', label: 'branches' }, { id: 'pr', label: 'PRs' }, { id: 'all', label: 'All' }].forEach(def => {
       const btn = document.createElement('button');
       btn.className = 'commit-picker-tab' + (def.id === _activeTab ? ' active' : '');
       btn.textContent = def.label;
@@ -626,7 +709,8 @@ class UI {
     });
     search.addEventListener('input', () => { _query = search.value.toLowerCase(); renderRows(); });
 
-    // Close on outside click; self-cleans when wrapper leaves the DOM.
+    // Registered on open / removed on close (see openPanel/closePanel). The
+    // document.contains guard self-cleans if the wrapper is detached while open.
     const outsideHandler = (e) => {
       if (!document.contains(wrapper)) {
         document.removeEventListener('click', outsideHandler, true);
@@ -634,12 +718,12 @@ class UI {
       }
       if (!wrapper.contains(e.target)) closePanel();
     };
-    document.addEventListener('click', outsideHandler, true);
 
     // ── Helpers ───────────────────────────────────────────────
     function openPanel() {
       const rect = trigger.getBoundingClientRect();
-      const panelW = Math.max(rect.width, 480);
+      const stored = readStoredPickerWidth(PICKER_WIDTH_KEYS.commit);
+      const panelW = stored ?? Math.max(rect.width, 480);
       let left = rect.left;
       if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
       panel.style.top    = (rect.bottom + 4) + 'px';
@@ -650,8 +734,12 @@ class UI {
       _query = '';
       renderRows();
       search.focus();
+      document.addEventListener('click', outsideHandler, true);
     }
-    function closePanel() { panel.classList.add('hidden'); }
+    function closePanel() {
+      panel.classList.add('hidden');
+      document.removeEventListener('click', outsideHandler, true);
+    }
 
     function updateTrigger() {
       if (!_value) {
@@ -669,7 +757,9 @@ class UI {
           trigger.textContent = `${name} (undefined)`;
         }
       } else {
-        trigger.textContent = CommitHelp.ShortHash(_value);
+        const pin = _timestamp != null
+          ? ` · ${CommitHelp.FormatTimestamp(_timestamp, 'MM-DD HH:mm')}` : '';
+        trigger.textContent = CommitHelp.ShortHash(_value) + pin;
       }
     }
 
@@ -697,16 +787,19 @@ class UI {
 
       // ── Commit rows (filtered by tab + query) ─────────────────
       const visible = _rows.filter(r => {
-        if (_activeTab === 'main' && r.type !== 'main') return false;
-        if (_activeTab === 'pr'   && r.type !== 'pr')   return false;
+        if (_activeTab !== 'all' && !r.categories.includes(_activeTab)) return false;
         if (_query) {
-          const haystack = `${r.hash} ${r.branch ?? ''} ${r.comment ?? ''} ${r.date ?? ''}`.toLowerCase();
+          const num = r.number != null ? `#${r.number}` : '';
+          const haystack = `${r.hash} ${r.branch ?? ''} ${r.comment ?? ''} ${r.date ?? ''} ${num}`.toLowerCase();
           if (!haystack.includes(_query)) return false;
         }
         return true;
       });
 
-      visible.forEach(r => list.appendChild(buildCommitRow(r)));
+      visible.forEach(r => {
+        list.appendChild(buildCommitRow(r));
+        if (_expandedHash === r.value) appendRunRows(r.value);
+      });
 
       if (visible.length === 0 && _rows.length > 0) {
         const empty = document.createElement('div');
@@ -730,9 +823,11 @@ class UI {
     }
 
     function buildCommitRow(r) {
+      // Clicking the row selects the latest (dynamic) run for this commit.
       const row = document.createElement('div');
-      row.className = 'commit-picker-row' + (r.value === _value ? ' selected' : '');
-      row.onclick = () => selectValue(r.value);
+      const isSelectedLatest = r.value === _value && _timestamp == null;
+      row.className = 'commit-picker-row' + (isSelectedLatest ? ' selected' : '');
+      row.onclick = () => selectValue(r.value, null);
 
       const left = document.createElement('div');
       left.className = 'commit-picker-row-left';
@@ -750,6 +845,33 @@ class UI {
       hashEl.textContent = CommitHelp.ShortHash(r.value);
       left.appendChild(hashEl);
 
+      if (r.number != null) {
+        const prEl = document.createElement('span');
+        prEl.className = 'commit-pr-number';
+        prEl.textContent = `#${r.number}`;
+        left.appendChild(prEl);
+      }
+
+      // "×N" badge + chevron to expand the run list. Shown whenever the run count is
+      // known (even ×1) so the user can see how many runs/types a commit has and,
+      // if they want, pin a specific run. 0 means counts aren't loaded yet — hide it.
+      const runCount = options?.getRunCount?.(r.value) ?? 0;
+      if (runCount >= 1) {
+        const expanded = _expandedHash === r.value;
+        const runBadge = document.createElement('span');
+        runBadge.className = 'commit-run-badge';
+        runBadge.textContent = `×${runCount}`;
+        runBadge.title = 'Runs for this commit — click to pick a specific one';
+        const chevron = document.createElement('span');
+        chevron.className = 'commit-run-chevron';
+        chevron.textContent = expanded ? '▾' : '▸';
+        const toggle = (e) => { e.stopPropagation(); toggleExpand(r.value); };
+        runBadge.onclick = toggle;
+        chevron.onclick = toggle;
+        left.appendChild(runBadge);
+        left.appendChild(chevron);
+      }
+
       const mid = document.createElement('div');
       mid.className = 'commit-picker-date';
       mid.textContent = r.date ?? '';
@@ -764,8 +886,65 @@ class UI {
       return row;
     }
 
-    function selectValue(val) {
+    // Toggles the expanded run sublist for a commit, fetching /runs lazily.
+    function toggleExpand(hash) {
+      if (_expandedHash === hash) {
+        _expandedHash = null;
+        renderRows();
+        return;
+      }
+      _expandedHash = hash;
+      if (_runsCache.has(hash)) {
+        renderRows();
+      } else {
+        renderRows();  // show the "Loading runs…" placeholder immediately
+        Promise.resolve(options?.loadRuns?.(hash) ?? []).then(runs => {
+          _runsCache.set(hash, runs ?? []);
+          if (_expandedHash === hash && !panel.classList.contains('hidden')) renderRows();
+        });
+      }
+    }
+
+    // Appends one selectable row per run of `hash` (newest first, "run #N · date · type").
+    function appendRunRows(hash) {
+      const runs = _runsCache.get(hash);
+      if (runs == null) {
+        const loading = document.createElement('div');
+        loading.className = 'commit-picker-run-row loading';
+        loading.textContent = 'Loading runs…';
+        list.appendChild(loading);
+        return;
+      }
+      const total = runs.length;
+      runs.forEach((run, i) => {
+        const ts = Number(run.timestamp);
+        const selected = hash === _value && Number(_timestamp) === ts;
+        const runRow = document.createElement('div');
+        runRow.className = 'commit-picker-run-row' + (selected ? ' selected' : '');
+        runRow.onclick = () => selectValue(hash, ts);
+
+        const num = document.createElement('span');
+        num.className = 'commit-run-num';
+        num.textContent = `run #${total - i}`;
+
+        const date = document.createElement('span');
+        date.className = 'commit-run-date';
+        date.textContent = CommitHelp.FormatTimestamp(ts, 'YYYY-MM-DD HH:mm');
+
+        const type = document.createElement('span');
+        type.className = 'commit-run-type';
+        type.textContent = run.type ?? '';
+
+        runRow.appendChild(num);
+        runRow.appendChild(date);
+        runRow.appendChild(type);
+        list.appendChild(runRow);
+      });
+    }
+
+    function selectValue(val, ts = null) {
       _value = val;
+      _timestamp = ts;
       updateTrigger();
       closePanel();
       options?.callback?.(val);
@@ -786,20 +965,296 @@ class UI {
     Promise.all([gitHistoryPromise, Promise.resolve(allCommits)]).then(([history, commits]) => {
 
       if (!history) {
-        _rows = commits.map(hash => ({ value: hash, hash, branch: null, date: null, comment: null, type: 'main' }));
+        _rows = commits.map(hash => ({ value: hash, hash, branch: null, date: null, comment: null, number: null, categories: [] }));
       } else {
-        const entryMap = new Map();
-        (history.commits ?? []).forEach(e => entryMap.set(CommitHelp.ShortHash(e.id), { ...e, type: 'main' }));
-        (history.PR ?? []).forEach(e => entryMap.set(CommitHelp.ShortHash(e.id), { ...e, type: 'pr' }));
+        // A local commit can appear in several git categories (e.g. a PR head that
+        // is also a branch tip); track all of them so it shows under each tab.
+        const entryMap = new Map();  // shortHash -> { branch, date, comment, number, categories:Set }
+        const add = (e, cat) => {
+          const k = CommitHelp.ShortHash(e.id);
+          let m = entryMap.get(k);
+          if (!m) { m = { categories: new Set() }; entryMap.set(k, m); }
+          m.categories.add(cat);
+          m.branch  = m.branch  ?? e.branch  ?? null;
+          m.date    = m.date    ?? e.date    ?? null;
+          m.comment = m.comment ?? e.comment ?? null;
+          if (e.number != null) m.number = e.number;
+        };
+        (history.commits  ?? []).forEach(e => add(e, 'main'));
+        (history.branches ?? []).forEach(e => add(e, 'branch'));
+        (history.PR       ?? []).forEach(e => add(e, 'pr'));
         _rows = commits
           .map(hash => {
-            const entry = entryMap.get(CommitHelp.ShortHash(hash));
-            return { value: hash, hash, branch: entry?.branch ?? null, date: entry?.date ?? null, comment: entry?.comment ?? null, type: entry?.type ?? 'main' };
+            const m = entryMap.get(CommitHelp.ShortHash(hash));
+            return {
+              value: hash, hash,
+              branch:  m?.branch  ?? null,
+              date:    m?.date    ?? null,
+              comment: m?.comment ?? null,
+              number:  m?.number  ?? null,
+              categories: m ? [...m.categories] : [],
+            };
           })
           .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
       }
       if (!panel.classList.contains('hidden')) renderRows();
     }).catch(err => console.error('[CommitPicker] failed to load commits', err));
+
+    updateTrigger();
+    return wrapper;
+  }
+
+  /**
+   * Rich campaign run selector (mirrors the commit picker style).
+   * Columns: username, campaign, commit (short), date, subtype (tag).
+   * Search bar + sortable column headers + per-column value filters.
+   * Each row is one campaign run (one zst).
+   *
+   * `.value` is a runRef { type:'Campaign', commit, timestamp, user, campaign, subject }
+   * or null; dispatches a native `change` event on selection.
+   *
+   * @param {Array<{type,user,campaign,commit,timestamp,subjects:string[]}>} campaigns
+   * @param {object} options
+   * @param {object|null} [options.selected] - pre-selected runRef
+   * @returns {HTMLDivElement}
+   */
+  CreateCampaignPicker(campaigns, options) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'commit-picker campaign-picker';
+    this.#ApplyOptions(wrapper, options?.container);
+
+    let _value   = options?.selected ?? null;
+    let _query   = '';
+    let _sortKey = 'date';
+    let _sortDir = -1;  // -1 desc (newest first), 1 asc
+    const _filters = { user: '', campaign: '', subject: '' };
+
+    Object.defineProperty(wrapper, 'value', {
+      get: () => _value,
+      set: (v) => { _value = v; updateTrigger(); },
+    });
+
+    // ── Normalised rows ───────────────────────────────────────
+    const fmtDate = (ts) => CommitHelp.FormatTimestamp(ts, 'YYYY-MM-DD HH:mm');
+    const rows = [...(campaigns ?? [])].map(r => ({
+      ref: {
+        type: 'Campaign', commit: r.commit, timestamp: r.timestamp,
+        user: r.user, campaign: r.campaign,
+        subject: (r.subjects && r.subjects[0]) || null,
+      },
+      user:        r.user ?? '',
+      campaign:    r.campaign ?? '',
+      commitShort: CommitHelp.ShortHash(r.commit ?? ''),
+      date:        fmtDate(r.timestamp),
+      subject:     (r.subjects && r.subjects[0]) || '',
+      timestamp:   Number(r.timestamp),
+    }));
+    const distinct = (key) => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();
+
+    // ── Trigger + panel ───────────────────────────────────────
+    const trigger = document.createElement('div');
+    trigger.className = 'commit-picker-trigger';
+    trigger.tabIndex = 0;
+    wrapper.appendChild(trigger);
+
+    const panel = document.createElement('div');
+    panel.className = 'commit-picker-panel hidden';
+    wrapper.appendChild(panel);
+    persistPickerWidth(PICKER_WIDTH_KEYS.campaign, panel);
+    attachPickerResizeHandle(panel);
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = 'Search user / campaign / commit / subtype…';
+    search.className = 'commit-picker-search';
+    panel.appendChild(search);
+
+    // Per-column value filters. These are custom in-DOM dropdowns (CreateSimpleDropdown)
+    // rather than native <select>s: a native <select>'s OS popup renders outside the panel
+    // DOM, so picking an option counted as an outside-click and closed the whole picker.
+    const FILTER_ALL = ' all';  // sentinel for the "no filter" row (truthy, can't collide with a real value)
+    const filterBar = document.createElement('div');
+    filterBar.className = 'campaign-filter-bar';
+    const makeFilter = (key, label) => {
+      const opts = [{ value: FILTER_ALL, text: `all ${label}`, selected: true }];
+      distinct(key).forEach(v => opts.push({ value: v, text: v }));
+      const dd = this.CreateSimpleDropdown(opts);
+      dd.addEventListener('change', () => {
+        _filters[key] = dd.value === FILTER_ALL ? '' : (dd.value ?? '');
+        renderRows();
+      });
+      filterBar.appendChild(dd);
+    };
+    makeFilter('user', 'users');
+    makeFilter('campaign', 'campaigns');
+    makeFilter('subject', 'subtypes');
+    panel.appendChild(filterBar);
+
+    const table = document.createElement('div');
+    table.className = 'campaign-picker-table';
+    panel.appendChild(table);
+
+    // ── Wiring ────────────────────────────────────────────────
+    trigger.addEventListener('click', () => panel.classList.contains('hidden') ? openPanel() : closePanel());
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); }
+      if (e.key === 'Escape') closePanel();
+    });
+    search.addEventListener('input', () => { _query = search.value.toLowerCase(); renderRows(); });
+
+    // Dismiss when clicking outside the picker. The filter dropdowns are in-DOM
+    // descendants of the wrapper, so selecting one never registers as an outside click.
+    // Registered on open / removed on close (see openPanel/closePanel); the
+    // document.contains guard self-cleans if the wrapper is detached while open.
+    const outsideHandler = (e) => {
+      if (!document.contains(wrapper)) { document.removeEventListener('click', outsideHandler, true); return; }
+      if (!wrapper.contains(e.target)) closePanel();
+    };
+
+    function openPanel() {
+      const rect = trigger.getBoundingClientRect();
+      const stored = readStoredPickerWidth(PICKER_WIDTH_KEYS.campaign);
+      const panelW = stored ?? Math.max(rect.width, 680);
+      let left = rect.left;
+      if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
+      panel.style.top   = (rect.bottom + 4) + 'px';
+      panel.style.left  = left + 'px';
+      panel.style.width = panelW + 'px';
+      panel.classList.remove('hidden');
+      search.value = ''; _query = '';
+      renderRows();
+      search.focus();
+      document.addEventListener('click', outsideHandler, true);
+    }
+    function closePanel() {
+      panel.classList.add('hidden');
+      document.removeEventListener('click', outsideHandler, true);
+    }
+
+    // One-line summary of a campaign runRef, including the date so two runs of the
+    // same campaign are distinguishable once selected.
+    function runSummary(ref) {
+      if (!ref) return '(undefined)';
+      return CommitHelp.CampaignRunLabel(ref);
+    }
+    const isVarValue = (v) => typeof v === 'string' && v.startsWith('_var_');
+
+    function updateTrigger() {
+      if (!_value) { trigger.textContent = '(—)'; trigger.classList.add('empty'); return; }
+      trigger.classList.remove('empty');
+      if (isVarValue(_value)) {
+        const name  = _value.slice(5);
+        const entry = options?.variables?.get(name);
+        trigger.textContent = entry?.value ? `${name} = ${runSummary(entry.value)}` : `${name} (undefined)`;
+      } else {
+        trigger.textContent = runSummary(_value);
+      }
+    }
+
+    const COLS = [
+      { key: 'user',        label: 'User' },
+      { key: 'campaign',    label: 'Campaign' },
+      { key: 'commitShort', label: 'Commit' },
+      { key: 'date',        label: 'Date', sortKey: 'timestamp' },
+      { key: 'subject',     label: 'Subtype' },
+    ];
+
+    function renderRows() {
+      table.replaceChildren();
+
+      // Header (sortable).
+      const header = document.createElement('div');
+      header.className = 'campaign-picker-row campaign-picker-header';
+      COLS.forEach(col => {
+        const cell = document.createElement('div');
+        cell.className = `campaign-cell campaign-cell-${col.key}`;
+        const sk = col.sortKey ?? col.key;
+        cell.textContent = col.label + (_sortKey === sk ? (_sortDir === 1 ? ' ▲' : ' ▼') : '');
+        cell.onclick = () => {
+          if (_sortKey === sk) { _sortDir = -_sortDir; } else { _sortKey = sk; _sortDir = 1; }
+          renderRows();
+        };
+        header.appendChild(cell);
+      });
+      table.appendChild(header);
+
+      // Unset row.
+      const unset = document.createElement('div');
+      unset.className = 'campaign-picker-row campaign-picker-unset' + (_value ? '' : ' selected');
+      unset.textContent = '(—)';
+      unset.onclick = () => selectRef(null);
+      table.appendChild(unset);
+
+      // Campaign-variable rows (single selector — like the commit picker's variable rows).
+      if (options?.variables?.size > 0) {
+        for (const [name, entry] of options.variables) {
+          const val   = `_var_${name}`;
+          const label = `${name} = ${entry?.value ? runSummary(entry.value) : '(undefined)'}`;
+          if (_query && !label.toLowerCase().includes(_query)) continue;
+          const vrow = document.createElement('div');
+          vrow.className = 'campaign-picker-row campaign-picker-var' + (_value === val ? ' selected' : '');
+          vrow.textContent = label;
+          vrow.onclick = () => selectRef(val);
+          table.appendChild(vrow);
+        }
+      }
+
+      // Filter + search.
+      let visible = rows.filter(r => {
+        if (_filters.user && r.user !== _filters.user) return false;
+        if (_filters.campaign && r.campaign !== _filters.campaign) return false;
+        if (_filters.subject && r.subject !== _filters.subject) return false;
+        if (_query) {
+          const hay = `${r.user} ${r.campaign} ${r.commitShort} ${r.date} ${r.subject}`.toLowerCase();
+          if (!hay.includes(_query)) return false;
+        }
+        return true;
+      });
+
+      // Sort.
+      visible.sort((a, b) => {
+        const va = a[_sortKey], vb = b[_sortKey];
+        const cmp = (typeof va === 'number' && typeof vb === 'number')
+          ? va - vb : String(va).localeCompare(String(vb));
+        return cmp * _sortDir;
+      });
+
+      visible.forEach(r => {
+        const row = document.createElement('div');
+        const isSel = _value && typeof _value === 'object' && _value.timestamp === r.timestamp;
+        row.className = 'campaign-picker-row' + (isSel ? ' selected' : '');
+        row.onclick = () => selectRef(r.ref);
+        COLS.forEach(col => {
+          const cell = document.createElement('div');
+          cell.className = `campaign-cell campaign-cell-${col.key}`;
+          if (col.key === 'subject') {
+            const tag = document.createElement('span');
+            tag.className = 'campaign-subtype-tag';
+            tag.textContent = r.subject;
+            cell.appendChild(tag);
+          } else {
+            cell.textContent = r[col.key];
+          }
+          row.appendChild(cell);
+        });
+        table.appendChild(row);
+      });
+
+      if (visible.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'commit-picker-empty';
+        empty.textContent = rows.length === 0 ? 'No campaign runs' : 'No runs match';
+        table.appendChild(empty);
+      }
+    }
+
+    function selectRef(ref) {
+      _value = ref;
+      updateTrigger();
+      closePanel();
+      options?.callback?.(ref);
+      wrapper.dispatchEvent(new Event('change'));
+    }
 
     updateTrigger();
     return wrapper;

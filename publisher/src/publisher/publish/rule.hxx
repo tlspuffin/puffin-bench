@@ -18,6 +18,7 @@ public:
     std::string state;
     std::string user_run_state;
     uint64_t duration_ms;
+    uint64_t timeout_ms;
     uint64_t attempt;
     uint64_t exit_code;
   };
@@ -40,12 +41,16 @@ public:
       std::string const& ruleRelativePath, std::string const& filesFilter);
   bool Match(std::string const& file);
 
+  bool IsCampaign() const;
+  std::filesystem::path DataPath() const;
+
   virtual bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged) = 0;
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
+      bool generateArtefact) = 0;
 
   static Rule* Build(std::string const& action, std::string const& name, 
       std::string const& rulesPath, std::string const& rulesRelativePath, 
-      std::string const& filesFilter, rapidjson::Value::ConstObject const& parameters);
+      std::string const& filesFilter, rapidjson::Value const& parameters);
 
 protected:
   TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile, 
@@ -53,11 +58,11 @@ protected:
   TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer, 
       std::filesystem::path taskInfos, std::filesystem::path taskData);
 
-  static bool UpdateJSON(std::string const& jsonPath, 
-      rapidjson::Document& newJSON, std::unordered_set<std::string>& libsManaged);
-  static bool UpdateTempJSON(std::string const& jsonPath, 
-      rapidjson::Document& newJSON, std::unordered_set<std::string>& libsManaged);
-  static bool ValidateTempJSON(std::string const& jsonPath);
+  void SetCampaignStatus(bool enable);
+
+  static bool UpdateJSON(std::string jsonPath, rapidjson::Document& newJSON, 
+      std::unordered_set<std::string>& libsManaged);
+  static bool ValidateUpdatedJSON(std::string const& jsonPath);
   static std::unordered_set<std::string> MergeResults(
       rapidjson::Document& lastResults, rapidjson::Document const& newResults);
 
@@ -66,20 +71,35 @@ protected:
   std::string const ruleRelativePath_;
   std::regex filesFilter_;
 
+private:
+  bool isCampaign_;
+  std::filesystem::path dataPath_;
+
+  static std::filesystem::path ExtractLiteralPathPrefix(std::string const& path);
+
 public:
   std::string debugFilesFilter_;
 };
 
-inline bool Rule::UpdateTempJSON(std::string const& jsonPath, 
-    rapidjson::Document& newJSON, std::unordered_set<std::string>& libsManaged) {
-  return UpdateJSON(jsonPath + ".tmp", newJSON, libsManaged);
+inline bool Rule::IsCampaign() const {
+  return isCampaign_;
 }
 
-inline bool Rule::ValidateTempJSON(std::string const& jsonPath) {
+inline std::filesystem::path Rule::DataPath() const {
+  return dataPath_;
+}
+
+inline void Rule::SetCampaignStatus(bool enable) {
+  isCampaign_ = enable;
+}
+
+inline bool Rule::ValidateUpdatedJSON(std::string const& jsonPath) {
   std::error_code ec;
-  std::filesystem::rename(jsonPath + ".tmp", jsonPath, ec);
+  std::string tmpName = jsonPath + ".tmp";
+  std::filesystem::rename(tmpName, jsonPath, ec);
   if (ec) {
-    LOGE << ec.message() << Log::Flags::End;
+    LOGE << "Unable to move " << tmpName << " to " << jsonPath << " : " << 
+        ec.message() << Log::Flags::End;
   }
   return !ec;
 }
@@ -88,10 +108,11 @@ class RuleNULL : public Rule {
 public:
    RuleNULL(std::string const& name, std::string const& rulePath, 
       std::string const& ruleRelativePath, std::string const& filesFilter, 
-      rapidjson::Value::ConstObject const& parameters)
+      rapidjson::Value const& parameters)
       : Rule(name, rulePath, ruleRelativePath, filesFilter) {}
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged) {
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
+      bool generateArtefact) {
     return true;
   }
 };

@@ -25,6 +25,9 @@ export const ICONS = Object.freeze({
   GEAR:         '⚙',
   PLUS:         '➕',
   MINUS:        '➖',
+  COPY:         '⧉',
+  ARROW_UP:     '▲',
+  ARROW_DOWN:   '▼',
   FOLDER_OPEN:  '➖',
   FOLDER_SHUT:  '➕',
 });
@@ -37,6 +40,9 @@ export const BRANCH_PR_PALETTE = Object.freeze(['#7b5ea7', '#9b5de5', '#6a4c93',
 
 /** Line-dash styles for metric traces (cycles beyond 4). */
 export const DASH_PALETTE = Object.freeze(['solid', 'dot', 'dash', 'dashdot']);
+
+/** Divisor used to derive a default time step (delta) from a graph's max time. */
+export const DEFAULT_DELTA_DIVISOR = 20_000;
 
 /** Default legend format templates applied when no explicit override is set. */
 export const DEFAULT_LEGEND_FORMAT = Object.freeze({

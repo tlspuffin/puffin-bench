@@ -141,6 +141,15 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
       cmd << " " << source;
     } else {
       std::filesystem::path relativePath = std::filesystem::relative(source, job.baseDir_);
+      auto parentPath = relativePath.parent_path();
+      if ((!parentPath.empty()) && ((*parentPath.begin()) == "..")) {
+        std::filesystem::copy(source, job.baseDir_, std::filesystem::copy_options::skip_existing, ec);
+        if (!ec) {
+          relativePath = source.filename();
+        } else {
+          LOGW << "Unable to copy " << source << " in " << job.baseDir_ << Log::Flags::End;
+        }
+      }
       cmd << " " << relativePath.string();
    }
   }

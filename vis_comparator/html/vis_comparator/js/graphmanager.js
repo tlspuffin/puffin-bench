@@ -1,7 +1,7 @@
 // Shared commit colour palette — imported by index.js for commitRegistry assignment.
 import {CommitHelp} from "./commithelp.js";
 import { ICONS, COMMIT_PALETTE, DASH_PALETTE } from './constants.js';
-import { resolveMetricEntry, resolveExperimentSlot } from './state.js';
+import { resolveMetricEntry, resolveExperimentSlot, experimentKey, slotKey } from './state.js';
 
 /**
  * Manages Plotly graph instances displayed in the main area.
@@ -17,7 +17,14 @@ class GraphManager {
   #configs;
   #document;
   #callbacks;
+  // Re-entrant scroll-anchoring suppression for MoveGraph: count in-flight restores so
+  // rapid moves capture the true prior value once and restore only after the last one.
+  #moveAnchorPending = 0;
+  #moveAnchorPrev = '';
   static #nextid = 0;
+
+  // Selectable confidence-interval levels (percent); must match the server's accepted set.
+  static #CI_LEVELS = [60, 70, 80, 90, 95, 98, 99];
 
   // Four distinct colours for up to 4 experiments. Beyond 4, colours cycle.
   static #PALETTE = COMMIT_PALETTE;
@@ -28,9 +35,11 @@ class GraphManager {
   /**
    * @param {HTMLElement} container  - Container element where graph divs are appended
    * @param {object}      callbacks  - {
-   *   delete(id),          called when a graph is removed
-   *   getState(),          returns current app state ({ variables, commitRegistry })
-   *   editGraph(id),       called when the ⚙ button is clicked (optional)
+   *   delete(id),               called when a graph is removed
+   *   duplicate(newId, config), called after a graph is duplicated (optional)
+   *   reorder(),                called after graphs are reordered on screen (optional)
+   *   getState(),               returns current app state ({ variables, commitRegistry })
+   *   editGraph(id),            called when the ⚙ button is clicked (optional)
    * }
    */
   constructor(container, callbacks) {
@@ -45,9 +54,11 @@ class GraphManager {
    * Adds a graph (single or multi-experiment) to the page.
    * @param {object}              graphConfig - Canonical config (experiments array, metricsMode, metrics, …)
    * @param {Map<string, object>} dataMap     - "commit:type:subject" → { header, series }
+   * @param {number|null}         afterId     - Insert the new container right after this graph's
+   *                                            container; appended to the end when null/unknown.
    * @returns {Promise<number>} Numeric graph ID
    */
-  async AddGraph(graphConfig, dataMap) {
+  async AddGraph(graphConfig, dataMap, afterId = null) {
     const id = GraphManager.#nextid++;
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
 
@@ -56,8 +67,12 @@ class GraphManager {
       showAxesToggle: true,
       showRawToggle:  true,
       showCIToggle:   true,
+      ciLevel:        graphConfig.ciLevel ?? 95,
+      showXAxisSelect: true,
     });
-    this.#document.appendChild(graphContainer);
+    const afterEl = afterId != null ? this.#configs.get(afterId)?.graphContainer : null;
+    if (afterEl) afterEl.after(graphContainer);
+    else this.#document.appendChild(graphContainer);
 
     const stored = { graphConfig, dataMap, graphContainer, graphArea, hiddenGroups: new Set() };
     this.#configs.set(id, stored);
@@ -82,6 +97,8 @@ class GraphManager {
     if (graphConfig.showCI !== false) {
       document.getElementById('graph_ui_ci_' + id)?.classList.add('active');
     }
+    // Reflect a preset x-axis metric (e.g. from a loaded template) in the selector.
+    this.#SyncXAxisSelect(id);
 
     return id;
   }
@@ -104,6 +121,60 @@ class GraphManager {
     for (const id of Array.from(this.#configs.keys())) {
       this.DelGraph(id);
     }
+  }
+
+  /**
+   * Creates a copy of an existing graph directly below it, reusing the source's
+   * already-fetched data (no server round trip). The config is deep-cloned so the
+   * copy can be edited independently. Notifies the duplicate callback so app state
+   * can track the new graph.
+   * @param {number} id
+   */
+  async DuplicateGraph(id) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const clonedConfig = structuredClone(stored.graphConfig);
+    const newId = await this.AddGraph(clonedConfig, stored.dataMap, /*afterId=*/ id);
+    this.#callbacks?.duplicate?.(newId, clonedConfig);
+  }
+
+  /**
+   * Moves a graph one slot up or down on the page, then notifies the reorder callback.
+   * @param {number} id
+   * @param {number} dir  -1 = up, +1 = down
+   */
+  MoveGraph(id, dir) {
+    const el = this.#configs.get(id)?.graphContainer;
+    if (!el) return;
+    const sibling = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+    if (!sibling) return;                       // already at an end — nothing to do
+
+    // Reordering mutates the DOM, which makes the browser's scroll anchoring nudge
+    // scrollTop and visually shift the page. Disable anchoring on the container so the
+    // scroll position stays put across the move. It must stay disabled *through* the
+    // layout that processes this mutation: rAF callbacks run before that frame's layout,
+    // so we restore on the frame after (double rAF) to keep deletes/redraws anchoring.
+    // Capture the prior value only when no restore is in flight, so rapid consecutive
+    // moves don't capture the transient 'none' and leave anchoring stranded off.
+    const container = el.parentNode;
+    if (this.#moveAnchorPending === 0) this.#moveAnchorPrev = container.style.overflowAnchor;
+    this.#moveAnchorPending++;
+    container.style.overflowAnchor = 'none';
+
+    if (dir < 0) container.insertBefore(el, sibling);
+    else         container.insertBefore(sibling, el);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (--this.#moveAnchorPending === 0) container.style.overflowAnchor = this.#moveAnchorPrev;
+    }));
+    this.#callbacks?.reorder?.();
+  }
+
+  /** Returns graph IDs in their current on-screen (DOM) order. */
+  GetDomOrderedIds() {
+    return Array.from(this.#document.querySelectorAll(':scope > .graph-container'))
+      .map(el => Number(el.id.replace('graph-container_', '')))
+      .filter(domId => this.#configs.has(domId));
   }
 
   /** Notifies Plotly of a container size change for all graphs. */
@@ -133,12 +204,14 @@ class GraphManager {
    * @param {object}              graphConfig
    * @param {Map<string, object>} dataMap
    */
-  async UpdateGraph(id, graphConfig, dataMap) {
+  async UpdateGraph(id, graphConfig, dataMap, preserveView = false) {
     const stored = this.#configs.get(id);
     if (!stored) return;
     stored.graphConfig = graphConfig;
     stored.dataMap     = dataMap;
-    stored.hiddenGroups.clear();  // legendgroups may have changed
+    // Keep the user's hidden legend selections when only the data values changed
+    // (e.g. a CI-level change); clear them when the graph identity may have changed.
+    if (!preserveView) stored.hiddenGroups.clear();  // legendgroups may have changed
 
     // Update DOM title
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
@@ -155,8 +228,17 @@ class GraphManager {
       ?.classList.toggle('active', graphConfig.showRaw !== false);
     document.getElementById('graph_ui_ci_' + id)
       ?.classList.toggle('active', graphConfig.showCI !== false);
+    // Experiments/x-metric may have changed: drop the now-stale metric options (keep
+    // 'Time'), refresh the current selection, and force a repopulate on next interaction
+    // so the list can't offer metrics from the previous experiment set.
+    const xSel = document.getElementById('graph_ui_xaxis_' + id);
+    if (xSel) {
+      while (xSel.options.length > 1) xSel.remove(1);
+      xSel.dataset.populated = '';
+    }
+    this.#SyncXAxisSelect(id);
 
-    await this.#Draw(stored.graphArea, graphConfig, dataMap, stored);
+    await this.#Draw(stored.graphArea, graphConfig, dataMap, stored, preserveView);
   }
 
   /**
@@ -169,7 +251,7 @@ class GraphManager {
     stored.graphConfig.showRaw = !stored.graphConfig.showRaw;
     document.getElementById('graph_ui_raw_' + id)
       ?.classList.toggle('active', stored.graphConfig.showRaw);
-    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
+    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored, true);
   }
 
   /**
@@ -182,7 +264,7 @@ class GraphManager {
     stored.graphConfig.showCI = !(stored.graphConfig.showCI ?? false);
     document.getElementById('graph_ui_ci_' + id)
       ?.classList.toggle('active', stored.graphConfig.showCI !== false);
-    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
+    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored, true);
   }
 
   /**
@@ -197,6 +279,96 @@ class GraphManager {
     const eltSplit = document.getElementById('graph_ui_split_' + id);
     if (eltSplit) eltSplit.classList.toggle('active', stored.graphConfig.splitAxes);
     this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
+  }
+
+  /**
+   * Sets the x-axis metric for a graph (null / 'time' = plot against time).
+   * Unlike the Y-axis toggles (which redraw from the cached dataMap), a metric x-axis
+   * may need a series that isn't fetched yet, so this triggers a full re-fetch + redraw
+   * via the reloadGraph callback rather than #Draw.
+   * @param {number} id
+   * @param {string|null} path  resolved metric path, or null for time
+   */
+  async SetXMetric(id, path) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const next = path || null;
+    const prev = stored.graphConfig.xMetric ?? null;
+    if (prev === next) return;                                  // no-op
+    stored.graphConfig.xMetric = next;                          // shared ref → persisted
+    // The reload needs a series that may not be in the cached dataMap, so it re-fetches.
+    // If it fails (no data), roll the config back so it can't diverge from stored.dataMap
+    // and turn a later cheap redraw (Split/CI toggle) into all-warning traces.
+    const ok = await this.#callbacks?.reloadGraph?.(id);
+    if (ok === false) {
+      stored.graphConfig.xMetric = prev;
+      this.#SyncXAxisSelect(id);
+    }
+  }
+
+  /**
+   * Change the confidence-interval level of a graph. The CI bands are computed
+   * server-side, so this triggers a re-fetch + redraw (unlike ToggleCIShadow,
+   * which only shows/hides the already-fetched band). Rolls back on fetch failure.
+   */
+  async SetCILevel(id, level) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const next = Number(level);
+    const prev = stored.graphConfig.ciLevel ?? 95;
+    if (prev === next) return;                                  // no-op
+    stored.graphConfig.ciLevel = next;                          // shared ref → persisted
+    // Only the band values change: keep the current zoom and hidden-trace selection.
+    // Treat any non-true result (fetch failure or a no-op that didn't redraw) as a
+    // failure so the dropdown never shows a level the drawn band doesn't reflect.
+    const ok = await this.#callbacks?.reloadGraph?.(id, true);
+    if (ok !== true) {
+      stored.graphConfig.ciLevel = prev;
+      const sel = document.getElementById('graph_ui_ci_level_' + id);
+      if (sel) sel.value = String(prev);
+    }
+  }
+
+  /** Shows the graph's current x-axis metric in its selector without any fetch. */
+  #SyncXAxisSelect(id) {
+    const sel = document.getElementById('graph_ui_xaxis_' + id);
+    const stored = this.#configs.get(id);
+    if (!sel || !stored) return;
+    const current = (stored.graphConfig.xMetric && stored.graphConfig.xMetric !== 'time')
+      ? stored.graphConfig.xMetric : '';
+    if (current && ![...sel.options].some(o => o.value === current)) {
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = this.#MetricDisplayName(current);
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+  }
+
+  /** Fills a graph's x-axis <select> with 'Time' + every metric available to its experiments. */
+  async #PopulateXAxisOptions(id, sel) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const resolvedExps = this.#ResolveExperiments(stored.graphConfig)
+      .map(e => e.resolved).filter(Boolean);
+    let paths = [];
+    try {
+      paths = await this.#callbacks?.getMetricOptions?.(resolvedExps) ?? [];
+    } catch (err) {
+      console.error('[xaxis] metric options error:', err);
+      paths = [];
+    }
+    const current = (stored.graphConfig.xMetric && stored.graphConfig.xMetric !== 'time')
+      ? stored.graphConfig.xMetric : '';
+    if (current && !paths.includes(current)) paths = [current, ...paths];
+    while (sel.options.length > 1) sel.remove(1);  // keep the leading 'Time' option
+    for (const p of paths) {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = this.#MetricDisplayName(p);
+      sel.appendChild(opt);
+    }
+    sel.value = current;
   }
 
   /** Returns the dash style for a resolved metric path as it would be rendered. */
@@ -214,16 +386,25 @@ class GraphManager {
   /**
    * Resolves experiment slots to concrete { commit, tasktype, subtask } objects.
    * commitVar/subtaskVar refs are looked up in state.variables; null values → unresolved.
-   * @returns {Array<{ resolved: object|null, slot, idx, commitVarName: string|null, subtaskVarName: string|null }>}
+   * @returns {Array<{ resolved: object|null, slot, idx, commitVarName: string|null, subtaskVarName: string|null, campaignVarName: string|null }>}
    */
   #ResolveExperiments(graphConfig) {
     const vars = this.#callbacks?.getState?.()?.variables;
-    return graphConfig.experiments.map((slot, idx) => ({
-      resolved:       resolveExperimentSlot(slot, vars),
-      slot, idx,
-      commitVarName:  slot.commitVar  ?? null,
-      subtaskVarName: slot.subtaskVar ?? null,
-    }));
+    return graphConfig.experiments.map((slot, idx) => {
+      const resolved = resolveExperimentSlot(slot, vars);
+      // Non-pinned commit-mode runs resolve with timestamp:null; fill the latest
+      // timestamp so ${DATE}/${TIME}/${DATETIME} render. A pinned run already has
+      // its timestamp and is left untouched (and `resolved.pinned` drives the keys).
+      if (resolved && resolved.tasktype !== 'Campaign' && resolved.timestamp == null) {
+        resolved.timestamp = this.#callbacks?.getLatestTimestamp?.(resolved.tasktype, resolved.commit) ?? null;
+      }
+      return {
+        resolved, slot, idx,
+        commitVarName:   slot.commitVar   ?? null,
+        subtaskVarName:  slot.subtaskVar  ?? null,
+        campaignVarName: slot.campaignVar ?? null,
+      };
+    });
   }
 
   /**
@@ -275,8 +456,7 @@ class GraphManager {
    *   3. commitRegistry[key].displayName (individual override)
    */
   #ExperimentDisplayName(resolved, slot, state) {
-    const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
-    const entry  = state?.commitRegistry?.get(expKey);
+    const entry  = state?.commitRegistry?.get(slotKey(slot, resolved));
     if (entry?.displayName) return entry.displayName;
     const fmt = state?.legendFormat?.experiment;
     if (fmt) return GraphManager.#InterpolateExperiment(fmt, resolved, slot, state);
@@ -316,7 +496,29 @@ class GraphManager {
       .reduce((v, t) => GraphManager.#ApplySingleTransform(v, t), value);
   }
 
+  /**
+   * Expands a DATE/TIME/DATETIME token from an epoch-ms source `ms`.
+   * Returns '' when ms is null/undefined. Applies the token's default pattern
+   * unless the transform chain already contains a format(...) call, then runs
+   * the remaining transforms.
+   */
+  static #ExpandDateToken(token, transform, ms) {
+    if (ms == null) return '';
+    const defaults = { DATE: 'YYYY-MM-DD', TIME: 'HH:mm:ss', DATETIME: 'YYYY-MM-DD HH:mm:ss' };
+    const hasFormat = transform && /(^|:)\s*format\(/i.test(transform);
+    const chain = hasFormat
+      ? transform
+      : (transform ? `format(${defaults[token]}):${transform}` : `format(${defaults[token]})`);
+    return GraphManager.#ApplyTransform(String(ms), chain);
+  }
+
   static #ApplySingleTransform(value, str) {
+    // format(pattern) — interpret value as epoch-ms and format it (for DATE/TIME/DATETIME)
+    const fmtMatch = str.match(/^format\((.+)\)$/);
+    if (fmtMatch) {
+      return CommitHelp.FormatTimestamp(Number(value), fmtMatch[1]);
+    }
+
     // beforeFirst(regex)
     const bfMatch = str.match(/^beforeFirst\((.+)\)$/);
     if (bfMatch) {
@@ -356,8 +558,11 @@ class GraphManager {
 
   /**
    * Interpolates a legend format template for an experiment.
-   * Tokens: ${COMMIT}, ${TASKTYPE}, ${SUBTASK}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}
-   * Any token accepts an optional transform: ${TOKEN:transformName} or ${TOKEN:beforeFirst(regex)}
+   * Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS},
+   *   ${SUBTASK_ALIAS}, ${USER}, ${CAMPAIGN_NAME}, ${DATE}, ${TIME}, ${DATETIME}.
+   * Any token accepts an optional transform chain (e.g. :uppercase, :beforeFirst(regex)).
+   * DATE/TIME/DATETIME additionally accept :format(<pattern>) with YYYY/MM/DD/HH/mm/ss;
+   * without it they default to YYYY-MM-DD / HH:mm:ss / YYYY-MM-DD HH:mm:ss.
    */
   static #InterpolateExperiment(fmt, resolved, slot, state) {
     const shortHash = CommitHelp.ShortHash(resolved.commit);
@@ -380,11 +585,21 @@ class GraphManager {
       SUBTASK_NAME:  resolved.subtask,
       COMMIT_ALIAS:  commitAlias,
       SUBTASK_ALIAS: subtaskAlias,
+      USER:          resolved.user ?? '',
+      CAMPAIGN_NAME: resolved.campaign ?? '',
     };
 
-    return fmt.replace(/\$\{(COMMIT_HASH|SUBTASK_TYPE|SUBTASK_NAME|COMMIT_ALIAS|SUBTASK_ALIAS)(?::([^}]*))?\}/gi, (_, token, transform) => {
-      return GraphManager.#ApplyTransform(tokens[token.toUpperCase()] ?? '', transform);
-    });
+    const ts = resolved.timestamp;
+
+    return fmt.replace(
+      /\$\{(COMMIT_HASH|SUBTASK_TYPE|SUBTASK_NAME|COMMIT_ALIAS|SUBTASK_ALIAS|USER|CAMPAIGN_NAME|DATE|TIME|DATETIME)(?::([^}]*))?\}/gi,
+      (_, token, transform) => {
+        const T = token.toUpperCase();
+        if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
+          return GraphManager.#ExpandDateToken(T, transform, ts);
+        }
+        return GraphManager.#ApplyTransform(tokens[T] ?? '', transform);
+      });
   }
 
   /**
@@ -402,20 +617,22 @@ class GraphManager {
    * Tokens (case-insensitive): ${TEMPLATE}, ${DATE} (DD-MM-YYYY),
    *   ${<varname>_HASH}, ${<varname>_ALIAS} for commit variables,
    *   ${<varname>_NAME}, ${<varname>_TYPE}, ${<varname>_ALIAS} for subtask variables,
+   *   ${<varname>_USER}, ${<varname>_CAMPAIGN}, ${<varname>_COMMIT},
+   *   ${<varname>_SUBTYPE}, ${<varname>_DATE}, ${<varname>_ALIAS} for campaign variables,
    *   ${<varname>} for metric variables.
+   * ${<varname>_DATE} accepts a format(...) transform like ${DATE} (default YYYY-MM-DD).
    * Transforms (chained with :) are the same as legend format.
    * Unknown tokens are left as-is. Variables with no value → empty string.
    */
   static InterpolateTitleFormat(fmt, variables, templateName) {
-    const today = new Date();
-    const dd    = String(today.getDate()).padStart(2, '0');
-    const mm    = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy  = today.getFullYear();
+    const now = Date.now();
 
     const map = {
       TEMPLATE: templateName ?? '',
-      DATE:     `${dd}-${mm}-${yyyy}`,
     };
+    // Date-valued tokens hold a raw epoch-ms (or null); expanded via #ExpandDateToken
+    // so they honour a format(...) transform and fall back to the DATE default.
+    const dateTokens = {};
 
     for (const [name, entry] of variables.commits) {
       const k    = name.toUpperCase();
@@ -431,12 +648,29 @@ class GraphManager {
       map[`${k}_TYPE`]  = type;
       map[`${k}_ALIAS`] = entry?.alias || sub;
     }
+    for (const [name, entry] of (variables.campaigns ?? [])) {
+      const k   = name.toUpperCase();
+      const run = entry?.value ?? null;
+      map[`${k}_USER`]     = run?.user ?? '';
+      map[`${k}_CAMPAIGN`] = run?.campaign ?? '';
+      map[`${k}_COMMIT`]   = run?.commit ? CommitHelp.ShortHash(run.commit) : '';
+      map[`${k}_SUBTYPE`]  = run?.subject ?? '';
+      dateTokens[`${k}_DATE`] = run?.timestamp ?? null;
+      map[`${k}_ALIAS`]    = entry?.alias || (run?.campaign ?? '');
+    }
     for (const [name, path] of variables.metrics) {
       map[name.toUpperCase()] = path ?? '';
     }
 
     return fmt.replace(/\$\{([^:}]+)(?::([^}]*))?\}/gi, (match, token, transform) => {
-      const val = map[token.trim().toUpperCase()];
+      const T = token.trim().toUpperCase();
+      if (T === 'DATE' || T === 'TIME' || T === 'DATETIME') {
+        return GraphManager.#ExpandDateToken(T, transform, now);
+      }
+      if (T in dateTokens) {
+        return GraphManager.#ExpandDateToken('DATE', transform, dateTokens[T]);
+      }
+      const val = map[T];
       if (val === undefined) return match;
       return GraphManager.#ApplyTransform(val, transform);
     });
@@ -459,21 +693,14 @@ class GraphManager {
     const state = this.#callbacks?.getState?.();
 
     // ── Experiment labels ───────────────────────────────────────
-    resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName }, i) => {
+    resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName, campaignVarName }, i) => {
       if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
 
       // Show variable name badges for any variable-sourced sides
-      if (commitVarName) {
+      for (const varName of [commitVarName, subtaskVarName, campaignVarName].filter(Boolean)) {
         const badge = document.createElement('span');
         badge.className = 'graph-title-var-badge';
-        badge.textContent = commitVarName;
-        titleSpan.appendChild(badge);
-        titleSpan.appendChild(document.createTextNode('\u00a0'));
-      }
-      if (subtaskVarName) {
-        const badge = document.createElement('span');
-        badge.className = 'graph-title-var-badge';
-        badge.textContent = subtaskVarName;
+        badge.textContent = varName;
         titleSpan.appendChild(badge);
         titleSpan.appendChild(document.createTextNode('\u00a0'));
       }
@@ -534,7 +761,7 @@ class GraphManager {
     // ── Missing-data warning ──────────────────────────────────────
     // Show ⚠ if any resolved experiment has no data available (fetch failed or combination unknown)
     const missingExps = resolvedEntries
-      .filter(({ resolved }) => resolved && !dataMap?.get(`${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`))
+      .filter(({ resolved }) => resolved && !dataMap?.get(experimentKey(resolved)))
       .map(({ resolved }) => `${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`);
     if (missingExps.length > 0) {
       const warn = document.createElement('span');
@@ -564,7 +791,7 @@ class GraphManager {
     let timestamps = [];
     for (const { resolved } of resolvedEntries) {
       if (!resolved) continue;
-      const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+      const expKey = experimentKey(resolved);
       const data = dataMap?.get(expKey);
       if (data?.header) {
         const { min, max, step } = data.header;
@@ -572,6 +799,12 @@ class GraphManager {
         break;
       }
     }
+
+    // X-axis metric: null/'time' → plot against the shared time grid (timestamps);
+    // otherwise each experiment is plotted against its own resampled x-metric series,
+    // making the curve parametric (x(t), y(t)) — it need not increase left-to-right.
+    const xMetric = (graphConfig.xMetric && graphConfig.xMetric !== 'time')
+      ? graphConfig.xMetric : null;
 
     const traces = [];
 
@@ -589,13 +822,13 @@ class GraphManager {
         return;
       }
 
-      const expKey = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+      const expKey = experimentKey(resolved);
       const data   = dataMap?.get(expKey);
 
       // ── Placeholder: resolved experiment but data unavailable ─────
       if (!data) {
         const short    = CommitHelp.ShortHash(resolved.commit);
-        const regEntry = state?.commitRegistry?.get(expKey);
+        const regEntry = state?.commitRegistry?.get(slotKey(slot, resolved));
         traces.push({
           x: [], y: [],
           mode: 'lines',
@@ -608,12 +841,37 @@ class GraphManager {
       }
 
       const { series } = data;
-      const regEntry  = state?.commitRegistry?.get(expKey);
+      const regEntry  = state?.commitRegistry?.get(slotKey(slot, resolved));
       const expHidden = regEntry?.visible === false;
 
       const color     = regEntry?.color ?? GraphManager.#PALETTE[idx % GraphManager.#PALETTE.length];
       const fillColor = GraphManager.#HexToRgba(color, 0.2);
       const expLabel  = this.#ExperimentDisplayName(resolved, slot, state);
+
+      // ── Resolve the x-axis source for this experiment ──────────
+      //   Time  → shared grid timestamps.
+      //   Metric → this experiment's resampled x-series: xMean for aggregate traces,
+      //            xRaw[run] for individual runs. If the x-metric is absent for this
+      //            experiment we do NOT fall back to time (that would silently change
+      //            the axis meaning) — we emit a ⚠ warning trace and skip it.
+      let xMean = timestamps;   // aggregate x (mean/CI trio)
+      let xRaw  = null;         // per-run x arrays (metric mode only)
+      if (xMetric) {
+        const xMeanData = series[`${xMetric}.mean`];
+        if (!xMeanData) {
+          traces.push({
+            x: [], y: [],
+            mode: 'lines',
+            name: `${ICONS.WARN} ${expLabel} (no ${this.#MetricDisplayName(xMetric)})`,
+            line: { color, width: 2, dash: 'dot' },
+            showlegend: true,
+            visible: expHidden ? 'legendonly' : true,
+          });
+          return;
+        }
+        xMean = Array.isArray(xMeanData[0]) ? xMeanData[0] : xMeanData;
+        xRaw  = series[xMetric];
+      }
 
       // ── Render: mean + CI per experiment ───────────────────────
       metrics.forEach((metricName, metricIdx) => {
@@ -637,8 +895,8 @@ class GraphManager {
           if (metricsMode === 'OR') {
             const traceName = graphConfig.metrics.length === 1 ? expLabel : `${expLabel} \u00b7 ${metricLabel}`;
             traces.push({
-              x: timestamps,
-              y: Array(timestamps.length).fill(0),
+              x: xMean,
+              y: Array(xMean.length).fill(0),
               mode: 'lines',
               name: `â  ${traceName} (absent)`,
               line: { width: 1.5, color, dash: 'dot' },
@@ -657,19 +915,24 @@ class GraphManager {
         if (showCI === true && series[lowerKey] && series[upperKey]) {
           const ciLower = Array.isArray(series[lowerKey][0]) ? series[lowerKey][0] : series[lowerKey];
           const ciUpper = Array.isArray(series[upperKey][0]) ? series[upperKey][0] : series[upperKey];
-          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group, visible: traceVisible });
-          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
         } else {
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group, visible: traceVisible });
         }
 
         if (showRaw) {
           const rawData = series[metricName];
           if (rawData && Array.isArray(rawData[0])) {
-            rawData.forEach(runData => {
+            rawData.forEach((runData, runIdx) => {
+              // Pair run i's y with run i's own x-metric series (metric mode) or the
+              // shared time grid. No silent fallback: if this run lacks the x-metric,
+              // skip it rather than mislabel its x-axis.
+              const rawX = xMetric ? xRaw?.[runIdx] : timestamps;
+              if (!rawX) return;
               traces.push({
-                x: timestamps, y: runData,
+                x: rawX, y: runData,
                 mode: 'lines',
                 name: `${expLabel} raw`,
                 line: { width: 1, color, dash: 'dot' },
@@ -689,7 +952,7 @@ class GraphManager {
   }
 
   /** Unified draw function — replaces the former #DrawGraph / #DrawCompareGraph pair. */
-  async #Draw(container, graphConfig, dataMap, stored = null) {
+  async #Draw(container, graphConfig, dataMap, stored = null, preserveView = false) {
     const hiddenBefore = stored?.hiddenGroups ? new Set(stored.hiddenGroups) : new Set();
 
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
@@ -699,10 +962,19 @@ class GraphManager {
     const { splitAxes } = graphConfig;
     const splitActive = splitAxes && resolvedMetrics.length > 1;
 
+    // X-axis: time (shared grid) vs a metric (parametric per-experiment curves).
+    const xMetric = (graphConfig.xMetric && graphConfig.xMetric !== 'time')
+      ? graphConfig.xMetric : null;
+    // With a metric x-axis each experiment has its own x-values, so x-unified hover
+    // (which snaps every trace to a shared x) would be misleading — use closest.
+    const xaxis = xMetric
+      ? { title: this.#MetricDisplayName(xMetric), type: 'linear', rangemode: 'tozero' }
+      : { title: 'Time (s)', type: 'linear', ticksuffix: 's' };
+
     const layout = {
-      xaxis:     { title: 'Time (s)', type: 'linear', ticksuffix: 's' },
-      yaxis:     { title: splitActive ? this.#MetricDisplayName(resolvedMetrics[0]) : 'Value', type: 'linear' },
-      hovermode: 'x unified',
+      xaxis,
+      yaxis:     { title: splitActive ? this.#MetricDisplayName(resolvedMetrics[0]) : 'Value', type: 'linear', rangemode: 'tozero' },
+      hovermode: xMetric ? 'closest' : 'x unified',
       hoverlabel: { namelength: -1 },
       showlegend: true,
       // Legend always sits outside the plot area to the right so traces are never covered.
@@ -718,6 +990,20 @@ class GraphManager {
       const { xDomain, axes } = GraphManager.#BuildSplitAxisLayout(metricLabels);
       layout.xaxis.domain = xDomain;
       Object.assign(layout, axes);
+    }
+
+    // Carry over the user's current zoom/pan when only the data changed (e.g. a
+    // CI-level change): copy any manually-set axis ranges into the fresh layout so
+    // Plotly.newPlot doesn't snap back to autorange.
+    if (preserveView && container.layout) {
+      for (const key of Object.keys(layout)) {
+        if (!/^[xy]axis\d*$/.test(key)) continue;
+        const prevAxis = container.layout[key];
+        if (prevAxis && prevAxis.autorange === false && Array.isArray(prevAxis.range)) {
+          layout[key].range     = prevAxis.range.slice();
+          layout[key].autorange = false;
+        }
+      }
     }
 
     const plotlyConfig = {
@@ -754,6 +1040,17 @@ class GraphManager {
     }
   }
 
+  /** Builds a title-bar icon button. */
+  static #MakeIconBtn({ id, icon, title, onclick, className = 'graph-icon-btn' }) {
+    const btn = document.createElement('button');
+    btn.className   = className;
+    btn.id          = id;
+    btn.textContent = icon;
+    btn.title       = title;
+    btn.onclick     = onclick;
+    return btn;
+  }
+
   #BuildGraphContainer(id, options) {
     const container = document.createElement('div');
     container.id        = 'graph-container_' + id;
@@ -782,43 +1079,51 @@ class GraphManager {
         const controlsDiv = document.createElement('div');
         controlsDiv.className = 'graph-title-controls';
 
+        // ▲ Move up · ▼ Move down · ⧉ Duplicate
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_up_' + id, icon: ICONS.ARROW_UP, title: 'Move up',
+          onclick: this.MoveGraph.bind(this, id, -1),
+        }));
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_down_' + id, icon: ICONS.ARROW_DOWN, title: 'Move down',
+          onclick: this.MoveGraph.bind(this, id, +1),
+        }));
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_duplicate_' + id, icon: ICONS.COPY, title: 'Duplicate graph',
+          onclick: () => this.DuplicateGraph(id),
+        }));
+
         // ⚙ Edit button (Phase E) — only when editGraph callback is provided
         if (this.#callbacks?.editGraph) {
-          const eltEdit = document.createElement('button');
-          eltEdit.className   = 'graph-icon-btn graph-icon-btn-edit';
-          eltEdit.id          = 'graph_ui_edit_' + id;
-          eltEdit.textContent = ICONS.GEAR;
-          eltEdit.title       = 'Edit graph settings';
-          eltEdit.onclick     = () => this.#callbacks.editGraph(id);
-          controlsDiv.appendChild(eltEdit);
+          controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+            id: 'graph_ui_edit_' + id, icon: ICONS.GEAR, title: 'Edit graph settings',
+            className: 'graph-icon-btn graph-icon-btn-edit',
+            onclick: () => this.#callbacks.editGraph(id),
+          }));
         }
 
         // ➖ Collapse button
-        const eltCollapse = document.createElement('button');
-        eltCollapse.className   = 'graph-icon-btn';
-        eltCollapse.id          = 'graph_ui_collapse_' + id;
-        eltCollapse.textContent = ICONS.MINUS;
-        eltCollapse.title       = 'Minimize';
-        eltCollapse.onclick = function() {
-          const isVisible = graphArea.style.display !== 'none';
-          graphArea.style.display = isVisible ? 'none' : '';
-          // Also collapse/expand the toggle bar (Split Y-Axes / All Runs / Confidence Bands)
-          const toggleBar = container.querySelector('.graph-toggle-bar');
-          if (toggleBar) toggleBar.style.display = isVisible ? 'none' : '';
-          eltCollapse.textContent = isVisible ? ICONS.PLUS : ICONS.MINUS;
-          eltCollapse.title       = isVisible ? 'Expand'  : 'Minimize';
-          if (!isVisible) Plotly.Plots.resize(graphArea);
-        };
+        const eltCollapse = GraphManager.#MakeIconBtn({
+          id: 'graph_ui_collapse_' + id, icon: ICONS.MINUS, title: 'Minimize',
+          onclick: function() {
+            const isVisible = graphArea.style.display !== 'none';
+            graphArea.style.display = isVisible ? 'none' : '';
+            // Also collapse/expand the toggle bar (Split Y-Axes / All Runs / Confidence Bands)
+            const toggleBar = container.querySelector('.graph-toggle-bar');
+            if (toggleBar) toggleBar.style.display = isVisible ? 'none' : '';
+            eltCollapse.textContent = isVisible ? ICONS.PLUS : ICONS.MINUS;
+            eltCollapse.title       = isVisible ? 'Expand'  : 'Minimize';
+            if (!isVisible) Plotly.Plots.resize(graphArea);
+          },
+        });
         controlsDiv.appendChild(eltCollapse);
 
         // ✖ Delete button
-        const eltDelete = document.createElement('button');
-        eltDelete.className   = 'graph-icon-btn graph-icon-btn-delete';
-        eltDelete.id          = 'graph_ui_delete_' + id;
-        eltDelete.textContent = ICONS.CLOSE_HEAVY;
-        eltDelete.title       = 'Delete graph';
-        eltDelete.onclick     = this.DelGraph.bind(this, id);
-        controlsDiv.appendChild(eltDelete);
+        controlsDiv.appendChild(GraphManager.#MakeIconBtn({
+          id: 'graph_ui_delete_' + id, icon: ICONS.CLOSE_HEAVY, title: 'Delete graph',
+          className: 'graph-icon-btn graph-icon-btn-delete',
+          onclick: this.DelGraph.bind(this, id),
+        }));
 
         titleBar.appendChild(controlsDiv);
       }
@@ -826,7 +1131,8 @@ class GraphManager {
       container.appendChild(titleBar);
 
       // ── Toggle bar ──────────────────────────────────────────────
-      const showAnyToggle = options?.showAxesToggle || options?.showRawToggle || options?.showCIToggle;
+      const showAnyToggle = options?.showAxesToggle || options?.showRawToggle
+        || options?.showCIToggle || options?.showXAxisSelect;
       if (showAnyToggle) {
         const toggleBar = document.createElement('div');
         toggleBar.className = 'graph-toggle-bar';
@@ -846,7 +1152,7 @@ class GraphManager {
           eltRaw.className = 'graph-toggle-btn';
           eltRaw.id        = 'graph_ui_raw_' + id;
           eltRaw.textContent = 'All Runs';
-          eltRaw.title     = 'Show each individual run as a separate trace';
+          eltRaw.title     = 'Show each individual client run as a separate trace';
           eltRaw.onclick   = this.ToggleRawTraces.bind(this, id);
           toggleBar.appendChild(eltRaw);
         }
@@ -856,9 +1162,74 @@ class GraphManager {
           eltCI.className = 'graph-toggle-btn';
           eltCI.id        = 'graph_ui_ci_' + id;
           eltCI.textContent = 'Confidence Bands';
-          eltCI.title     = 'Show 95% confidence interval around the mean';
+          eltCI.title     = 'Show the confidence interval around the mean';
           eltCI.onclick   = this.ToggleCIShadow.bind(this, id);
           toggleBar.appendChild(eltCI);
+
+          // CI level selector: re-fetches from the server (bands are computed server-side).
+          const ciWrap = document.createElement('label');
+          ciWrap.className = 'graph-pill-select';
+          ciWrap.title = 'Confidence-interval level for the bands';
+
+          const ciLabel = document.createElement('span');
+          ciLabel.className   = 'graph-pill-label';
+          ciLabel.textContent = 'CI:';
+
+          const ciSel = document.createElement('select');
+          ciSel.id = 'graph_ui_ci_level_' + id;
+          const ciLevels = GraphManager.#CI_LEVELS;
+          // Snap an unsupported/legacy stored level to 95 so the shown option, the
+          // config, and the server-side fallback all agree.
+          const currentCI = ciLevels.includes(Number(options.ciLevel)) ? Number(options.ciLevel) : 95;
+          for (const level of ciLevels) {
+            const opt = document.createElement('option');
+            opt.value = String(level);
+            opt.textContent = level + '%';
+            if (level === currentCI) opt.selected = true;
+            ciSel.appendChild(opt);
+          }
+          ciSel.onchange = () => this.SetCILevel(id, ciSel.value);
+
+          ciWrap.appendChild(ciLabel);
+          ciWrap.appendChild(ciSel);
+          toggleBar.appendChild(ciWrap);
+        }
+
+        if (options?.showXAxisSelect) {
+          // X-axis selector: Time (default) or any metric. Options are populated
+          // lazily on first interaction (a fetch per experiment) so time-default
+          // graphs don't trigger metric lookups on load; the current selection is
+          // shown immediately by #SyncXAxisSelect without any fetch.
+          const xWrap = document.createElement('label');
+          xWrap.className = 'graph-pill-select graph-xaxis-select';
+          xWrap.title = 'Choose the quantity plotted on the X-axis';
+
+          const xLabel = document.createElement('span');
+          xLabel.className   = 'graph-pill-label';
+          xLabel.textContent = 'X:';
+
+          const xSel = document.createElement('select');
+          xSel.id = 'graph_ui_xaxis_' + id;
+          const optTime = document.createElement('option');
+          optTime.value = '';
+          optTime.textContent = 'Time';
+          xSel.appendChild(optTime);
+
+          const populate = () => {
+            if (xSel.dataset.populated === '1') return;
+            xSel.dataset.populated = '1';
+            this.#PopulateXAxisOptions(id, xSel);
+          };
+          // pointerenter (hover) pre-fills before the click so the first open is complete;
+          // pointerdown/focus are fallbacks for keyboard/touch.
+          xSel.addEventListener('pointerenter', populate);
+          xSel.addEventListener('pointerdown', populate);
+          xSel.addEventListener('focus', populate);
+          xSel.onchange = () => this.SetXMetric(id, xSel.value || null);
+
+          xWrap.appendChild(xLabel);
+          xWrap.appendChild(xSel);
+          toggleBar.appendChild(xWrap);
         }
 
         container.appendChild(toggleBar);
@@ -880,7 +1251,7 @@ class GraphManager {
     const domainStart = extraLeftCount > 0 ? extraLeftCount * PAD : 0;
     const domainEnd   = rightCount > 1 ? 1 - (rightCount - 1) * PAD : 1;
 
-    const axes = { yaxis: { title: { text: metrics[0], standoff: 8 }, type: 'linear' } };
+    const axes = { yaxis: { title: { text: metrics[0], standoff: 8 }, type: 'linear', rangemode: 'tozero' } };
 
     metrics.slice(1).forEach((metric, i) => {
       const axisKey = 'yaxis' + (i + 2);
@@ -895,6 +1266,7 @@ class GraphManager {
         side:       isRight ? 'right' : 'left',
         title:      { text: metric, standoff: 8 },
         type:       'linear',
+        rangemode:  'tozero',
         anchor:     'free',
         position,
       };

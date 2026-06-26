@@ -53,7 +53,7 @@ iframe {
 #navigation:hover #navitems {
   padding: 15px 30px;
   border-width: 2px;
-  max-height: 5lh;
+  max-height: 8lh;
 
   transition: all 0.5s, border-width 0.5s step-start;
 }

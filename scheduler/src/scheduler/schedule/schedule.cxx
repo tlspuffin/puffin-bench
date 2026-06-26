@@ -213,13 +213,14 @@ void ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     uint64_t stepUUID, std::string const& stepID,
     struct FileExtractedText& data) {
-  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
-    return;
-  }
 
   tasksManager_.GetRunningOutput(type, 
       std::stoull(taskID), stepUUID, data);
   if (data.state != FileReadState::NotExecuted) {
+    return;
+  }
+
+  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
     return;
   }
 
@@ -257,6 +258,15 @@ void ns_Schedule::Schedule::GetOutput(
     data.state = FileReadState::Error_Access;
     return;
   }
+}
+
+bool ns_Schedule::Schedule::GetTaskData(std::string const& task_id, 
+    std::string& fileStateJSON, std::string& fileArtefacts) {
+  if (GetTaskFinalData(task_id, fileStateJSON, fileArtefacts)) {
+    return true;
+  }
+  fileStateJSON = tasksManager_.GetTaskState(stoull(task_id));
+  return !fileStateJSON.empty();
 }
 
 bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id, 
@@ -446,9 +456,6 @@ void ns_Schedule::Schedule::ManageEndOfStep(
   step->GatherFilesToLocal();
 
   if (step->TaskLastStep()) {
-    step->SetUserRunState(
-        step->task_->request_cancel_ ? "flow cancelled" : "flow ended");
-    users_.Add(step->task_, false);
     uint64_t task_id = step->TaskID();
     ArchiveJob archiveJob = step->FinalizeAndArchive(
         step->task_->request_cancel_ ? config_.exportCanceledPath_ : config_.exportPath_);
@@ -456,6 +463,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
       archiveJob.doPublish_ = !step->task_->request_cancel_;
       archiver_.AddJob(archiveJob);
     }
+    users_.Add(step->task_, false);
     tasksManager_.TaskEnded(step->task_);
     LOGI << "Tasks " << task_id << " done" << Log::Flags::End;
   }

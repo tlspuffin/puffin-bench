@@ -1,22 +1,24 @@
 {
   "publish": {
     "server": "default",
-    "storage": "tlspuffin/PR/${COMMIT_ID}/Perf/",
+    "storage": "${PACKAGE}/PR/${COMMIT_ID}/Perf/",
     "goal": "Perf PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
     "LibreSSL": {
       "args": {
-        "experiment": "LibreSSL 333",
+        "experiment": "LibreSSL",
         "required_features": "introspection",
-        "features": "asan,libressl"
+        "features": "asan,libressl",
+        "vendor": "libressl:libressl421-asan"
       }
     },
     "BoringSSL": {
       "args": {
-        "experiment": "BoringSSL 202403",
+        "experiment": "BoringSSL",
         "required_features": "introspection",
-        "features": "asan,boringssl202403"
+        "features": "asan,boringssl202403",
+        "vendor": "boringssl:boringssl20260508-asan"
       }
     },
     "OpenSSL": {
@@ -36,6 +38,9 @@
       }
     }
   },
+  "args": {
+    "TYPE": "perf"
+  },
   "name" : "Performance - ${COMMIT_ID}",
   "flow" : [
     {
@@ -43,11 +48,14 @@
     }, 
     [
       {
-        "run": [ "LibreSSL", "BoringSSL", "OpenSSL", "WolfSSL" ],
+        "run": [ ],
         "configuration": {
           "nb_retry": 5,
           "nb_cores": 3
-        }
+        },
+        "streams": [
+          { "name": "error", "path": "current_log/error.log" }
+        ]
       },
       {
         "step": "ForcedBuild"
@@ -64,7 +72,7 @@
         }
       },
       {
-        "step": "ExperimentEndCommon"
+        "step": "ExperimentEnd"
       }
     ],
     {

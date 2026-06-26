@@ -168,9 +168,9 @@ Persists processed state in `.project/.index.json`.
 }
 ```
 
-Key methods: `HaveCachedJSON()`, `HaveIndexed()`, `Add()`, `Load()`, `Save()`.
+Key methods: `HaveIndexed()`, `Add()`, `Load()`, `Save()`.
 
-`HaveCachedJSON()` returns `true` only when the entry is in the index **and** the output JSON file exists on disk — used by `ScanStorage()` to skip files.
+`HaveIndexed()` returns `true` only when the entry is in the index **and** the output JSON file exists on disk — used by `ScanStorage()` to skip files.
 
 ---
 

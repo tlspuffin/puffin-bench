@@ -59,7 +59,7 @@ public:
     GroupStepConfigurations const& groupConfigurations, 
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration,
-    rapidjson::Value const* monitorJSON);
+    rapidjson::Value const* monitorJSON, rapidjson::Value const* streamsConfigJSON[2]);
   Step(ns_Schedule::Task* task, rapidjson::Value const& config, 
       struct UUIDDependencies& dependencies);
   ~Step();
@@ -141,6 +141,12 @@ public:
 
   uint16_t group_status_;
 
+  struct Stream {
+    std::string name;
+    std::string path;
+  };
+  std::vector<struct Stream> readable_files_;
+
 private:
   enum class State { 
     Pending, 
@@ -156,13 +162,14 @@ private:
   std::chrono::time_point<std::chrono::system_clock> time_points_[2];
   std::string user_run_state_;
 
-  Step(Step const& src);
+  Step(Step const& src) = delete;
 
   static std::atomic<uint64_t> next_uuid_;
   static uint64_t ToMillis(std::chrono::time_point<std::chrono::system_clock> const& tp);
   static std::chrono::system_clock::time_point FromMillis(uint64_t millis);
   static std::string StateEnumToString(State state);
   static State StateStringToEnum(std::string const& state);
+  static std::vector<Stream> MergeStreamsConfig(rapidjson::Value const* streamsConfigJSON[2]);
 };
 
 inline uint64_t Step::TaskID() const {

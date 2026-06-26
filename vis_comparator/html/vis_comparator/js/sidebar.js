@@ -12,11 +12,16 @@ import {
   nextCommitColor,
   getKnownSubtasks,
   globalDynamicSubtasks,
+  globalCampaigns,
   setModalCancel,
   clearModalCancel,
   dedupSubtasks,
   isVarReferenced,
+  experimentKey,
+  slotKey,
+  fetchMetricSet,
 } from './state.js';
+import { CommitHelp } from './commithelp.js';
 
 // ============================================================
 // DEPENDENCY INJECTION
@@ -116,6 +121,7 @@ export function BuildSidebar(state) {
 
   sidebar.appendChild(buildCommitVariableSection(state));
   sidebar.appendChild(buildSubtaskVariableSection(state));
+  sidebar.appendChild(buildCampaignVariableSection(state));
   sidebar.appendChild(buildMetricVariableSection(state));
   sidebar.appendChild(buildExperimentLegend(state));
   sidebar.appendChild(buildMetricLegend(state));
@@ -127,43 +133,48 @@ export function BuildSidebar(state) {
 
 /** Re-renders traces for all graphs (appearance only, no re-fetch). */
 export function refreshAllGraphAppearances(state) {
-  for (const id of state.graphSettings.keys()) {
+  for (const { id } of state.graphSettings) {
     _graphManager.RefreshGraphAppearance(id);
   }
 }
 
 /** Re-fetches and redraws all graphs that reference the given variable name. */
 export function refreshGraphsUsingVariable(state, varName) {
-  for (const [id, config] of state.graphSettings) {
-    const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName)
+  // Only experiment-defining variables (commit/subtask/campaign) can change the data
+  // extent; a metric-variable change must not refit a user's custom time range.
+  const isExperimentVar = state.variables.commits.has(varName)
+    || state.variables.subtasks.has(varName)
+    || state.variables.campaigns.has(varName);
+  for (const { id, config } of state.graphSettings) {
+    const usesVar = config.experiments.some(s => s.commitVar === varName || s.subtaskVar === varName || s.campaignVar === varName)
       || config.metrics.some(m => m?.variable === varName);
     if (usesVar) {
-      _refetchAndRedrawGraph(state, id, config).catch(err => console.error('[sidebar] refetch error:', err));
+      _refetchAndRedrawGraph(state, id, config, isExperimentVar).catch(err => console.error('[sidebar] refetch error:', err));
     }
   }
 }
 
-function getGraphIDsUsingExperiment(state, expKey) {
+function getGraphIDsUsingExperiment(state, key) {
   const ids = [];
-  for (const [id, config] of state.graphSettings) {
+  for (const { id, config } of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
-      if (def && `${def.commit}:${def.tasktype}:${def.subtask}` === expKey) { ids.push(id); break; }
+      if (def && slotKey(slot, def) === key) { ids.push(id); break; }
     }
   }
   return ids;
 }
 
-/** Re-colours/renames traces for all graphs using the given experiment (no re-fetch). */
-export function refreshGraphsUsingExperiment(state, expKey) {
-  for (const id of getGraphIDsUsingExperiment(state, expKey)) {
+/** Re-colours/renames traces for all graphs using the given slot key (no re-fetch). */
+export function refreshGraphsUsingExperiment(state, key) {
+  for (const id of getGraphIDsUsingExperiment(state, key)) {
     _graphManager.RefreshGraphAppearance(id);
   }
 }
 
 function getGraphIDsUsingMetric(state, metricPath) {
   const ids = [];
-  for (const [id, config] of state.graphSettings) {
+  for (const { id, config } of state.graphSettings) {
     const uses = config.metrics.some(m =>
       resolveMetricEntry(m, state.variables.metrics) === metricPath
     );
@@ -179,12 +190,17 @@ export function refreshGraphsUsingMetric(state, metricPath) {
   }
 }
 
-/** Resolves variables and re-fetches data for a graph, then redraws it in place. */
-async function _refetchAndRedrawGraph(state, id, config) {
+/**
+ * Resolves variables and re-fetches data for a graph, then redraws it in place.
+ * @returns {Promise<boolean>} true if the graph was redrawn, false if nothing was
+ *   drawn (unresolved experiments/metrics or no data). Callers that optimistically
+ *   mutated the config can use this to roll back on a false result.
+ */
+async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false, preserveView = false) {
   const resolved = config.experiments
     .map(slot => resolveExperimentSlot(slot, state.variables))
     .filter(Boolean);
-  if (resolved.length === 0) return;
+  if (resolved.length === 0) return false;
 
   // Deduplicate: two variables may resolve to the same path
   const resolvedMetrics = [...new Set(
@@ -192,13 +208,24 @@ async function _refetchAndRedrawGraph(state, id, config) {
       .map(m => resolveMetricEntry(m, state.variables.metrics))
       .filter(m => m != null)
   )];
-  if (resolvedMetrics.length === 0) return;
+  if (resolvedMetrics.length === 0) return false;
+
+  // An experiment change can alter the data extent; refit the range so we don't draw a
+  // trail of zeroes or truncate the tail. Mutates the live config in state.graphSettings.
+  // Skipped for metric-only changes so a user's custom time range is preserved.
+  if (recomputeRange) {
+    const range = await _apirest.ComputeTimeRange(resolved);
+    if (range) Object.assign(config, range);
+  }
+
+  // Fetch the x-axis metric too when the x-axis is a metric (not time).
+  const fetchMetrics = fetchMetricSet(resolvedMetrics, config);
 
   const results = await Promise.all(
     resolved.map(exp => _apirest.LoadCommitMetricsValues(
       exp.tasktype, exp.commit, exp.subtask,
       config.min, config.max, config.delta,
-      resolvedMetrics
+      fetchMetrics, exp.timestamp, config.ciLevel ?? 95
     ))
   );
 
@@ -206,11 +233,23 @@ async function _refetchAndRedrawGraph(state, id, config) {
     resolved
       .map((exp, i) => ({ exp, data: results[i] }))
       .filter(p => p.data != null)
-      .map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
+      .map(p => [experimentKey(p.exp), p.data])
   );
 
-  if (dataMap.size === 0) return;
-  await _graphManager.UpdateGraph(id, config, dataMap);
+  if (dataMap.size === 0) return false;
+  await _graphManager.UpdateGraph(id, config, dataMap, preserveView);
+  return true;
+}
+
+/**
+ * Re-fetches and redraws a single graph by id (used when its x-axis metric changes).
+ * Looks up the live config in state.graphSettings so the mutated xMetric is honoured.
+ * @returns {Promise<boolean>} whether the graph was redrawn (see _refetchAndRedrawGraph).
+ */
+export async function reloadGraphData(state, id, preserveView = false) {
+  const entry = state.graphSettings.find(g => g.id === id);
+  if (!entry) return false;
+  return _refetchAndRedrawGraph(state, id, entry.config, false, preserveView);
 }
 
 // ============================================================
@@ -271,7 +310,7 @@ function buildCommitVariableSection(state) {
   const section = buildSidebarSection('Variables: Commits', 'Add commit variable', () => {
     let n = 1;
     while (state.variables.commits.has(`c${n}`)) n++;
-    state.variables.commits.set(`c${n}`, { value: null, alias: null });
+    state.variables.commits.set(`c${n}`, { value: null, timestamp: null, alias: null });
     BuildSidebar(state);
   });
 
@@ -281,7 +320,7 @@ function buildCommitVariableSection(state) {
 
     buildVarCardHeader(card, name, entry?.value !== null && entry?.value !== undefined,
       () => {
-        state.variables.commits.set(name, { value: null, alias: entry?.alias ?? null });
+        state.variables.commits.set(name, { value: null, timestamp: null, alias: entry?.alias ?? null });
         refreshGraphsUsingVariable(state, name);
         BuildSidebar(state);
       },
@@ -299,15 +338,25 @@ function buildCommitVariableSection(state) {
     const commitPicker = _ui.CreateCommitPicker(
       _gitHistoryPromise,
       _allCommitsPromise,
-      { selected: entry?.value ?? null }
+      {
+        selected: entry?.value ?? null,
+        selectedTimestamp: entry?.timestamp ?? null,
+        getRunCount: (commit) => _apirest.RunCountSync(commit),
+        loadRuns: (commit) => _apirest.LoadRuns(commit),
+      }
     );
     commitPicker.addEventListener('change', () => {
       const newValue = commitPicker.value || null;
-      state.variables.commits.set(name, { value: newValue, alias: entry?.alias ?? null });
+      const newTs = commitPicker.timestamp ?? null;
+      state.variables.commits.set(name, { value: newValue, timestamp: newTs, alias: entry?.alias ?? null });
       refreshGraphsUsingVariable(state, name);
       BuildSidebar(state);
 
       if (newValue) {
+        // Subtask discovery stays on the latest run of each type: a pinned
+        // timestamp belongs to one type only, so passing it here would empty the
+        // other type's subjects. The pinned run is honoured on the data path
+        // (resolveExperimentSlot -> LoadCommitMetrics/Values).
         Promise.all([
           _apirest.LoadCommitSubjects(TASK_TYPES.PERF, newValue),
           _apirest.LoadCommitSubjects(TASK_TYPES.VULN, newValue)
@@ -322,8 +371,8 @@ function buildCommitVariableSection(state) {
     card.appendChild(commitPicker);
 
     buildAliasRow(card, entry?.alias, (newAlias) => {
-      const cur = state.variables.commits.get(name) ?? { value: null, alias: null };
-      state.variables.commits.set(name, { value: cur.value, alias: newAlias });
+      const cur = state.variables.commits.get(name) ?? { value: null, timestamp: null, alias: null };
+      state.variables.commits.set(name, { value: cur.value, timestamp: cur.timestamp ?? null, alias: newAlias });
       refreshAllGraphAppearances(state);
     });
 
@@ -402,6 +451,63 @@ function buildSubtaskVariableSection(state) {
   return section;
 }
 
+/** Short, human-readable label for a campaign run (`{user,campaign,commit,timestamp,subjects[]}`). */
+function campaignRunLabel(run) {
+  return CommitHelp.CampaignRunLabel({
+    user: run.user, campaign: run.campaign, commit: run.commit,
+    timestamp: run.timestamp, subject: (run.subjects && run.subjects[0]) || null,
+  });
+}
+
+function buildCampaignVariableSection(state) {
+  const section = buildSidebarSection('Variables: Campaigns', 'Add campaign variable', () => {
+    let n = 1;
+    while (state.variables.campaigns.has(`k${n}`)) n++;
+    state.variables.campaigns.set(`k${n}`, { value: null, alias: null });
+    BuildSidebar(state);
+  });
+
+  for (const [name, entry] of state.variables.campaigns) {
+    const card = document.createElement('div');
+    card.className = 'sidebar-variable-card';
+
+    buildVarCardHeader(card, name, entry?.value !== null && entry?.value !== undefined,
+      () => {
+        state.variables.campaigns.set(name, { value: null, alias: entry?.alias ?? null });
+        refreshGraphsUsingVariable(state, name);
+        BuildSidebar(state);
+      },
+      () => {
+        if (isVarReferenced(state, name, 'campaign')) {
+          _errorManager.Error(`Variable "${name}" is used by one or more graphs — remove it from the graphs before deleting.`);
+          return;
+        }
+        state.variables.campaigns.delete(name);
+        BuildSidebar(state);
+      }
+    );
+
+    const campaignSel = _ui.CreateCampaignPicker(globalCampaigns, { selected: entry?.value ?? null });
+    campaignSel.addEventListener('change', () => {
+      const run = campaignSel.value || null;
+      state.variables.campaigns.set(name, { value: run, alias: entry?.alias ?? null });
+      refreshGraphsUsingVariable(state, name);
+      BuildSidebar(state);
+    });
+    card.appendChild(campaignSel);
+
+    buildAliasRow(card, entry?.alias, (newAlias) => {
+      const cur = state.variables.campaigns.get(name) ?? { value: null, alias: null };
+      state.variables.campaigns.set(name, { value: cur.value, alias: newAlias });
+      refreshAllGraphAppearances(state);
+    });
+
+    section.appendChild(card);
+  }
+
+  return section;
+}
+
 function buildMetricVariableSection(state) {
   const section = buildSidebarSection('Variables: Metrics', 'Add metric variable', () => {
     let n = 1;
@@ -443,17 +549,22 @@ function buildMetricVariableSection(state) {
   return section;
 }
 
-// Returns the set of experiment keys ("commit:type:subject") currently used in graphs.
-// Resolves variable slots; ignores unresolved variables.
-function getActiveExperimentKeys(state) {
-  const keys = new Set();
-  for (const [, config] of state.graphSettings) {
+// Returns the distinct active slots across all graphs, keyed by slotKey so a slot
+// reused in multiple graphs (and the colour bound to it) appears once. Variable-defined
+// parts key on the variable name (template-stable); literal parts key on the resolved
+// value. Each entry carries the resolved experiment for label/subtitle rendering.
+// Resolves variable slots; ignores unresolved variables. First occurrence wins.
+function getActiveSlots(state) {
+  const byKey = new Map();  // key → { key, slot, resolved }
+  for (const { config } of state.graphSettings) {
     for (const slot of config.experiments) {
-      const def = resolveExperimentSlot(slot, state.variables);
-      if (def) keys.add(`${def.commit}:${def.tasktype}:${def.subtask}`);
+      const resolved = resolveExperimentSlot(slot, state.variables);
+      if (!resolved) continue;
+      const key = slotKey(slot, resolved);
+      if (!byKey.has(key)) byKey.set(key, { key, slot, resolved });
     }
   }
-  return keys;
+  return byKey;
 }
 
 function buildExperimentLegend(state) {
@@ -476,7 +587,7 @@ function buildExperimentLegend(state) {
   fmtInput.className = 'sidebar-format-template-input';
   fmtInput.placeholder = '\${COMMIT_ALIAS} − \${SUBTASK_ALIAS}';
   fmtInput.value = state.legendFormat.experiment ?? '';
-  fmtInput.title = 'Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex)\nExample: ${SUBTASK_ALIAS:afterLast(_):pascalcase}';
+  fmtInput.title = 'Tokens: ${COMMIT_HASH}, ${SUBTASK_TYPE}, ${SUBTASK_NAME}, ${COMMIT_ALIAS}, ${SUBTASK_ALIAS}, ${USER}, ${CAMPAIGN_NAME}, ${DATE}, ${TIME}, ${DATETIME}\nTransforms (chain with :): uppercase, lowercase, camelcase, pascalcase, kebabcase, snakecase, beforeFirst(regex), afterLast(regex), format(pattern)\nDate/time default to YYYY-MM-DD / HH:mm:ss / YYYY-MM-DD HH:mm:ss; override with :format(YYYY/MM/DD)\nExample: ${DATE:format(YYYY-MM-DD)} ${USER:uppercase}';
   fmtInput.addEventListener('change', () => {
     state.legendFormat.experiment = fmtInput.value.trim() || null;
     refreshAllGraphAppearances(state);
@@ -485,9 +596,9 @@ function buildExperimentLegend(state) {
   fmtRow.appendChild(fmtInput);
   section.appendChild(fmtRow);
 
-  const activeKeys = getActiveExperimentKeys(state);
+  const activeSlots = getActiveSlots(state);
 
-  if (activeKeys.size === 0) {
+  if (activeSlots.size === 0) {
     const empty = document.createElement('p');
     empty.style.cssText = 'font-size:0.75rem;color:#aaa;font-style:italic;margin:0';
     empty.textContent = 'No experiments loaded';
@@ -495,17 +606,17 @@ function buildExperimentLegend(state) {
     return section;
   }
 
-  for (const expKey of activeKeys) {
-    let entry = state.commitRegistry.get(expKey);
+  for (const { key, slot, resolved } of activeSlots.values()) {
+    let entry = state.commitRegistry.get(key);
     if (!entry) {
       entry = { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true };
-      state.commitRegistry.set(expKey, entry);
+      state.commitRegistry.set(key, entry);
     }
-    // expKey format: "commitHash:type:subject"
-    const parts = expKey.split(':');
-    const commitShort = parts[0].substring(0, 7);
-    const type    = parts[1] ?? '';
-    const subject = parts.slice(2).join(':');  // subject may contain colons
+
+    // Variable badges identify the parts whose colour is template-stable (follows the
+    // variable, not the URL value). The resolved value is shown as a greyed subtitle.
+    const varNames = [slot.commitVar, slot.subtaskVar, slot.campaignVar].filter(Boolean);
+    const resolvedLabel = `${CommitHelp.ShortHash(resolved.commit)} · ${resolved.tasktype} · ${resolved.subtask}`;
 
     const row = document.createElement('div');
     row.className = 'commit-legend-row';
@@ -520,13 +631,25 @@ function buildExperimentLegend(state) {
     colorInput.title = 'Change color';
     colorInput.addEventListener('input', (e) => {
       entry.color = e.target.value;
-      refreshGraphsUsingExperiment(state, expKey);
+      refreshGraphsUsingExperiment(state, key);
     });
 
     const identSpan = document.createElement('span');
     identSpan.className = 'commit-legend-ident';
-    identSpan.title = expKey;
-    identSpan.textContent = `${commitShort} · ${type} · ${subject}`;
+    identSpan.title = key;
+    if (varNames.length > 0) {
+      // Variable-defined slot: show variable-name badges (stable identity).
+      for (const vn of varNames) {
+        const badge = document.createElement('span');
+        badge.className = 'legend-var-badge';
+        badge.textContent = vn;
+        identSpan.appendChild(badge);
+        identSpan.appendChild(document.createTextNode(' '));
+      }
+    } else {
+      // Manually-defined slot: identity is the resolved value itself.
+      identSpan.textContent = resolvedLabel;
+    }
 
     const eyeBtn = document.createElement('button');
     eyeBtn.className = 'legend-eye-btn';
@@ -536,12 +659,23 @@ function buildExperimentLegend(state) {
       entry.visible = entry.visible === false;
       eyeBtn.textContent = entry.visible !== false ? ICONS.BULLET_FILL : ICONS.BULLET_EMPTY;
       eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
-      refreshGraphsUsingExperiment(state, expKey);
+      refreshGraphsUsingExperiment(state, key);
     });
 
     topLine.appendChild(colorInput);
     topLine.appendChild(identSpan);
     topLine.appendChild(eyeBtn);
+
+    row.appendChild(topLine);
+
+    // For variable-defined slots, show the currently-resolved value as a greyed subtitle.
+    if (varNames.length > 0) {
+      const sub = document.createElement('div');
+      sub.className = 'commit-legend-resolved';
+      sub.style.cssText = 'font-size:0.7rem;color:#aaa;margin:1px 0 0 22px';
+      sub.textContent = resolvedLabel;
+      row.appendChild(sub);
+    }
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
@@ -550,10 +684,9 @@ function buildExperimentLegend(state) {
     nameInput.value = entry.displayName ?? '';
     nameInput.addEventListener('change', (e) => {
       entry.displayName = e.target.value.trim() || null;
-      refreshGraphsUsingExperiment(state, expKey);
+      refreshGraphsUsingExperiment(state, key);
     });
 
-    row.appendChild(topLine);
     row.appendChild(nameInput);
     section.appendChild(row);
   }
@@ -564,7 +697,7 @@ function buildExperimentLegend(state) {
 // Returns the set of resolved metric paths currently active across all graphs.
 function getActiveMetrics(state) {
   const paths = new Set();
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     for (const m of config.metrics) {
       const path = resolveMetricEntry(m, state.variables.metrics);
       if (path) paths.add(path);
@@ -687,10 +820,10 @@ async function openMetricVarModal(name, currentVal, state) {
 
   // Collect all unique resolved experiments across all graphs and variables
   const uniqueExps = new Map();
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
-      if (def) uniqueExps.set(`${def.commit}:${def.tasktype}:${def.subtask}`, def);
+      if (def) uniqueExps.set(experimentKey(def), def);
     }
   }
   // Also include all commit×subtask variable combinations
@@ -700,7 +833,7 @@ async function openMetricVarModal(name, currentVal, state) {
       if (!subtaskEntry?.value) continue;
       const { tasktype, subtask } = subtaskEntry.value;
       const def = { commit: commitEntry.value, tasktype, subtask };
-      uniqueExps.set(`${def.commit}:${def.tasktype}:${def.subtask}`, def);
+      uniqueExps.set(experimentKey(def), def);
     }
   }
 
@@ -767,7 +900,7 @@ async function openMetricVarModal(name, currentVal, state) {
 
   // Fetch metrics, then replace only the content area
   const metricsResults = experiments.length > 0
-    ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask)))
+    ? await Promise.all(experiments.map(exp => _apirest.LoadCommitMetrics(exp.tasktype, exp.commit, exp.subtask, exp.timestamp)))
     : [];
 
   const union = new Set();

@@ -5,6 +5,7 @@
 
 std::atomic<uint64_t> ns_Schedule::Step::next_uuid_ = 0;
 
+// duplicate attempt Step
 ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
     uint64_t attempt_id, std::list<ns_Schedule::Step*> dependFrom) 
     : task_(source.task_), name_(source.name_), id_(source.id_), uuid_(++next_uuid_),
@@ -18,7 +19,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), 
     message_from_run_(""), state_(State::Pending), end_processed_(false),
-    user_run_state_(""), group_status_(source.group_status_)
+    user_run_state_(""), group_status_(source.group_status_), readable_files_(source.readable_files_)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -39,6 +40,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
+// duplicate rank Step
 ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id, 
     uint64_t rank_id, uint64_t attempt_id, uint64_t group_id, 
     std::list<ns_Schedule::Step*> dependFrom, 
@@ -56,7 +58,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), message_from_run_(""), 
     state_(State::Pending), end_processed_(false), user_run_state_(""), 
-    group_status_(source.group_status_)
+    group_status_(source.group_status_), readable_files_(source.readable_files_)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -79,13 +81,14 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
+// new Step
 ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name, 
     uint64_t run_id, uint64_t step_id, uint64_t group_id, uint16_t group_status, 
     std::list<ns_Schedule::Step*> dependFrom, 
     GroupStepConfigurations const& groupConfigurations, 
     std::vector<rapidjson::Value const*> configurationStack, 
     rapidjson::Value const* configuration,
-    rapidjson::Value const* monitorJSON) 
+    rapidjson::Value const* monitorJSON, rapidjson::Value const* streamsConfigJSON[2]) 
     : task_(task), name_(name), id_(), uuid_(++next_uuid_), group_id_(group_id), 
     step_id_(step_id), rank_id_(0), attempt_id_(0), run_id_(run_id), 
     executor_data_(nullptr), 
@@ -94,7 +97,8 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     depend_from_(dependFrom), stdout_(), stderr_(), exit_code_(exitCode_NotSet_), 
     monitor_count_(0), request_cancel_(false), monitor_(), monitor_path_(), 
     message_from_run_(""), state_(State::Pending), end_processed_(false), 
-    user_run_state_(""), group_status_(group_status)
+    user_run_state_(""), group_status_(group_status), 
+    readable_files_(MergeStreamsConfig(streamsConfigJSON))
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -220,6 +224,20 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
         throw std::runtime_error("Step JSON executor_data must be an object");
       }
       executor_data_ = task_->executor_->CreateLocalData(config["executor_data"]);
+    }
+  }
+
+  if (config.HasMember("streams") && config["streams"].IsArray()) {
+    for (auto const& entry : config["streams"].GetArray()) {
+      if (!entry.IsObject()) {
+        continue;
+      }
+      if ((!entry.HasMember("name") || !entry["name"].IsString()) || 
+          (!entry.HasMember("path") || !entry["path"].IsString())) {
+            continue;
+      }
+      std::string name = entry["name"].GetString();
+      readable_files_.push_back({ name, entry["path"].GetString() });
     }
   }
 
@@ -379,6 +397,15 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     out.AddMember("monitor_path", rapidjson::Value(monitor_path_.c_str(), alloc), alloc);
     out.AddMember("message_from_run", rapidjson::Value(message_from_run_.c_str(), alloc), alloc);
   }
+
+  rapidjson::Value streamsArray(rapidjson::kArrayType);
+  for (auto const& stream : readable_files_) {
+    rapidjson::Value entry(rapidjson::kObjectType);
+    entry.AddMember("name", rapidjson::Value(stream.name.c_str(), alloc), alloc);
+    entry.AddMember("path", rapidjson::Value(stream.path.c_str(), alloc), alloc);
+    streamsArray.PushBack(entry, alloc);
+  }
+  out.AddMember("streams", streamsArray, alloc);
 }
 
 void ns_Schedule::Step::UpdateStats() {
@@ -422,4 +449,39 @@ ns_Schedule::Step::State ns_Schedule::Step::StateStringToEnum(std::string const&
       { "LaunchError", State::LaunchError }, 
   };
   return map.at(state);
+}
+
+std::vector<ns_Schedule::Step::Stream> ns_Schedule::Step::MergeStreamsConfig(
+      rapidjson::Value const* streamsConfigJSON[2]) {
+  std::vector<Stream> result;
+  std::unordered_map<std::string, Stream> streams;
+  for(size_t i=0; i<2; ++i) {
+    auto const config = streamsConfigJSON[i];
+    if (config == nullptr) {
+      continue;
+    }
+    for (auto const& entry : config->GetArray()) {
+      if (!entry.IsObject()) {
+        continue;
+      }
+      if ((!entry.HasMember("name") || !entry["name"].IsString()) || 
+          (!entry.HasMember("path") || !entry["path"].IsString())) {
+        continue;
+      }
+      std::string name = entry["name"].GetString();
+      std::string path = entry["path"].GetString();
+
+      if (path.empty()) {
+        if (streams.erase(name) != 1) {
+          LOGW << "Warning, removing an unexisting stream " << name << Log::Flags::End;
+        }
+      } else {
+        streams[name] = Stream{name, path};
+      }
+    }
+  }
+  for(auto const& [_, stream]: streams) {
+    result.push_back(stream);
+  }
+  return result;
 }

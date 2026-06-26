@@ -39,6 +39,8 @@ The scheduler calls `executor.sh`, which sources the script and invokes the func
 | `THEJOB_ENV_PATH` | File storing global params shared between steps (`AddGlobalParam`) |
 | `THEJOB_PARAMETERS_PATH` | File containing step args and task args (already evaluated by `SetupEnv`) |
 | `THEJOB_USER_STATE_FILE` | File for end-of-step structured metadata (see User State below) |
+| `THEJOB_FLAG_FILE` | Task-level flag file shared across all steps (written by `Flag()`) |
+| `THEJOB_DONE_FILE` | Step-level sentinel file written by the executor at step exit |
 | `THEJOB_STDOUT_PATH` | Path of the stdout log file |
 | `THEJOB_STDERR_PATH` | Path of the stderr log file |
 
@@ -209,6 +211,22 @@ StartMonitor "${EXPERIMENT_DIR}"   # args forwarded to monitor function each cal
 - No-op if the monitor is already running.
 - The monitor function is called in a loop: `delay_start` wait, then every `interval`, each call wrapped in `timeout` if configured.
 - Arguments passed to `StartMonitor` are forwarded to the monitor function on **every** invocation.
+
+---
+
+### `Flag <json>`
+
+Writes a JSON string to `THEJOB_FLAG_FILE` atomically. The file is shared across all steps of the task — later calls overwrite earlier ones.
+
+```bash
+Flag '{"color": "#6f6f00"}'
+Flag '{"status": "done", "result": "passed"}'
+```
+
+- The write is atomic: content goes to a per-step temp file first (`<THEJOB_FLAG_FILE>.<stepNumId>.<rank>.<attempt>`), then renamed into place.
+- Returns `1` and prints an error if no argument is given.
+- After all steps finish, the scheduler reads `THEJOB_FLAG_FILE` and stores its content in `Task::flag_`, which is then serialised into the task JSON and exposed via the users API as the `flag` field.
+- The history page uses `flag.color` to colour task entries.
 
 ---
 

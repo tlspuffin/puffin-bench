@@ -22,17 +22,21 @@ export function getModalCancelFn() { return _currentModalCancelFn; }
 /** Dynamic subtask cache populated at startup and on commit-select changes. */
 export const globalDynamicSubtasks = [];
 
+/** Campaign run list populated once at startup (one entry per run/zst). */
+export const globalCampaigns = [];
+
 // ============================================================
 // APPLICATION STATE
 // ============================================================
 
 export const state = {
   title: 'No Title_' + Date.now(),
-  graphSettings: new Map(),
+  graphSettings: [],  // ordered [{ id, config }] — array order == DOM order == save order
   variables: {
-    commits:  new Map(),  // name → { value: commitID | null, alias: string | null }
-    subtasks: new Map(),  // name → { value: { tasktype, subtask } | null, alias: string | null }
-    metrics:  new Map(),  // name → metricPath | null
+    commits:   new Map(),  // name → { value: commitID | null, alias: string | null }
+    subtasks:  new Map(),  // name → { value: { tasktype, subtask } | null, alias: string | null }
+    campaigns: new Map(),  // name → { value: runRef | null, alias: string | null }
+    metrics:   new Map(),  // name → metricPath | null
   },
   legendFormat: { ...DEFAULT_LEGEND_FORMAT },
   commitRegistry: new Map(),
@@ -57,82 +61,6 @@ export function dedupSubtasks(target, incoming) {
 }
 
 /**
- * Migrates a loaded state object from the old experiment-variable format
- * (variables.experiments) to the new split format (variables.commits / variables.subtasks).
- * Also ensures legendFormat is present.
- * @param {object|null} loadedState
- * @returns {object|null}
- */
-export function migrateStateIfNeeded(loadedState) {
-  if (!loadedState) return loadedState;
-
-  // ── Old format: variables.experiments exists ─────────────────────────────
-  if (loadedState.variables?.experiments instanceof Map) {
-    const oldExps    = loadedState.variables.experiments;
-    const newCommits  = new Map();
-    const newSubtasks = new Map();
-
-    for (const [ename, def] of oldExps) {
-      newCommits.set(`c_${ename}`, {
-        value: def ? def.commit : null,
-        alias: null,
-      });
-      newSubtasks.set(`s_${ename}`, {
-        value: def ? { tasktype: def.type, subtask: def.subject } : null,
-        alias: null,
-      });
-    }
-
-    loadedState.variables = {
-      commits:  newCommits,
-      subtasks: newSubtasks,
-      metrics:  loadedState.variables.metrics ?? new Map(),
-    };
-
-    // Migrate graph experiment slots
-    if (loadedState.graphSettings instanceof Map) {
-      for (const [, config] of loadedState.graphSettings) {
-        if (!Array.isArray(config.experiments)) continue;
-        config.experiments = config.experiments.map(slot => {
-          if ('variable' in slot) {
-            // Old { variable: "e1" } → { commitVar: "c_e1", subtaskVar: "s_e1" }
-            return { commitVar: `c_${slot.variable}`, subtaskVar: `s_${slot.variable}` };
-          }
-          // Old manual { commit, type, subject } → { commit, tasktype, subtask }
-          if (slot.commit !== undefined) {
-            return { commit: slot.commit, tasktype: slot.type, subtask: slot.subject };
-          }
-          return slot;
-        });
-      }
-    }
-  } else if (loadedState.variables && !loadedState.variables.commits) {
-    // Partial new state without commits/subtasks — initialise empty
-    loadedState.variables.commits  = loadedState.variables.commits  ?? new Map();
-    loadedState.variables.subtasks = loadedState.variables.subtasks ?? new Map();
-  }
-
-  // ── Upgrade string-form MetricVarRefs to object form ─────────────────────
-  if (loadedState.graphSettings instanceof Map) {
-    for (const [, config] of loadedState.graphSettings) {
-      if (!Array.isArray(config.metrics)) continue;
-      config.metrics = config.metrics.map(m => {
-        if (typeof m !== 'string') return m;
-        try { const p = JSON.parse(m); if (p?.variable) return { variable: p.variable }; } catch (_) {}
-        return m;
-      });
-    }
-  }
-
-  // ── Ensure legendFormat exists ────────────────────────────────────────────
-  if (!loadedState.legendFormat) {
-    loadedState.legendFormat = { ...DEFAULT_LEGEND_FORMAT };
-  }
-
-  return loadedState;
-}
-
-/**
  * Resolves a metric entry (plain path string or JSON-encoded {variable:name}) to a
  * concrete metric path. Returns null for unresolved VarRefs or unparseable values.
  * @param {string|object} m           - Raw metric entry from graphConfig.metrics
@@ -150,6 +78,19 @@ export function resolveMetricEntry(m, metricsMap) {
 }
 
 /**
+ * Returns the metric paths to fetch for a graph: its resolved y-metrics plus the
+ * x-axis metric when the x-axis is a metric (not time). Deduplicated.
+ * @param {string[]} resolvedMetrics - already-resolved y-metric paths
+ * @param {object}   graphConfig     - graph config (reads graphConfig.xMetric)
+ * @returns {string[]}
+ */
+export function fetchMetricSet(resolvedMetrics, graphConfig) {
+  const x = graphConfig?.xMetric;
+  if (!x || x === 'time') return resolvedMetrics;
+  return [...new Set([...resolvedMetrics, x])];
+}
+
+/**
  * Returns the next color from the commit palette for a new registry entry.
  * Must be called before inserting the new entry (uses current .size as index).
  * @param {Map} commitRegistry - state.commitRegistry
@@ -160,19 +101,59 @@ export function nextCommitColor(commitRegistry) {
 }
 
 /**
- * Resolves a graph slot's commit/tasktype/subtask from variables or direct values.
+ * Whether a slot is configured in campaign or commit mode.
+ * @returns {'campaign'|'commit'}
+ */
+export function slotMode(slot) {
+  return (slot.mode === 'campaign' || slot.campaignVar || slot.campaignRun) ? 'campaign' : 'commit';
+}
+
+/**
+ * Resolves a graph slot to a concrete run descriptor.
+ * Commit mode → { commit, tasktype, subtask, timestamp:null, user:null, campaign:null }.
+ * Campaign mode → fields taken from the selected run (tasktype='Campaign').
  * Returns null if any required field is missing.
  */
 export function resolveExperimentSlot(slot, variables) {
+  // ── Campaign mode: a single run reference supplies everything ──────────────
+  if (slotMode(slot) === 'campaign') {
+    const run = slot.campaignVar
+      ? (variables?.campaigns?.get(slot.campaignVar)?.value ?? null)
+      : (slot.campaignRun ?? null);
+    if (run && run.commit && run.timestamp != null) {
+      if (run.subject) {
+        return {
+          commit:    run.commit,
+          tasktype:  run.type ?? 'Campaign',
+          subtask:   run.subject,
+          timestamp: run.timestamp,
+          user:      run.user ?? null,
+          campaign:  run.campaign ?? null,
+        };
+      }
+      // A selected campaign run that resolves but has no subject can't be plotted
+      // (its archive metadata.json was missing/unreadable). Flag it so it's
+      // distinguishable from a genuinely unset variable rather than silently empty.
+      console.warn('Campaign run has no subject and cannot be plotted:', run);
+    }
+    return null;
+  }
+
+  // ── Commit mode ────────────────────────────────────────────────────────────
   let commit   = null;
   let tasktype = null;
   let subtask  = null;
+  // Pinned run timestamp: from the slot for a literal commit, or carried by the
+  // commit variable. null = latest (dynamic). See CreateCommitPicker.
+  let pinnedTs = null;
 
   if (slot.commitVar) {
     const entry = variables?.commits?.get(slot.commitVar);
     commit = entry?.value ?? null;
+    pinnedTs = entry?.timestamp ?? null;
   } else {
     commit = slot.commit ?? null;
+    pinnedTs = slot.timestamp ?? null;
   }
 
   if (slot.subtaskVar) {
@@ -184,18 +165,81 @@ export function resolveExperimentSlot(slot, variables) {
     subtask  = slot.subtask  ?? null;
   }
 
-  if (commit && tasktype && subtask) return { commit, tasktype, subtask };
+  if (commit && tasktype && subtask) {
+    // `pinned` distinguishes an explicit run from the latest timestamp that
+    // graphmanager fills in for ${DATE} — only pinned runs affect the keys below.
+    return { commit, tasktype, subtask, timestamp: pinnedTs, pinned: pinnedTs != null,
+        user: null, campaign: null };
+  }
   return null;
 }
 
 /**
+ * Stable identity key for a resolved experiment. Commit-mode runs key on
+ * commit:tasktype:subtask; campaign runs append the timestamp so two runs of the
+ * same campaign (same commit+subject, different timestamp) stay distinct.
+ * @param {{commit,tasktype,subtask,timestamp?}|null} resolved
+ * @returns {string|null}
+ */
+export function experimentKey(resolved) {
+  if (!resolved) return null;
+  const base = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
+  // Campaigns always disambiguate by timestamp; commit-mode keys stay 3-part
+  // unless a specific run is pinned (so two pinned runs of the same commit +
+  // subtask stay distinct). The auto-filled latest timestamp (not pinned) never
+  // widens the key.
+  const includeTs = (resolved.tasktype === 'Campaign' || resolved.pinned) && resolved.timestamp != null;
+  return includeTs ? `${base}:${resolved.timestamp}` : base;
+}
+
+/**
+ * Stable appearance key for a slot's resolved experiment. Unlike experimentKey
+ * (which always keys on resolved values and is used for data lookup), this
+ * substitutes the variable name ($c1, $s1, $k1) for any part the slot defines via
+ * a variable, so colour/visibility follow the variable rather than the URL-supplied
+ * value. Slots that define every part literally produce a key identical to
+ * experimentKey(resolved), so colours saved against literal experiments still match.
+ * @param {object} slot           - graph experiment slot
+ * @param {object|null} resolved  - result of resolveExperimentSlot(slot, …)
+ * @returns {string|null}
+ */
+export function slotKey(slot, resolved) {
+  if (!resolved) return null;
+  if (slotMode(slot) === 'campaign') {
+    return slot.campaignVar
+      ? `$${slot.campaignVar}`
+      : `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}:${resolved.timestamp}`;
+  }
+  // A commit variable carries its own pinned run, so `$c1` already encodes it;
+  // only a literal pinned commit needs the timestamp appended so two pinned runs
+  // of the same commit get distinct colours/visibility.
+  const commitPart  = slot.commitVar
+    ? `$${slot.commitVar}`
+    : (resolved.pinned ? `${resolved.commit}@${resolved.timestamp}` : resolved.commit);
+  const subtaskPart = slot.subtaskVar ? `$${slot.subtaskVar}` : `${resolved.tasktype}:${resolved.subtask}`;
+  return `${commitPart}:${subtaskPart}`;
+}
+
+/** Returns the { id, config } graph entry with the given id, or undefined. */
+export function findGraph(state, id) {
+  return state.graphSettings.find(g => g.id === id);
+}
+
+/** Removes the graph entry with the given id from state.graphSettings (in place). */
+export function removeGraph(state, id) {
+  const i = state.graphSettings.findIndex(g => g.id === id);
+  if (i >= 0) state.graphSettings.splice(i, 1);
+}
+
+/**
  * Returns true if any graph's configuration references the given variable name.
- * @param {'commit'|'subtask'|'metric'} type
+ * @param {'commit'|'subtask'|'campaign'|'metric'} type
  */
 export function isVarReferenced(state, varName, type) {
-  for (const [, config] of state.graphSettings) {
+  for (const { config } of state.graphSettings) {
     if (type === 'commit' && config.experiments.some(s => s.commitVar === varName)) return true;
     if (type === 'subtask' && config.experiments.some(s => s.subtaskVar === varName)) return true;
+    if (type === 'campaign' && config.experiments.some(s => s.campaignVar === varName)) return true;
     if (type === 'metric' && config.metrics.some(m => m?.variable === varName)) return true;
   }
   return false;
@@ -209,9 +253,11 @@ export function getKnownSubtasks(state) {
   const seen   = new Set();
   const result = [];
   for (const key of state.commitRegistry.keys()) {
+    if (key.startsWith('$') || key.includes(':$')) continue;  // variable-keyed entries aren't literal subtasks
     const parts = key.split(':');
     if (parts.length < 3) continue;
     const tasktype = parts[1];
+    if (tasktype === 'Campaign') continue;  // campaign keys carry a timestamp; not commit subtasks
     const subtask  = parts.slice(2).join(':');
     const token    = `${tasktype}:${subtask}`;
     if (!seen.has(token)) { seen.add(token); result.push({ tasktype, subtask }); }

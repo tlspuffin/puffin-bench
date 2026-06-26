@@ -17,6 +17,8 @@
 #include <rapidjson/writer.h>
 #include <rapidjson/istreamwrapper.h>
 
+#define UPDATE_CHILD_UMASK
+
 #define FREE_ARG_STRINGS(args) for(char* string: args) free(string)
 
 template<typename T>
@@ -35,13 +37,14 @@ static bool WriteCGroup(std::string const& filename, T const& value) {
   return false;
 }
 
-ns_Executor::LocalTaskData::LocalTaskData() : cgroupPath_(), os_memory_load_(-1), os_cores_load_(-1), 
-    os_memory_max_load_(-1), os_cores_max_load_(-1)
+ns_Executor::LocalTaskData::LocalTaskData() : cgroupPath_(), 
+    os_memory_load_(-1), os_cores_load_(-1), 
+    os_memory_max_load_(-1), os_cores_max_load_(-1), run_path_(), flag_file_()
 {}
 
 ns_Executor::LocalTaskData::LocalTaskData(rapidjson::Value const& config)
     : os_memory_load_(-1), os_cores_load_(-1), 
-    os_memory_max_load_(-1), os_cores_max_load_(-1)
+    os_memory_max_load_(-1), os_cores_max_load_(-1), run_path_(), flag_file_()
 {
   if (!config.IsObject()) {
     throw std::runtime_error("LocalData JSON must be an object");
@@ -58,6 +61,9 @@ ns_Executor::LocalTaskData::LocalTaskData(rapidjson::Value const& config)
     os_memory_max_load_ = Get<uint64_t>(loadJSON, "memory_max");
     os_cores_max_load_ = Get<uint64_t>(loadJSON, "cores_max");
   }
+
+  run_path_ = Get<std::string>(config, "run_path");
+  flag_file_ = Get<std::string>(config, "flag_file");
 }
 
 void ns_Executor::LocalTaskData::ToJSON(rapidjson::Value& out, 
@@ -70,6 +76,8 @@ void ns_Executor::LocalTaskData::ToJSON(rapidjson::Value& out,
   osLoad.AddMember("memory_max", os_memory_max_load_, alloc);
   osLoad.AddMember("cores_max", os_cores_max_load_, alloc);
   out.AddMember("os_load", osLoad, alloc);
+  out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
+  out.AddMember("flag_file", rapidjson::Value(flag_file_.c_str(), alloc), alloc);
 }
 
 
@@ -98,10 +106,10 @@ ns_Executor::LocalData::LocalData(rapidjson::Value const& config)
   run_path_ = Get<std::string>(config, "run_path");
   pid_ = Get<uint64_t>(config, "pid");
 
-  artefacts_path_ = Get<std::string>(config, "artefacts_path");
+  artefacts_file_ = Get<std::string>(config, "artefacts_file");
 
-  fatalerror_path_ = Get<std::string>(config, "fatalerror_path");
-  done_path_ = Get<std::string>(config, "done_path");
+  fatalerror_file_ = Get<std::string>(config, "fatalerror_file");
+  done_file_ = Get<std::string>(config, "done_file");
 
   launcher_file_ = Get<std::string>(config, "launcher_file");
   user_state_file_ = Get<std::string>(config, "user_state_file");
@@ -140,10 +148,10 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
   out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
   out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
 
-  out.AddMember("artefacts_path", rapidjson::Value(artefacts_path_.c_str(), alloc), alloc);
+  out.AddMember("artefacts_file", rapidjson::Value(artefacts_file_.c_str(), alloc), alloc);
 
-  out.AddMember("fatalerror_path", rapidjson::Value(fatalerror_path_.c_str(), alloc), alloc);
-  out.AddMember("done_path", rapidjson::Value(done_path_.c_str(), alloc), alloc);
+  out.AddMember("fatalerror_file", rapidjson::Value(fatalerror_file_.c_str(), alloc), alloc);
+  out.AddMember("done_file", rapidjson::Value(done_file_.c_str(), alloc), alloc);
 
   out.AddMember("launcher_file", rapidjson::Value(launcher_file_.c_str(), alloc), alloc);
   out.AddMember("user_state_file", rapidjson::Value(user_state_file_.c_str(), alloc), alloc);
@@ -230,6 +238,10 @@ bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
   if (localtaskData == nullptr) {
     return false;
   }
+
+  localtaskData->run_path_ = task->run_root_path_ / "executor";
+  localtaskData->flag_file_ = localtaskData->run_path_ / ".flag";
+
   if (cgroupRoot_.empty()) {
     localtaskData->cgroupPath_.clear();
     return true;
@@ -254,7 +266,22 @@ bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
   return true;
 }
 
-bool ns_Executor::Local::TaskFinalize(ExecutorTaskData* data) {
+bool ns_Executor::Local::TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data) {
+  ns_Executor::LocalTaskData* localTaskData = 
+      dynamic_cast<ns_Executor::LocalTaskData*>(data);
+  if (localTaskData == nullptr) {
+    throw std::runtime_error("No ns_Executor::LocalTaskData* in task_->executor_data_");
+  }
+  if (!localTaskData->flag_file_.empty()) {
+    std::ifstream ifs(localTaskData->flag_file_);
+    if (ifs.is_open()) {
+      task->flag_.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    } else {
+      LOGE << "Unable to access flag file " << localTaskData->flag_file_ << " for task " << 
+          task->id_ << Log::Flags::End;
+    }
+  }
+
   if (cgroupRoot_.empty()) {
     return true;
   }
@@ -271,10 +298,16 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
   std::list<ns_Schedule::Step*> result;
 
   GatherStats();
+
+  if (steps.empty()) {
+    return result;
+  }
+
   uint64_t freeMemory = stats_.freeMemory;
   uint64_t nbCoresFree = nbCoresFree_;
 
-  if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
+  if (stats_.cores > cpuMaxLoad_) {
+  //if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
     return result;
   }
   if (freeMemory < memMinAllowed_) {
@@ -314,20 +347,25 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     throw std::runtime_error("Fatal erreor: a step required a number of core");
   }
 
+  ns_Executor::LocalTaskData* localTaskData = 
+      dynamic_cast<ns_Executor::LocalTaskData*>(step.task_->executor_data_);
+  if (localTaskData == nullptr) {
+    throw std::runtime_error("No ns_Executor::LocalTaskData* in task_->executor_data_");
+  }
   LocalData* localData = new LocalData(step.nb_cores_);
   if (step.group_id_ == 0) {
-    localData->run_path_ = step.task_->run_root_path_ / "executor" / step.ID();
+    localData->run_path_ = localTaskData->run_path_ / step.ID();
+    localData->artefacts_file_ = localTaskData->run_path_ / (step.ID() + "-artefacts.json");
   } else {
-    localData->run_path_ = step.task_->run_root_path_ / "executor" / step.GID();
+    localData->run_path_ = localTaskData->run_path_ / step.GID();
+    localData->artefacts_file_ = localTaskData->run_path_ / (step.GID() + "-artefacts.json");
   }
-  localData->artefacts_path_ = step.task_->run_root_path_ / "executor" / (step.ID() + "-artefacts.json");
-  localData->fatalerror_path_ = step.task_->run_root_path_ / "executor" / ("fe-" + step.ID());
-  localData->done_path_ = localData->run_path_ / (".done-" + step.ID());
+  localData->fatalerror_file_ = localTaskData->run_path_ / ("fe-" + step.ID());
+  localData->done_file_ = localTaskData->run_path_ / (".done-" + step.ID());
 
-  std::string baseRunPath = step.task_->run_root_path_ / "executor";
-  localData->launcher_file_ = baseRunPath + "-" + step.ID() + "-launcher";
-  localData->user_state_file_ = baseRunPath + "-" + step.ID() + "-userstate";
-  localData->step_parameters_file_ = baseRunPath + "-" + step.ID() + "-parameters";
+  localData->launcher_file_ = localTaskData->run_path_ / (step.ID() + "-launcher");
+  localData->user_state_file_ = localTaskData->run_path_ / (step.ID() + "-userstate");
+  localData->step_parameters_file_ = localTaskData->run_path_ / (step.ID() + "-parameters");
 
   step.executor_data_ = localData;
 
@@ -342,7 +380,15 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
           " (" + ec.message() + ")"
       );
     }
+  } 
+#ifdef UPDATE_CHILD_UMASK  
+  else {
+    std::filesystem::permissions(localData->run_path_, 
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_read | 
+        std::filesystem::perms::group_exec | std::filesystem::perms::others_read | 
+        std::filesystem::perms::others_exec, ec);
   }
+#endif
 
   if (pipe(localData->pipeFDOut) != 0) {
     throw std::runtime_error(
@@ -398,6 +444,10 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   pid_t pid = fork();
   if (pid == 0) {
     pid = getpid();
+
+#ifdef UPDATE_CHILD_UMASK
+    umask(0022);
+#endif
 
     std::string cores;
     for(uint64_t core: localData->cores_) {
@@ -457,11 +507,15 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_ENV_PATH=\"" << step.task_->env_path_ << "\"\n"
         << "THEJOB_USER_FILES_PATH=\"" << step.task_->files_path_ << "\"\n"
         << "THEJOB_OUT_PATH=\"" << step.task_->outputs_path_ << "\"\n"
-        << "THEJOB_ARTEFACTS_FILE=\"" << localData->artefacts_path_ << "\"\n"
+        << "THEJOB_ARTEFACTS_FILE=\"" << localData->artefacts_file_ << "\"\n"
         << "THEJOB_ARTEFACTS_PATH=\"" << step.task_->artefacts_path_ << "\"\n"
         << "THEJOB_TOOLS_PATH=\"" << step.task_->tools_path_ << "\"\n"
+        << "THEJOB_USER=\"" << step.task_->user_ << "\"\n"
         << "THEJOB_UNIQ_STEP=" << (step.next_ == &step) << "\n"
         << "THEJOB_PID=" << pid << "\n"
+        << "THEJOB_API_URL=\"" << step.task_->apiURL_ << "\"\n"
+        << "THEJOB_TASK_ID=" << step.task_->id_ << "\n"
+        << "THEJOB_STEP_UUID=\"" << step.uuid_ << "\"\n"
         << "THEJOB_STEP_ID=\"" << step.id_ << "\"\n"
         << "THEJOB_STEP_NUMID=\"" << step.step_id_ << "\"\n"
         << "THEJOB_STEP_RANK_ID=\"" << step.rank_id_ << "\"\n"
@@ -473,7 +527,9 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
         << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
         << "THEJOB_CACHE_PORT=\"" << cachePort_ << "\"\n"
-        << "THEJOB_USER_STATE_FILE=\"" << localData->user_state_file_ << "\"\n";
+        << "THEJOB_USER_STATE_FILE=\"" << localData->user_state_file_ << "\"\n"
+        << "THEJOB_FLAG_FILE=\"" << localTaskData->flag_file_ << "\"\n"
+        << "THEJOB_DONE_FILE=\"" << localData->done_file_ << "\"\n";
     if (step.monitor_) {
       stepLauncher << "THEJOB_MONITOR_PARAMETERS_PATH=\"" << step.monitor_->ToArgs() << 
         " " << step.monitor_path_.string() << "\"\n";
@@ -514,7 +570,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     LOGE << "Unable to excecute " << script << " : " 
         << strerror(errno) << Log::Flags::End;
 
-    std::ofstream fatalErrorProf(localData->fatalerror_path_, std::ios::trunc);
+    std::ofstream fatalErrorProf(localData->fatalerror_file_, std::ios::trunc);
     fatalErrorProf << "0";
     fatalErrorProf.close();
     sync();
@@ -556,7 +612,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
     } else {
       std::stringstream log;
       status = CheckExternalProcessIsRunning(localData->pid_, localData->arguments_, 
-          localData->fatalerror_path_, localData->done_path_, log);
+          localData->fatalerror_file_, localData->done_file_, log);
       if (status != ns_Schedule::Step::exitCode_NotSet_) {
         childPID = localData->pid_;
       }
@@ -571,7 +627,7 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       --nbChild_;
 
       std::error_code ec;
-      if (std::filesystem::exists(localData->fatalerror_path_, ec)) {
+      if (std::filesystem::exists(localData->fatalerror_file_, ec)) {
         step->MarkLaunchError();
       } else {
         if (localData->process_status_ != ns_Executor::LocalData::External) {
@@ -600,7 +656,7 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
 
   KillSession(localData->pid_, localData->cgroup_path_, &step, "Step timeout run");
 
-  if (!std::filesystem::exists(localData->fatalerror_path_)) {
+  if (!std::filesystem::exists(localData->fatalerror_file_)) {
     pid_t pid = RunShutdown(step, localData);
     if (pid <= 0) {
       throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
@@ -641,7 +697,7 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
   }
 
   status = CheckExternalProcessIsRunning(localData->pid_, localData->arguments_, 
-      localData->fatalerror_path_, localData->done_path_, logSS);
+      localData->fatalerror_file_, localData->done_file_, logSS);
   if (status == ns_Schedule::Step::exitCode_NotSet_) {
     if (VerifyProcessArgs(localData->pid_, localData->arguments_)) {
       LOGD << "Step " << step.ID() << " process still running, re-reserving " << 
@@ -701,15 +757,38 @@ void ns_Executor::Local::GetRunningOutput(
   if (localData == nullptr) {
     return;
   }
-  int fd = localData->pipeFDOut[0];
-  if (type == "stderr") {
+
+  int fd = -1;
+  std::filesystem::path file;
+  if (type == "stdout") {
+    fd = localData->pipeFDOut[0];
+    file = step.stdout_;
+  } else if (type == "stderr") {
     fd = localData->pipeFDErr[0];
+    file = step.stderr_;
   }
-  localData->fdCaptureThread_.Read(fd, data);
+  if (fd != -1) {
+    localData->fdCaptureThread_.Read(fd, data);
+  } else if ((type != "stdout") && (type != "stderr")) {
+    try {
+      data.live = true;
+      data.supportSeek = true;
+      data.partialFile = true;
+      int index = std::stoi(type);
+      if (index < step.readable_files_.size()) {
+        file = localData->run_path_ / step.readable_files_[index].path;
+      } else {
+        throw std::runtime_error("");
+      }
+    } catch(...) {
+      data.buffer.resize(0);
+      data.state = FileReadState::Error_Access;
+    }
+  }
   if (data.state != FileReadState::NotExecuted) {
     return;
   }
-  FileExtractText(type == "stderr" ? step.stderr_ : step.stdout_, data);
+  FileExtractText(file, data);
 }
 
 ns_Executor::ExecutorTaskData* ns_Executor::Local::CreateLocalTaskData(
@@ -723,6 +802,7 @@ ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
 }
 
 std::pair<bool, bool> ns_Executor::Local::LimitsState() {
+  // if cgroup up and was enough cpu to start a task, does not check cpu limit during task lifecycle
   return std::make_pair<>(
       (!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_), 
       stats_.freeMemory < memMinAllowed_
@@ -882,6 +962,10 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
   if (pid == 0) {
     pid_t localPID = getpid();
 
+#ifdef UPDATE_CHILD_UMASK
+    umask(0022);
+#endif
+
     if (!localData->cgroup_path_.empty()) {
       std::filesystem::create_directory(localData->cgroup_path_);
       std::ofstream procFile(localData->cgroup_path_ / "cgroup.procs");
@@ -935,7 +1019,7 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
     LOGE << "Unable to excecute " << script << " : " 
         << strerror(errno) << Log::Flags::End;
 
-    std::ofstream fatalErrorProf(localData->fatalerror_path_, std::ios::app);
+    std::ofstream fatalErrorProf(localData->fatalerror_file_, std::ios::app);
     fatalErrorProf << "0";
     fatalErrorProf.close();
     sync();
@@ -971,6 +1055,7 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
   if (ifs.is_open()) {
     std::stringstream oss;
     oss << ifs.rdbuf();
+    ifs.close();
     step.SetUserRunState(oss.str());
   } else {
     LOGD << "Unable to open user state: " + userStateFile << Log::Flags::End;
@@ -980,15 +1065,18 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
     ReleaseCores(localData->cores_);
   }
 
-  SaveArtefacts(step);
-
   std::error_code ec;
   if ((step.group_status_ == ns_Schedule::Step::stepsGroup_None_) || 
-      (step.group_status_ == ns_Schedule::Step::stepsGroup_End_)) {
+      (step.group_status_ == ns_Schedule::Step::stepsGroup_End_) ||
+      step.task_->request_cancel_) {
+    SaveArtefacts(step);
     std::filesystem::remove_all(localData->run_path_, ec);
   }
-  std::filesystem::remove(localData->step_parameters_file_);
-  std::filesystem::remove(localData->launcher_file_);
+  std::filesystem::remove(localData->step_parameters_file_, ec);
+  std::filesystem::remove(localData->user_state_file_, ec);
+  std::filesystem::remove(localData->launcher_file_, ec);
+  std::filesystem::remove(localData->done_file_, ec);
+  std::filesystem::remove(localData->fatalerror_file_, ec);
 }
 
 std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
@@ -1249,7 +1337,7 @@ void ns_Executor::Local::GatherStats() {
   ns_System::MemoryMonitor::MemoryStats memory;
   os_.GetLoad(global, perCores, memory, stats_.storages);
   stats_.memory = memory.UsedRatio() * 100.0;
-  stats_.freeMemory = memory.free_kb * 1024;
+  stats_.freeMemory = memory.available_kb * 1024;
   stats_.totalMemory = memory.total_kb * 1024;
   stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
   stats_.perCores.resize(perCores.size());
@@ -1290,14 +1378,14 @@ bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) 
 
 void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
   LocalData const* localData = static_cast<LocalData*>(step.executor_data_);
-  if (!std::filesystem::exists(localData->artefacts_path_)) {
+  if (!std::filesystem::exists(localData->artefacts_file_)) {
     return;
   }
 
-  std::ifstream ifs(localData->artefacts_path_);
+  std::ifstream ifs(localData->artefacts_file_);
   if (!ifs.is_open()) {
     throw std::runtime_error("Cannot open artefacts file: " + 
-        localData->artefacts_path_.string());
+        localData->artefacts_file_.string());
   }
 
   std::filesystem::path const finalDir = step.task_->artefacts_path_;
@@ -1374,7 +1462,8 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
     }
   }
 
-  metadataJSON.AddMember(rapidjson::Value(step.ID().c_str(), metadataAlloc), 
+  std::string const metadataKey = (step.group_id_ == 0) ? step.ID() : step.GID();
+  metadataJSON.AddMember(rapidjson::Value(metadataKey.c_str(), metadataAlloc), 
       metadata, metadataAlloc);
 
   std::lock_guard<std::mutex> lock(step.task_->metadata_index_lock_);
@@ -1386,5 +1475,5 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
   outFile.close();
 
   std::error_code ec;
-  std::filesystem::remove(localData->artefacts_path_, ec);
+  std::filesystem::remove(localData->artefacts_file_, ec);
 }

@@ -11,9 +11,9 @@ namespace ns_Analyze {
 class Statistics {
 public:
   static std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>>
-      ComputeStats(std::string const& metricName, 
-      std::vector<struct ns_Analyze::DataManager::SMetricValues>& values, 
-      std::vector<uint64_t>* runs);
+      ComputeStats(std::string const& metricName,
+      std::vector<struct ns_Analyze::DataManager::SMetricValues>& values,
+      std::vector<uint64_t>* runs, int ciPercent =95);
 
 private:
   struct StatsSeries {
@@ -22,13 +22,13 @@ private:
     std::vector<double> ciUpper;
   };
 
-  static std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> 
-      ComputeStats(std::string const& metricName, 
-      std::vector<struct ns_Analyze::DataManager::SMetricValues>& values, 
-      std::vector<uint64_t> const& indexes, uint64_t* id);
+  static std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>>
+      ComputeStats(std::string const& metricName,
+      std::vector<struct ns_Analyze::DataManager::SMetricValues>& values,
+      std::vector<uint64_t> const& indexes, uint64_t* id, int ciPercent);
 
-  static StatsSeries ComputeStats(std::vector<std::vector<double>> const& series, 
-      double confidence =0.0);
+  static StatsSeries ComputeStats(std::vector<std::vector<double>> const& series,
+      int ciPercent =95);
 
 };
 

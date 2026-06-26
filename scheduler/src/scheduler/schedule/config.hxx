@@ -10,7 +10,9 @@
 namespace ns_Schedule {
 
 struct PublisherConfig {
-  std::string uri_;
+  std::string baseURL_;
+  std::string notifyEndpoint_;
+  std::string viewEndpoint_;
   bool checkServerCertificat_;
   std::filesystem::path storage_;
 };
@@ -27,9 +29,11 @@ struct Config {
 
   std::unordered_map<std::string, PublisherConfig> publishers_;
 
+  std::string apiURL_;
+
   Config();
   ~Config();
-  void Load(std::string const& name, rapidjson::Value& doc);
+  void Load(std::string const& name, rapidjson::Value& doc, std::string const& apiURL);
   void Save(std::string const& name, rapidjson::Value& doc, 
       rapidjson::MemoryPoolAllocator<>& alloc) const;
   void Validate(bool forceInstall) const;

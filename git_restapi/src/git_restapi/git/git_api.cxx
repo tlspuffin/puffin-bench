@@ -1,5 +1,6 @@
 #include "git_api.hxx"
 #include "../../utils/logs.hxx"
+#include "../../utils/rapidjson.hxx"
 #include <fstream>
 #include <set>
 #include <regex>
@@ -253,17 +254,10 @@ bool ns_GIT::GitAPI::ManageExternalPR(rapidjson::Document& json, std::string& re
       std::chrono::system_clock::now().time_since_epoch()).count();
   if ((refresh != ns_GIT::GitAPI::ERefresh::All) || 
       ((apiResetTS_ > nowSec) && (apiRemaining_ == 0))) {
-    std::ifstream ifs(cacheFile);
-    if (ifs.is_open()) {
-      std::string cacheContent(std::istreambuf_iterator<char>(ifs), {});
-      if (!ifs.fail()) {
-        rapidjson::Document cacheDoc;
-        cacheDoc.Parse(cacheContent.c_str());
-        if (!cacheDoc.HasParseError() && cacheDoc.IsArray()) {
-          prArray.CopyFrom(cacheDoc, alloc);
-          cacheSuccess = true;
-        }
-      }
+    rapidjson::Document cacheDoc;
+    if (ReadJSONFile(cacheFile, cacheDoc) && cacheDoc.IsArray()) {
+      prArray.CopyFrom(cacheDoc, alloc);
+      cacheSuccess = true;
     }
   }
   if (!cacheSuccess) {
@@ -376,10 +370,7 @@ bool ns_GIT::GitAPI::ManageExternalPR(rapidjson::Document& json, std::string& re
       SaveFile(cacheInfoFile, std::to_string(apiResetTS_) + " " + std::to_string(apiRemaining_));
     }
 
-    rapidjson::StringBuffer sb;
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> writerCache(sb);
-    prArray.Accept(writerCache);
-    SaveFile(cacheFile, sb.GetString());
+    SaveJSONFile(cacheFile, prArray, true);
   }
 
   rapidjson::Value prAPIInfos(rapidjson::kObjectType);

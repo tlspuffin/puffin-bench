@@ -5,20 +5,17 @@ set (CMAKE_CXX_STANDARD 17)
 
 include(CMakeExternal.cmake)
 include(CMakeTextEmbedding.cmake)
+include(CMakeBinaryEmbedding.cmake)
 
 set(DEPS_BASE_DIR "${CMAKE_SOURCE_DIR}/third-party")
 
-find_program(XXD xxd REQUIRED)
-set(VISCOMPARATOR_PLOTLYJS_BLOB_H "plotly_3_3_0_min_js.h")
-add_custom_command(
-  OUTPUT ${VISCOMPARATOR_PLOTLYJS_BLOB_H}
-  COMMAND ${CMAKE_COMMAND} -E env
-          OUT=${VISCOMPARATOR_PLOTLYJS_BLOB_H}
-          sh -c "${XXD} -i -n VisComparator_HTML_Ploty_JS \"${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js\" > \"${VISCOMPARATOR_PLOTLYJS_BLOB_H}\""
-  COMMENT "Generating ${VISCOMPARATOR_PLOTLYJS_BLOB_H} from reserve_port with xxd -i"
-  VERBATIM
-)
-add_custom_target(viscomparator_plotly_3_3_0_min_js_h DEPENDS ${VISCOMPARATOR_PLOTLYJS_BLOB_H})
+get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT CMAKE_BUILD_TYPE AND NOT IS_MULTI_CONFIG)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif()
+
+EmbedBinaryFile("${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/html/third-party/plotly/plotly_3_3_0_min_js.h" VisComparator_HTML_Ploty_JS)
 
 set(IN_VERSION_C "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in")
 set(GENERATED_VERSION_C "${CMAKE_BINARY_DIR}/version.c")
@@ -171,31 +168,31 @@ if (NOT TARGET ZStdSeekable)
   target_link_libraries(ZStdSeekable PUBLIC ${ZStdTN})
 endif()
 
-#set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}" CACHE STRING "" FORCE)
 
-#add_executable(analyze_results src/analyze_results.cxx)
-#target_link_libraries(analyze_results PRIVATE RapidJSON)
-#add_executable(analyze_results-static src/analyze_results.cxx)
-#target_link_libraries(analyze_results-static PRIVATE RapidJSON)
-#target_link_options(analyze_results-static PRIVATE -static)
+# The shared EmbeddedFile descriptor is hardcoded as an include by the generated
+# aggregate headers (see CMakeTextEmbedding.cmake) and by config.cxx.
+file(WRITE "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/embedded_file.h"
+        "/* Shared descriptor for files embedded via EmbedDirAsArray (CMakeTextEmbedding.cmake). */\n"
+        "#pragma once\n"
+        "#include <cstddef>\n"
+        "\n"
+        "struct EmbeddedFile {\n"
+        "  char const* name;  // path relative to the group's base dir (e.g. \"js/ui.js\")\n"
+        "  char const* data;\n"
+        "  size_t size;\n"
+        "};\n")
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/index.html" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/index_html.h" VisComparator_HTML_Index_HTML)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/css/index.css" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/css/index_css.h" VisComparator_HTML_Index_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/apirest.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/apirest_js.h" VisComparator_HTML_APIRest_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/commithelp.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/commithelp_js.h" VisComparator_HTML_CommitHelp_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/constants.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/constants_js.h" VisComparator_HTML_Constants_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/dialogs.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/dialogs_js.h" VisComparator_HTML_Dialogs_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/error.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/error_js.h" VisComparator_HTML_Error_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/graphmanager.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/graphmanager_js.h" VisComparator_HTML_GraphManager_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/help.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/help_js.h" VisComparator_HTML_Help_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/index.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/index_js.h" VisComparator_HTML_Index_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/jsonhelp.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/jsonhelp_js.h" VisComparator_HTML_JSONHelp_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/sidebar.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/sidebar_js.h" VisComparator_HTML_Sidebar_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/state.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/state_js.h" VisComparator_HTML_State_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator/js/ui.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/ui_js.h" VisComparator_HTML_UI_JS)
+# Auto-discover and embed whole directories into one aggregated header each.
+# Adding/removing a file in either source tree is picked up automatically (no edits here).
+set(VISCOMPARATOR_WEBASSETS_HEADER "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/webassets_all.h")
+set(VISCOMPARATOR_TEMPLATES_HEADER "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/templates_all.h")
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/SingleTaskTemplate.dat" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/SingleTaskTemplate_dat.h" VisComparator_Template_SingleTask)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates/TwoTasksTemplate.dat" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/TwoTasksTemplate_dat.h" VisComparator_Template_TwoTasks)
+EmbedDirAsArray("${CMAKE_CURRENT_SOURCE_DIR}/html/vis_comparator"
+  "${VISCOMPARATOR_WEBASSETS_HEADER}" VisComparator_WebAssets
+  "*.html" "*.css" "*.js")
+EmbedDirAsArray("${CMAKE_CURRENT_SOURCE_DIR}/samples/users_data/vis_comparator/templates"
+  "${VISCOMPARATOR_TEMPLATES_HEADER}" VisComparator_Templates
+  "*.json")
 
 set(ANALYZE_SRC
   src/analyze/config.cxx 
@@ -203,23 +200,16 @@ set(ANALYZE_SRC
   src/analyze/server/config.cxx src/analyze/server/server.cxx src/analyze/server/parts_handler.cxx src/analyze/server/request_handler.cxx
   src/analyze/analyze/config.cxx src/analyze/analyze/data_manager.cxx src/analyze/analyze/statistics.cxx
 
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/index_html.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/css/index_css.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/apirest_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/commithelp_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/constants_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/dialogs_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/error_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/graphmanager_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/help_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/index_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/jsonhelp_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/sidebar_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/state_js.h ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/js/ui_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/SingleTaskTemplate_dat.h
-  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/templates/TwoTasksTemplate_dat.h
+  ${VISCOMPARATOR_WEBASSETS_HEADER}
+  ${VISCOMPARATOR_TEMPLATES_HEADER}
 
-  ${GENERATED_VERSION_C}
+  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/html/third-party/plotly/plotly_3_3_0_min_js.h ${GENERATED_VERSION_C}
 )
 
 add_library(vis_comparator.lib STATIC ${ANALYZE_SRC})
 target_link_libraries(vis_comparator.lib PUBLIC ${RapidjsonTN} ${PocoTN} ${LibArchiveTN} ZStdSeekable)
-target_include_directories(vis_comparator.lib PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
-add_dependencies(vis_comparator.lib generate_version viscomparator_plotly_3_3_0_min_js_h)
+target_include_directories(vis_comparator.lib PRIVATE ${CMAKE_SOURCE_DIR})
+add_dependencies(vis_comparator.lib generate_version)
 
 add_executable(vis_comparator src/analyze/main.cxx)
 target_link_libraries(vis_comparator PRIVATE vis_comparator.lib)

@@ -1,20 +1,29 @@
-import '../../third-party/plotly/plotly-3.3.0.min.js'
+import '../third-party/plotly/plotly-3.3.0.min.js'
 const Plotly = window.Plotly;
 import { ErrorManager } from "./error.js";
 import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
-import { state, globalDynamicSubtasks, getModalCancelFn, clearModalCancel, dedupSubtasks, migrateStateIfNeeded, resolveExperimentSlot, resolveMetricEntry, nextCommitColor } from './state.js';
-import { initSidebar, BuildSidebar } from './sidebar.js';
-import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadTemplateFromURL, OpenInfoModal } from './dialogs.js';
+import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, slotKey, removeGraph, fetchMetricSet } from './state.js';
+import { initSidebar, BuildSidebar, flattenMetricPaths, reloadGraphData } from './sidebar.js';
+import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
 
 // ============================================================
 // CONFIGURATION
 // ============================================================
 
+// The protocol is the segment right after "files" in the page URL
+// (/files/<protocol>[/index.html]); it scopes every API call to that dataset.
+const protocol = window.location.pathname.split('/').filter(Boolean)[1];
+if (!protocol) {
+  document.body.textContent =
+    'No protocol in URL. Open this page as /files/<protocol> (e.g. /files/tlspuffin).';
+  throw new Error('Missing protocol segment in URL path');
+}
+
 const config = {
-  apiBase: '/api/PR',
+  apiBase: `/api/${encodeURIComponent(protocol)}/PR`,
 };
 
 // ============================================================
@@ -34,6 +43,11 @@ headerEditBtn.textContent = ICONS.PENCIL + ' Edit';
 headerEditBtn.title = 'Rename this view';
 headerEditBtn.style.display = 'none';
 let headerEditInput = null;
+
+const serverName = window.location.hostname;
+const headerBrand = document.createElement('div');
+headerBrand.className = 'header-brand';
+headerBrand.textContent = `Experiment Analyzer on ${serverName}`;
 
 function commitTitleEdit() {
   if (headerEditBtn.dataset.editing !== 'true' || !headerEditInput) return;
@@ -82,9 +96,10 @@ headerEditBtn.onclick = function() {
 };
 
 const headerLeft = document.createElement('div');
-headerLeft.className = 'header-left';
+headerLeft.className = 'header-center';
 headerLeft.appendChild(headerTitle);
 headerLeft.appendChild(headerEditBtn);
+header.appendChild(headerBrand);
 header.appendChild(headerLeft);
 
 const headerToolbar = document.createElement('div');
@@ -142,13 +157,15 @@ function Save(state) {
 // ============================================================
 
 async function ResetState(state, newState, templateName = null) {
-  const migrated = migrateStateIfNeeded(newState);
+  const migrated = newState;
   graphManager.DelAllGraph();
   state.title          = migrated?.title          ?? 'Vue_' + Date.now();
-  state.graphSettings  = new Map();
+  state.graphSettings  = [];
   state.variables      = migrated?.variables      ?? {
-    commits: new Map(), subtasks: new Map(), metrics: new Map(),
+    commits: new Map(), subtasks: new Map(), campaigns: new Map(), metrics: new Map(),
   };
+  // Ensure the campaigns map exists (safe default for views saved before it existed).
+  if (!(state.variables.campaigns instanceof Map)) state.variables.campaigns = new Map();
   state.legendFormat   = migrated?.legendFormat   ?? { ...DEFAULT_LEGEND_FORMAT };
   state.commitRegistry = migrated?.commitRegistry ?? new Map();
   state.metricLegend   = migrated?.metricLegend   ?? new Map();
@@ -161,29 +178,60 @@ async function ResetState(state, newState, templateName = null) {
   }
 
   UpdateHeader();
-  if (migrated?.graphSettings?.size > 0) {
-    await restoreGraphs(migrated.graphSettings);
+  const configList = asConfigList(migrated?.graphSettings);
+  if (configList.length > 0) {
+    // Templates carry an authored time range that rarely matches the experiments they
+    // resolve to at load time; recompute it from real data. Views keep their saved range.
+    await restoreGraphs(configList, /*recomputeRange=*/ templateName != null);
   }
   BuildSidebar(state);
 }
 
 /**
- * Re-fetches data and recreates all graphs from a saved graphSettings Map.
- * Called by ResetState after the global state (variables, commitRegistry) is applied.
- * @param {Map<number, object>} savedSettings
+ * Normalises a loaded graphSettings value into an ordered list of graph configs.
+ * New files store an array of { id, config }; legacy files store a Map<id, config>
+ * (revived by JSONHelp). Saved ids are discarded — fresh ids are issued on render.
+ * @param {Map|Array|undefined} saved
+ * @returns {object[]} ordered graph configs
  */
-async function restoreGraphs(savedSettings) {
-  for (const [, graphConfig] of savedSettings) {
-    // Resolve concrete experiment entries (skip unresolvable slots)
-    const resolved = graphConfig.experiments
-      .map(slot => resolveExperimentSlot(slot, state.variables))
-      .filter(Boolean);
+function asConfigList(saved) {
+  if (saved instanceof Map) return [...saved.values()];          // legacy files
+  if (Array.isArray(saved)) return saved.map(e => e.config ?? e); // new ({id,config}) or bare
+  return [];
+}
+
+/** Re-orders state.graphSettings to match the current on-screen (DOM) order. */
+function resyncGraphOrder() {
+  const order = graphManager.GetDomOrderedIds();
+  state.graphSettings.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+}
+
+/**
+ * Re-fetches data and recreates all graphs from an ordered list of graph configs.
+ * Called by ResetState after the global state (variables, commitRegistry) is applied.
+ * @param {object[]} configList - ordered graph configs (ids are issued fresh on render)
+ * @param {boolean} [recomputeRange=false] - When true (template load), refit each graph's
+ *   time range to the real data extent of its resolved experiments.
+ */
+async function restoreGraphs(configList, recomputeRange = false) {
+  // Renders a tracked placeholder graph (no data) so the config stays in
+  // state.graphSettings for later variable resolution / redraw.
+  const addPlaceholder = async (graphConfig) => {
+    const id = await graphManager.AddGraph(graphConfig, new Map());
+    state.graphSettings.push({ id, config: graphConfig });
+  };
+
+  for (const graphConfig of configList) {
+    // Resolve each slot once, keeping the slot→resolved pairing (needed for slotKey
+    // when seeding the commit registry below); drop slots that don't resolve.
+    const pairs = graphConfig.experiments
+      .map(slot => ({ slot, exp: resolveExperimentSlot(slot, state.variables) }))
+      .filter(p => p.exp);
+    const resolved = pairs.map(p => p.exp);
 
     if (resolved.length === 0) {
-      // All experiment variables unresolved (template with null vars) — render placeholders
-      // so the config is tracked in state.graphSettings for later variable resolution.
-      const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.set(id, graphConfig);
+      // All experiment variables unresolved (template with null vars).
+      await addPlaceholder(graphConfig);
       continue;
     }
 
@@ -195,17 +243,25 @@ async function restoreGraphs(savedSettings) {
     )];
 
     if (resolvedMetrics.length === 0) {
-      // All metric variables unresolved — render placeholders.
-      const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.set(id, graphConfig);
+      // All metric variables unresolved.
+      await addPlaceholder(graphConfig);
       continue;
+    }
+
+    // When the x-axis is a metric (not time), fetch it too so its resampled series
+    // (and .mean) is available for #PrepareTraces. Deduplicated against the y-metrics.
+    const fetchMetrics = fetchMetricSet(resolvedMetrics, graphConfig);
+
+    if (recomputeRange) {
+      const range = await apirest.ComputeTimeRange(resolved);
+      if (range) Object.assign(graphConfig, range);
     }
 
     const results = await Promise.all(
       resolved.map(exp => apirest.LoadCommitMetricsValues(
         exp.tasktype, exp.commit, exp.subtask,
         graphConfig.min, graphConfig.max, graphConfig.delta,
-        resolvedMetrics
+        fetchMetrics, exp.timestamp, graphConfig.ciLevel ?? 95
       ))
     );
 
@@ -213,20 +269,25 @@ async function restoreGraphs(savedSettings) {
       resolved
         .map((exp, i) => ({ exp, data: results[i] }))
         .filter(p => p.data != null)
-        .map(p => [`${p.exp.commit}:${p.exp.tasktype}:${p.exp.subtask}`, p.data])
+        .map(p => [experimentKey(p.exp), p.data])
     );
 
-    if (dataMap.size === 0) continue;
+    if (dataMap.size === 0) {
+      // Experiments resolved but no data came back (e.g. the referenced commit/subtask
+      // has no results on this server). Show a placeholder rather than silently dropping it.
+      await addPlaceholder(graphConfig);
+      continue;
+    }
 
-    for (const exp of resolved) {
-      const expKey = `${exp.commit}:${exp.tasktype}:${exp.subtask}`;
-      if (!state.commitRegistry.has(expKey)) {
-        state.commitRegistry.set(expKey, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });
+    for (const { slot, exp } of pairs) {
+      const key = slotKey(slot, exp);
+      if (!state.commitRegistry.has(key)) {
+        state.commitRegistry.set(key, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });
       }
     }
 
     const id = await graphManager.AddGraph(graphConfig, dataMap);
-    state.graphSettings.set(id, graphConfig);
+    state.graphSettings.push({ id, config: graphConfig });
   }
 }
 
@@ -248,13 +309,14 @@ function onLoading(delta, label) {
 const apirest = new ApiREST(config.apiBase, errorManager, onLoading);
 // Loaded once at startup; reused as a resolved Promise by all dropdowns.
 const gitHistoryPromise = apirest.LoadGitHistory();
-// Pre-fetch all available commits once for use in sidebar pill-selectors.
+// Pre-fetch all available commits once for use in sidebar pill-selectors. Resolves
+// to the bare commit-id list as soon as the two commit lists arrive; the subject
+// prefetch below is a detached sidebar-warming side-effect and must NOT gate this
+// promise (callers such as template-from-URL loading await it on the render path).
 let allCommitsPromise = Promise.all([
   apirest.LoadCommits(TASK_TYPES.PERF),
   apirest.LoadCommits(TASK_TYPES.VULN),
-]).then(async ([perf, vuln]) => {
-  const all = [...new Set([...perf, ...vuln])];
-
+]).then(([perf, vuln]) => {
   const recentPerf = perf.slice(0, 10);
   const recentVuln = vuln.slice(0, 10);
 
@@ -266,18 +328,52 @@ let allCommitsPromise = Promise.all([
     apirest.LoadCommitSubjects(TASK_TYPES.VULN, c).then(res => res.map(s => ({tasktype: TASK_TYPES.VULN, subtask: s.value})))
   ));
 
-  const results = await Promise.all(fetches);
-  const before = globalDynamicSubtasks.length;
-  dedupSubtasks(globalDynamicSubtasks, results.flat());
-  if (globalDynamicSubtasks.length > before) BuildSidebar(state);
+  // Fire-and-forget: warm the dynamic-subtask cache and refresh the sidebar when done.
+  Promise.all(fetches).then(results => {
+    const before = globalDynamicSubtasks.length;
+    dedupSubtasks(globalDynamicSubtasks, results.flat());
+    if (globalDynamicSubtasks.length > before) BuildSidebar(state);
+  });
 
-  return all;
+  return [...new Set([...perf, ...vuln])];
+});
+// Load the campaign run list once; refresh the sidebar when it arrives. The promise is
+// awaited before template-from-URL handling so campaign URL params can be resolved.
+const campaignsReady = apirest.LoadCampaigns().then(list => {
+  globalCampaigns.length = 0;
+  globalCampaigns.push(...(list ?? []));
+  BuildSidebar(state);
 });
 const ui = new UI();
 const graphManager = new GraphManager(main, {
-  delete:    function(id) { state.graphSettings.delete(id); BuildSidebar(state); },
+  delete:    function(id) { removeGraph(state, id); BuildSidebar(state); },
+  duplicate: function(newId, config) {
+    state.graphSettings.push({ id: newId, config }); // appended; resync sorts it into place
+    resyncGraphOrder();
+    BuildSidebar(state);
+  },
+  reorder:   function() { resyncGraphOrder(); },
   getState:  function()   { return state; },
   editGraph: function(id) { EditGraph(id); },
+  getLatestTimestamp: function(type, commit) { return apirest.LatestTimestampSync(type, commit); },
+  // Re-fetch + redraw a graph after its x-axis metric changed (needs a new series).
+  // Returns whether the redraw happened so the caller can roll back on failure.
+  reloadGraph: function(id, preserveView = false) {
+    return reloadGraphData(state, id, preserveView).catch(err => {
+      console.error('[xaxis] reload error:', err);
+      return false;
+    });
+  },
+  // All metric paths available across the given resolved experiments (union), for the
+  // per-graph x-axis dropdown. Same source as the edit dialog's metric picker.
+  getMetricOptions: async function(resolvedExps) {
+    if (!resolvedExps || resolvedExps.length === 0) return [];
+    const metricsResults = await Promise.all(resolvedExps.map(e =>
+      apirest.LoadCommitMetrics(e.tasktype, e.commit, e.subtask, e.timestamp)));
+    const union = new Set();
+    for (const r of metricsResults) flattenMetricPaths(r).forEach(p => union.add(p));
+    return [...union].sort();
+  },
 });
 
 // Wire up module dependencies now that all objects are created.
@@ -455,13 +551,17 @@ modalpage.addEventListener('click', function(e) {
   }
 });
 
-tryLoadTemplateFromURL().then(function(loaded) {
-  if (!loaded) {
-    // No URL template — create a default view so the user can start immediately.
-    const defaultTitle = 'Vue_' + Date.now();
-    ResetState(state, { title: defaultTitle }).then(function() {
-      EnableMainUI(true);
-    });
-  }
+tryLoadViewFromURL().then(async function(loaded) {
+  if (loaded) return;
+  // No explicit view — try an explicit template link. Campaign URL params resolve against
+  // globalCampaigns, so make sure the run list has arrived first.
+  await campaignsReady;
+  if (await tryLoadTemplateFromURL()) return;
+  // No explicit template — if the URL carries variables, offer matching templates.
+  if (await SuggestTemplatesFromURL()) return;
+  // Otherwise create a default view so the user can start immediately.
+  const defaultTitle = 'Vue_' + Date.now();
+  await ResetState(state, { title: defaultTitle });
+  EnableMainUI(true);
 });
 console.log('done');

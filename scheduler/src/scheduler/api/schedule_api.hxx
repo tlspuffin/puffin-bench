@@ -30,6 +30,7 @@ public:
     struct FileExtractedText& data);
   bool CancelStep(uint64_t taskID, uint64_t stepID);
   bool CancelTask(uint64_t taskID);
+  bool GetTaskData(std::string const& task_id, std::string& fileStateJSON, std::string& fileArtefacts);
   bool GetTaskFinalData(std::string const& task_id, std::string& fileStateJSON, std::string& fileArtefacts) const;
 
 private:
@@ -47,6 +48,11 @@ inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
 
 inline bool ScheduleAPI::CancelTask(uint64_t taskID) {
   return schedule_.CancelTask(taskID, "rest api request");
+}
+
+inline bool ScheduleAPI::GetTaskData(std::string const& task_id, 
+    std::string& fileStateJSON, std::string& fileArtefacts) {
+  return schedule_.GetTaskData(task_id, fileStateJSON, fileArtefacts);
 }
 
 inline bool ScheduleAPI::GetTaskFinalData(std::string const& task_id, 

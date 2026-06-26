@@ -55,6 +55,8 @@ ExperimentCheckAllThreadsRunning() {
 }
 
 function ExperimentCheckRun() {
+  [[ ${DISABLE_KILL_ON_HANG:-} == 1 ]] || DISABLE_KILL_ON_HANG=0;
+
   local tlspuffin_pid="$1"; shift;
   local stats="$1"; shift;
 
@@ -63,21 +65,31 @@ function ExperimentCheckRun() {
   local nbissues=0;
   local problems='';
   while true; do
-    echo "ExperimentCheckRun..." >&2
-    local currentProblems='';
-    ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
-    local haveissue=0;
-    local i='';
-    for i in ${currentProblems}; do
-      echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
-    done;
-    problems="${currentProblems}";
-    (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
 
-    (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
-    (( nbissues > 4 )) && break;
+    if (( DISABLE_KILL_ON_HANG == 1)); then
+      if ! kill -0 ${tlspuffin_pid} 2>/dev/null; then
+        echo "process ${tlspuffin_pid} dead, exit" >&2
+        break;
+      fi
+    else
 
-    echo "ExperimentCheckRun sleep" >&2
+      echo "ExperimentCheckRun..." >&2
+      local currentProblems='';
+      ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
+      local haveissue=0;
+      local i='';
+      for i in ${currentProblems}; do
+        echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
+      done;
+      problems="${currentProblems}";
+      (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
+
+      (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
+      (( nbissues > 4 )) && break;
+      echo "ExperimentCheckRun sleep" >&2
+
+    fi
+
     sleep 60;
   done
   echo "Issues detected, killing process ${tlspuffin_pid} ..." >&2
@@ -178,9 +190,11 @@ ExperimentSetup() {
   local features="$1";
   shift
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
-  ref_binary="${THEJOB_OUT_PATH}/tlspuffin-${THEJOB_STEP_ID}"
+  ref_binary="${THEJOB_OUT_PATH}/${PACKAGE}-${THEJOB_STEP_ID}"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
   if [ ! -x "${ref_binary}" ]; then
@@ -227,6 +241,10 @@ ExperimentSetupForCargo() {
   local -n ref_esfc_features=$1;
   shift
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
+  local featureLib=${ref_esfc_features};
+
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
@@ -238,13 +256,38 @@ ExperimentSetupForCargo() {
       echo "Failed to compute runtime info for vendor '${vendor}' '${ref_esfc_features}'"
       return 1;
   }
+
+  local library=$( echo "${vendor}" | cut -d: -f1 )
+  local library_version=""
   if ${cputs}; then
-    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": true, \"features\": \"${vendor}\" }" > "./.compil_info.json"
+    # "wolfssl:wolfssl580-asan" → wolfssl + 580
+    library_version=$( echo "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
   else
-    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "${THEJOB_USER_STATE_FILE}";
-    echo "{ \"cputs\": false, \"features\": \"${ref_esfc_features}\" }" > "./.compil_info.json"
+    # ",?wolfssl540,?" → wolfssl + 540
+    # ",?libressl,?" → libressl + 333
+    if [ -n "${library}" ]; then
+      if [ "${library}" == "libressl" ]; then
+        featureLib=$( echo "${featureLib}" | sed "s/${library}/${library}0/g" )
+      fi
+      library_version=$( echo "${featureLib}" | sed -E "s/.*,?${library}([0-9][0-9a-zA-Z]*),?.*/\1/" )
+      if [ "${library_version}" == "${featureLib}" ] || [ -z "${library_version}" ]; then
+        library="NA";
+        library_version="NA";
+      elif [ "${library}" == "libressl" ]; then
+        library_version=$( echo "${library_version}" | sed "s/^.//" )
+        [ -z "${library_version}" ] && library_version="333";
+      fi
+    else
+      library="NA";
+      library_version="NA";
+    fi
   fi
+
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
+  if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
+    echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
+  fi
+  echo "${jsonCompilInfos}" > "${THEJOB_USER_STATE_FILE}";
 
   eval $( ${THEJOB_TOOLS_PATH}/reserve_port ) || return 1; # reserve a tcp port on if 127.0.0.1 (RESERVED_PORT, RESERVED_PORT_PID)
 }
@@ -353,39 +396,53 @@ ExperimentPostLaunchSetup() {
   (( saveData && SAVE_CORPUS )) && 
       CreateArtefact "${experiment_base}/corpus" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-corpus" "commit_id:${COMMIT_ID}" "features:${features}"
 
+  ln -sfn "./${experiment_base}/log" ./current_log
+
   return 0;
 }
 
 ExperimentReport() {
-  local tlspuffin_outpath=$( ls experiments/ )
-  local experiment_base="./experiments/${tlspuffin_outpath}"
-  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-    read nbClients execPerSec <<< "$(
-        tail -c 8192 "${statsJSON}" |\
-        sed 's/}{/\n/g' |\
-        grep '"type":"global"' |\
-        sed 's/,/\n/g' |\
-        awk -F: '
-          $1 ~ /clients/      { clients=$2+0 }
-          $1 ~ /exec_per_sec/ { exec=$2+0 }
-          END { print clients, exec }
-        '
-    )"
-    [[ "$nbClients" =~ ^[0-9]+$ ]] || nbClients=0;
-    [[ "$execPerSec" =~ ^[0-9]+$ ]] || execPerSec=0;
-    echo "{\"nb_cores\": ${THEJOB_NB_CORES}, \"nb_clients\": ${nbClients}, \"exec_per_sec\": ${execPerSec}}" >> "${THEJOB_USER_STATE_FILE}"
+  if [ -z "$1" ]; then
+    echo "Missing experimentUUID ref parameter"
+    return 1;
+  fi
+  local -n ref_experimentUUID=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing experiment_base ref parameter"
+    return 1;
+  fi
+  local -n ref_experiment_base=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing objective_count ref parameter"
+    return 1;
+  fi
+  local -n ref_objective_count=$1;
+  shift;
+
+  ref_experimentUUID=-1
+  [ -r "./.thejob_uuid" ] && ref_experimentUUID=$( cat ./.thejob_uuid )
+  if (( ref_experimentUUID != -1)); then
+    curl -s "${THEJOB_API_URL}/task/${THEJOB_TASK_ID}/state" -o "task.json" || return 1
   fi
 
-  local objective_dir="${experiment_base}/objective"
+  local tlspuffin_outpath=$( ls experiments/ )
+  ref_experiment_base="./experiments/${tlspuffin_outpath}"
+
+  ref_objective_count=0
+  local objective_dir="${ref_experiment_base}/objective"
   if [ -d "$objective_dir" ]; then
-    local objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
+    ref_objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
     # Display the following if obejctive_count is greater than 0
-    if [ "$objective_count" -gt 0 ]; then
+    if [ "${ref_objective_count}" -gt 0 ]; then
       local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
       local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       local now=$(date +%s)
       local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-      echo "{\"objective_count\": ${objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
+      echo "{\"objective_count\": ${ref_objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
     else
       echo "{\"objective_count\": 0}" >> "${THEJOB_USER_STATE_FILE}"
     fi
@@ -397,7 +454,6 @@ ExperimentReport() {
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
-  ExperimentReport
 }
 
 ExperimentRun() {
@@ -439,6 +495,8 @@ ExperimentRun() {
     echo "Missing required global variable: experiment"
     return 1;
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local binary="";
   local last_core=0;
@@ -497,12 +555,16 @@ ExperimentRunWithCargo() {
     return 1
   fi
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
+
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -563,6 +625,7 @@ Init () {
 
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
   LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  AddGlobalParam LIBAFL_VERSION "${LIBAFL_VER}"
   echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
   AFL_CORES_GRAMMAR=$?
   AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"
@@ -580,6 +643,8 @@ Build() {
     return 1
   fi
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
   local cputs=false
   ComputeBuildRuntimeInfo "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
@@ -587,9 +652,9 @@ Build() {
   }
 
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
-  md5sum_res=$( echo "tlspuffin-${COMMIT_ID}-${features}-${vendor}" | md5sum )
-  cache_id="tlspuffin-${md5sum_res%% *}"
-  echo "tlspuffin-${COMMIT_ID}-${features}-${vendor} = ${cache_id}"
+  md5sum_res=$( echo "${PACKAGE}-${COMMIT_ID}-${features}-${vendor}" | md5sum )
+  cache_id="${PACKAGE}-${md5sum_res%% *}"
+  echo "${PACKAGE}-${COMMIT_ID}-${features}-${vendor} = ${cache_id}"
   cache_ok=1
   if [[ "${COMMIT_ID}" != "main" ]]; then
     binary=$( QueryCache -q "${cache_id}" )
@@ -601,13 +666,13 @@ Build() {
     if ${cputs}; then
       nix-shell --run "./tools/mk_vendor make '${vendor}'"
     fi
-    nix-shell --run "cargo build --bin tlspuffin --release --features=${features} -j ${THEJOB_NB_CORES}" || return 1
-    binary=$( realpath ./target/release/tlspuffin )
+    nix-shell --run "cargo build --bin \"${PACKAGE}\" --release --features=${features} -j ${THEJOB_NB_CORES}" || return 1
+    binary=$( realpath "./target/release/${PACKAGE}" )
     SetCache "${cache_id}" "${binary}"
   else
     echo "Found in cache"
   fi
-  cp "${binary}" "${THEJOB_OUT_PATH}/tlspuffin-${THEJOB_STEP_ID}" || return 1;
+  cp "${binary}" "${THEJOB_OUT_PATH}/${PACKAGE}-${THEJOB_STEP_ID}" || return 1;
 
   return 0
 }
@@ -621,6 +686,8 @@ ForcedBuild() {
     echo "Missing required global variable: experiment"
     return 1
   fi
+
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
 
@@ -636,12 +703,12 @@ ForcedBuild() {
   fi
 
   rm -rf ./seeds
-  echo "nix-shell --run \"cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed\""
-  nix-shell --run "cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+  echo "nix-shell --run \"cargo run --release --bin \"${PACKAGE}\" --features=${features} -j ${THEJOB_NB_CORES} -- seed\""
+  nix-shell --run "cargo run --release --bin \"${PACKAGE}\" --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   rm -rf ./experiments
-  echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help" || return 1
+  echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- help\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- help" || return 1
 }
 
 Clean() {
@@ -790,89 +857,31 @@ ExperimentWithCargo () {
   return ${status}
 }
 
+ExperimentEnd() {
+  ExperimentEndCommon || return 1;
+
+  local experimentUUID=-1;
+  local experiment_base='';
+  local objective_count=0;
+  ExperimentReport experimentUUID experiment_base objective_count || return 1;
+  local outFile="${THEJOB_OUT_PATH}/summary-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json"
+  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
+    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${experimentUUID}" "${outFile}" >> "${THEJOB_USER_STATE_FILE}" 
+  else
+    echo '{ "error": "stats.json not found" }' > "${outFile}"
+  fi
+}
+
 SummaryRun () {
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
-
-  local json='{ "type": "perf", "libraries": [ ';
-  local firstlib=1;
-  while read -r libresults; do
-    local lib=${libresults#"$THEJOB_ARTEFACTS_PATH"/}
-    if (( ! firstlib )); then
-      json+=","
-    fi
-    firstlib=0
-    json+=" { \"name\": \"${lib}\", \"data\": [ ";
-    local firstRun=1;
-    while read -r i; do
-      local idRun=$( echo "${i}" | sed 's:.*/\([0-9][0-9]*\)-stats.json$:\1:' )
-
-      local startInfos=$( head -c 1M "${i}" | sed 's/}{/}\n{/g' | head -1 );
-      local startTime=$( echo "${startInfos}" | jq -r '.time.secs_since_epoch' );
-      local endInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | tail -1 );
-      echo "${endInfos}" | jq >/dev/null 2>&1 || endInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | tail -2 | head -1 );
-      local endTime=$( echo "${endInfos}" | jq -r '.time.secs_since_epoch' );
-      local runTime=$(( endTime - startTime ));
-
-      local endGlobalInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"global".*}$' | tail -1 );
-      echo "${endGlobalInfos}" | jq >/dev/null 2>&1 || endGlobalInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"global".*}$' | tail -2 | head -1 );
-
-      local corpus=$( echo "${endGlobalInfos}" | jq -r '.corpus_size' )
-      [ -z "${corpus}" ] && corpus='null';
-      local execs=$( echo "${endGlobalInfos}" | jq -r '.total_execs' )
-      [ -z "${execs}" ] && execs='null';
-      local nbClients=$( echo "${endGlobalInfos}" | jq -r '.clients' )
-      [ -z "${nbClients}" ] && nbClients=0;
-      local objectiveSize=$( echo "${endGlobalInfos}" | jq -r '.objective_size' )
-      [ -z "${objectiveSize}" ] && objectiveSize=0;
-
-      local coverages=''
-      local nbDuration=0
-      local avgDuration=0
-      local endClientsInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"client".*}$' );
-      for (( client=1; client<nbClients; ++client )); do
-
-        local startClientInfos=$( head -c 2M "${i}" | sed 's/}{/}\n{/g' | grep "\"id\":${client}" | head -1 );
-        local clientStartTime=$( echo "$startClientInfos" | jq -r '.time.secs_since_epoch' )
-
-        local endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -1 );
-        echo "${endClientInfos}" | jq  >/dev/null 2>&1 || endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -2 | head -1 );
-
-        local clientCovHit=''
-        clientCovHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit' ) || clientCovHit=$(echo "$endClientInfos" | jq -e -r '.coverage.discovered' ) || clientCovHit='';
-        local clientCovMax=''
-        clientCovMax=$( echo "$endClientInfos" | jq -e -r '.coverage.max' ) || clientCovMax='';
-        local clientCoverage=0
-
-        [ -n "${clientCovHit}" ] && {
-          [ -n "${clientCovMax}" ] && {
-            clientCoverage=$( echo "scale=8; ( ${clientCovHit} / ${clientCovMax} ) * 100" | bc | LC_ALL=C xargs printf "%.6f\n" )
-            [ -n "${coverages}" ] && coverages+=","
-            coverages+="${clientCoverage}"
-          }
-        }
-
-        local clientEndTime=$( echo "$endClientInfos" | jq -r '.time.secs_since_epoch' )
-        local clientDuration=;
-        [ -n "${clientStartTime}" ] && [ -n "${clientEndTime}" ] && clientDuration=$(( clientEndTime - clientStartTime  ))
-        [ -n "${clientDuration}" ] && {
-          (( avgDuration += clientDuration ));
-          (( ++nbDuration ));
-        }
-      done
-      [ -z "${coverages}" ] && coverages=''
-      (( nbDuration > 0)) && avgDuration=$(( avgDuration / nbDuration )) || avgDuration='"NA"';
-
-      if (( ! firstRun )); then
-        json+=","
-      fi
-      firstRun=0;
-      json+=" { \"id\": \"${idRun}\", \"duration\": ${runTime}, \"corpus_size\": ${corpus}, \"total_execs\": ${execs}, \"coverage\": [ ${coverages} ], \"objective_size\": ${objectiveSize}, \"client_average_duration_s\": ${avgDuration} }";
-
-    done < <(find "${libresults}" -name "*.json" | sort -V)
-    json+=" ] }";
-  done < <(find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -V)
-  json+=" ] }";
-  echo "${json}" > summary.json;
+  [ -z "${TYPE}" ] && TYPE="perf"
+  [ -z "${CAMPAIGN_ID}" ] && CAMPAIGN_ID="N/A"
   CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"
+  "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_summary_run.js" "${COMMIT_ID}" "${THEJOB_USER}" "${THEJOB_TASK_ID}" "${TYPE}" "${CAMPAIGN_ID}" "${THEJOB_ARTEFACTS_PATH}" "${THEJOB_OUT_PATH}" ./summary.json
+  local flagObjective=$?
+  (( flagObjective == 2 )) && return 1;
+  if [ "${flagObjective}" == '0' ]; then
+    Flag '{"color": "#6f6f00"}';
+  fi
   return 0;
 }

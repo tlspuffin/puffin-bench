@@ -11,10 +11,11 @@ class JSONHelp {
   /**
    * Serialises an object (possibly containing Map/Set values) to a JSON string.
    * @param {*} object
+   * @param {string|number} [space] - Indentation passed to JSON.stringify (e.g. 2 for multiline output)
    * @returns {string}
    */
-  static Stringify(object) {
-    return JSON.stringify(object, this.#Replacer);
+  static Stringify(object, space) {
+    return JSON.stringify(object, this.#Replacer, space);
   }
 
   /**
@@ -27,6 +28,11 @@ class JSONHelp {
   }
 
   static #Replacer(key, value) {
+    // Shrink saved files: omit null-valued object properties. Readers default any
+    // absent key to null (?? null / optional chaining). In an array the returned
+    // undefined is serialized by JSON.stringify as null, so Map entries encoded as
+    // [key, null] (e.g. metric variables) keep their key and null value.
+    if (value === null) return undefined;
     if (value instanceof Map) {
       return { __type: 'Map', value: Array.from(value.entries())};
     }

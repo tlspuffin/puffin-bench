@@ -1,5 +1,4 @@
 #include "project.hxx"
-#include "rule_campaign_summary.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include <unordered_set>
@@ -30,13 +29,18 @@ ns_Publish::Project::Project(std::string const& projectName, std::string const& 
   }
 }
 
-bool ns_Publish::Project::ScanStorage() {
+bool ns_Publish::Project::ScanStorage(bool regenCache, std::filesystem::path directory) {
+  if (!directory.is_relative()) {
+    return false;
+  }
   try {
+    if (regenCache) {
+      index_.Delete(directory);
+    }
     int processedCount = 0;
-    std::unordered_set<std::string> triggers;
     LOGI << "Scan " << path << Log::Flags::End;
 
-    for(auto it = std::filesystem::recursive_directory_iterator(path);
+    for(auto it = std::filesystem::recursive_directory_iterator(path / directory);
         it != std::filesystem::recursive_directory_iterator(); ++it) {
       auto const& entry = *it;
 
@@ -52,12 +56,15 @@ bool ns_Publish::Project::ScanStorage() {
         continue;
       }
 
-      std::string projectRelativeStr = file.lexically_relative(path);
-      if (index_.HaveCachedJSON(projectRelativeStr)) {
-        continue;
-      }
       if (filesInError_.find(file) != filesInError_.end()) {
         continue;
+      }
+
+      std::string projectRelativeStr = file.lexically_relative(path);
+      if (!regenCache) {
+        if (index_.HaveIndexed(projectRelativeStr)) {
+          continue;
+        }
       }
 
       for(auto const& rule: rules_) {
@@ -65,7 +72,7 @@ bool ns_Publish::Project::ScanStorage() {
           uint64_t timestamp = 0;
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged)) {
+          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged, !regenCache)) {
             index_.Add(outFile, timestamp, projectRelativeStr, libsManaged);
             ++processedCount;
           } else {
@@ -75,7 +82,7 @@ bool ns_Publish::Project::ScanStorage() {
         }
       }
     }
-    if (processedCount > 0) {
+    if (processedCount > 0 || regenCache) {
       index_.Save(outputPath / ".index.json");
       LOGI << "Processed and indexed " << processedCount << " files" << Log::Flags::End;
     }
@@ -103,7 +110,7 @@ bool ns_Publish::Project::ScanFiles(std::vector<std::filesystem::path> const& fi
           uint64_t timestamp = 0;
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged)) {
+          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged, true)) {
             index_.Add(outFile, timestamp, projectRelativeStr, libsManaged);
             ++processedCount;
           } else {
@@ -135,22 +142,15 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std:
   std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
       result;
   for (auto const onerule : rules_) {
-    auto rule = std::dynamic_pointer_cast<ns_Publish::RuleCampaignUseSummary>(onerule);
-    if (!rule) {
+    if (!onerule->IsCampaign()) {
       continue;
     }
-    std::filesystem::path ruleFolder = path / rule->DataPath();
+    std::filesystem::path ruleFolder = path / onerule->DataPath();
 
     auto itDirectoryEnd = std::filesystem::recursive_directory_iterator();
     for(std::filesystem::recursive_directory_iterator it(ruleFolder); 
         it != itDirectoryEnd; ++it) {
       if (it->is_directory()) {
-        if (it.depth() >= 2) {
-          it.disable_recursion_pending();
-        }
-        continue;
-      }
-      if (it.depth() != 2) {
         continue;
       }
       if (!it->is_regular_file()) {
@@ -160,14 +160,25 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std:
         continue;
       }
       std::filesystem::path id = it->path().lexically_relative(ruleFolder);
+      std::ptrdiff_t const pathSize = std::distance(id.begin(), id.end());
+      if (pathSize < 3) {
+        continue;
+      }
       auto itID = id.begin();
+      std::advance(itID, pathSize - 3);
       std::string user = itID->string();
       std::string campaignName = (++itID)->string();
       std::string file = (++itID)->string();
-      result[user][campaignName].push_back({file, rule->DataPath() / id});
+      result[user][campaignName].push_back({file, onerule->DataPath() / id});
     }
   }
   return result;
+}
+
+bool ns_Publish::Project::DeleteData(std::string const& cacheFile) {
+  bool success = index_.Remove(path, cacheFile, true);
+  index_.Save(outputPath / ".index.json");
+  return success;
 }
 
 bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {
@@ -179,7 +190,9 @@ bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {
   std::string const relativePath = std::filesystem::relative(rulesPath, path);
 
   rapidjson::Document doc;
-  ReadJSONFile(rulesFile, doc);
+  if (!ReadJSONFile(rulesFile, doc)) {
+    throw std::runtime_error("Error while trying access "+rulesFile);
+  }
 
   if (doc.HasMember("index") && doc["index"].IsString()) {
     std::filesystem::path indexFile = doc["index"].GetString();
@@ -211,19 +224,18 @@ bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {
 
     std::string const action = value["action"].GetString();
     std::string const onFiles = value["onFiles"].GetString();
-    static const rapidjson::Value emptyObject(rapidjson::kObjectType);
-    const rapidjson::Value* parametersValue = &emptyObject;
+    static rapidjson::Value const emptyObject(rapidjson::kObjectType);
+    rapidjson::Value const* parameters = &emptyObject;
     if (value.HasMember("parameters")) {
-      parametersValue = &(value["parameters"]);
+      parameters = &(value["parameters"]);
     }
-    rapidjson::Value::ConstObject const& parameters = parametersValue->GetObject();
     std::shared_ptr<Rule> rulePtr = 
-        std::shared_ptr<Rule>(Rule::Build(action, name, rulesPath, relativePath, onFiles, parameters));
+        std::shared_ptr<Rule>(Rule::Build(action, ruleName, rulesPath, relativePath, onFiles, *parameters));
     if (rulePtr) {
       rules_.push_back(rulePtr);
-      LOGI << "Add rules: " << name << " → " << action << " (" << onFiles << ") for: " << relativePath << Log::Flags::End;
+      LOGI << "Add rules: " << ruleName << " → " << action << " (" << onFiles << ") for: " << relativePath << Log::Flags::End;
     } else {
-     throw std::runtime_error("Fatal error. Invalid rules file, \"" + name + "\" object have an unknown action \"" + action + "\" in " + rulesFile);
+     throw std::runtime_error("Fatal error. Invalid rules file, \"" + ruleName + "\" object have an unknown action \"" + action + "\" in " + rulesFile);
     }
   }
   return true;

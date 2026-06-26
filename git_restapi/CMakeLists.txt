@@ -8,6 +8,12 @@ include(CMakeTextEmbedding.cmake)
 
 set(DEPS_BASE_DIR "${CMAKE_SOURCE_DIR}/third-party")
 
+get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT CMAKE_BUILD_TYPE AND NOT IS_MULTI_CONFIG)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif()
+
 set(IN_VERSION_C "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in")
 set(GENERATED_VERSION_C "${CMAKE_BINARY_DIR}/version.c")
 if (NOT TARGET generate_version)
@@ -20,7 +26,7 @@ else()
   set_source_files_properties(${GENERATED_VERSION_C} PROPERTIES GENERATED TRUE)
 endif()
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/tlspuffin_history.sh" "${CMAKE_SOURCE_DIR}/embeded/git_restapi/tlspuffin_history_sh.h" TLSPuffinHistory_Script)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/tlspuffin_history.sh" "${CMAKE_SOURCE_DIR}/embeded/git_restapi/scripts/tlspuffin_history_sh.h" TLSPuffinHistory_Script)
 
 set(OPENSSL_SEARCH_ROOT "/usr/lib" CACHE PATH "openssl lib search path")
 set(OPENSSL_SEARCH_ROOT_INCLUDE "/usr/include" CACHE PATH "openssl include search path")
@@ -99,8 +105,8 @@ set(SRV_SRC
   src/git_restapi/server/request_handler.cxx src/git_restapi/server/parts_handler.cxx
   src/git_restapi/git/config.cxx src/git_restapi/git/git_api.cxx
   src/git_restapi/api/api.cxx
-  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/httpsclient.cxx
-  ${CMAKE_SOURCE_DIR}/embeded/git_restapi/tlspuffin_history_sh.h
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/dir.cxx src/utils/httpsclient.cxx
+  ${CMAKE_SOURCE_DIR}/embeded/git_restapi/scripts/tlspuffin_history_sh.h
   ${GENERATED_VERSION_C}
 )
 

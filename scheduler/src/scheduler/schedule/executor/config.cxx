@@ -4,8 +4,8 @@
 #include "../../../utils/rapidjson.hxx"
 #include "../../../utils/variables.hxx"
 
-#include "embeded/scheduler/executor_sh.h"
-#include "embeded/scheduler/functions_sh.h"
+#include "embeded/scheduler/scripts/executor_sh.h"
+#include "embeded/scheduler/scripts/functions_sh.h"
 
 #include <iostream>
 #include <fstream>
@@ -52,7 +52,7 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
     scriptPath_("scripts"), logsSize_(16*1024*1024), 
     //cgroupPathSymbolic_("/sys/fs/cgroup/user.slice/user-${euid}.slice/user@${euid}.service/"),
     cgroupPathSymbolic_("/sys/fs/cgroup/scheduler.service"), 
-    cgroupPath_(), cpuMaxLoad_(101), memMinRatio_(0.15)
+    cgroupPath_(), cpuMaxLoad_(90), memMinRatio_(0.15)
 {
   uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   cores_.assign(maxNbCores, true);

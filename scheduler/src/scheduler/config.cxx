@@ -41,7 +41,7 @@ bool Config::Load(std::string const& filepath) {
     logsLevel_ = doc["logs_level"].GetUint();
   }
   server_.Load("server", doc);
-  schedule_.Load("schedule", doc);
+  schedule_.Load("schedule", doc, server_.apiURL_);
   cache_.Load("cache", doc);
   return sucess;
 }

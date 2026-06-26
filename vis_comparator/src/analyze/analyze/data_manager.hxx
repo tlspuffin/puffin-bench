@@ -6,7 +6,12 @@
 #include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
+#include <map>
+#include <vector>
 #include <variant>
+#include <mutex>
+#include <optional>
+#include <chrono>
 #include <cmath>
 
 #include <iostream>
@@ -38,19 +43,54 @@ public:
     std::variant<std::vector<uint64_t>, std::vector<double>> values_;
   };
 
+  // One indexed run (a single .zst archive). The runId is (type, commit, timestamp);
+  // `timestamp` is the filename (= task.id) and is globally unique.
+  struct RunEntry {
+    std::string kind;                  // "commit" | "campaign"
+    std::string type;                  // "Perf"/"Vuln" (commit) | "Campaign"
+    std::string commit;                // commit hash (commit) | COMMIT_ID (campaign)
+    uint64_t timestamp;                // filename stem (= task.id)
+    std::string user;                  // task.user ("" when absent)
+    std::string campaign;              // campaign name (campaigns; "" otherwise)
+    std::filesystem::path relpath;     // zst path w/o extension, relative to rootpath_
+    std::vector<std::string> subjects; // keys of the archive top-level metadata.json
+    int64_t mtime;                     // .zst last_write_time (cache fingerprint)
+    uint64_t size;                     // .zst file size (cache fingerprint)
+  };
+
+  // One commit of a given type, with its latest run and how many runs it has.
+  struct SCommitInfo {
+    std::string commit;
+    uint64_t latest;  // newest timestamp of this (type, commit)
+    uint64_t count;   // number of runs of this (type, commit)
+  };
+
   DataManager(Config const& config);
-  std::vector<std::string> Commits(std::string const& type);
-  std::vector<std::pair<std::string, uint64_t>> 
-      CommitSubjects(std::string const& type, std::string const& commitID);
+  // Re-scans the data root and rebuilds the run index (thread-safe).
+  void Refresh();
+  // Local commit runs of `type`, each with its latest timestamp and run count.
+  std::vector<SCommitInfo> Commits(std::string const& type);
+  // Every run of `commit` across all types, as (timestamp, type) pairs, newest
+  // first. Type-agnostic: lets the commit picker list all runs regardless of type.
+  std::vector<std::pair<uint64_t, std::string>> Runs(std::string const& commit);
+  // Snapshot copy of every indexed campaign run.
+  std::vector<RunEntry> Campaigns();
+  // Runs are addressed by the runId (type, commit, timestamp).
+  std::vector<std::pair<std::string, uint64_t>>
+      CommitSubjects(std::string const& type, std::string const& commitID,
+      uint64_t timestamp);
   struct ns_Analyze::DataManager::SMetricsSummaries CommitMetrics(
-      std::string const& type, std::string const& commitID, 
-      std::string const& subject);
+      std::string const& type, std::string const& commitID,
+      uint64_t timestamp, std::string const& subject);
   std::unordered_map<std::string, std::vector<struct SMetricValues>> CommitValues(
-      std::string const& type, std::string const& commitID, 
-      std::string const& subject, uint64_t min, uint64_t max, 
+      std::string const& type, std::string const& commitID, uint64_t timestamp,
+      std::string const& subject, uint64_t min, uint64_t max,
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
-      std::vector<std::string> const& metrics, std::string const& aggregate);
+      std::vector<std::string> const& metrics);
+  // "mtime:size" fingerprint for cache keying ("" if the run is unknown).
+  std::string RunTag(std::string const& type, std::string const& commitID,
+      uint64_t timestamp);
 
 private:
   struct SInterpolations {
@@ -59,8 +99,26 @@ private:
   };
   Config const& config_;
   std::filesystem::path const rootpath_;
-  std::unordered_map<std::string, 
-      std::unordered_map<std::string, std::filesystem::path>> runsResults_;
+
+  // Guards runIndex_ and runsByTriple_ against concurrent reads/refreshes.
+  std::mutex mutex_;
+  // Last successful index build; debounces the burst of listing calls a single
+  // page load triggers (epoch => the first Refresh() always rebuilds).
+  std::chrono::steady_clock::time_point lastRefresh_{};
+  // Flat list of every indexed run.
+  std::vector<RunEntry> runIndex_;
+  // runId resolution: type -> commit -> timestamp -> index into runIndex_.
+  // std::map keeps timestamps ordered so commit-mode "latest" = rbegin().
+  std::unordered_map<std::string,
+      std::unordered_map<std::string, std::map<uint64_t, size_t>>> runsByTriple_;
+
+  void BuildIndex();
+  // Returns a copy of the resolved run (caller-owned, safe across refreshes).
+  std::optional<RunEntry> Resolve(std::string const& type,
+      std::string const& commit, uint64_t timestamp);
+  // Computes the metrics summary for a subject from an already-open archive.
+  struct SMetricsSummaries CommitMetrics(FileTARZST& archive,
+      std::string const& subject);
 
   std::vector<struct SInterpolations> ExtractDataTS(FileTARZST& archive, 
       std::filesystem::path const& prefixPath, 

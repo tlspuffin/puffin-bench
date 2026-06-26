@@ -155,17 +155,34 @@ Cancels a specific step within a task. If the step is running, `KillAndMarkCance
 
 ---
 
+### Get Task State
+
+```
+GET /api/task/<taskID>/state
+```
+
+Returns the current state of a task whether it is still running or already completed. If the task is still in memory (running), the response is serialised live from `TasksManager::GetTaskState()`. If the task has been archived, the exported JSON is returned instead.
+
+**Response `200 OK` (running task):**
+```json
+{ "task": { "id": 1713240000000, "name": "my-experiment", "state": "Running", ... } }
+```
+
+**Response `200 OK` (completed task):** the exported task JSON file (same format as `final_state`).
+
+---
+
 ### Get Task Final State
 
 ```
 GET /api/task/<taskID>/final_state
 ```
 
-Returns metadata for a completed task, read from `<exportPath>/<taskID>/metadata.json`.
+Returns metadata for a completed task. Requires the task archive to exist on disk.
 
-**Response `200 OK`:** Contents of `metadata.json` (task JSON at archival time).
+**Response `200 OK`:** Exported task JSON at archival time.
 
-**Response `404`** — task not yet completed or not found.
+**Response `400`** — task not found or not yet archived.
 
 ---
 
@@ -229,16 +246,21 @@ GET /api/user/<username>/<jobType>/tasks
 **Response `200 OK`:**
 ```json
 {
-  "tasks": [
+  "success": true,
+  "data": [
     {
       "id": 1713240000000,
       "name": "my-experiment",
       "running": false,
-      "cancelled": false
+      "cancelled": false,
+      "publish_link": "http://publisher.example.com/files/tlspuffin#1713240000000",
+      "flag": { "color": "#6f6f00" }
     }
   ]
 }
 ```
+
+Both `publish_link` and `flag` are always present. `publish_link` is `""` when no publish server is configured. `flag` is `{}` when `Flag()` was never called in the step script.
 
 ---
 
@@ -340,7 +362,8 @@ GET    /api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr)/(\d+)/(-?\d+)
                                                                   → RequestHandlerTaskOutputs(taskID, uuid, stepID, type, size, offset)
 DELETE /api/task/(\d+)                                            → RequestHandlerTaskCancel(taskID)
 DELETE /api/task/(\d+)/step/(\d+)                                 → RequestHandlerTaskCancelStep(taskID, stepUUID)
-GET    /api/task/(\d+)/final_state                                → RequestHandlerTaskGetFinalState(taskID)
+GET    /api/task/(\d+)/final_state                                → RequestHandlerTaskGetState(final=true, taskID)
+GET    /api/task/(\d+)/state                                      → RequestHandlerTaskGetState(final=false, taskID)
 GET    /api/task/(\d+)/artefacts                                  → RequestHandlerTaskGetArtefacts(taskID)
 GET    /api/users                                                  → RequestHandlerUsersList
 GET    /api/user/([a-zA-Z0-9_-]+)/job_types                       → RequestHandlerUserJobsTypeList(user)
