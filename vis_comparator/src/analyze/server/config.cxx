@@ -1,21 +1,8 @@
 #include "config.hxx"
 #include "../../utils/rapidjson.hxx"
-#include "embeded/vis_comparator/index_html.h"
-#include "embeded/vis_comparator/css/index_css.h"
-#include "embeded/vis_comparator/js/apirest_js.h"
-#include "embeded/vis_comparator/js/commithelp_js.h"
-#include "embeded/vis_comparator/js/constants_js.h"
-#include "embeded/vis_comparator/js/dialogs_js.h"
-#include "embeded/vis_comparator/js/error_js.h"
-#include "embeded/vis_comparator/js/graphmanager_js.h"
-#include "embeded/vis_comparator/js/help_js.h"
-#include "embeded/vis_comparator/js/index_js.h"
-#include "embeded/vis_comparator/js/jsonhelp_js.h"
-#include "embeded/vis_comparator/js/sidebar_js.h"
-#include "embeded/vis_comparator/js/state_js.h"
-#include "embeded/vis_comparator/js/ui_js.h"
-#include "embeded/vis_comparator/templates/SingleTaskTemplate_json.h"
-#include "embeded/vis_comparator/templates/TwoTasksTemplate_json.h"
+#include "embeded/vis_comparator/embedded_file.h"
+#include "embeded/vis_comparator/webassets_all.h"
+#include "embeded/vis_comparator/templates/templates_all.h"
 #include <fstream>
 #include <iostream>
 #include "Poco/Exception.h"
@@ -74,28 +61,31 @@ void ns_Server::Config::Validate(bool forceInstall) const {
     discard = std::filesystem::canonical(CA_);
   }
 
-  std::error_code ec;
-  bool wasCreated = std::filesystem::create_directory(userdata_ / "templates", ec);
-  if ((!wasCreated) && ec) {
-    throw std::runtime_error("Unable to create userdata directory \"" + 
-        (userdata_ / "templates").string() + "\": " + ec.message());
-  }
-  for(auto const& [ file, data, size ] : {
-        std::tuple{ "templates/SingleTaskTemplate.json", VisComparator_Template_SingleTask_data, VisComparator_Template_SingleTask_size },
-        std::tuple{ "templates/TwoTasksTemplate.json", VisComparator_Template_TwoTasks_data, VisComparator_Template_TwoTasks_size }
-  }) {
-    std::filesystem::path filePath = 
-        std::filesystem::weakly_canonical(userdata_ / file);
+  // Writes data to filePath only when it is missing; forceInstall (--force) reinstalls
+  // everything. Mirrors the previous per-file behaviour for every embedded file.
+  auto install = [forceInstall](std::filesystem::path const& filePath,
+                                char const* data, size_t size) {
     if (forceInstall || (!std::filesystem::exists(filePath))) {
       std::cout << "Creating missing required file " << filePath << std::endl;
       std::ofstream ofs(filePath, std::ios::binary);
       ofs.write(data, size);
       ofs.close();
       std::filesystem::permissions(filePath,
-        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | 
-        std::filesystem::perms::group_read, 
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+        std::filesystem::perms::group_read,
         std::filesystem::perm_options::replace);
     }
+  };
+
+  std::error_code ec;
+  bool wasCreated = std::filesystem::create_directory(userdata_ / "templates", ec);
+  if ((!wasCreated) && ec) {
+    throw std::runtime_error("Unable to create userdata directory \"" +
+        (userdata_ / "templates").string() + "\": " + ec.message());
+  }
+  for (auto const& f : VisComparator_Templates) {
+    install(std::filesystem::weakly_canonical(userdata_ / "templates" / f.name),
+            f.data, f.size);
   }
 
   if (!git_history_url_.empty()) {
@@ -109,40 +99,17 @@ void ns_Server::Config::Validate(bool forceInstall) const {
     }
   }
 
-  std::filesystem::create_directory(html_/ "vis_comparator", ec);
-  std::filesystem::create_directory(html_/ "vis_comparator" / "css", ec);
-  std::filesystem::create_directory(html_/ "vis_comparator" / "js", ec);
-  std::filesystem::create_directory(html_/ "vis_comparator" / "js", ec);
-  std::filesystem::create_directory(html_/ "third-party", ec);
-  std::filesystem::create_directory(html_/ "third-party" / "plotly", ec);
-  for(auto const& [ file, data, size ] : {
-      std::tuple{ "vis_comparator/index.html", VisComparator_HTML_Index_HTML_data, VisComparator_HTML_Index_HTML_size },
-      std::tuple{ "vis_comparator/css/index.css", VisComparator_HTML_Index_CSS_data, VisComparator_HTML_Index_CSS_size },
-      std::tuple{ "vis_comparator/js/apirest.js", VisComparator_HTML_APIRest_JS_data, VisComparator_HTML_APIRest_JS_size },
-      std::tuple{ "vis_comparator/js/commithelp.js", VisComparator_HTML_CommitHelp_JS_data, VisComparator_HTML_CommitHelp_JS_size },
-      std::tuple{ "vis_comparator/js/constants.js", VisComparator_HTML_Constants_JS_data, VisComparator_HTML_Constants_JS_size },
-      std::tuple{ "vis_comparator/js/dialogs.js", VisComparator_HTML_Dialogs_JS_data, VisComparator_HTML_Dialogs_JS_size },
-      std::tuple{ "vis_comparator/js/error.js", VisComparator_HTML_Error_JS_data, VisComparator_HTML_Error_JS_size },
-      std::tuple{ "vis_comparator/js/graphmanager.js", VisComparator_HTML_GraphManager_JS_data, VisComparator_HTML_GraphManager_JS_size },
-      std::tuple{ "vis_comparator/js/help.js", VisComparator_HTML_Help_JS_data, VisComparator_HTML_Help_JS_size },
-      std::tuple{ "vis_comparator/js/index.js", VisComparator_HTML_Index_JS_data, VisComparator_HTML_Index_JS_size },
-      std::tuple{ "vis_comparator/js/jsonhelp.js", VisComparator_HTML_JSONHelp_JS_data, VisComparator_HTML_JSONHelp_JS_size },
-      std::tuple{ "vis_comparator/js/sidebar.js", VisComparator_HTML_Sidebar_JS_data, VisComparator_HTML_Sidebar_JS_size },
-      std::tuple{ "vis_comparator/js/state.js", VisComparator_HTML_State_JS_data, VisComparator_HTML_State_JS_size },
-      std::tuple{ "vis_comparator/js/ui.js", VisComparator_HTML_UI_JS_data, VisComparator_HTML_UI_JS_size },
-      std::tuple{ "third-party/plotly/plotly-3.3.0.min.js", reinterpret_cast<char const*>(VisComparator_HTML_Ploty_JS), static_cast<size_t const>(VisComparator_HTML_Ploty_JS_len) },
-  }) {
-    std::filesystem::path filePath = 
-        std::filesystem::weakly_canonical(html_ / file);
-    if (forceInstall || (!std::filesystem::exists(filePath))) {
-      std::cout << "Creating missing required file " << filePath << std::endl;
-      std::ofstream ofs(filePath, std::ios::binary);
-      ofs.write(data, size);
-      ofs.close();
-      std::filesystem::permissions(filePath,
-        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | 
-        std::filesystem::perms::group_read, 
-        std::filesystem::perm_options::replace);
-    }
+  // Web assets (html/css/js): directories are derived from each file's relative path.
+  for (auto const& f : VisComparator_WebAssets) {
+    std::filesystem::path filePath =
+        std::filesystem::weakly_canonical(html_ / "vis_comparator" / f.name);
+    std::filesystem::create_directories(filePath.parent_path(), ec);
+    install(filePath, f.data, f.size);
   }
+
+  // Plotly: binary blob embedded via xxd, kept separate from the globbed assets.
+  std::filesystem::create_directories(html_ / "third-party" / "plotly", ec);
+  install(std::filesystem::weakly_canonical(html_ / "third-party" / "plotly" / "plotly-3.3.0.min.js"),
+          reinterpret_cast<char const*>(VisComparator_HTML_Ploty_JS),
+          static_cast<size_t>(VisComparator_HTML_Ploty_JS_len));
 }
