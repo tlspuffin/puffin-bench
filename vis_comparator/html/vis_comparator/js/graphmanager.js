@@ -1,7 +1,7 @@
 // Shared commit colour palette — imported by index.js for commitRegistry assignment.
 import {CommitHelp} from "./commithelp.js";
 import { ICONS, COMMIT_PALETTE, DASH_PALETTE } from './constants.js';
-import { resolveMetricEntry, resolveExperimentSlot, experimentKey } from './state.js';
+import { resolveMetricEntry, resolveExperimentSlot, experimentKey, slotKey } from './state.js';
 
 /**
  * Manages Plotly graph instances displayed in the main area.
@@ -346,8 +346,7 @@ class GraphManager {
    *   3. commitRegistry[key].displayName (individual override)
    */
   #ExperimentDisplayName(resolved, slot, state) {
-    const expKey = experimentKey(resolved);
-    const entry  = state?.commitRegistry?.get(expKey);
+    const entry  = state?.commitRegistry?.get(slotKey(slot, resolved));
     if (entry?.displayName) return entry.displayName;
     const fmt = state?.legendFormat?.experiment;
     if (fmt) return GraphManager.#InterpolateExperiment(fmt, resolved, slot, state);
@@ -720,7 +719,7 @@ class GraphManager {
       // ── Placeholder: resolved experiment but data unavailable ─────
       if (!data) {
         const short    = CommitHelp.ShortHash(resolved.commit);
-        const regEntry = state?.commitRegistry?.get(expKey);
+        const regEntry = state?.commitRegistry?.get(slotKey(slot, resolved));
         traces.push({
           x: [], y: [],
           mode: 'lines',
@@ -733,7 +732,7 @@ class GraphManager {
       }
 
       const { series } = data;
-      const regEntry  = state?.commitRegistry?.get(expKey);
+      const regEntry  = state?.commitRegistry?.get(slotKey(slot, resolved));
       const expHidden = regEntry?.visible === false;
 
       const color     = regEntry?.color ?? GraphManager.#PALETTE[idx % GraphManager.#PALETTE.length];

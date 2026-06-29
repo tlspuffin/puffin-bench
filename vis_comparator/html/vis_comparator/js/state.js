@@ -169,6 +169,29 @@ export function experimentKey(resolved) {
     ? `${base}:${resolved.timestamp}` : base;
 }
 
+/**
+ * Stable appearance key for a slot's resolved experiment. Unlike experimentKey
+ * (which always keys on resolved values and is used for data lookup), this
+ * substitutes the variable name ($c1, $s1, $k1) for any part the slot defines via
+ * a variable, so colour/visibility follow the variable rather than the URL-supplied
+ * value. Slots that define every part literally produce a key identical to
+ * experimentKey(resolved), so colours saved against literal experiments still match.
+ * @param {object} slot           - graph experiment slot
+ * @param {object|null} resolved  - result of resolveExperimentSlot(slot, …)
+ * @returns {string|null}
+ */
+export function slotKey(slot, resolved) {
+  if (!resolved) return null;
+  if (slotMode(slot) === 'campaign') {
+    return slot.campaignVar
+      ? `$${slot.campaignVar}`
+      : `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}:${resolved.timestamp}`;
+  }
+  const commitPart  = slot.commitVar  ? `$${slot.commitVar}`  : resolved.commit;
+  const subtaskPart = slot.subtaskVar ? `$${slot.subtaskVar}` : `${resolved.tasktype}:${resolved.subtask}`;
+  return `${commitPart}:${subtaskPart}`;
+}
+
 /** Returns the { id, config } graph entry with the given id, or undefined. */
 export function findGraph(state, id) {
   return state.graphSettings.find(g => g.id === id);
@@ -202,6 +225,7 @@ export function getKnownSubtasks(state) {
   const seen   = new Set();
   const result = [];
   for (const key of state.commitRegistry.keys()) {
+    if (key.startsWith('$') || key.includes(':$')) continue;  // variable-keyed entries aren't literal subtasks
     const parts = key.split(':');
     if (parts.length < 3) continue;
     const tasktype = parts[1];

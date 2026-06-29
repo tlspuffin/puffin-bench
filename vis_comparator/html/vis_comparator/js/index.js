@@ -5,7 +5,7 @@ import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
-import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, removeGraph } from './state.js';
+import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, slotKey, removeGraph } from './state.js';
 import { initSidebar, BuildSidebar } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
 
@@ -262,10 +262,12 @@ async function restoreGraphs(configList, recomputeRange = false) {
       continue;
     }
 
-    for (const exp of resolved) {
-      const expKey = experimentKey(exp);
-      if (!state.commitRegistry.has(expKey)) {
-        state.commitRegistry.set(expKey, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });
+    for (const slot of graphConfig.experiments) {
+      const exp = resolveExperimentSlot(slot, state.variables);
+      if (!exp) continue;
+      const key = slotKey(slot, exp);
+      if (!state.commitRegistry.has(key)) {
+        state.commitRegistry.set(key, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });
       }
     }
 

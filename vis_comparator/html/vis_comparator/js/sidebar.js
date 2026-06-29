@@ -18,6 +18,7 @@ import {
   dedupSubtasks,
   isVarReferenced,
   experimentKey,
+  slotKey,
 } from './state.js';
 import { CommitHelp } from './commithelp.js';
 
@@ -152,20 +153,20 @@ export function refreshGraphsUsingVariable(state, varName) {
   }
 }
 
-function getGraphIDsUsingExperiment(state, expKey) {
+function getGraphIDsUsingExperiment(state, key) {
   const ids = [];
   for (const { id, config } of state.graphSettings) {
     for (const slot of config.experiments) {
       const def = resolveExperimentSlot(slot, state.variables);
-      if (def && experimentKey(def) === expKey) { ids.push(id); break; }
+      if (def && slotKey(slot, def) === key) { ids.push(id); break; }
     }
   }
   return ids;
 }
 
-/** Re-colours/renames traces for all graphs using the given experiment (no re-fetch). */
-export function refreshGraphsUsingExperiment(state, expKey) {
-  for (const id of getGraphIDsUsingExperiment(state, expKey)) {
+/** Re-colours/renames traces for all graphs using the given slot key (no re-fetch). */
+export function refreshGraphsUsingExperiment(state, key) {
+  for (const id of getGraphIDsUsingExperiment(state, key)) {
     _graphManager.RefreshGraphAppearance(id);
   }
 }
@@ -517,17 +518,22 @@ function buildMetricVariableSection(state) {
   return section;
 }
 
-// Returns the set of experiment keys ("commit:type:subject") currently used in graphs.
-// Resolves variable slots; ignores unresolved variables.
-function getActiveExperimentKeys(state) {
-  const keys = new Set();
+// Returns the distinct active slots across all graphs, keyed by slotKey so a slot
+// reused in multiple graphs (and the colour bound to it) appears once. Variable-defined
+// parts key on the variable name (template-stable); literal parts key on the resolved
+// value. Each entry carries the resolved experiment for label/subtitle rendering.
+// Resolves variable slots; ignores unresolved variables. First occurrence wins.
+function getActiveSlots(state) {
+  const byKey = new Map();  // key → { key, slot, resolved }
   for (const { config } of state.graphSettings) {
     for (const slot of config.experiments) {
-      const def = resolveExperimentSlot(slot, state.variables);
-      if (def) keys.add(experimentKey(def));
+      const resolved = resolveExperimentSlot(slot, state.variables);
+      if (!resolved) continue;
+      const key = slotKey(slot, resolved);
+      if (!byKey.has(key)) byKey.set(key, { key, slot, resolved });
     }
   }
-  return keys;
+  return byKey;
 }
 
 function buildExperimentLegend(state) {
@@ -559,9 +565,9 @@ function buildExperimentLegend(state) {
   fmtRow.appendChild(fmtInput);
   section.appendChild(fmtRow);
 
-  const activeKeys = getActiveExperimentKeys(state);
+  const activeSlots = getActiveSlots(state);
 
-  if (activeKeys.size === 0) {
+  if (activeSlots.size === 0) {
     const empty = document.createElement('p');
     empty.style.cssText = 'font-size:0.75rem;color:#aaa;font-style:italic;margin:0';
     empty.textContent = 'No experiments loaded';
@@ -569,17 +575,17 @@ function buildExperimentLegend(state) {
     return section;
   }
 
-  for (const expKey of activeKeys) {
-    let entry = state.commitRegistry.get(expKey);
+  for (const { key, slot, resolved } of activeSlots.values()) {
+    let entry = state.commitRegistry.get(key);
     if (!entry) {
       entry = { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true };
-      state.commitRegistry.set(expKey, entry);
+      state.commitRegistry.set(key, entry);
     }
-    // expKey format: "commitHash:type:subject"
-    const parts = expKey.split(':');
-    const commitShort = parts[0].substring(0, 7);
-    const type    = parts[1] ?? '';
-    const subject = parts.slice(2).join(':');  // subject may contain colons
+
+    // Variable badges identify the parts whose colour is template-stable (follows the
+    // variable, not the URL value). The resolved value is shown as a greyed subtitle.
+    const varNames = [slot.commitVar, slot.subtaskVar, slot.campaignVar].filter(Boolean);
+    const resolvedLabel = `${CommitHelp.ShortHash(resolved.commit)} · ${resolved.tasktype} · ${resolved.subtask}`;
 
     const row = document.createElement('div');
     row.className = 'commit-legend-row';
@@ -594,13 +600,25 @@ function buildExperimentLegend(state) {
     colorInput.title = 'Change color';
     colorInput.addEventListener('input', (e) => {
       entry.color = e.target.value;
-      refreshGraphsUsingExperiment(state, expKey);
+      refreshGraphsUsingExperiment(state, key);
     });
 
     const identSpan = document.createElement('span');
     identSpan.className = 'commit-legend-ident';
-    identSpan.title = expKey;
-    identSpan.textContent = `${commitShort} · ${type} · ${subject}`;
+    identSpan.title = key;
+    if (varNames.length > 0) {
+      // Variable-defined slot: show variable-name badges (stable identity).
+      for (const vn of varNames) {
+        const badge = document.createElement('span');
+        badge.className = 'legend-var-badge';
+        badge.textContent = vn;
+        identSpan.appendChild(badge);
+        identSpan.appendChild(document.createTextNode(' '));
+      }
+    } else {
+      // Manually-defined slot: identity is the resolved value itself.
+      identSpan.textContent = resolvedLabel;
+    }
 
     const eyeBtn = document.createElement('button');
     eyeBtn.className = 'legend-eye-btn';
@@ -610,12 +628,23 @@ function buildExperimentLegend(state) {
       entry.visible = entry.visible === false;
       eyeBtn.textContent = entry.visible !== false ? ICONS.BULLET_FILL : ICONS.BULLET_EMPTY;
       eyeBtn.title = entry.visible !== false ? 'Hide' : 'Show';
-      refreshGraphsUsingExperiment(state, expKey);
+      refreshGraphsUsingExperiment(state, key);
     });
 
     topLine.appendChild(colorInput);
     topLine.appendChild(identSpan);
     topLine.appendChild(eyeBtn);
+
+    row.appendChild(topLine);
+
+    // For variable-defined slots, show the currently-resolved value as a greyed subtitle.
+    if (varNames.length > 0) {
+      const sub = document.createElement('div');
+      sub.className = 'commit-legend-resolved';
+      sub.style.cssText = 'font-size:0.7rem;color:#aaa;margin:1px 0 0 22px';
+      sub.textContent = resolvedLabel;
+      row.appendChild(sub);
+    }
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
@@ -624,10 +653,9 @@ function buildExperimentLegend(state) {
     nameInput.value = entry.displayName ?? '';
     nameInput.addEventListener('change', (e) => {
       entry.displayName = e.target.value.trim() || null;
-      refreshGraphsUsingExperiment(state, expKey);
+      refreshGraphsUsingExperiment(state, key);
     });
 
-    row.appendChild(topLine);
     row.appendChild(nameInput);
     section.appendChild(row);
   }

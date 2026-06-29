@@ -461,6 +461,21 @@ body {
   align-self: center; /* color input has no text baseline — center it explicitly */
 }
 
+.legend-var-badge {
+  display: inline-block;
+  background: #eef1f5;
+  border: 1px solid #c7ccd4;
+  color: #333;
+  font-size: 0.65rem;
+  font-family: monospace;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  vertical-align: middle;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
 .commit-legend-ident {
   font-family: monospace;
   font-size: 0.75rem;

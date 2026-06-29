@@ -6,7 +6,7 @@
 
 import { ICONS, TASK_TYPES, DEFAULT_DELTA_DIVISOR } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey, findGraph } from './state.js';
+import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey, slotKey, findGraph } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -559,10 +559,12 @@ export async function AddGraphique(prefill = null, editId = null) {
         const max   = +document.getElementById('time_end_'   + ctx.timeID).value;
         const delta = +document.getElementById('time_delta_' + ctx.timeID).value;
 
-        for (const exp of resolved) {
-          const expKey = experimentKey(exp);
-          if (!_state.commitRegistry.has(expKey)) {
-            _state.commitRegistry.set(expKey, { color: nextCommitColor(_state.commitRegistry), displayName: null });
+        for (const slot of slots) {
+          const exp = resolveSlot(slot);
+          if (!exp) continue;
+          const key = slotKey(slot, exp);
+          if (!_state.commitRegistry.has(key)) {
+            _state.commitRegistry.set(key, { color: nextCommitColor(_state.commitRegistry), displayName: null });
           }
         }
 
