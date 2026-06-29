@@ -9,6 +9,9 @@
 #include <map>
 #include <vector>
 #include <variant>
+#include <mutex>
+#include <optional>
+#include <chrono>
 #include <cmath>
 
 #include <iostream>
@@ -56,9 +59,12 @@ public:
   };
 
   DataManager(Config const& config);
+  // Re-scans the data root and rebuilds the run index (thread-safe).
+  void Refresh();
   // Local commit runs of `type` as (commit, latestTimestamp) pairs.
   std::vector<std::pair<std::string, uint64_t>> Commits(std::string const& type);
-  std::vector<RunEntry> const& RunIndex() const { return runIndex_; }
+  // Snapshot copy of every indexed campaign run.
+  std::vector<RunEntry> Campaigns();
   // Runs are addressed by the runId (type, commit, timestamp).
   std::vector<std::pair<std::string, uint64_t>>
       CommitSubjects(std::string const& type, std::string const& commitID,
@@ -74,7 +80,7 @@ public:
       std::vector<std::string> const& metrics, std::string const& aggregate);
   // "mtime:size" fingerprint for cache keying ("" if the run is unknown).
   std::string RunTag(std::string const& type, std::string const& commitID,
-      uint64_t timestamp) const;
+      uint64_t timestamp);
 
 private:
   struct SInterpolations {
@@ -84,6 +90,11 @@ private:
   Config const& config_;
   std::filesystem::path const rootpath_;
 
+  // Guards runIndex_ and runsByTriple_ against concurrent reads/refreshes.
+  std::mutex mutex_;
+  // Last successful index build; debounces the burst of listing calls a single
+  // page load triggers (epoch => the first Refresh() always rebuilds).
+  std::chrono::steady_clock::time_point lastRefresh_{};
   // Flat list of every indexed run.
   std::vector<RunEntry> runIndex_;
   // runId resolution: type -> commit -> timestamp -> index into runIndex_.
@@ -92,8 +103,9 @@ private:
       std::unordered_map<std::string, std::map<uint64_t, size_t>>> runsByTriple_;
 
   void BuildIndex();
-  RunEntry const* Resolve(std::string const& type, std::string const& commit,
-      uint64_t timestamp) const;
+  // Returns a copy of the resolved run (caller-owned, safe across refreshes).
+  std::optional<RunEntry> Resolve(std::string const& type,
+      std::string const& commit, uint64_t timestamp);
   // Computes the metrics summary for a subject from an already-open archive.
   struct SMetricsSummaries CommitMetrics(FileTARZST& archive,
       std::string const& subject);

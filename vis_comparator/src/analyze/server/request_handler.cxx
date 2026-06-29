@@ -1008,21 +1008,3 @@ void ns_Server::RequestHandlerAPIGetGitLog::handleRequest(
 
   ProxyGetJSON(logUri.toString(), "git/log proxy", "{}", response);
 }
-
-
-// POST /api/refresh
-/*void ns_Server::RequestHandlerAPIRefresh::handleRequest(
-    Poco::Net::HTTPServerRequest& request,
-    Poco::Net::HTTPServerResponse& response) {
-
-  if (ManageCORS(request, response)) return;
-
-  apis_->analyzeAPI_.datasetManager_.Refresh();
-
-  rapidjson::Document doc;
-  doc.SetObject();
-  auto& allocator = doc.GetAllocator();
-  doc.AddMember("status", "ok", allocator);
-  doc.AddMember("message", "Dataset hierarchy refreshed", allocator);
-  SendJSONResponse(response, doc);
-}*/

@@ -100,8 +100,6 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
               std::strtoull(match[7].str().c_str(), nullptr, 10));
         } else if (std::regex_search(path, match, regSaveLoadUserData)) {
           requestHandler = new RequestHandlerAPISaveUserData(match[1].str());
-        } else if (path == "/api/refresh") {
-          //requestHandler = new RequestHandlerAPIRefresh();
         }
       }
     }

@@ -243,10 +243,10 @@ static void Fingerprint(std::filesystem::path const& zstPath, int64_t& mtime, ui
 
 void ns_Analyze::DataManager::BuildIndex() {
   std::filesystem::path const cachePath = rootpath_ / ".project/vis_comparator-index.json";
-  std::cout << "[index] Building run index from " << rootpath_.string() << std::endl;
 
   // ── Load the persistent cache: relpath -> (RunEntry, fingerprint) ──────────
   std::unordered_map<std::string, RunEntry> cache;
+  size_t cacheRawCount = 0;  // valid entries in the file, before dedup by relpath
   {
     std::ifstream ifs(cachePath);
     if (ifs) {
@@ -287,17 +287,38 @@ void ns_Analyze::DataManager::BuildIndex() {
           if (!subjectsOk) {
             continue;
           }
+          ++cacheRawCount;
           cache.emplace(r.relpath.string(), std::move(r));
         }
       }
     }
   }
-  std::cout << "[index] Loaded " << cache.size() << " cached entries from "
-            << cachePath.string() << std::endl;
+  // Build into locals and swap into the members at the end, so a mid-walk
+  // failure (e.g. a run directory deleted underneath us) can't leave the live
+  // index empty or partial, and concurrent readers keep seeing the old index
+  // for the whole scan instead of blocking on it.
+  std::vector<RunEntry> index;
+  std::unordered_map<std::string,
+      std::unordered_map<std::string, std::map<uint64_t, size_t>>> byTriple;
+
+  // Track whether the index differs from the on-disk cache, to skip the rewrite
+  // when nothing changed. Set on any fresh parse below; a final count check also
+  // catches deletions and heals a bloated cache (duplicate entries from an
+  // earlier bug collapse on load, so the rebuilt index has fewer runs).
+  bool dirty = false;
 
   // ── Walk the data root for runs (one .zst with numeric stem + sibling .json) ─
-  for (auto it = std::filesystem::recursive_directory_iterator(rootpath_);
-       it != std::filesystem::recursive_directory_iterator(); ++it) {
+  // Use the error_code overloads so a run directory vanishing mid-walk (a race
+  // with run cleanup) skips that entry instead of throwing and aborting the
+  // whole rebuild.
+  std::error_code walkEc;
+  auto const walkEnd = std::filesystem::recursive_directory_iterator();
+  for (auto it = std::filesystem::recursive_directory_iterator(rootpath_, walkEc);
+       it != walkEnd; it.increment(walkEc)) {
+    if (walkEc) {
+      LOGW(std::string("Run index walk aborted: ") + walkEc.message());
+      break;
+    }
     auto const& entry = *it;
     std::filesystem::path const& path = entry.path();
 
@@ -332,11 +353,12 @@ void ns_Analyze::DataManager::BuildIndex() {
     auto cached = cache.find(relKey);
     if (cached != cache.end() && cached->second.mtime == mtime &&
         cached->second.size == size) {
-      runIndex_.push_back(cached->second);
+      index.push_back(cached->second);
       continue;
     }
 
     // ── Fresh parse ──────────────────────────────────────────────────────────
+    dirty = true;
     std::cout << "[index] Parsing run " << relKey << std::endl;
     RunEntry run{};
     run.timestamp = std::strtoull(taskID.c_str(), nullptr, 10);
@@ -368,24 +390,33 @@ void ns_Analyze::DataManager::BuildIndex() {
       run.commit = path.parent_path().parent_path().stem().string();
     }
 
-    runIndex_.push_back(std::move(run));
+    index.push_back(std::move(run));
   }
-
-  std::cout << "[index] Indexed " << runIndex_.size() << " runs" << std::endl;
 
   // ── Build the runId resolution map ─────────────────────────────────────────
-  for (size_t i = 0; i < runIndex_.size(); ++i) {
-    RunEntry const& r = runIndex_[i];
-    runsByTriple_[r.type][r.commit][r.timestamp] = i;
+  for (size_t i = 0; i < index.size(); ++i) {
+    RunEntry const& r = index[i];
+    byTriple[r.type][r.commit][r.timestamp] = i;
   }
 
-  // ── Persist the (possibly refreshed) index ─────────────────────────────────
+  // If the rebuilt index has a different run count than the file held, the data
+  // changed (deletion) or the file carried duplicates worth rewriting cleanly.
+  if (index.size() != cacheRawCount) {
+    dirty = true;
+  }
+
+  // ── Persist the index only when the on-disk data actually changed ──────────
+  // (Build the JSON from the local `index` before it is moved into the member.)
+  if (dirty) {
+  std::cout << "[index] Reindexed " << rootpath_.string() << ": "
+            << index.size() << " runs (" << cache.size() << " cached)"
+            << std::endl;
   {
     rapidjson::Document doc;
     doc.SetObject();
     auto& alloc = doc.GetAllocator();
     rapidjson::Value entries(rapidjson::kArrayType);
-    for (RunEntry const& r : runIndex_) {
+    for (RunEntry const& r : index) {
       rapidjson::Value e(rapidjson::kObjectType);
       e.AddMember("kind", rapidjson::Value(r.kind.c_str(), alloc), alloc);
       e.AddMember("type", rapidjson::Value(r.type.c_str(), alloc), alloc);
@@ -417,27 +448,56 @@ void ns_Analyze::DataManager::BuildIndex() {
       LOGW("Could not write run index cache to " + cachePath.string());
     }
   }
+  }
+
+  // ── Install the freshly built index, replacing the previous one atomically ──
+  // The swap is the only place the members are mutated, so concurrent readers
+  // see either the old or the new index, never a half-built one.
+  std::lock_guard<std::mutex> lk(mutex_);
+  runIndex_ = std::move(index);
+  runsByTriple_ = std::move(byTriple);
 }
 
-ns_Analyze::DataManager::RunEntry const* ns_Analyze::DataManager::Resolve(
-    std::string const& type, std::string const& commit, uint64_t timestamp) const {
+void ns_Analyze::DataManager::Refresh() {
+  // Collapse the burst of listing requests a single page load fires into one
+  // rebuild; manual page reloads are seconds apart, well past this window.
+  // Claim the slot under the lock (so two threads can't rebuild at once), then
+  // release it before the walk: BuildIndex() does its own filesystem I/O
+  // unlocked and only re-takes the lock for the final atomic swap, so readers
+  // are never blocked for the duration of the scan.
+  {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto now = std::chrono::steady_clock::now();
+    if (now - lastRefresh_ < std::chrono::seconds(1)) {
+      return;
+    }
+    lastRefresh_ = now;
+  }
+  BuildIndex();
+}
+
+std::optional<ns_Analyze::DataManager::RunEntry> ns_Analyze::DataManager::Resolve(
+    std::string const& type, std::string const& commit, uint64_t timestamp) {
+  std::lock_guard<std::mutex> lk(mutex_);
   auto t = runsByTriple_.find(type);
   if (t == runsByTriple_.end()) {
-    return nullptr;
+    return std::nullopt;
   }
   auto c = t->second.find(commit);
   if (c == t->second.end()) {
-    return nullptr;
+    return std::nullopt;
   }
   auto ts = c->second.find(timestamp);
   if (ts == c->second.end()) {
-    return nullptr;
+    return std::nullopt;
   }
-  return &runIndex_[ts->second];
+  return runIndex_[ts->second];
 }
 
 std::vector<std::pair<std::string, uint64_t>>
 ns_Analyze::DataManager::Commits(std::string const& type) {
+  Refresh();
+  std::lock_guard<std::mutex> lk(mutex_);
   auto t = runsByTriple_.find(type);
   if (t == runsByTriple_.end()) {
     return {};
@@ -451,10 +511,23 @@ ns_Analyze::DataManager::Commits(std::string const& type) {
   return result;
 }
 
+std::vector<ns_Analyze::DataManager::RunEntry>
+ns_Analyze::DataManager::Campaigns() {
+  Refresh();
+  std::lock_guard<std::mutex> lk(mutex_);
+  std::vector<RunEntry> result;
+  for (RunEntry const& run : runIndex_) {
+    if (run.kind == "campaign") {
+      result.push_back(run);
+    }
+  }
+  return result;
+}
+
 std::string ns_Analyze::DataManager::RunTag(std::string const& type,
-    std::string const& commitID, uint64_t timestamp) const {
-  RunEntry const* run = Resolve(type, commitID, timestamp);
-  if (run == nullptr) {
+    std::string const& commitID, uint64_t timestamp) {
+  std::optional<RunEntry> run = Resolve(type, commitID, timestamp);
+  if (!run) {
     return "";
   }
   return std::to_string(run->mtime) + ":" + std::to_string(run->size);
@@ -465,8 +538,8 @@ std::vector<std::pair<std::string, uint64_t>>
     std::string const& type, std::string const& commitID, uint64_t timestamp) {
   std::vector<std::pair<std::string, uint64_t>> result{};
 
-  RunEntry const* run = Resolve(type, commitID, timestamp);
-  if (run == nullptr) {
+  std::optional<RunEntry> run = Resolve(type, commitID, timestamp);
+  if (!run) {
     return result;
   }
   std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
@@ -489,8 +562,8 @@ std::vector<std::pair<std::string, uint64_t>>
 
 struct ns_Analyze::DataManager::SMetricsSummaries
 ns_Analyze::DataManager::CommitMetrics(std::string const& type, std::string const& commitID, uint64_t timestamp, std::string const& subject) {
-  RunEntry const* run = Resolve(type, commitID, timestamp);
-  if (run == nullptr) {
+  std::optional<RunEntry> run = Resolve(type, commitID, timestamp);
+  if (!run) {
     return SMetricsSummaries{0};
   }
   std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");
@@ -532,8 +605,8 @@ ns_Analyze::DataManager::CommitValues(
     std::vector<std::string> const& metrics, std::string const& aggregate) {
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> result;
 
-  RunEntry const* run = Resolve(type, commitID, timestamp);
-  if (run == nullptr) {
+  std::optional<RunEntry> run = Resolve(type, commitID, timestamp);
+  if (!run) {
     return result;
   }
   std::string binFilename = rootpath_ / (run->relpath.string() + ".zst");

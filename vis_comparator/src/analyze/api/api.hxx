@@ -19,13 +19,7 @@ public:
   }
 
   std::vector<ns_Analyze::DataManager::RunEntry> GetCampaigns() {
-    std::vector<ns_Analyze::DataManager::RunEntry> result;
-    for (auto const& run : dataManager_.RunIndex()) {
-      if (run.kind == "campaign") {
-        result.push_back(run);
-      }
-    }
-    return result;
+    return dataManager_.Campaigns();
   }
 
   std::string GetRunTag(std::string const& type, std::string const& commitID,
