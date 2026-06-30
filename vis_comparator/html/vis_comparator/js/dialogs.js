@@ -854,6 +854,8 @@ export function buildFileListModal(restoreUI, opts) {
   container.appendChild(listContainer);
 
   let allFiles = [];
+  let selectedName = null;
+  let openBtn = null; // assigned when the action bar is built (below)
 
   function closeModal() {
     clearModalCancel();
@@ -869,6 +871,8 @@ export function buildFileListModal(restoreUI, opts) {
 
   function renderList() {
     listContainer.innerHTML = '';
+    selectedName = null;
+    if (openBtn) openBtn.disabled = true;
     const filterText = filterInput.value.toLowerCase();
     let files = allFiles.filter(f => f.toLowerCase().includes(filterText));
     files = [...files].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
@@ -893,6 +897,8 @@ export function buildFileListModal(restoreUI, opts) {
           r.classList.remove('selected');
         });
         row.classList.add('selected');
+        selectedName = name;
+        if (openBtn) openBtn.disabled = false;
       };
       nameBtn.ondblclick = function() { opts.onLoad(name, closeModal); };
 
@@ -924,9 +930,25 @@ export function buildFileListModal(restoreUI, opts) {
 
   setModalCancel(dismissModal);
 
-  container.appendChild(_ui.CreateActions(false, {
-    ok: { text: 'Close', callback: dismissModal }
-  }));
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+
+  openBtn = document.createElement('button');
+  openBtn.className = 'modal-button-ok';
+  openBtn.innerText = 'Open';
+  openBtn.disabled = true; // enabled once a row is selected
+  openBtn.onclick = function() {
+    if (selectedName != null) opts.onLoad(selectedName, closeModal);
+  };
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal-button-cancel';
+  closeBtn.innerText = 'Close';
+  closeBtn.onclick = dismissModal;
+
+  actions.appendChild(openBtn);
+  actions.appendChild(closeBtn);
+  container.appendChild(actions);
 
   opts.fetchFiles().then(function(answer) {
     if (answer?.files) {
