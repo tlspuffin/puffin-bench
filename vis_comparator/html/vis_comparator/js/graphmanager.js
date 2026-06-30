@@ -825,7 +825,7 @@ class GraphManager {
 
     const layout = {
       xaxis:     { title: 'Time (s)', type: 'linear', ticksuffix: 's' },
-      yaxis:     { title: splitActive ? this.#MetricDisplayName(resolvedMetrics[0]) : 'Value', type: 'linear' },
+      yaxis:     { title: splitActive ? this.#MetricDisplayName(resolvedMetrics[0]) : 'Value', type: 'linear', rangemode: 'tozero' },
       hovermode: 'x unified',
       hoverlabel: { namelength: -1 },
       showlegend: true,
@@ -1023,7 +1023,7 @@ class GraphManager {
     const domainStart = extraLeftCount > 0 ? extraLeftCount * PAD : 0;
     const domainEnd   = rightCount > 1 ? 1 - (rightCount - 1) * PAD : 1;
 
-    const axes = { yaxis: { title: { text: metrics[0], standoff: 8 }, type: 'linear' } };
+    const axes = { yaxis: { title: { text: metrics[0], standoff: 8 }, type: 'linear', rangemode: 'tozero' } };
 
     metrics.slice(1).forEach((metric, i) => {
       const axisKey = 'yaxis' + (i + 2);
@@ -1038,6 +1038,7 @@ class GraphManager {
         side:       isRight ? 'right' : 'left',
         title:      { text: metric, standoff: 8 },
         type:       'linear',
+        rangemode:  'tozero',
         anchor:     'free',
         position,
       };
