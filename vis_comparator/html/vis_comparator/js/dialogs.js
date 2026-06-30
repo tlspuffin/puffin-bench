@@ -1505,7 +1505,8 @@ function buildVariablesFromParams(params, fullHashes = []) {
     subtasks.set(name, { value, alias: params.get(`${name}.alias`) || null });
   }
   for (const name of defined.campaigns) {
-    campaigns.set(name, { value: null, alias: params.get(`${name}.alias`) || null });
+    const raw = params.get(name);
+    campaigns.set(name, { value: raw ? findCampaignRun(raw) : null, alias: params.get(`${name}.alias`) || null });
   }
   for (const name of defined.metrics) metrics.set(name, params.get(name) || null);
   return { commits, subtasks, campaigns, metrics };
