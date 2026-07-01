@@ -83,7 +83,7 @@ while read -r branch_ref; do
      --arg date "$date" --arg comment "$comment" --arg base "$baseID" \
     '.branches += [{branch: $branch, id: $id, date: $date, comment: $comment, base: $base}]' \
     "${tmp_json}" > "${tmp}" && mv "${tmp}" "${tmp_json}"
-done < <(git -C "${repo_directory}" for-each-ref --format='%(refname:short)' 'refs/remotes/origin/*' \
+done < <(git -C "${repo_directory}" for-each-ref --format='%(refname:short)' 'refs/remotes/origin/**' \
          | grep -v 'origin/HEAD\|origin/main\|origin/dev')
 
 mv "${tmp_json}" "${output}"

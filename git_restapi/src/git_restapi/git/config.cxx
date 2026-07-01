@@ -93,7 +93,7 @@ void ns_GIT::Config::Validate(bool forceInstall) const {
       ofs.write(data, size);
       ofs.close();
       std::filesystem::permissions(filePath,
-        std::filesystem::perms::owner_all |
+        std::filesystem::perms::owner_all | 
         std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
         std::filesystem::perm_options::replace);
     }

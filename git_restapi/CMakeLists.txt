@@ -99,7 +99,7 @@ set(SRV_SRC
   src/git_restapi/server/request_handler.cxx src/git_restapi/server/parts_handler.cxx
   src/git_restapi/git/config.cxx src/git_restapi/git/git_api.cxx
   src/git_restapi/api/api.cxx
-  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/httpsclient.cxx
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/dir.cxx src/utils/httpsclient.cxx
   ${CMAKE_SOURCE_DIR}/embeded/git_restapi/tlspuffin_history_sh.h
   ${GENERATED_VERSION_C}
 )
