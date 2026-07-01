@@ -1,4 +1,5 @@
 import { Metrics } from './summary_PR_metrics.js';
+import { manageGraphs } from './summary_PR_managegraphs.js';
 import '../third-party/plotly/plotly-3.3.0.min.js';
 const Plotly = window.Plotly;
 
@@ -13,7 +14,19 @@ class GraphMetrics {
 
   constructor(metrics) {
     this.#metrics = metrics;
+    this.#Reset();
+  }
+
+  #Reset() {
+    this.#html = null;
+    this.#selectType = null;
+    this.#selectSubType = null;
+    this.#selectMetric = null;
+    this.#graphContainer = null;
     this.#saveDocKeyDown = null;
+  }
+
+  #BuildDialog() {
     this.#html = document.createElement('div');
     this.#html.classList.add('graph-modal');
     const closeWindow = document.createElement('div');
@@ -81,6 +94,8 @@ class GraphMetrics {
   }
 
   Open() {
+    this.#BuildDialog();
+
     this.#selectType.innerHTML = '<option value="">Select type...</option>';
     this.#metrics.GetTypes().sort().forEach(type => {
         const option = document.createElement('option');
@@ -106,11 +121,14 @@ class GraphMetrics {
   }
 
   Close() {
+    manageGraphs.UnregisterAllGraphs();
+
     this.#html.classList.remove('visible');
     document.body.style.overflow = '';
     document.body.removeChild(this.#html);
     document.onkeydown = this.#saveDocKeyDown;
-    this.#saveDocKeyDown = null;
+
+    this.#Reset();
   }
 
   // Update libraries list when type changes
@@ -194,6 +212,8 @@ class GraphMetrics {
     const ApplyColors = () => Metrics.ColorGraphXTicks(this.#graphContainer, unusedCommitsList, '#e74c3c');
     Plotly.newPlot('graph-container', traces, layout, config)
         .then((result) => { ApplyColors(); this.#graphContainer.on('plotly_afterplot', ApplyColors); });
+
+    manageGraphs.RegisterGraph(this.#graphContainer);
   }
 };
 

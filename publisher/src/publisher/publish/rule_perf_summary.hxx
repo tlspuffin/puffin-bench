@@ -13,7 +13,8 @@ public:
       rapidjson::Value::ConstObject const& parameters);
 
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged);
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
+      bool generateArtefact);
 
 protected:
   RulePerfUseSummary(std::string const& name, std::string const& rulePath, 

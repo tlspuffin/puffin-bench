@@ -1,8 +1,28 @@
-import { config } from './summary_PR_config.js'
+import { urls as configURLS } from './summary_PR_config.js'
 import { Metrics } from './summary_PR_metrics.js';
-import { MetricsCampaign } from './summary_PR_metrics_campaign.js';
+import { MetricsCampaign } from './summary_PR_metricscampaign.js';
 import { GraphMetrics } from './summary_PR_graphmetrics.js';
 import { GraphOverview } from './summary_PR_graphoverview.js';
+import { GraphCompare } from './summary_PR_graphcompare.js';
+
+const config = {
+  urlData: (project) => `http://${window.location.host}/api/project/${project}/data`,
+  urlDataFile: (project) => `http://${window.location.host}/files/${project}/.project`,
+
+  urlGit: (project) => `${configURLS.git_restapi}/api/git/history/${project}`,
+  urlGitLogs: (project) => `${configURLS.git_restapi}/api/git/logs/${project}`,
+
+  taskInfoURL: `${configURLS.scheduler}/files/board/task.html`,
+  artefactURL: (taskID) => `${configURLS.scheduler}/api/task/${taskID}/artefacts`,
+
+  vis_comparator: configURLS.vis_comparator,
+  vis_comparator_perf: (commitID, libraryName) => `${configURLS.vis_comparator}?template=TwoTasksTemplate_2C1S&c1=${commitID}&c2=@dev-base&c2.alias=Dev&s1=Perf%3A${libraryName}`,
+  vis_comparator_campaign: (user, campaignID) => `${configURLS.vis_comparator}?k1=${encodeURIComponent(user+':'+campaignID.replace(/-(?=[^-]*$)/, ":"))}`,
+  vis_comparator_perf_multiple: (commitID, librariesName) => {
+    const libraries = librariesName.map((name, index) => `&s${index+1}=${encodeURIComponent(`Perf:${name}`)}`).join('');
+    return `${configURLS.vis_comparator}?template=PerfCompareTemplate&c1=${commitID}&c2=@dev-base&c2.alias=Dev${libraries}`
+  },
+}
 
 const availableTypes = ['Perf', 'Vuln'];
 var project = ''
@@ -29,6 +49,32 @@ var tabIndex = -1;
 var currentFilter = 'all';
 var selectedTypes = new Set(availableTypes);
 var campaigns = null;
+
+function DisableUI() {
+  document.body.setAttribute('inert', '');
+  document.body.setAttribute('aria-busy', 'true');
+}
+
+function EnableUI() {
+  document.body.removeAttribute('inert');
+  document.body.removeAttribute('aria-busy');
+}
+
+function CopyInClipboard(text) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.position = "absolute";
+  textArea.style.left = "-999999px";
+  document.body.prepend(textArea);
+  textArea.select();
+  try {
+    document.execCommand('copy');
+  } catch (error) {
+    console.error(error);
+  } finally {
+    textArea.remove();
+  }
+}
 
 async function LoadGitLogs(commitsArray) {
   try {
@@ -108,16 +154,17 @@ function NormalizeType(type) {
   return result;
 }
 
-async function LoadCommits(commits) {
+async function LoadCommits(runResults) {
   const result = new Map();
   const batchSize = 10;
-  for (let i = 0; i < commits.length; i += batchSize) {
-    const batch = commits.slice(i, i + batchSize);
+  for (let i = 0; i < runResults.length; i += batchSize) {
+    const batch = runResults.slice(i, i + batchSize);
     const promises = batch.map(async file => {
         try {
           const response = await fetch(`${config.urlDataFile(project)}/${file}`);
           if (response.ok) {
             const json = await response.json();
+            json.source_file = file;
             let gitState = result.get(json.commit_id);
             if (!gitState) {
               gitState = new Map();
@@ -433,14 +480,112 @@ function CreateActionButtons(typeData, type) {
   return actions;
 }
 
-function RenderTypeSection(type, typeData) {
+async function DeleteResults(div, data, event) {
+  if (!confirm(`Delete results file:\n\t${data} ?`)) return;
+
+  DisableUI();
+  try {
+    const response = await fetch(`${config.urlData(project)}/${data}`, { method: 'DELETE' });
+    const json = await response.json();
+    if (json.success) {
+      const commitDiv = div.parentElement;
+      div.remove();
+      if (commitDiv && !commitDiv.querySelector('.type-section')) {
+        commitDiv.remove();
+      }
+    } else {
+      alert(`Server denied deletion of: ${data}\n${json.error ?? ''}`);
+    }
+  } catch(e) {
+    alert('Fatal error while trying remove results: ' + e.name + ' : ' + e.message);
+  }
+  EnableUI();
+}
+
+function RenderTypeSection(type, typeData, label, comparaisonElement) {
   const section = document.createElement('div');
   section.className = 'type-section';
 
-  const typeHeader = document.createElement('div');
-  typeHeader.className = 'type-header';
-  typeHeader.innerHTML = `<h3>${type}</h3>`;
-  section.appendChild(typeHeader);
+  typeData?.tasks?.forEach(task => {
+    const span = document.createElement('span');
+    span.id = `${task.task_id}`
+    span.className = 'result-anchor';
+    section.appendChild(span);
+  })
+
+  const typeHeaders = document.createElement('div');
+  typeHeaders.className = 'type-headers';
+
+  const headerLabel = document.createElement('div');
+  headerLabel.className = 'type-header';
+
+  const permanentLink = document.createElement('h3');
+  const taskID = typeData.tasks?.[0]?.task_id;
+  if (taskID) {
+    permanentLink.textContent = `🔗`;
+    permanentLink.onclick = (event) => {
+        const url = new URL(window.location.href);
+        url.hash = taskID;
+        CopyInClipboard(url.toString());
+    }
+  }
+  headerLabel.appendChild(permanentLink); 
+
+  if (type == "Campaign") {
+    const displayLabel = document.createElement('a');
+    displayLabel.textContent = label;
+    displayLabel.href = config.vis_comparator_campaign(typeData.user, typeData.campaign_id);
+    headerLabel.appendChild(displayLabel);
+  } else {
+    const displayLabel = document.createElement('span');
+    displayLabel.textContent = label;
+    headerLabel.appendChild(displayLabel);
+  }
+
+  typeHeaders.appendChild(headerLabel);
+
+  const headerActions = document.createElement('div');
+  headerActions.className = 'type-header-actions';
+  if ((type == 'Perf') || (type == 'Campaign')) {
+    const btnAnalyze = document.createElement('button');
+    btnAnalyze.className = 'type-header-action';
+    btnAnalyze.textContent = '🔬 Analyze';
+    let libs = [];
+    Object.keys(typeData.libs).forEach(lib => libs.push(lib));
+    btnAnalyze.onclick = (event) => {
+      window.open(config.vis_comparator_perf_multiple(typeData.commit_id, libs), "_blank");
+    }
+    headerActions.appendChild(btnAnalyze);
+  }
+  if (comparaisonElement && typeData.global_status != 'fail') {
+    const index = metrics.findIndex(metric => metric.HaveCommit(comparaisonElement.baseCommitID));
+    if (index != -1) {
+      const btnCompare = document.createElement('button');
+      btnCompare.className = 'type-header-action';
+      btnCompare.textContent = '📈 Compare';
+      btnCompare.onclick = () => {
+          if (index == 0) {
+            new GraphOverview(metrics[0], comparaisonElement).Open(true, comparaisonElement.type);
+          } else {
+            new GraphCompare(comparaisonElement.type, [ 
+                metrics[index].GetCommitMetrics(comparaisonElement.baseCommitID), 
+                comparaisonElement.dataPoints 
+            ], [ comparaisonElement.baseCommitID, comparaisonElement.srcCommitID ]).Open();
+          }
+      };
+      headerActions.appendChild(btnCompare);
+    }
+  }
+  if (type === 'Campaign') {
+    const headerDelete = document.createElement('button');
+    headerDelete.className = 'type-header-action';
+    headerDelete.innerHTML = `<h3>💣👾</h3>`;
+    headerDelete.onclick = DeleteResults.bind(this, section, typeData.source_file);
+    headerActions.appendChild(headerDelete);
+  }
+  typeHeaders.appendChild(headerActions);
+
+  section.appendChild(typeHeaders);
 
   if (typeData.libs && Object.keys(typeData.libs).length > 0) {
     const libsDiv = document.createElement('div');
@@ -463,22 +608,39 @@ function RenderTypeSection(type, typeData) {
       // Check for warning
       const warnUser = libData.warn_user;
       const warningIcon = warnUser ? GetWarningIcon(warnUser) : '';
+      if (warningIcon != '') {
+        libItem.classList.add('alert');
+      }
 
       let libNameLabel = libName;
       if (type == "Perf") {
-        libNameLabel = `<a href=${config.vis_comparator_details(typeData.commit_id, libName)}>${libName}</a>`;
+        libNameLabel = `<a href=${config.vis_comparator_perf(typeData.commit_id, libName)}>${libName}</a>`;
       }
 
-      const libItemHeader = document.createElement('div');
-      libItemHeader.className = 'lib-item-header';
-      // Add lib name, stats, icon directly to libItem
-      libItemHeader.innerHTML = `
+      const libItemsHeader = document.createElement('div');
+      libItemsHeader.className = 'lib-items-header';
+
+      const libItem1Header = document.createElement('div');
+      libItem1Header.className = 'lib-item-header';
+      libItem1Header.innerHTML = `
         <span class="lib-icon">${icon}</span>
         <span class="lib-harnesskind">${libData.cputs == 1 ? '⚙C' : libData.cputs == -1 ? '🦀' : '❓'}</span>
         <span class="lib-name">${libNameLabel} ${warningIcon}</span>
         <span class="lib-stats">${successCount}/${totalRuns}</span>
       `;
-      libItem.appendChild(libItemHeader);
+      libItemsHeader.appendChild(libItem1Header);
+
+      if (libData.cli) {
+        const libItem2Header = document.createElement('div');
+        libItem2Header.className = 'lib-item-header';
+        libItem2Header.innerHTML = `
+            ${libData.cli?.features ? `features: ${libData.cli?.features}<br>` : ''}
+            ${libData.cli?.flags ? `flags: ${libData.cli?.flags}` : ''}
+        `
+        libItemsHeader.appendChild(libItem2Header);
+      }
+
+      libItem.appendChild(libItemsHeader);
 
       // Add compact stats display inline
       if (Object.keys(displayData.withStats).length > 0) {
@@ -547,7 +709,7 @@ function RenderTypeSection(type, typeData) {
   return section;
 }
 
-function RenderCommit(commit, container) {
+function RenderCommit(commit, container, metrics =null) {
   const commitDiv = document.createElement('div');
   commitDiv.className = 'commit';
   commitDiv.dataset.commitId = commit.id;
@@ -613,7 +775,17 @@ function RenderCommit(commit, container) {
   for (const type of availableTypes) {
     const typeData = commit.infos?.get(type);
     if (typeData) {
-      const typeSection = RenderTypeSection(type, typeData);
+      let comparaisonElement = null;
+      if ((commit?.base) && (commit.base != commit.id)) {
+        comparaisonElement = {
+            type: type,
+            highlights: [commit.base, commit.id],
+            baseCommitID: commit.base,
+            srcCommitID: commit.id,
+            dataPoints: metrics.GetCommitMetrics(commit.id)
+        };
+      }
+      const typeSection = RenderTypeSection(type, typeData, type, comparaisonElement);
       typeSection.dataset.type = type;
       commitDiv.appendChild(typeSection);
       hasSections = true;
@@ -666,7 +838,30 @@ function RenderCampaigns(commit, container) {
   campaignDiv.appendChild(header);
 
   for (const campaign of campaignList) {
-    const typeSection = RenderTypeSection(`👤 ${campaign.user} / ${campaign.campaign_id}`, campaign);
+    const timestamp = Number(campaign.campaign_id.split('-').pop());
+    let date = '';
+    if (timestamp) {
+      date = ' / [' + new Date(timestamp).toLocaleString(navigator.languages, {
+          month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false}) + ']';
+    }
+
+    let comparaisonElement = null;
+    if ((commit?.base) && (commit.base != commit.id)) {
+      comparaisonElement = {
+          type: 'Perf', 
+          highlights: [commit.base, commit.id],
+          baseCommitID: commit.base,
+          srcCommitID: commit.id,
+          dataPoints: MetricsCampaign.GetMetrics(campaign)
+      };
+    }
+
+    const typeSection = RenderTypeSection(
+        'Campaign', 
+        campaign, `👤 ${campaign.user} / ${campaign.campaign_id}${date}`,
+        comparaisonElement
+    );
     typeSection.dataset.user = campaign.user;
     typeSection.dataset.campaignId = campaign.campaign_id;
     typeSection.dataset.status = campaign.global_status ?? 'no run';
@@ -689,7 +884,7 @@ function ChangeTab(newTabIndex) {
     const infos = ui.refreshInfos[tabIndex]?.infos;
     if (infos) {
       const infosUI = document.getElementById('refresh-infos');
-      const resetDate = new Date(infos.apiResetTS * 1000).toLocaleString([], { 
+      const resetDate = new Date(infos.apiResetTS * 1000).toLocaleString([], {
           month: '2-digit', day: '2-digit',
           hour: '2-digit', minute: '2-digit', hour12: false});
       infosUI.innerHTML = `🪙 ${infos.apiRemaining}credits<br>⏱ reset: ${resetDate}`;
@@ -880,33 +1075,36 @@ async function RefreshData(refreshGit) {
   });
   dataGit.users = dataGitLogs;
 
+  metrics[0] = new Metrics(availableTypes, dataGit.commits);
+  metrics[1] = new Metrics(availableTypes, dataGit.PR);
+  metrics[2] = new Metrics(availableTypes, dataGit.branches);
+  metrics[3] = new Metrics(availableTypes, dataGit.users);
+
   dataGit.commits.forEach(element => {
       RenderCommit(element, ui.commitsDiv[0]);
   });
-  metrics[0] = new Metrics(availableTypes, dataGit.commits);
   graphs.metrics.push(new GraphMetrics(metrics[0]));
   graphs.overview.push(new GraphOverview(metrics[0]));
 
   dataGit.PR.forEach(element => {
-      RenderCommit(element, ui.commitsDiv[1]);
+      RenderCommit(element, ui.commitsDiv[1], metrics[1]);
   });
-  metrics[1] = new Metrics(availableTypes, dataGit.PR);
   graphs.metrics.push(new GraphMetrics(metrics[1]));
   graphs.overview.push(new GraphOverview(metrics[1]));
   ui.refreshInfos[1]["infos"] = dataGit.PR_API_Infos;
 
   dataGit.branches.forEach(element => {
-      RenderCommit(element, ui.commitsDiv[2]);
+      RenderCommit(element, ui.commitsDiv[2], metrics[2]);
   });
-  metrics[2] = new Metrics(availableTypes, dataGit.branches);
   graphs.metrics.push(new GraphMetrics(metrics[2]));
   graphs.overview.push(new GraphOverview(metrics[2]));
+
   dataGit.users.forEach(element => {
-      RenderCommit(element, ui.commitsDiv[3]);
+      RenderCommit(element, ui.commitsDiv[3], metrics[3]);
   });
-  metrics[3] = new Metrics(availableTypes, dataGit.users);
   graphs.metrics.push(new GraphMetrics(metrics[3]));
   graphs.overview.push(new GraphOverview(metrics[3]));
+
   campaigns = [];
   [dataGit.commits, dataGit.PR, dataGit.users].forEach(dataSrc => {
       dataSrc.forEach(commit => {
@@ -925,6 +1123,7 @@ async function RefreshData(refreshGit) {
   if (tabIndex == -1) {
     ChangeTab(0);
   } else {
+    ApplyFilters();
     ui.commitsDiv[tabIndex].classList.remove('hidden');
   }
 
@@ -1179,6 +1378,16 @@ function SelectAllType(event) {
   ApplyFilters();
 }
 
+function ScrollToTarget() {
+  const ref = document.getElementById(window.location.hash.slice(1));
+  const pageIndex = ref?.closest('.page')?.dataset.index;
+  if ((pageIndex === undefined) || (pageIndex === null)) {
+    return;
+  }
+  ChangeTab(+pageIndex);
+  ref.scrollIntoView();
+}
+
 async function Main() {
   const title = document.getElementById('header-title');
   title.innerText = `Results browser on ${window.location.hostname}`;
@@ -1257,11 +1466,9 @@ async function Main() {
       document.getElementById('othersTab'),
       document.getElementById('campaignsTab')
   ];
-  ui.tabListsDiv[0].onclick = ClickTab;
-  ui.tabListsDiv[1].onclick = ClickTab;
-  ui.tabListsDiv[2].onclick = ClickTab;
-  ui.tabListsDiv[3].onclick = ClickTab;
-  ui.tabListsDiv[4].onclick = ClickTab;
+  for(let i=0; i<ui.tabListsDiv.length; ++i) {
+    ui.tabListsDiv[i].onclick = ClickTab;
+  }
 
   ui.refreshInfos[0] = { type: 'free', parameter: '?refresh=local' }
   ui.refreshInfos[1] = { type: 'gold', parameter: '?refresh=all' }
@@ -1275,12 +1482,11 @@ async function Main() {
       document.getElementById('branchesCommits'),
       document.getElementById('usersCommits'),
       document.getElementById('campaignsCommits'),
-  ]
-  ui.commitsDiv[0].classList.add('hidden');
-  ui.commitsDiv[1].classList.add('hidden');
-  ui.commitsDiv[2].classList.add('hidden');
-  ui.commitsDiv[3].classList.add('hidden');
-  ui.commitsDiv[4].classList.add('hidden');
+  ];
+  for(let i=0; i<ui.commitsDiv.length; ++i) {
+    ui.commitsDiv[i].classList.add('hidden');
+    ui.commitsDiv[i].dataset.index = i;
+  }
 
   const initialTab = (!isNaN(tabParam) && tabParam >= 0 && tabParam < ui.tabListsDiv.length) ? tabParam : 0;
 
@@ -1311,9 +1517,14 @@ async function Main() {
   window.ClearSearch = ClearSearch;
 
   await RefreshData("");
-  if (tabIndex != initialTab) {
+
+  if (window.location.hash) {
+    ScrollToTarget();
+  } else if (tabIndex != initialTab) {
     ChangeTab(initialTab);
   }
+
+  window.onhashchange = ScrollToTarget;
 }
 
 Main();

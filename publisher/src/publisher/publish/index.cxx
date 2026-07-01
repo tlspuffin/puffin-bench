@@ -1,5 +1,7 @@
 #include "index.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/logs.hxx"
+#include "../../utils/dir.hxx"
 #include <iostream>
 #include <fstream>
 #include <rapidjson/document.h>
@@ -46,9 +48,9 @@ bool ns_Publish::Index::Load(std::filesystem::path filename) {
   }
 
   /*{
-    "resultFile(commitID)": {
+    "cacheFile": {
       "Timestamp": {
-          "file": [ XXXX ]
+          "file": [ dataFile ]
           "libs": [ "1", "2" ]
       }
     }
@@ -115,7 +117,7 @@ bool ns_Publish::Index::Save(std::filesystem::path filename) {
       for(std::string const& libName: infos.libsName) {
         libs.PushBack(rapidjson::Value(libName.c_str(), alloc), alloc);
       }
-      infosJSON.AddMember("libs", libs, alloc);    
+      infosJSON.AddMember("libs", libs, alloc);
       cachedFileJSON.AddMember(rapidjson::Value(std::to_string(timestamp).c_str(), alloc), infosJSON, alloc);
     }
     doc.AddMember(rapidjson::Value(cachedFile.c_str(), alloc), cachedFileJSON, alloc);
@@ -153,10 +155,6 @@ bool ns_Publish::Index::Add(std::string const& key, uint64_t timestamp, std::str
         }
       }
     }
-    if (libsManaged.empty()) {
-      timestamps.emplace(timestamp, sEntryInfos{file, {}});
-      return true;
-    }
 
     auto it = timestamps.find(timestamp);
     if (it == timestamps.end()) {
@@ -172,28 +170,59 @@ bool ns_Publish::Index::Add(std::string const& key, uint64_t timestamp, std::str
   return true;
 }
 
-bool ns_Publish::Index::HaveCachedJSON(std::string const& key) {
+bool ns_Publish::Index::HaveIndexed(std::string const& srcFile) {
   std::shared_lock lock(lock_);
-  for(auto const& [commitID, timestamps]: entries_) {
-    for(auto const& [timestamps, entry]: timestamps) {
-      if (entry.srcFiles == key) {
-        return std::filesystem::exists(path_ / commitID);
+  for(auto const& [cacheFile, timestamps]: entries_) {
+    for(auto const& [_, entry]: timestamps) {
+      if (entry.srcFiles == srcFile) {
+        return std::filesystem::exists(path_ / cacheFile);
       }
     }
   }
   return false;
 }
 
-bool ns_Publish::Index::HaveIndexed(std::string const& key) {
-  std::shared_lock lock(lock_);
-  for(auto const& [_, timestamps]: entries_) {
-    for(auto const& [timestamps, entry]: timestamps) {
-      if (entry.srcFiles == key) {
-        return std::filesystem::exists(path_ / entry.srcFiles);
-      }
+bool ns_Publish::Index::Remove(std::filesystem::path const& rootDataPath, 
+    std::string const& key, bool deleteSourceFiles) {
+  std::lock_guard lock(lock_);
+  auto it = entries_.find(key);
+  if (it == entries_.end()) {
+    return true;
+  }
+  if (deleteSourceFiles) {
+    std::filesystem::path cacheFile = path_ / it->first;
+    //LOGE << "Delete " << cacheFile << Log::Flags::End;
+    std::error_code ec;
+    if ((!std::filesystem::remove(cacheFile, ec)) || ec) {
+      LOGW << "Error, unable to delete " << cacheFile << Log::Flags::End;
+    }
+    for(auto& [_, infos]: it->second) {
+      DeleteFilesWithPrefix((rootDataPath / infos.srcFiles).replace_extension("."));
     }
   }
-  return false;
+  entries_.erase(it);
+  return true;
+}
+
+bool ns_Publish::Index::Delete(std::filesystem::path const& dataDirectory) {
+  std::lock_guard lock(lock_);
+  bool succes = true;
+  std::error_code ec;
+  for(auto it = entries_.begin(); it !=  entries_.end(); ) {
+    std::string const& cacheFile = it->first;
+    if (!IsSubDir(dataDirectory, cacheFile)) {
+      ++it;
+      continue;
+    }
+    std::filesystem::remove(path_ / cacheFile, ec);
+    if (ec) {
+      succes = false;
+      LOGE << "Unable to remove cache file " << cacheFile << 
+          ": " << ec.message() << ". Fix issues and retry regenCache" << Log::Flags::End;
+    }
+    it = entries_.erase(it);
+  }
+  return succes;
 }
 
 std::vector<std::string> ns_Publish::Index::List() {

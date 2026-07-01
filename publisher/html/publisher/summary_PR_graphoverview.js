@@ -1,4 +1,5 @@
 import { Metrics } from './summary_PR_metrics.js';
+import { manageGraphs } from './summary_PR_managegraphs.js';
 import '../third-party/plotly/plotly-3.3.0.min.js';
 const Plotly = window.Plotly;
 
@@ -6,21 +7,37 @@ class GraphOverview {
   #metrics;
   #html;
   #type;
+  #selectLib;
   #subtypeCheckBox;
   #allLibrariesCheckBox
   #librariesCheckbox;
   #graphContainer;
   #saveDocKeyDown;
+  #compareCommit;
 
   static #overviewMetrics = {
     'Perf': ['corpus_size', 'coverage', 'total_execs'],
     'Vuln': ['durations_s', 'ratio_success_execution', 'total_execs'],
   }
 
-  constructor(metrics) {
+  constructor(metrics, compareCommit =null) {
+    this.#Reset();
     this.#metrics = metrics;
+    this.#compareCommit = compareCommit;
+  }
+
+  #Reset() {
+    this.#html = null;
     this.#type = null;
     this.#saveDocKeyDown = null;
+    this.#selectLib = null;
+    this.#subtypeCheckBox = null;
+    this.#allLibrariesCheckBox = null;
+    this.#librariesCheckbox = null;
+    this.#graphContainer = null;
+  }
+
+  #BuildDialog(defaultType, hideDetailsSelection) {
     this.#html = document.createElement('div');
     this.#html.classList.add('graph-modal');
 
@@ -48,17 +65,18 @@ class GraphOverview {
     const controls = document.createElement('div');
     controls.classList.add('graph-overview-controls');
 
-    const selectLib = document.createElement('select');
-    selectLib.innerHTML = 
-        '<option value="">Select type...</option>\
-        <option value="Perf">Perf</option>\
-        <option value="Vuln">Vuln</option>\
-        '
-    selectLib.onchange = this.#PopulateLibraryCheckboxes.bind(this);
-    controls.appendChild(selectLib);
+    this.#selectLib = document.createElement('select');
+    this.#selectLib.innerHTML = 
+        `<option value="Perf" ${defaultType == 'Perf' ? 'selected' : ''}>Perf</option>\
+        <option value="Vuln" ${defaultType == 'Vuln' ? 'selected' : ''}>Vuln</option>`
+    this.#selectLib.onchange = this.#PopulateLibraryCheckboxes.bind(this);
+    controls.appendChild(this.#selectLib);
 
     this.#subtypeCheckBox = document.createElement('div');
-    this.#subtypeCheckBox.classList.add('graph-overview-controls-subtype');
+    this.#subtypeCheckBox.className = 'graph-overview-controls-subtype';
+    if (hideDetailsSelection) {
+      this.#subtypeCheckBox.classList.add('hidden');
+    }
 
     const label = document.createElement('label');
     label.classList.add('graph-overview-checkbox');
@@ -88,10 +106,12 @@ class GraphOverview {
 
     content.appendChild(body);
     this.#html.appendChild(content);
+
+    this.#PopulateLibraryCheckboxes();
   }
 
-  Open() {
-    this.#PopulateLibraryCheckboxes();
+  Open(hideDetailsSelection =false, defaultType ="Perf") {
+    this.#BuildDialog(defaultType, hideDetailsSelection);
 
     // Show modal
     document.body.appendChild(this.#html);
@@ -106,11 +126,14 @@ class GraphOverview {
   }
 
   Close() {
+    manageGraphs.UnregisterAllGraphs();
+
     this.#html.classList.remove('visible');
     document.body.style.overflow = '';
     document.body.removeChild(this.#html);
     document.onkeydown = this.#saveDocKeyDown;
-    this.#saveDocKeyDown = null;
+
+    this.#Reset();
   }
 
   #ToggleAllLibraries() {
@@ -122,9 +145,7 @@ class GraphOverview {
 
   #PopulateLibraryCheckboxes(event) {
     if (event == null) {
-      if (this.#type == null) {
-        this.#type = '';
-      }
+      this.#type = this.#selectLib.value;
     } else {
       if (this.#type === event.currentTarget.value) {
         return;
@@ -132,10 +153,6 @@ class GraphOverview {
       this.#type = event.currentTarget.value;
     }
     this.#librariesCheckbox.innerHTML = '';
-    if (this.#type == '') {
-      this.#subtypeCheckBox.style.display = 'none';
-      return;
-    }
     this.#subtypeCheckBox.style.display = '';
 
     const libraries = Object.keys(this.#metrics.GetValuesForType(this.#type) || {}).sort();
@@ -160,6 +177,11 @@ class GraphOverview {
     const checkboxes = this.#librariesCheckbox.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = true);
     this.#UpdateOverviewGraphs();
+  }
+
+  #HasCompareData(lib, metric) {
+    return !this.#compareCommit || 
+        !!this.#compareCommit.dataPoints?.[this.#type]?.[lib]?.[metric];
   }
 
   #UpdateOverviewGraphs() {
@@ -195,11 +217,16 @@ class GraphOverview {
           graphsContainer.className = 'graph-overview-lib-graphs';
 
           selectedLibs.forEach(lib => {
+              if (!this.#HasCompareData(lib, metric)) return;
+
               const graphDiv = document.createElement('div');
               graphDiv.className = 'graph-overview-lib-graph';
               graphDiv.id = `graph-overview-${lib}-${metric}`;
               graphsContainer.appendChild(graphDiv);
           });
+          if (graphsContainer.children.length === 0) {
+            return;
+          }
 
           section.appendChild(graphsContainer);
           this.#graphContainer.appendChild(section);
@@ -221,11 +248,16 @@ class GraphOverview {
       graphsContainer.className = 'graph-overview-lib-graphs';
 
       GraphOverview.#overviewMetrics[this.#type].forEach(metric => {
+          if (!this.#HasCompareData(lib, metric)) return;
+
           const graphDiv = document.createElement('div');
           graphDiv.className = 'graph-overview-lib-graph';
           graphDiv.id = `graph-overview-${lib}-${metric}`;
           graphsContainer.appendChild(graphDiv);
       });
+      if (graphsContainer.children.length === 0) {
+        return;
+      }
 
       section.appendChild(graphsContainer);
       this.#graphContainer.appendChild(section);
@@ -249,12 +281,28 @@ class GraphOverview {
       return;
     }
 
-    const [traces, layout, config, unusedCommitsList] = this.#metrics.GenerateGraphData(this.#type, lib, metric);
+    let [traces, layout, config, unusedCommitsList] = this.#metrics.GenerateGraphData(this.#type, lib, metric);
+    let highlightIndex = -1;
+    let highlights = [];
+    if (this.#compareCommit) {
+      [traces, layout, config, unusedCommitsList, highlightIndex] = this.#metrics.InsertComparaisonData(
+          [traces, layout, config, unusedCommitsList], 
+          this.#compareCommit.dataPoints?.[this.#type]?.[lib]?.[metric], 
+          this.#compareCommit.baseCommitID
+      );
+      highlights = this.#compareCommit?.highlights;
+      container.dataset.highlightIndex = highlightIndex;
+    }
     layout.title.font.size = 14;
     layout.margin = { l: 50, r: 20, t: 40, b: 125 };
-    const ApplyColors = () => Metrics.ColorGraphXTicks(container, unusedCommitsList, '#e74c3c');
+    const ApplyColors = () => {
+      Metrics.ColorGraphXTicks(container, unusedCommitsList, '#e74c3c');
+      Metrics.StyleGraphXTicks(container, highlights, { fontWeight: 'bold' });
+    };
     Plotly.newPlot(containerId, traces, layout, config)
         .then(() => { ApplyColors(); container.on('plotly_afterplot', ApplyColors); });
+
+    manageGraphs.RegisterGraph(containerId);
   }
 };
 

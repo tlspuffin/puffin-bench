@@ -30,13 +30,18 @@ ns_Publish::Project::Project(std::string const& projectName, std::string const& 
   }
 }
 
-bool ns_Publish::Project::ScanStorage() {
+bool ns_Publish::Project::ScanStorage(bool regenCache, std::filesystem::path directory) {
+  if (!directory.is_relative()) {
+    return false;
+  }
   try {
+    if (regenCache) {
+      index_.Delete(directory);
+    }
     int processedCount = 0;
-    std::unordered_set<std::string> triggers;
     LOGI << "Scan " << path << Log::Flags::End;
 
-    for(auto it = std::filesystem::recursive_directory_iterator(path);
+    for(auto it = std::filesystem::recursive_directory_iterator(path / directory);
         it != std::filesystem::recursive_directory_iterator(); ++it) {
       auto const& entry = *it;
 
@@ -52,12 +57,15 @@ bool ns_Publish::Project::ScanStorage() {
         continue;
       }
 
-      std::string projectRelativeStr = file.lexically_relative(path);
-      if (index_.HaveCachedJSON(projectRelativeStr)) {
-        continue;
-      }
       if (filesInError_.find(file) != filesInError_.end()) {
         continue;
+      }
+
+      std::string projectRelativeStr = file.lexically_relative(path);
+      if (!regenCache) {
+        if (index_.HaveIndexed(projectRelativeStr)) {
+          continue;
+        }
       }
 
       for(auto const& rule: rules_) {
@@ -65,7 +73,7 @@ bool ns_Publish::Project::ScanStorage() {
           uint64_t timestamp = 0;
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged)) {
+          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged, !regenCache)) {
             index_.Add(outFile, timestamp, projectRelativeStr, libsManaged);
             ++processedCount;
           } else {
@@ -75,7 +83,7 @@ bool ns_Publish::Project::ScanStorage() {
         }
       }
     }
-    if (processedCount > 0) {
+    if (processedCount > 0 || regenCache) {
       index_.Save(outputPath / ".index.json");
       LOGI << "Processed and indexed " << processedCount << " files" << Log::Flags::End;
     }
@@ -103,7 +111,7 @@ bool ns_Publish::Project::ScanFiles(std::vector<std::filesystem::path> const& fi
           uint64_t timestamp = 0;
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged)) {
+          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged, true)) {
             index_.Add(outFile, timestamp, projectRelativeStr, libsManaged);
             ++processedCount;
           } else {
@@ -168,6 +176,12 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std:
     }
   }
   return result;
+}
+
+bool ns_Publish::Project::DeleteData(std::string const& cacheFile) {
+  bool success = index_.Remove(path, cacheFile, true);
+  index_.Save(outputPath / ".index.json");
+  return success;
 }
 
 bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {

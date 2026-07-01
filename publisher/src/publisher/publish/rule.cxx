@@ -154,6 +154,8 @@ ns_Publish::Rule::TaskAnalysis ns_Publish::Rule::ExtractExperimentsFromBuffer(
           ? step["exit_code"].GetInt() : -1;
       exp.user_run_state = step.HasMember("user_run_state") && step["user_run_state"].IsString()
           ? step["user_run_state"].GetString() : "";
+      exp.timeout_ms = step.HasMember("timeout") && step["timeout"].IsUint64() 
+          ? (step["timeout"].GetUint64() * 1000) : 0;
 
       exp.duration_ms = 0;
       if (step.HasMember("time_points_ms") && step["time_points_ms"].IsArray()) {
@@ -173,8 +175,8 @@ ns_Publish::Rule::TaskAnalysis ns_Publish::Rule::ExtractExperimentsFromBuffer(
   return result;
 }
 
-bool ns_Publish::Rule::UpdateJSON(std::string const& jsonPath, 
-    rapidjson::Document& newJSON, std::unordered_set<std::string>& libsManaged) {
+bool ns_Publish::Rule::UpdateJSON(std::string jsonPath, rapidjson::Document& newJSON, 
+    std::unordered_set<std::string>& libsManaged) {
   rapidjson::Document oldDoc;
   if (std::filesystem::exists(jsonPath)) {
     std::ifstream ifs(jsonPath);
@@ -193,6 +195,7 @@ bool ns_Publish::Rule::UpdateJSON(std::string const& jsonPath,
     newJSON.Swap(oldDoc);
   }
 
+  jsonPath += ".tmp";
   std::ofstream ofs(jsonPath);
   if (!ofs.is_open()) {
     LOGE << "Failed to create JSON file: " << jsonPath << Log::Flags::End;
@@ -222,7 +225,8 @@ std::unordered_set<std::string> ns_Publish::Rule::MergeResults(
   if (lastCommitID.empty() || (newCommitID != lastCommitID)) {
     return libsManaged;
   }
-  if ((!newResults.HasMember("tasks")) || (!newResults["tasks"].IsArray())) {
+  if ((!newResults.HasMember("tasks")) || (!newResults["tasks"].IsArray()) || 
+      (newResults["tasks"].Empty())) {
     return libsManaged;
   }
   if ((!lastResults.HasMember("tasks")) || (!lastResults["tasks"].IsArray())) {
@@ -239,55 +243,72 @@ std::unordered_set<std::string> ns_Publish::Rule::MergeResults(
 
   rapidjson::MemoryPoolAllocator<>& alloc = lastResults.GetAllocator();
   //lastResults["date"].SetString(newDate.c_str(), alloc);
-  if (newStatus != lastStatus) {
-    if (((lastStatus == "no run") && (newStatus == "fail")) || 
-        ((lastStatus == "fail") && (newStatus == "no run"))) {
-      lastResults["global_status"].SetString("fail", alloc);
-    } else {
-      lastResults["global_status"].SetString("mixed", alloc);
-    }
-  }
 
   uint64_t detailsID = lastResults["tasks"].Size();
   rapidjson::Value taskCopy;
   taskCopy.CopyFrom(newResults["tasks"][0], alloc);
   lastResults["tasks"].PushBack(taskCopy, alloc);
 
-  rapidjson::Value::ConstObject const& newLibs = newResults["libs"].GetObject();
-  if ((lastResults.HasMember("libs")) && (lastResults["libs"].IsObject())) {
-    rapidjson::Value::Object const& libs = lastResults["libs"].GetObject();
-    for(auto it=libs.MemberBegin(); it!=libs.MemberEnd(); ++it) {
-      if (!it->name.IsString()) {
-        continue;
-      }
-      std::string const libName = it->name.GetString();
-      for(auto newIT=newLibs.MemberBegin(); newIT!=newLibs.MemberEnd(); ++newIT) {
-        if ((!newIT->name.IsString()) || (libName != newIT->name.GetString())) {
-          continue;
-        }
-        it->value.CopyFrom(newIT->value, alloc);
-        it->value["details_id"].SetUint64(detailsID);
-        libsManaged.insert(libName);
-        break;
-      }
-    }
-  } else {
+  if ((!lastResults.HasMember("libs")) || (!lastResults["libs"].IsObject())) {
     lastResults.AddMember("libs", rapidjson::Value(rapidjson::kObjectType), alloc);
   }
+  rapidjson::Value::ConstObject const& newLibs = newResults["libs"].GetObject();
+  rapidjson::Value::Object libs = lastResults["libs"].GetObject();
   for(auto it=newLibs.MemberBegin(); it!=newLibs.MemberEnd(); ++it) {
     if (!it->name.IsString()) {
       continue;
     }
     std::string const libName = it->name.GetString();
-    if (libsManaged.find(libName) != libsManaged.end()) {
+
+    auto existing = libs.FindMember(it->name);
+    if (existing != libs.MemberEnd()) {
+      existing->value.CopyFrom(it->value, alloc);
+      existing->value["details_id"].SetUint64(detailsID);
+    } else {
+      rapidjson::Value key(it->name, alloc);
+      rapidjson::Value val(it->value, alloc);
+      val["details_id"].SetUint64(detailsID);
+      libs.AddMember(key, val, alloc);
+    }
+    libsManaged.insert(libName);
+  }
+
+  uint totalRun = 0;
+  uint succesRun = 0;
+  for(auto it=libs.MemberBegin(); it!=libs.MemberEnd(); ++it) {
+    if (!it->name.IsString()) {
       continue;
     }
-    rapidjson::Value key(it->name, alloc);
-    rapidjson::Value val(it->value, alloc);
-    val["details_id"].SetUint64(detailsID);
-    lastResults["libs"].AddMember(key, val, alloc);
-    libsManaged.insert(it->name.GetString());
+    auto const& val = it->value;
+    if (val.HasMember("status") && val["status"].IsString()) {
+      std::string status = val["status"].GetString();
+      if (status == "success") {
+        ++totalRun;
+        ++succesRun;
+      } else if (status == "mixed") {
+        totalRun += 2;
+        ++succesRun;
+      } else if (status == "fail") {
+        ++totalRun;
+      }
+    } else if (val.HasMember("total_runs") && val["total_runs"].IsUint() &&
+        val.HasMember("success_count") && val["success_count"].IsUint()) {
+      totalRun += val["total_runs"].GetUint();
+      succesRun += val["success_count"].GetUint();
+    } else {
+      ++totalRun;
+    }
   }
+  if (totalRun == 0) {
+    lastResults["global_status"].SetString("no run", alloc);
+  } else if (succesRun == totalRun) {
+    lastResults["global_status"].SetString("success", alloc);
+  } else if (succesRun == 0) {
+    lastResults["global_status"].SetString("fail", alloc);
+  } else {
+    lastResults["global_status"].SetString("mixed", alloc);
+  }
+
   return libsManaged;
 }
 

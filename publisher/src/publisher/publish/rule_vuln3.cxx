@@ -233,6 +233,9 @@ bool ns_Publish::RuleVuln3::BuildJSON(ns_Publish::Rule::TaskAnalysis const& anal
   if (!UpdateJSON(jsonPath, doc, libsManaged)) {
     return false;
   }
+  if (!ValidateUpdatedJSON(jsonPath)) {
+    return false;
+  }
 
   outFile = jsonRelativePath;
   return true;

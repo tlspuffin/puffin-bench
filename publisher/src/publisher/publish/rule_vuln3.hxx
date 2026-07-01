@@ -26,7 +26,8 @@ public:
       rapidjson::Value::ConstObject const& parameters);
   
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged);
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
+      bool generateArtefact);
   
 protected:
   bool BuildSummary(std::string const& taskDataFile, Rule::TaskAnalysis& analysis, 
@@ -38,7 +39,8 @@ protected:
 };
 
 inline bool RuleVuln3::Apply(std::string const& file, std::filesystem::path const& outPath, 
-    uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged) {
+    uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
+    bool generateArtefact) {
   try {
     timestamp = std::stoull(std::filesystem::path(file).stem());
   } catch(...) {
@@ -47,8 +49,12 @@ inline bool RuleVuln3::Apply(std::string const& file, std::filesystem::path cons
   }
   Rule::TaskAnalysis summary;
   std::unordered_map<std::string, struct LibSummary> libSummaries;     
-  return BuildSummary(file, summary, libSummaries) && 
+  bool success = BuildSummary(file, summary, libSummaries) && 
       BuildJSON(summary, libSummaries, outPath, outFile, libsManaged);
+  if ((!generateArtefact) && (!success)) {
+    throw std::runtime_error("Unable to generate informations for " + file);
+  }
+  return success;
 }
 
 };

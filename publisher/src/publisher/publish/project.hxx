@@ -16,12 +16,14 @@ public:
   std::unordered_map<std::filesystem::path, std::string> indexes;
 
   Project(std::string const& projectName, std::string const& projectPath);
-  bool ScanStorage();
+  bool ScanStorage(bool regenCache, std::filesystem::path directory);
   bool ScanFiles(std::vector<std::filesystem::path> const& files);
   std::vector<std::string> ListData();
 
   std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
       ListCampaigns();
+
+  bool DeleteData(std::string const& cacheFile);
 
 private:
   Index index_;

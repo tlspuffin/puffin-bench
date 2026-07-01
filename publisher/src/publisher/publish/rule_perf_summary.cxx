@@ -4,6 +4,8 @@
 #include "../../utils/rapidjson.hxx"
 #include <fstream>
 #include <variant>
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
 #define TOLOWER(astring) { std::transform(astring.begin(), astring.end(), astring.begin(), \
     [](unsigned char c){ return std::tolower(c); }); }
@@ -17,7 +19,7 @@ ns_Publish::RulePerfUseSummary::RulePerfUseSummary(std::string const& name,
 
 bool ns_Publish::RulePerfUseSummary::Apply(std::string const& file, 
     std::filesystem::path const& outPath, uint64_t& timestamp, 
-    std::string& outFile, std::unordered_set<std::string>& libsManaged) {
+    std::string& outFile, std::unordered_set<std::string>& libsManaged, bool generateArtefact) {
   try {
     timestamp = std::stoull(std::filesystem::path(file).stem());
   } catch(...) {
@@ -35,11 +37,13 @@ bool ns_Publish::RulePerfUseSummary::Apply(std::string const& file,
     error = "Error: while parsing task json " + taskJSONFile.string();
     goto RulePerfUseSummary__Process;
   }
-  if (!ns_Analyze::Generate_Perf_ZST(file, zstdFile, "")) {
-    error = "Error: file " + file + " is not usable to generate ZST";
-    goto RulePerfUseSummary__Process;
+  if (generateArtefact) {
+    if (!ns_Analyze::Generate_Perf_ZST(file, zstdFile, "")) {
+      error = "Error: file " + file + " is not usable to generate ZST";
+      goto RulePerfUseSummary__Process;
+    }
   }
-  if (!ValidateTempJSON(outPath / outFile)) {
+  if (!ValidateUpdatedJSON(outPath / outFile)) {
     error = "Error: while making permanent " + outFile;
     goto RulePerfUseSummary__Process;
   }
@@ -47,12 +51,19 @@ bool ns_Publish::RulePerfUseSummary::Apply(std::string const& file,
 
 RulePerfUseSummary__Process:
   LOGE << error << Log::Flags::End;
+  if (!generateArtefact) {
+    throw std::runtime_error("Unable to generate informations for " + file);
+  }
   std::error_code ec;
   (!zstdFile.empty()) && std::filesystem::exists(zstdFile) && 
       std::filesystem::remove(zstdFile, ec);
-  (!outFile.empty()) && std::filesystem::exists(rulePath_ / outFile) && 
-      std::filesystem::remove(rulePath_ / outFile, ec);
-  outFile = "";
+  if (!outFile.empty()) {
+    std::string file = rulePath_ / outFile;
+    std::filesystem::exists(file) && std::filesystem::remove(file, ec);
+    file += ".tmp";
+    std::filesystem::exists(file) && std::filesystem::remove(file, ec);
+    outFile = "";
+  }
   return false;
 }
 
@@ -67,7 +78,6 @@ ns_Publish::RulePerfUseSummary::RulePerfUseSummary(std::string const& name,
     folder_ = parameters["folder"].GetString();
   }
 }
-
 
 bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile, 
       std::filesystem::path const& outputPath, std::string& outFile, 
@@ -110,43 +120,58 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
       } else {
         LOGE << "Error, missing required field cputs in " << taskInfoFile << 
             " " << result.id << ":" << result.attempt << Log::Flags::End;
+        continue;
       }
 
-      if ((!doc.HasMember("features")) || (!doc["features"].IsString())) {
-        LOGE << "Error, missing required field features in " << taskInfoFile  << 
-            " " << result.id << ":" << result.attempt << Log::Flags::End;
-      }
-      std::string features = doc["features"].GetString();
-      static std::regex featuresSearch(".*(?:^|,)([a-zA-Z]+)([0-9][0-9a-zA-Z]+)(?:$|,.*)");
-      static std::regex vendorSearch("([a-zA-Z]+):[a-zA-Z]+([0-9][0-9a-zA-Z]+)(?:$|-.*)");
-      std::smatch matches;
-      if (std::regex_match(features, matches, featuresSearch)) {
-        std::string name = matches[1].str();
-        TOLOWER(name);
-        states[result.id].libraryName = name;
-        states[result.id].libraryVersion = matches[2].str();
-        states[result.id].infoSafe = success;
-      } else if (std::regex_match(features, matches, vendorSearch)) {
-        std::string name = matches[1].str();
-        TOLOWER(name);
-        states[result.id].libraryName = name;
-        states[result.id].libraryVersion = matches[2].str();
-        states[result.id].infoSafe = success;
-      } else if (strcasecmp(result.id.c_str(), "libressl") == 0) {
-        states[result.id].libraryName = "libressl";
-        states[result.id].libraryVersion = "333";
-        states[result.id].infoSafe = true;
-      } else {
-        LOGE << "Error, unable to find library version in " << taskInfoFile  << 
-            " " << result.id << ":" << result.attempt << " data= " << features << Log::Flags::End;
-        states[result.id].libraryVersion = "";
-      }
-      if ((checkIDMatchFeature_) && (matches.size() > 1)) {
-        if (strcasecmp(matches[1].str().c_str(), result.id.c_str()) != 0) {
-          LOGE << "Error expected lib id " << result.id << " not matching id found " 
-              << matches[1].str() << Log::Flags::End;
-          states[result.id].infoSafe = false;
+      if (doc.HasMember("library") && doc["library"].IsObject()) {
+        rapidjson::Value const& libraryJSON = doc["library"];
+        if (((!libraryJSON.HasMember("name")) || (!libraryJSON["name"].IsString())) || 
+            ((!libraryJSON.HasMember("version")) || (!libraryJSON["version"].IsString()))) {
+          LOGE << "Error, missing required field in user_run_state.library " << 
+              taskInfoFile  << " " << result.id << ":" << result.attempt << Log::Flags::End;
+          continue;
         }
+        states[result.id].libraryName = libraryJSON["name"].GetString();
+        TOLOWER(states[result.id].libraryName);
+        states[result.id].libraryVersion = libraryJSON["version"].GetString();
+        states[result.id].infoSafe = success;
+      } else if (doc.HasMember("features") && doc["features"].IsString()) {
+        std::string features = doc["features"].GetString();
+        static std::regex featuresSearch(".*(?:^|,)([a-zA-Z]+)([0-9][0-9a-zA-Z]+)(?:$|,.*)");
+        static std::regex vendorSearch("([a-zA-Z]+):[a-zA-Z]+([0-9][0-9a-zA-Z]+)(?:$|-.*)");
+        std::smatch matches;
+        if (std::regex_match(features, matches, featuresSearch)) {
+          std::string name = matches[1].str();
+          TOLOWER(name);
+          states[result.id].libraryName = name;
+          states[result.id].libraryVersion = matches[2].str();
+          states[result.id].infoSafe = success;
+        } else if (std::regex_match(features, matches, vendorSearch)) {
+          std::string name = matches[1].str();
+          TOLOWER(name);
+          states[result.id].libraryName = name;
+          states[result.id].libraryVersion = matches[2].str();
+          states[result.id].infoSafe = success;
+        } else if (strcasecmp(result.id.c_str(), "libressl") == 0) {
+          states[result.id].libraryName = "libressl";
+          states[result.id].libraryVersion = "333";
+          states[result.id].infoSafe = true;
+        } else {
+          LOGE << "Error, unable to find library version in " << taskInfoFile  << 
+              " " << result.id << ":" << result.attempt << " data= " << features << Log::Flags::End;
+          states[result.id].libraryVersion = "";
+        }
+        if ((checkIDMatchFeature_) && (matches.size() > 1)) {
+          if (strcasecmp(matches[1].str().c_str(), result.id.c_str()) != 0) {
+            LOGE << "Error expected lib id " << result.id << " not matching id found " 
+                << matches[1].str() << Log::Flags::End;
+            states[result.id].infoSafe = false;
+          }
+        }
+      } else {
+        LOGE << "Error, missing required field library/feature in user_run_state " << 
+            taskInfoFile  << " " << result.id << ":" << result.attempt << Log::Flags::End;
+        continue;
       }
     }
   } catch(...) {
@@ -171,12 +196,14 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
   }
 
   rapidjson::Document doc;
+  auto& allocator = doc.GetAllocator();
   doc.Parse(summaryJSON.c_str());
   if (doc.HasParseError()) {
     LOGE << "Parse error in artefacts/summary.json" << Log::Flags::End;
     return false;
   }
 
+  std::unordered_map<std::string, rapidjson::Value> cliData;
   std::unordered_map<std::string, std::unordered_map<std::string, std::unordered_map<std::string, std::variant<std::uint64_t, double, std::vector<double>>>>> 
       librariesData;
   try {
@@ -185,6 +212,9 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
         Get<rapidjson::Value::ConstArray>(doc, "libraries");
     for (const auto& librarie: libraries) {
       std::string name = Get<std::string>(librarie, "name");
+      if (librarie.HasMember("cli") && librarie["cli"].IsObject()) {
+        cliData[name].CopyFrom(librarie["cli"], allocator);
+      }
       rapidjson::Value::ConstArray data = Get<rapidjson::Value::ConstArray>(librarie, "data");
       for (const auto& report: data) {
         std::string id = Get<std::string>(report, "id");
@@ -224,7 +254,6 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
   std::filesystem::create_directories(jsonPath.parent_path());
 
   doc.SetObject();
-  auto& allocator = doc.GetAllocator();
 
   doc.AddMember("type", rapidjson::Value(type_.c_str(), allocator), allocator);
   if (type_ == "Campaign") {
@@ -258,22 +287,19 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
     std::unordered_map<std::string, rapidjson::Value> datas;
     rapidjson::Value haveObjectif(rapidjson::kArrayType);
     int nbSuccess = 0;
-    /*int trustObjectif = strcasecmp(libName.c_str(), "wolfssl") != 0 ? 1 : 
-        (((!state.libraryVersion.empty()) && (std::stoull(state.libraryVersion))) > 540 ? 1 : -1);*/
     int trustObjectif = state.libraryName != "wolfssl" ? 1 : 
-        (((!state.libraryVersion.empty()) && (std::stoull(state.libraryVersion))) > 540 ? 1 : -1);
+        (((!state.libraryVersion.empty()) && (std::stoull(state.libraryVersion) > 540)) ? 1 : -1);
     for (auto const& [attempt, success]: state.runs) {
       bool successFinal = success;
       if (successFinal) {
-        uint64_t experimentDuration = -1;
+        bool experimentTimedOut = false;
         for(auto const& experiment: analysis.experiments) {
           if ((experiment.id == libName) && (experiment.attempt == attempt)) {
-            experimentDuration = experiment.duration_ms / 1000.0;
+            experimentTimedOut = experiment.duration_ms >= experiment.timeout_ms;
+            break;
           }
         }
-        uint64_t clientsDuration = std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["client_average_duration_s"]);
-        uint64_t duration = std::get<uint64_t>(librariesData[libName][std::to_string(attempt)]["duration"]);
-        successFinal = (duration > (experimentDuration - 700)) && (clientsDuration > (duration - 400));
+        successFinal = experimentTimedOut;
       }
       std::string attemptString = std::to_string(attempt);
       if (successFinal) {
@@ -318,6 +344,9 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
       libData.AddMember("library", rapidjson::Value(state.libraryName.c_str(), allocator), allocator);
       libData.AddMember("library_version", rapidjson::Value(state.libraryVersion.c_str(), allocator), allocator);
     }
+    if (!cliData[libName].IsNull()) {
+      libData.AddMember("cli", cliData[libName], allocator);
+    }
     libData.AddMember("cputs", state.cputs, allocator);
     libData.AddMember("total_runs", state.runs.size(), allocator);
     libData.AddMember("success_count", nbSuccess, allocator);
@@ -347,7 +376,7 @@ bool ns_Publish::RulePerfUseSummary::BuildJSON(std::string const& taskDataFile,
   doc.AddMember("global_status",
     rapidjson::Value(analysis.global_status.c_str(), allocator), allocator);
 
-  if (!UpdateTempJSON(jsonPath, doc, libsManaged)) {
+  if (!UpdateJSON(jsonPath, doc, libsManaged)) {
     return false;
   }
 

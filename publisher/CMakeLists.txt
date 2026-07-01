@@ -175,14 +175,16 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.html"
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_css.h" Publisher_HTML_SummaryPR_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_js.h" Publisher_HTML_SummaryPR_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_js.h" Publisher_HTML_SummaryPRMetrics_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metrics_campaign.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_campaign_js.h" Publisher_HTML_SummaryPRMetricsCampaign_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metricscampaign.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metricscampaign_js.h" Publisher_HTML_SummaryPRMetricsCampaign_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_managegraphs.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_managegraphs_js.h" Publisher_HTML_SummaryPRManageGraphs_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphoverview.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_js.h" Publisher_HTML_SummaryPRGraphOverview_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphoverview.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_css.h" Publisher_HTML_SummaryPRGraphOverview_CSS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphcompare.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphcompare_js.h" Publisher_HTML_SummaryPRGraphCompare_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphmetrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_js.h" Publisher_HTML_SummaryPRGraphMetrics_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphmetrics.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_css.h" Publisher_HTML_SummaryPRGraphMetrics_CSS)
 
 set(PUBLISHER_SRC
-  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/file_compressed.cxx src/utils/compress_tar_zst.cxx
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/file_compressed.cxx src/utils/compress_tar_zst.cxx src/utils/dir.cxx
   src/publisher/config.cxx 
   src/publisher/server/config.cxx src/publisher/server/server.cxx 
   src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
@@ -190,8 +192,10 @@ set(PUBLISHER_SRC
   src/publisher/publish/rule.cxx src/publisher/publish/rule_vuln3.cxx src/publisher/publish/rule_perf_summary.cxx 
   src/publisher/publish/rule_perf_summary/generate_perf_zst.cxx src/publisher/publish/rule_campaign_summary.cxx 
   ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_html.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_css.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_campaign_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metricscampaign_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_managegraphs_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_css.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphcompare_js.h
   ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_css.h 
   ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_config_js.h
   ${GENERATED_VERSION_C}

@@ -29,6 +29,9 @@ public:
   std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
       ProjectListCampaigns(std::string const& projectName);
 
+  bool RegenerateDataCache(std::string const& projectName, std::string const& directory);
+  bool DeleteData(std::string const& projectName, std::string const& cacheFile);
+
 private:
   struct SNotifyFiles {
     std::string projectName;

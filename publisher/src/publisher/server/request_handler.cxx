@@ -188,6 +188,69 @@ void ns_Server::RequestHandlerProjectListCampaigns::handleRequest(Poco::Net::HTT
   out->flush();
 }
 
+void ns_Server::RequestHandlerProjectRegenerateCache::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::string const project = std::get<0>(args_);
+  std::string const directory = std::get<1>(args_);
+  std::ostream* out = nullptr;
+  response.setContentType("application/json");
+  try {
+    std::string const project = std::get<0>(args_);
+    std::string const directory = std::get<1>(args_);
+    bool result = apis_->publishAPI_.RegenerateDataCache(project, directory);
+    out = &(response.send());
+    *out << R"({"success": )" << (result ? "true" : "false") << "}";
+  } catch(std::runtime_error const& e) {
+    if (out == nullptr) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  } catch(...) {
+    if (out == nullptr) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": "Unknown error"})";
+  }
+  out->flush();
+}
+
+
+void ns_Server::RequestHandlerProjectDeleteData::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  response.setContentType("application/json");
+  try {
+    std::string const project = std::get<0>(args_);
+    std::string const file = std::get<1>(args_);
+    bool result = apis_->publishAPI_.DeleteData(project, file);
+    out = &(response.send());
+    *out << R"({"success": )" << (result ? "true" : "false") << "}";
+  } catch(std::runtime_error const& e) {
+    if (out == nullptr) {
+      response.setContentType("application/json");
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+  } catch(...) {
+    if (out == nullptr) {
+      response.setContentType("application/json");
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": "Unknown error"})";
+  }
+  out->flush();
+}
+
 void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   if (ManageCORS(request, response)) {

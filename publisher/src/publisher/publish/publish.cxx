@@ -83,17 +83,35 @@ std::string ns_Publish::Publish::RulesIndex(std::filesystem::path path) {
 
 std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
     ns_Publish::Publish::ProjectListCampaigns(std::string const& projectName) {
-  std::vector<std::string> list;
-  {
-    std::shared_lock lock(lockProjects_);
-    for(auto& project: projects_) {
-      if (project.name == projectName) {
-        return project.ListCampaigns();
-      }
+  std::shared_lock lock(lockProjects_);
+  for(auto& project: projects_) {
+    if (project.name == projectName) {
+      return project.ListCampaigns();
     }
   }
   return {};
 }
+
+bool ns_Publish::Publish::RegenerateDataCache(std::string const& projectName, std::string const& directory) {
+  std::lock_guard lock(lockProjects_);
+  for(auto& project: projects_) {
+    if (project.name == projectName) {
+      return project.ScanStorage(true, directory);
+    }
+  }
+  return false;
+}
+
+bool ns_Publish::Publish::DeleteData(std::string const& projectName, std::string const& cacheFile) {
+  std::lock_guard lock(lockProjects_);
+  for(auto& project: projects_) {
+    if (project.name == projectName) {
+      return project.DeleteData(cacheFile);
+    }
+  }
+  return false;
+}
+
 
 void ns_Publish::Publish::ScanProjects() {
   LOGI << "Publish folder:" << Log::Flags::End;
@@ -120,7 +138,7 @@ void ns_Publish::Publish::Main() {
   {
     std::vector<Project> goodProjects;
     for (Project& project: projects_) {
-      if (project.ScanStorage()) {
+      if (project.ScanStorage(false, "")) {
         goodProjects.push_back(std::move(project));
       }
     }
@@ -149,7 +167,7 @@ void ns_Publish::Publish::Main() {
         now - lastCheck)).count();
     if (elapsedSeconds > config_.orphanScanInterval_) {
       for(auto& project: projects_) {
-        project.ScanStorage();
+        project.ScanStorage(false, "");
       }
       lastCheck = now;
     }

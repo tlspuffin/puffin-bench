@@ -21,6 +21,9 @@ public:
   std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
       ProjectListCampaigns(std::string const& projectName);
 
+  bool RegenerateDataCache(std::string const& projectName, std::string const& directory);
+  bool DeleteData(std::string const& projectName, std::string const& cacheFile);
+
 private:
   ns_Publish::Config const& config_;
   ns_Publish::Publish publish_;
@@ -56,5 +59,14 @@ inline std::unordered_map<std::string, std::unordered_map<std::string, std::vect
     PublishAPI::ProjectListCampaigns(std::string const& projectName) {
   return publish_.ProjectListCampaigns(projectName);
 }
+
+inline bool PublishAPI::RegenerateDataCache(std::string const& projectName, std::string const& directory) {
+  return publish_.RegenerateDataCache(projectName, directory);
+}
+
+inline bool PublishAPI::DeleteData(std::string const& projectName, std::string const& cacheFile) {
+  return publish_.DeleteData(projectName, cacheFile);
+}
+
 
 };

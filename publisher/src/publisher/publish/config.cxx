@@ -9,9 +9,11 @@
 #include "embeded/publisher/summary_PR_css.h"
 #include "embeded/publisher/summary_PR_js.h"
 #include "embeded/publisher/summary_PR_metrics_js.h"
-#include "embeded/publisher/summary_PR_metrics_campaign_js.h"
+#include "embeded/publisher/summary_PR_metricscampaign_js.h"
+#include "embeded/publisher/summary_PR_managegraphs_js.h"
 #include "embeded/publisher/summary_PR_graphoverview_js.h"
 #include "embeded/publisher/summary_PR_graphoverview_css.h"
+#include "embeded/publisher/summary_PR_graphcompare_js.h"
 #include "embeded/publisher/summary_PR_graphmetrics_js.h"
 #include "embeded/publisher/summary_PR_graphmetrics_css.h"
 #include "plotly_3_3_0_min_js.h"
@@ -58,9 +60,11 @@ void ns_Publish::Config::Validate(bool forceInstall) const {
       std::tuple{ "publisher/summary_PR.css", Publisher_HTML_SummaryPR_CSS_data, Publisher_HTML_SummaryPR_CSS_size },
       std::tuple{ "publisher/summary_PR.js", Publisher_HTML_SummaryPR_JS_data, Publisher_HTML_SummaryPR_JS_size },
       std::tuple{ "publisher/summary_PR_metrics.js", Publisher_HTML_SummaryPRMetrics_JS_data, Publisher_HTML_SummaryPRMetrics_JS_size },
-      std::tuple{ "publisher/summary_PR_metrics_campaign.js", Publisher_HTML_SummaryPRMetricsCampaign_JS_data, Publisher_HTML_SummaryPRMetricsCampaign_JS_size },
+      std::tuple{ "publisher/summary_PR_metricscampaign.js", Publisher_HTML_SummaryPRMetricsCampaign_JS_data, Publisher_HTML_SummaryPRMetricsCampaign_JS_size },
+      std::tuple{ "publisher/summary_PR_managegraphs.js", Publisher_HTML_SummaryPRManageGraphs_JS_data, Publisher_HTML_SummaryPRManageGraphs_JS_size },
       std::tuple{ "publisher/summary_PR_graphoverview.js", Publisher_HTML_SummaryPRGraphOverview_JS_data, Publisher_HTML_SummaryPRGraphOverview_JS_size },
       std::tuple{ "publisher/summary_PR_graphoverview.css", Publisher_HTML_SummaryPRGraphOverview_CSS_data, Publisher_HTML_SummaryPRGraphOverview_CSS_size },
+      std::tuple{ "publisher/summary_PR_graphcompare.js", Publisher_HTML_SummaryPRGraphCompare_JS_data, Publisher_HTML_SummaryPRGraphCompare_JS_size },
       std::tuple{ "publisher/summary_PR_graphmetrics.js", Publisher_HTML_SummaryPRGraphMetrics_JS_data, Publisher_HTML_SummaryPRGraphMetrics_JS_size },
       std::tuple{ "publisher/summary_PR_graphmetrics.css", Publisher_HTML_SummaryPRGraphMetrics_CSS_data, Publisher_HTML_SummaryPRGraphMetrics_CSS_size },
       std::tuple{ "third-party/plotly/plotly-3.3.0.min.js", reinterpret_cast<char const*>(Publisher_HTML_Ploty_JS), static_cast<size_t const>(Publisher_HTML_Ploty_JS_len) },
@@ -74,7 +78,7 @@ void ns_Publish::Config::Validate(bool forceInstall) const {
       ofs.close();
       std::filesystem::permissions(filePath,
         std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | 
-        std::filesystem::perms::group_read, 
+        std::filesystem::perms::group_read | std::filesystem::perms::others_read, 
         std::filesystem::perm_options::replace);
     }
   }
@@ -90,7 +94,7 @@ void ns_Publish::Config::Validate(bool forceInstall) const {
       ofs.close();
       std::filesystem::permissions(filePath,
         std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | 
-        std::filesystem::perms::group_read, 
+        std::filesystem::perms::group_read | std::filesystem::perms::others_read, 
         std::filesystem::perm_options::replace);
     }
   }
