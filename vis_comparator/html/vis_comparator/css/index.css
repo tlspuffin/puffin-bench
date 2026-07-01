@@ -995,7 +995,25 @@ select:focus {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 360px;
 }
+
+/* Drag grip on the bottom-left corner: the panel is anchored to the right side
+   of the screen, so resizing keeps the right edge fixed and grows leftward. */
+.picker-resize-handle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: ew-resize;
+  z-index: 1;
+  background:
+    linear-gradient(45deg, transparent 0 4px, var(--color-text-muted, #888) 4px 5px,
+                    transparent 5px 7px, var(--color-text-muted, #888) 7px 8px, transparent 8px);
+  opacity: 0.55;
+}
+.picker-resize-handle:hover { opacity: 1; }
 .commit-picker-panel.hidden { display: none; }
 
 /* ── Simple dropdown (generic custom select) ──────────────────── */
@@ -1142,7 +1160,7 @@ select:focus {
 }
 .campaign-picker-row {
   display: grid;
-  grid-template-columns: 1fr 1.4fr 0.9fr 1.2fr 1fr;
+  grid-template-columns: 1fr 2.2fr 0.9fr 1.2fr 1fr;
   gap: 6px;
   align-items: center;
   padding: 5px 8px;

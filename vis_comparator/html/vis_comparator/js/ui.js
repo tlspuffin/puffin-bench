@@ -10,6 +10,74 @@ function buildOption(configOption) {
   return option;
 }
 
+// localStorage keys for the user-resized width of each picker type.
+const PICKER_WIDTH_KEYS = {
+  campaign: 'vc.campaignPicker.width',
+  commit:   'vc.commitPicker.width',
+};
+
+/** Returns the persisted picker width, or null if unset/invalid. 360 mirrors the CSS min-width. */
+function readStoredPickerWidth(key) {
+  const v = Number(localStorage.getItem(key));
+  return Number.isFinite(v) && v >= 360 ? v : null;
+}
+
+/**
+ * Persists the user-dragged width of a picker panel. A debounced ResizeObserver
+ * avoids writing on every frame of the drag; it only saves while the panel is open
+ * (the programmatic width-set on each open just re-confirms the current value).
+ */
+function persistPickerWidth(key, panel) {
+  let t = null;
+  const ro = new ResizeObserver(() => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      if (!panel.classList.contains('hidden')) {
+        localStorage.setItem(key, String(Math.round(panel.offsetWidth)));
+      }
+    }, 150);
+  });
+  ro.observe(panel);
+}
+
+/**
+ * Adds a bottom-left drag handle that resizes the panel horizontally. The panel is
+ * anchored to the right side of the screen, so the right edge stays fixed and the
+ * panel grows leftward as the handle is dragged left. Width is clamped to the CSS
+ * min-width and to the available space up to 8px from the left viewport edge.
+ */
+function attachPickerResizeHandle(panel) {
+  const handle = document.createElement('div');
+  handle.className = 'picker-resize-handle';
+  panel.appendChild(handle);
+
+  const MIN_W = 360;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = panel.getBoundingClientRect();
+    const rightEdge = rect.right;     // stays fixed while dragging
+    const startX = e.clientX;
+    const startWidth = rect.width;
+    const maxW = rightEdge - 8;        // don't run off the left edge of the viewport
+
+    const onMove = (ev) => {
+      const delta = startX - ev.clientX;            // drag left → wider
+      const newWidth = Math.max(MIN_W, Math.min(maxW, startWidth + delta));
+      panel.style.width = newWidth + 'px';
+      panel.style.left  = (rightEdge - newWidth) + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+      document.body.style.cursor = '';
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+    document.body.style.cursor = 'ew-resize';
+  });
+}
+
 /**
  * DOM component factory for modal forms.
  * Uses an internal counter (#id) to generate unique element IDs.
@@ -594,6 +662,8 @@ class UI {
     const panel = document.createElement('div');
     panel.className = 'commit-picker-panel hidden';
     wrapper.appendChild(panel);
+    persistPickerWidth(PICKER_WIDTH_KEYS.commit, panel);
+    attachPickerResizeHandle(panel);
 
     const search = document.createElement('input');
     search.type = 'text';
@@ -644,7 +714,8 @@ class UI {
     // ── Helpers ───────────────────────────────────────────────
     function openPanel() {
       const rect = trigger.getBoundingClientRect();
-      const panelW = Math.max(rect.width, 480);
+      const stored = readStoredPickerWidth(PICKER_WIDTH_KEYS.commit);
+      const panelW = stored ?? Math.max(rect.width, 480);
       let left = rect.left;
       if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
       panel.style.top    = (rect.bottom + 4) + 'px';
@@ -897,6 +968,8 @@ class UI {
     const panel = document.createElement('div');
     panel.className = 'commit-picker-panel hidden';
     wrapper.appendChild(panel);
+    persistPickerWidth(PICKER_WIDTH_KEYS.campaign, panel);
+    attachPickerResizeHandle(panel);
 
     const search = document.createElement('input');
     search.type = 'text';
@@ -948,7 +1021,8 @@ class UI {
 
     function openPanel() {
       const rect = trigger.getBoundingClientRect();
-      const panelW = Math.max(rect.width, 560);
+      const stored = readStoredPickerWidth(PICKER_WIDTH_KEYS.campaign);
+      const panelW = stored ?? Math.max(rect.width, 680);
       let left = rect.left;
       if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
       panel.style.top   = (rect.bottom + 4) + 'px';
