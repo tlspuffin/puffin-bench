@@ -49,7 +49,10 @@
         "configuration": {
           "nb_retry": 5,
           "nb_cores": 3
-        }
+        },
+        "streams": [
+          { "name": "error", "path": "current_log/error.log" }
+        ]
       },
       {
         "step": "ForcedBuild"

@@ -17,6 +17,8 @@
 #include <rapidjson/writer.h>
 #include <rapidjson/istreamwrapper.h>
 
+#define UPDATE_CHILD_UMASK
+
 #define FREE_ARG_STRINGS(args) for(char* string: args) free(string)
 
 template<typename T>
@@ -304,7 +306,8 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
   uint64_t freeMemory = stats_.freeMemory;
   uint64_t nbCoresFree = nbCoresFree_;
 
-  if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
+  if (stats_.cores > cpuMaxLoad_) {
+  //if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
     return result;
   }
   if (freeMemory < memMinAllowed_) {
@@ -376,7 +379,15 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
           " (" + ec.message() + ")"
       );
     }
+  } 
+#ifdef UPDATE_CHILD_UMASK  
+  else {
+    std::filesystem::permissions(localData->run_path_, 
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_read | 
+        std::filesystem::perms::group_exec | std::filesystem::perms::others_read | 
+        std::filesystem::perms::others_exec, ec);
   }
+#endif
 
   if (pipe(localData->pipeFDOut) != 0) {
     throw std::runtime_error(
@@ -432,6 +443,10 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   pid_t pid = fork();
   if (pid == 0) {
     pid = getpid();
+
+#ifdef UPDATE_CHILD_UMASK
+    umask(0022);
+#endif
 
     std::string cores;
     for(uint64_t core: localData->cores_) {
@@ -737,15 +752,38 @@ void ns_Executor::Local::GetRunningOutput(
   if (localData == nullptr) {
     return;
   }
-  int fd = localData->pipeFDOut[0];
-  if (type == "stderr") {
+
+  int fd = -1;
+  std::filesystem::path file;
+  if (type == "stdout") {
+    fd = localData->pipeFDOut[0];
+    file = step.stdout_;
+  } else if (type == "stderr") {
     fd = localData->pipeFDErr[0];
+    file = step.stderr_;
   }
-  localData->fdCaptureThread_.Read(fd, data);
+  if (fd != -1) {
+    localData->fdCaptureThread_.Read(fd, data);
+  } else {
+    try {
+      data.live = true;
+      data.supportSeek = true;
+      data.partialFile = true;
+      int index = std::stoi(type);
+      if (index < step.readable_files_.size()) {
+        file = localData->run_path_ / step.readable_files_[index].path;
+      } else {
+        throw std::runtime_error("");
+      }
+    } catch(...) {
+      data.buffer.resize(0);
+      data.state = FileReadState::Error_Access;
+    }
+  }
   if (data.state != FileReadState::NotExecuted) {
     return;
   }
-  FileExtractText(type == "stderr" ? step.stderr_ : step.stdout_, data);
+  FileExtractText(file, data);
 }
 
 ns_Executor::ExecutorTaskData* ns_Executor::Local::CreateLocalTaskData(
@@ -917,6 +955,10 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
 
   if (pid == 0) {
     pid_t localPID = getpid();
+
+#ifdef UPDATE_CHILD_UMASK
+    umask(0022);
+#endif
 
     if (!localData->cgroup_path_.empty()) {
       std::filesystem::create_directory(localData->cgroup_path_);

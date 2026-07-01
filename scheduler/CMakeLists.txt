@@ -164,6 +164,7 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_
 
 #EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/custom/header.html" "${CMAKE_SOURCE_DIR}/embeded/html/board/custom/header_html.h" CustomHeader_HTML)
 
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/logsmanager.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/logsmanager_js.h" LogsManager_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h" Terminal_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/clipboard.js" "${CMAKE_SOURCE_DIR}/embeded/html/board/clipboard_js.h" Clipboard_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.html" "${CMAKE_SOURCE_DIR}/embeded/html/board/board_html.h" Board_HTML)
@@ -209,7 +210,7 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/executor_sh.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/functions_sh.h
-  ${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h ${CMAKE_SOURCE_DIR}/embeded/html/board/clipboard_js.h
+  ${CMAKE_SOURCE_DIR}/embeded/html/board/logsmanager_js.h ${CMAKE_SOURCE_DIR}/embeded/html/board/terminal_js.h ${CMAKE_SOURCE_DIR}/embeded/html/board/clipboard_js.h
   ${CMAKE_SOURCE_DIR}/embeded/html/board/board_html.h ${CMAKE_SOURCE_DIR}/embeded/html/board/board_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/board_js.h
   ${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/taskcard_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/html/board/launchers/launchers_js.h
@@ -246,5 +247,4 @@ target_link_options(scheduler-static PRIVATE -static-libgcc -static-libstdc++)
 add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
-target_link_options(testFilesRing PRIVATE -static-libgcc -static-libstdc++)
-
+add_executable(testOutputRing src/test_output_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )

@@ -482,6 +482,8 @@ void ns_Schedule::Task::CreateStepsFromJson(
 
     std::vector<rapidjson::Value const*> runList;
 
+    rapidjson::Value const* streamsConfigJSON[2] = {nullptr, nullptr};
+
     GroupStepConfigurations groupConfigurations;
     rapidjson::Value const* groupConfigurationJSON = nullptr;
     std::queue<rapidjson::Value const*> flowElements;
@@ -496,6 +498,9 @@ void ns_Schedule::Task::CreateStepsFromJson(
           if (element.HasMember("configuration") && element["configuration"].IsObject()) {
             groupConfigurations.ReadFromTaskJSON(element["configuration"]);
             groupConfigurationJSON = &element["configuration"];
+          }
+          if (element.HasMember("streams") && element["streams"].IsArray()) {
+            streamsConfigJSON[0] = &element["streams"];
           }
           if (element.HasMember("run") && element["run"].IsArray()) {
             rapidjson::Value const& run_array = element["run"];
@@ -548,6 +553,11 @@ void ns_Schedule::Task::CreateStepsFromJson(
         monitorJSON = &(stepJSON["monitor"]);
       }
 
+      streamsConfigJSON[1] = nullptr;
+      if (stepJSON.HasMember("streams") && stepJSON["streams"].IsArray()) {
+        streamsConfigJSON[1] = &stepJSON["streams"];
+      }
+
       std::vector<rapidjson::Value const*> configurationsStack;
       if (groupConfigurationJSON != nullptr) {
         configurationsStack.push_back(groupConfigurationJSON);
@@ -560,7 +570,7 @@ void ns_Schedule::Task::CreateStepsFromJson(
       ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
           run_id++, step_id, group_id, stepsGroupStatus, parent_stack, 
           groupConfigurations, configurationsStack, runConfiguration, 
-          monitorJSON);
+          monitorJSON, streamsConfigJSON);
       configurationsStack.push_back(runConfiguration);
 
       ns_Schedule::Step* first_step = step;

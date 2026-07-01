@@ -196,7 +196,7 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
     uint64_t stepuuid = std::get<1>(args_);
     std::string const& stepid = std::get<2>(args_);
     std::string const& type = std::get<3>(args_);
-    size_t readsize = std::get<4>(args_);
+    ssize_t readsize = std::get<4>(args_);
     ssize_t readoffset = std::get<5>(args_);
 
     if ((type.empty()) || (taskid.empty()) || (stepid.empty())) {
@@ -222,10 +222,11 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
 
     out = &(response.send());
 
-    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "partial": )" << 
-        data.partialFile << R"(, "size": )" << data.buffer.size() << R"(, "filesize": )" << 
-        data.filesize << R"(, "state": )" << (int)(data.state) << R"(, "support_seek": )" << 
-        data.supportSeek << R"(, "start_offset": )" << data.startOffset << "}";
+    *out << R"({"success": true, "data": ")" << oss.str() << R"(", "partial": )" << data.partialFile << 
+        R"(, "size": )" << data.buffer.size() << R"(, "filesize": )" << data.filesize << 
+        R"(, "state": )" << (int)(data.state) << R"(, "support_seek": )" << data.supportSeek << 
+        R"(, "start_offset": )" << data.startOffset << R"(, "file_start_offset": )" << data.fileStartOffset << 
+        R"(, "live": )" << data.live << "}";
   } catch(std::runtime_error const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {

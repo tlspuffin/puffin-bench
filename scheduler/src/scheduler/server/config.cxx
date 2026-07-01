@@ -2,6 +2,7 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 
+#include "embeded/html/board/logsmanager_js.h"
 #include "embeded/html/board/terminal_js.h"
 #include "embeded/html/board/clipboard_js.h"
 #include "embeded/html/board/board_html.h"
@@ -89,6 +90,7 @@ void ns_Server::Config::Validate(bool forceInstall) const {
   std::filesystem::create_directory(html_/ "jobsscripts", ec);
   std::filesystem::create_directory(html_/ "jobsscripts" / "tlspuffin", ec);
   for(auto const& [ file, data, size ] : {
+      std::tuple{ "board/logsmanager.js", LogsManager_JS_data, LogsManager_JS_size },
       std::tuple{ "board/terminal.js", Terminal_JS_data, Terminal_JS_size },
       std::tuple{ "board/clipboard.js", Clipboard_JS_data, Clipboard_JS_size },
       std::tuple{ "board/board.html", Board_HTML_data, Board_HTML_size },

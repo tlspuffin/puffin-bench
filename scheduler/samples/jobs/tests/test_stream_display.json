@@ -1,0 +1,34 @@
+{
+  "name": "Test Stream Display",
+  "configurations": {
+    "FastAppend":   {"args": {"nb_iterations": "120", "interval": "0.5", "line_size": "64",  "delay_iterations": "10"}},
+    "SlowAppend":   {"args": {"nb_iterations": "30",  "interval": "2",   "line_size": "200", "delay_iterations": "8"}},
+    "NeverDelayed": {"args": {"nb_iterations": "40",  "interval": "1",   "line_size": "80",  "delay_iterations": "1000"}}
+  },
+  "flow": [
+    {
+      "step": "Init"
+    },
+    {
+      "step": "DisplayFiles",
+      "run": [ "FastAppend", "SlowAppend", "NeverDelayed" ],
+      "configuration": {
+        "nb_retry": 1
+      },
+      "streams": [
+        { "name": "growing", "path": "log/growing.log" },
+        { "name": "status",  "path": "log/status.json" },
+        { "name": "late",    "path": "log/late.log" }
+      ],
+      "monitor": {
+        "entry_point": "MonitorDisplayFiles",
+        "delay_start": "2s",
+        "interval": "3s",
+        "timeout": "10s"
+      }
+    },
+    {
+      "step": "Summary"
+    }
+  ]
+}

@@ -241,25 +241,56 @@ bool ns_Executor::MemoryRing::Write(uint8_t const* data, uint64_t size) {
 }
 
 void ns_Executor::MemoryRing::Read(struct FileExtractedText& data) {
-  data.supportSeek = false;
+  data.live = true;
   data.state = FileReadState::EndOfFile;
-  data.startOffset = data.requestReadOffset;
 
   std::lock_guard lock(lock_);
   data.filesize = virtualSize_;
+
+  if (data.requestReadOffset < 0) {
+    uint64_t tail = 0u - static_cast<uint64_t>(data.requestReadOffset);
+    data.requestReadOffset = (tail >= virtualSize_) ? 0 : static_cast<ssize_t>(virtualSize_ - tail);
+  }
   if (data.requestReadOffset >= virtualSize_) {
     return;
   }
+
+  ssize_t virtualReadEndOffset = data.requestReadOffset + data.requestReadSize;
+  if (virtualReadEndOffset > virtualSize_) {
+    virtualReadEndOffset = virtualSize_;
+  }
+  ssize_t readSize = virtualReadEndOffset - data.requestReadOffset;
+
   if (!full_) {
-    data.buffer.resize(bufferStart_);
-    memcpy(data.buffer.data(), buffer_.data(), bufferStart_);
+    data.startOffset = 0;
+    data.fileStartOffset = 0;
+    data.buffer.resize(readSize);
+    memcpy(data.buffer.data(), &buffer_.data()[data.requestReadOffset], readSize);
     data.startOffset = 0;
   } else {
-    data.buffer.resize(maxSize_);
-    uint64_t endIndex = bufferStart_ + maxSize_;
-    memcpy(data.buffer.data(), &(buffer_.data()[bufferStart_]), maxSize_ - bufferStart_);
-    memcpy(&(data.buffer.data()[maxSize_ - bufferStart_]), buffer_.data(), endIndex - maxSize_);
-    data.startOffset = virtualSize_ - maxSize_;
+    ssize_t virtualFileStartOffset = virtualSize_ - maxSize_;
+    if (virtualReadEndOffset < virtualFileStartOffset) {
+      return;
+    }
+    data.startOffset = data.requestReadOffset;
+    if (data.requestReadOffset < virtualFileStartOffset) {
+      readSize -= virtualFileStartOffset - data.requestReadOffset;
+      data.startOffset = virtualFileStartOffset;
+    }
+    data.fileStartOffset = virtualFileStartOffset;
+    data.buffer.resize(readSize);
+
+    ssize_t bufferStartOffset = bufferStart_ + (data.startOffset - virtualFileStartOffset);
+    if (bufferStartOffset >= maxSize_) {
+      bufferStartOffset -= maxSize_;
+    }
+    uint64_t bufferEndOffset = bufferStartOffset + readSize;
+    if (bufferEndOffset < maxSize_) {
+      memcpy(data.buffer.data(), &(buffer_.data()[bufferStartOffset]), readSize);
+    } else {
+      memcpy(data.buffer.data(), &(buffer_.data()[bufferStartOffset]), maxSize_ - bufferStartOffset);
+      memcpy(&(data.buffer.data()[maxSize_ - bufferStartOffset]), buffer_.data(), readSize - (maxSize_ - bufferStartOffset));
+    }
   }
 }
 
@@ -268,6 +299,13 @@ ns_Executor::MemoryRing::~MemoryRing() {
     return;
   }
   FileExtractedText data;
+  if (full_) {
+    data.requestReadOffset = virtualSize_ - maxSize_;
+    data.requestReadSize = maxSize_;
+  } else {
+    data.requestReadOffset = 0;
+    data.requestReadSize = virtualSize_;
+  }
   Read(data);
 
   std::ofstream ofs(file_, std::ios::trunc);

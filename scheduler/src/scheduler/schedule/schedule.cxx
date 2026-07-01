@@ -213,13 +213,14 @@ void ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     uint64_t stepUUID, std::string const& stepID,
     struct FileExtractedText& data) {
-  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
-    return;
-  }
 
   tasksManager_.GetRunningOutput(type, 
       std::stoull(taskID), stepUUID, data);
   if (data.state != FileReadState::NotExecuted) {
+    return;
+  }
+
+  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
     return;
   }
 

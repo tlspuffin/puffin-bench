@@ -805,6 +805,7 @@ export class JobLauncher {
       if (isCampaign) {
         fd.append('args[CAMPAIGN_ID]', this.#campaignIdInput.value.trim());
         fd.append('args[SAVE_CORPUS]', 1);
+        fd.append('args[DISABLE_KILL_ON_HANG]', 1);
       }
       const nbAttempts = isCampaign ? (parseInt(this.#nbAttemptsInput.value, 10) || null) : null;
       const nbCore     = isCampaign ? (parseInt(this.#nbCoreInput.value,     10) || null) : null;

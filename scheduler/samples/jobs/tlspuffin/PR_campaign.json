@@ -16,7 +16,10 @@
         "configuration": {
           "nb_cores": ${RUNTIME_NB_CORES},
           "nb_retry": ${RUNTIME_NB_RUN}
-        }
+        },
+        "streams": [
+          { "name": "error", "path": "current_log/error.log" }
+        ]
       },
       {
         "step": "ForcedBuild"

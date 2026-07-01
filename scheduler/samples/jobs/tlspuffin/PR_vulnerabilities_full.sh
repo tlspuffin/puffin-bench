@@ -55,6 +55,8 @@ ExperimentCheckAllThreadsRunning() {
 }
 
 function ExperimentCheckRun() {
+  [[ ${DISABLE_KILL_ON_HANG:-} == 1 ]] || DISABLE_KILL_ON_HANG=0;
+
   local tlspuffin_pid="$1"; shift;
   local stats="$1"; shift;
 
@@ -63,21 +65,31 @@ function ExperimentCheckRun() {
   local nbissues=0;
   local problems='';
   while true; do
-    echo "ExperimentCheckRun..." >&2
-    local currentProblems='';
-    ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
-    local haveissue=0;
-    local i='';
-    for i in ${currentProblems}; do
-      echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
-    done;
-    problems="${currentProblems}";
-    (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
 
-    (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
-    (( nbissues > 4 )) && break;
+    if (( DISABLE_KILL_ON_HANG == 1)); then
+      if ! kill -0 ${tlspuffin_pid} 2>/dev/null; then
+        echo "process ${tlspuffin_pid} dead, exit" >&2
+        break;
+      fi
+    else
 
-    echo "ExperimentCheckRun sleep" >&2
+      echo "ExperimentCheckRun..." >&2
+      local currentProblems='';
+      ExperimentCheckAllThreadsRunning "${tlspuffin_pid}" statssize lastcheck "${stats}" "${THEJOB_NB_CORES}" currentProblems || break;
+      local haveissue=0;
+      local i='';
+      for i in ${currentProblems}; do
+        echo "${problems}" | grep -q " ${i} " && { haveissue=1; break; }
+      done;
+      problems="${currentProblems}";
+      (( haveissue == 0)) && nbissues=0 || (( ++nbissues ));
+
+      (( nbissues > 0 )) && echo "Checking Process vital: nbissues: ${nbissues}, problems: ${problems}" >&2
+      (( nbissues > 4 )) && break;
+      echo "ExperimentCheckRun sleep" >&2
+
+    fi
+
     sleep 60;
   done
   echo "Issues detected, killing process ${tlspuffin_pid} ..." >&2
@@ -379,6 +391,8 @@ ExperimentPostLaunchSetup() {
 
   (( saveData && SAVE_CORPUS )) && 
       CreateArtefact "${experiment_base}/corpus" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-corpus" "commit_id:${COMMIT_ID}" "features:${features}"
+
+  ln -sfn "./${experiment_base}/log" ./current_log
 
   return 0;
 }

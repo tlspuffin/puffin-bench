@@ -75,6 +75,11 @@ SummaryRun () {
         flagObjective='true'
       fi
 
+      if [ -n "$( head -c 1M "${i}" | sed 's/}{/}\n{/g' | jq -c --argjson n "${nbClients}" 'select(.id == $n)' 2>/dev/null | head -1 )" ] \
+          || [ -n "$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | jq -c --argjson n "${nbClients}" 'select(.id == $n)' 2>/dev/null | head -1 )" ]; then
+        (( ++nbClients ))
+      fi
+
       local coverages=''
       local nbDuration=0
       local avgDuration=0
