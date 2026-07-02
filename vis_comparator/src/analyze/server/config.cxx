@@ -1,5 +1,6 @@
 #include "config.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/logs.hxx"
 #include "embeded/vis_comparator/embedded_file.h"
 #include "embeded/vis_comparator/webassets_all.h"
 #include "embeded/vis_comparator/templates/templates_all.h"
@@ -65,15 +66,29 @@ void ns_Server::Config::Validate(bool forceInstall) const {
   // everything. Mirrors the previous per-file behaviour for every embedded file.
   auto install = [forceInstall](std::filesystem::path const& filePath,
                                 char const* data, size_t size) {
-    if (forceInstall || (!std::filesystem::exists(filePath))) {
+    bool const alreadyExists = std::filesystem::exists(filePath);
+    if (forceInstall || !alreadyExists) {
       std::cout << "Creating missing required file " << filePath << std::endl;
       std::ofstream ofs(filePath, std::ios::binary);
+      if (!ofs.is_open()) {
+        if (alreadyExists) {
+          LOGW("Unable to overwrite existing file " << filePath
+               << " (possibly owned by another user); keeping it and continuing");
+          return;
+        }
+        throw std::runtime_error("Unable to create required file " + filePath.string());
+      }
       ofs.write(data, size);
       ofs.close();
+      std::error_code ec;
       std::filesystem::permissions(filePath,
         std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
         std::filesystem::perms::group_read | std::filesystem::perms::others_read,
-        std::filesystem::perm_options::replace);
+        std::filesystem::perm_options::replace, ec);
+      if (ec) {
+        LOGW("Unable to set permissions on " << filePath << ": " << ec.message()
+             << "; continuing");
+      }
     }
   };
 
