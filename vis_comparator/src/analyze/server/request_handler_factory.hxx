@@ -37,6 +37,7 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   RequestHandler* requestHandler = nullptr;
 
   static const std::regex regListCommits("^/api/PR/commits/([^/]+)$");
+  static const std::regex regGetCommitRuns("^/api/PR/runs/([^/]+)$");
   static const std::regex regListCampaigns("^/api/PR/campaigns$");
   static const std::regex regGetCommitSubjects("^/api/PR/subjects/([^/]+)/([^/]+)/([0-9]+)$");
   static const std::regex regGetCommitMetrics("^/api/PR/metrics/([^/]+)/([^/]+)/([0-9]+)/([^/]+)$");
@@ -57,6 +58,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       if (method == "GET") {
         if (std::regex_search(path, match, regListCommits)) {
           requestHandler = new RequestHandlerAPIListCommits(match[1].str());
+        } else if (std::regex_search(path, match, regGetCommitRuns)) {
+          requestHandler = new RequestHandlerAPIGetCommitRuns(match[1].str());
         } else if (std::regex_search(path, match, regListCampaigns)) {
           requestHandler = new RequestHandlerAPIListCampaigns();
         } else if (std::regex_search(path, match, regGetCommitSubjects)) {

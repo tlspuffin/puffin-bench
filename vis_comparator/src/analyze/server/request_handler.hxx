@@ -41,6 +41,7 @@ REQUESTHANDLER(Error);
 REQUESTHANDLER(Files, std::string const);
 
 REQUESTHANDLER(APIListCommits, std::string const);
+REQUESTHANDLER(APIGetCommitRuns, std::string const);
 REQUESTHANDLER(APIListCampaigns);
 REQUESTHANDLER(APIGetCommitSubjects, std::string const, std::string const, uint64_t);
 REQUESTHANDLER(APIGetCommitMetrics, std::string const, std::string const, uint64_t, std::string const);

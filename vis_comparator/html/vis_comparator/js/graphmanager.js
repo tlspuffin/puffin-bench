@@ -284,8 +284,9 @@ class GraphManager {
     const vars = this.#callbacks?.getState?.()?.variables;
     return graphConfig.experiments.map((slot, idx) => {
       const resolved = resolveExperimentSlot(slot, vars);
-      // Commit-mode runs resolve with timestamp:null; fill the latest timestamp so
-      // ${DATE}/${TIME}/${DATETIME} render (does not affect experimentKey).
+      // Non-pinned commit-mode runs resolve with timestamp:null; fill the latest
+      // timestamp so ${DATE}/${TIME}/${DATETIME} render. A pinned run already has
+      // its timestamp and is left untouched (and `resolved.pinned` drives the keys).
       if (resolved && resolved.tasktype !== 'Campaign' && resolved.timestamp == null) {
         resolved.timestamp = this.#callbacks?.getLatestTimestamp?.(resolved.tasktype, resolved.commit) ?? null;
       }

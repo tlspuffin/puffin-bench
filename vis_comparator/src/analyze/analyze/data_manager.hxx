@@ -58,11 +58,21 @@ public:
     uint64_t size;                     // .zst file size (cache fingerprint)
   };
 
+  // One commit of a given type, with its latest run and how many runs it has.
+  struct SCommitInfo {
+    std::string commit;
+    uint64_t latest;  // newest timestamp of this (type, commit)
+    uint64_t count;   // number of runs of this (type, commit)
+  };
+
   DataManager(Config const& config);
   // Re-scans the data root and rebuilds the run index (thread-safe).
   void Refresh();
-  // Local commit runs of `type` as (commit, latestTimestamp) pairs.
-  std::vector<std::pair<std::string, uint64_t>> Commits(std::string const& type);
+  // Local commit runs of `type`, each with its latest timestamp and run count.
+  std::vector<SCommitInfo> Commits(std::string const& type);
+  // Every run of `commit` across all types, as (timestamp, type) pairs, newest
+  // first. Type-agnostic: lets the commit picker list all runs regardless of type.
+  std::vector<std::pair<uint64_t, std::string>> Runs(std::string const& commit);
   // Snapshot copy of every indexed campaign run.
   std::vector<RunEntry> Campaigns();
   // Runs are addressed by the runId (type, commit, timestamp).

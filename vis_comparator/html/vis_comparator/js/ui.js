@@ -643,13 +643,21 @@ class UI {
     this.#ApplyOptions(wrapper, options?.container);
 
     let _value = options?.selected ?? null;
+    let _timestamp = options?.selectedTimestamp ?? null;  // pinned run, null = latest
     let _activeTab = 'all';
     let _rows = [];   // populated asynchronously from gitHistoryPromise
     let _query = '';
+    let _expandedHash = null;          // hash whose run sublist is expanded, or null
+    const _runsCache = new Map();      // hash -> Array<{timestamp,type}> (lazy /runs)
 
     Object.defineProperty(wrapper, 'value', {
       get: () => _value,
       set: (v) => { _value = v; updateTrigger(); },
+    });
+    // Pinned timestamp of the current selection (null = latest/dynamic).
+    Object.defineProperty(wrapper, 'timestamp', {
+      get: () => _timestamp,
+      set: (v) => { _timestamp = v ?? null; updateTrigger(); },
     });
 
     // ── Trigger ───────────────────────────────────────────────
@@ -749,7 +757,9 @@ class UI {
           trigger.textContent = `${name} (undefined)`;
         }
       } else {
-        trigger.textContent = CommitHelp.ShortHash(_value);
+        const pin = _timestamp != null
+          ? ` · ${CommitHelp.FormatTimestamp(_timestamp, 'MM-DD HH:mm')}` : '';
+        trigger.textContent = CommitHelp.ShortHash(_value) + pin;
       }
     }
 
@@ -786,7 +796,10 @@ class UI {
         return true;
       });
 
-      visible.forEach(r => list.appendChild(buildCommitRow(r)));
+      visible.forEach(r => {
+        list.appendChild(buildCommitRow(r));
+        if (_expandedHash === r.value) appendRunRows(r.value);
+      });
 
       if (visible.length === 0 && _rows.length > 0) {
         const empty = document.createElement('div');
@@ -810,9 +823,11 @@ class UI {
     }
 
     function buildCommitRow(r) {
+      // Clicking the row selects the latest (dynamic) run for this commit.
       const row = document.createElement('div');
-      row.className = 'commit-picker-row' + (r.value === _value ? ' selected' : '');
-      row.onclick = () => selectValue(r.value);
+      const isSelectedLatest = r.value === _value && _timestamp == null;
+      row.className = 'commit-picker-row' + (isSelectedLatest ? ' selected' : '');
+      row.onclick = () => selectValue(r.value, null);
 
       const left = document.createElement('div');
       left.className = 'commit-picker-row-left';
@@ -837,6 +852,26 @@ class UI {
         left.appendChild(prEl);
       }
 
+      // "×N" badge + chevron to expand the run list. Shown whenever the run count is
+      // known (even ×1) so the user can see how many runs/types a commit has and,
+      // if they want, pin a specific run. 0 means counts aren't loaded yet — hide it.
+      const runCount = options?.getRunCount?.(r.value) ?? 0;
+      if (runCount >= 1) {
+        const expanded = _expandedHash === r.value;
+        const runBadge = document.createElement('span');
+        runBadge.className = 'commit-run-badge';
+        runBadge.textContent = `×${runCount}`;
+        runBadge.title = 'Runs for this commit — click to pick a specific one';
+        const chevron = document.createElement('span');
+        chevron.className = 'commit-run-chevron';
+        chevron.textContent = expanded ? '▾' : '▸';
+        const toggle = (e) => { e.stopPropagation(); toggleExpand(r.value); };
+        runBadge.onclick = toggle;
+        chevron.onclick = toggle;
+        left.appendChild(runBadge);
+        left.appendChild(chevron);
+      }
+
       const mid = document.createElement('div');
       mid.className = 'commit-picker-date';
       mid.textContent = r.date ?? '';
@@ -851,8 +886,65 @@ class UI {
       return row;
     }
 
-    function selectValue(val) {
+    // Toggles the expanded run sublist for a commit, fetching /runs lazily.
+    function toggleExpand(hash) {
+      if (_expandedHash === hash) {
+        _expandedHash = null;
+        renderRows();
+        return;
+      }
+      _expandedHash = hash;
+      if (_runsCache.has(hash)) {
+        renderRows();
+      } else {
+        renderRows();  // show the "Loading runs…" placeholder immediately
+        Promise.resolve(options?.loadRuns?.(hash) ?? []).then(runs => {
+          _runsCache.set(hash, runs ?? []);
+          if (_expandedHash === hash && !panel.classList.contains('hidden')) renderRows();
+        });
+      }
+    }
+
+    // Appends one selectable row per run of `hash` (newest first, "run #N · date · type").
+    function appendRunRows(hash) {
+      const runs = _runsCache.get(hash);
+      if (runs == null) {
+        const loading = document.createElement('div');
+        loading.className = 'commit-picker-run-row loading';
+        loading.textContent = 'Loading runs…';
+        list.appendChild(loading);
+        return;
+      }
+      const total = runs.length;
+      runs.forEach((run, i) => {
+        const ts = Number(run.timestamp);
+        const selected = hash === _value && Number(_timestamp) === ts;
+        const runRow = document.createElement('div');
+        runRow.className = 'commit-picker-run-row' + (selected ? ' selected' : '');
+        runRow.onclick = () => selectValue(hash, ts);
+
+        const num = document.createElement('span');
+        num.className = 'commit-run-num';
+        num.textContent = `run #${total - i}`;
+
+        const date = document.createElement('span');
+        date.className = 'commit-run-date';
+        date.textContent = CommitHelp.FormatTimestamp(ts, 'YYYY-MM-DD HH:mm');
+
+        const type = document.createElement('span');
+        type.className = 'commit-run-type';
+        type.textContent = run.type ?? '';
+
+        runRow.appendChild(num);
+        runRow.appendChild(date);
+        runRow.appendChild(type);
+        list.appendChild(runRow);
+      });
+    }
+
+    function selectValue(val, ts = null) {
       _value = val;
+      _timestamp = ts;
       updateTrigger();
       closePanel();
       options?.callback?.(val);

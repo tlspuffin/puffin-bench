@@ -205,17 +205,24 @@ function resyncGraphOrder() {
  *   time range to the real data extent of its resolved experiments.
  */
 async function restoreGraphs(configList, recomputeRange = false) {
+  // Renders a tracked placeholder graph (no data) so the config stays in
+  // state.graphSettings for later variable resolution / redraw.
+  const addPlaceholder = async (graphConfig) => {
+    const id = await graphManager.AddGraph(graphConfig, new Map());
+    state.graphSettings.push({ id, config: graphConfig });
+  };
+
   for (const graphConfig of configList) {
-    // Resolve concrete experiment entries (skip unresolvable slots)
-    const resolved = graphConfig.experiments
-      .map(slot => resolveExperimentSlot(slot, state.variables))
-      .filter(Boolean);
+    // Resolve each slot once, keeping the slot→resolved pairing (needed for slotKey
+    // when seeding the commit registry below); drop slots that don't resolve.
+    const pairs = graphConfig.experiments
+      .map(slot => ({ slot, exp: resolveExperimentSlot(slot, state.variables) }))
+      .filter(p => p.exp);
+    const resolved = pairs.map(p => p.exp);
 
     if (resolved.length === 0) {
-      // All experiment variables unresolved (template with null vars) — render placeholders
-      // so the config is tracked in state.graphSettings for later variable resolution.
-      const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.push({ id, config: graphConfig });
+      // All experiment variables unresolved (template with null vars).
+      await addPlaceholder(graphConfig);
       continue;
     }
 
@@ -227,9 +234,8 @@ async function restoreGraphs(configList, recomputeRange = false) {
     )];
 
     if (resolvedMetrics.length === 0) {
-      // All metric variables unresolved — render placeholders.
-      const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.push({ id, config: graphConfig });
+      // All metric variables unresolved.
+      await addPlaceholder(graphConfig);
       continue;
     }
 
@@ -255,16 +261,12 @@ async function restoreGraphs(configList, recomputeRange = false) {
 
     if (dataMap.size === 0) {
       // Experiments resolved but no data came back (e.g. the referenced commit/subtask
-      // has no results on this server). Render a placeholder so the graph still shows —
-      // matching the unresolved-variable cases above — rather than silently dropping it.
-      const id = await graphManager.AddGraph(graphConfig, new Map());
-      state.graphSettings.push({ id, config: graphConfig });
+      // has no results on this server). Show a placeholder rather than silently dropping it.
+      await addPlaceholder(graphConfig);
       continue;
     }
 
-    for (const slot of graphConfig.experiments) {
-      const exp = resolveExperimentSlot(slot, state.variables);
-      if (!exp) continue;
+    for (const { slot, exp } of pairs) {
       const key = slotKey(slot, exp);
       if (!state.commitRegistry.has(key)) {
         state.commitRegistry.set(key, { color: nextCommitColor(state.commitRegistry), displayName: null, visible: true });

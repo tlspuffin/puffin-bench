@@ -6,6 +6,7 @@
 #include <vector>
 #include <fstream>
 #include <regex>
+#include <algorithm>
 #include "rapidjson/document.h"
 #include "rapidjson/istreamwrapper.h"
 #include "rapidjson/ostreamwrapper.h"
@@ -494,7 +495,7 @@ std::optional<ns_Analyze::DataManager::RunEntry> ns_Analyze::DataManager::Resolv
   return runIndex_[ts->second];
 }
 
-std::vector<std::pair<std::string, uint64_t>>
+std::vector<ns_Analyze::DataManager::SCommitInfo>
 ns_Analyze::DataManager::Commits(std::string const& type) {
   Refresh();
   std::lock_guard<std::mutex> lk(mutex_);
@@ -502,12 +503,38 @@ ns_Analyze::DataManager::Commits(std::string const& type) {
   if (t == runsByTriple_.end()) {
     return {};
   }
-  std::vector<std::pair<std::string, uint64_t>> result;
+  std::vector<SCommitInfo> result;
   result.reserve(t->second.size());
   for (auto const& [commitID, byTs] : t->second) {
     uint64_t latest = byTs.empty() ? 0 : byTs.rbegin()->first;
-    result.emplace_back(commitID, latest);
+    result.push_back({commitID, latest, byTs.size()});
   }
+  return result;
+}
+
+std::vector<std::pair<uint64_t, std::string>>
+ns_Analyze::DataManager::Runs(std::string const& commit) {
+  Refresh();
+  std::lock_guard<std::mutex> lk(mutex_);
+  std::vector<std::pair<uint64_t, std::string>> result;
+  // Collect every (timestamp, type) for this commit across all commit-mode types.
+  // Campaign runs are keyed by their COMMIT_ID here too, but they belong to the
+  // campaign picker, not the commit picker — exclude them.
+  for (auto const& [type, byCommit] : runsByTriple_) {
+    if (type == "Campaign") {
+      continue;
+    }
+    auto c = byCommit.find(commit);
+    if (c == byCommit.end()) {
+      continue;
+    }
+    for (auto const& [ts, _] : c->second) {
+      result.emplace_back(ts, type);
+    }
+  }
+  // Newest first.
+  std::sort(result.begin(), result.end(),
+      [](auto const& a, auto const& b) { return a.first > b.first; });
   return result;
 }
 

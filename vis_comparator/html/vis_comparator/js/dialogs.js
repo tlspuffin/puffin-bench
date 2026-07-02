@@ -177,8 +177,13 @@ function buildSubtaskOptions(selectedTasktype, selectedSubtask, selectedVar, dyn
  */
 async function loadDynamicSubtasks(slot, subtaskSel) {
   let resolvedCommit = slot.commit;
+  // The pinned run travels with the commit variable, or sits on a literal slot.
+  // A pinned commit variable narrows *this slot's* subtasks to its run (fork-2).
+  let pinnedTs = slot.timestamp ?? null;
   if (slot.commitVar) {
-    resolvedCommit = _state.variables.commits.get(slot.commitVar)?.value;
+    const entry = _state.variables.commits.get(slot.commitVar);
+    resolvedCommit = entry?.value;
+    pinnedTs = entry?.timestamp ?? null;
   }
   if (!resolvedCommit) {
     const options = buildSubtaskOptions(slot.tasktype, slot.subtask, slot.subtaskVar, []);
@@ -191,12 +196,14 @@ async function loadDynamicSubtasks(slot, subtaskSel) {
   subtaskSel.disabled = true;
   subtaskSel.classList.add('select-loading');
   try {
-    const [perfSubjs, vulnSubjs] = await Promise.all([
-      _apirest.LoadCommitSubjects(TASK_TYPES.PERF, resolvedCommit),
-      _apirest.LoadCommitSubjects(TASK_TYPES.VULN, resolvedCommit)
-    ]);
-    perfSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.PERF, subtask: s.value }));
-    vulnSubjs.forEach(s => dynamicKnown.push({ tasktype: TASK_TYPES.VULN, subtask: s.value }));
+    // A pinned timestamp limits discovery to that one run (only its type has a run
+    // at that ts; the others return []). Unpinned (null) falls back to each type's
+    // latest run. Iterating TASK_TYPES keeps this correct as new types are added.
+    const types = Object.values(TASK_TYPES);
+    const results = await Promise.all(
+      types.map(t => _apirest.LoadCommitSubjects(t, resolvedCommit, pinnedTs)));
+    types.forEach((t, i) =>
+      (results[i] ?? []).forEach(s => dynamicKnown.push({ tasktype: t, subtask: s.value })));
   } finally {
     subtaskSel.disabled = false;
     subtaskSel.classList.remove('select-loading');
@@ -725,17 +732,21 @@ export async function AddGraphique(prefill = null, editId = null) {
     const initialSelected = slot.commitVar ? `_var_${slot.commitVar}` : (slot.commit ?? null);
     const commitSel = _ui.CreateCommitPicker(gitHistory, allCommits, {
       selected: initialSelected,
+      selectedTimestamp: slot.commitVar ? null : (slot.timestamp ?? null),
       variables: _state.variables.commits,
+      getRunCount: (commit) => _apirest.RunCountSync(commit),
+      loadRuns: (commit) => _apirest.LoadRuns(commit),
     });
 
     commitSel.addEventListener('change', function() {
       const val = commitSel.value;
       if (!val) {
-        slot.commitVar = null; slot.commit = null;
+        slot.commitVar = null; slot.commit = null; slot.timestamp = null;
       } else if (val.startsWith('_var_')) {
-        slot.commitVar = val.slice(5); slot.commit = null;
+        // Variable mode: the pinned run travels with the variable, not the slot.
+        slot.commitVar = val.slice(5); slot.commit = null; slot.timestamp = null;
       } else {
-        slot.commitVar = null; slot.commit = val;
+        slot.commitVar = null; slot.commit = val; slot.timestamp = commitSel.timestamp ?? null;
       }
       onExperimentChange();
       loadDynamicSubtasks(slot, subtaskSel);
@@ -1103,7 +1114,7 @@ async function buildTemplateURL(templateName) {
   const tpl = await _apirest.LoadTemplate(templateName);
   const vars = tpl?.variables;
   const parts = [`template=${encodeURIComponent(templateName)}`];
-  for (const [name] of vars?.commits   ?? []) parts.push(`${name}=<commit_hash>`, `${name}.alias=<alias>`);
+  for (const [name] of vars?.commits   ?? []) parts.push(`${name}=<commit_hash[@timestamp]>`, `${name}.alias=<alias>`);
   for (const [name] of vars?.subtasks  ?? []) parts.push(`${name}=<tasktype>:<subtask>`, `${name}.alias=<alias>`);
   for (const [name] of vars?.campaigns ?? []) parts.push(`${name}=<user>:<campaign>:<timestamp>`, `${name}.alias=<alias>`);
   for (const [name] of vars?.metrics   ?? []) parts.push(`${name}=<metric_path>`);
@@ -1242,6 +1253,25 @@ export function SaveAsTemplate(state) {
  * @param {URLSearchParams} params
  * @param {string[]} fullHashes - known full commit hashes, to resolve shortened ones
  */
+/**
+ * Parses a commit URL token `<hash>[@<timestamp>]` into `{ value, timestamp }`.
+ * The `@<timestamp>` suffix is optional and only recognised when numeric; its
+ * absence means the latest (dynamic) run. The hash is resolved to a full hash.
+ * @param {string} raw
+ * @param {string[]} fullHashes
+ * @returns {{value: string|null, timestamp: number|null}}
+ */
+function parseCommitToken(raw, fullHashes = []) {
+  if (!raw) return { value: null, timestamp: null };
+  const at = raw.lastIndexOf('@');
+  let hash = raw, ts = null;
+  if (at > 0) {
+    const tsStr = raw.slice(at + 1);
+    if (/^[0-9]+$/.test(tsStr)) { hash = raw.slice(0, at); ts = Number(tsStr); }
+  }
+  return { value: CommitHelp.ResolveFullHash(hash, fullHashes), timestamp: ts };
+}
+
 function applyURLParamsToTemplate(tpl, params, fullHashes = []) {
   // A value still wrapped in angle brackets is an unedited placeholder from a copied URL.
   const isPlaceholder = (v) => typeof v === 'string' && /^<.*>$/.test(v.trim());
@@ -1262,17 +1292,18 @@ function applyURLParamsToTemplate(tpl, params, fullHashes = []) {
         const raw = params.get(name);
         if (isPlaceholder(raw)) {
           fail(name, `value is still a placeholder (${raw})`);
-          tpl.variables.commits.set(name, { value: null, alias });
+          tpl.variables.commits.set(name, { value: null, timestamp: null, alias });
         } else if (parseDynamicRef(raw)) {
           // A dynamic reference (e.g. @dev-base) is resolved in a later async pass
           // (resolveDynamicCommitRefs), once anchor commits hold their literal hashes.
           // Keep any alias the URL/template already carries.
-          tpl.variables.commits.set(name, { value: null, alias });
+          tpl.variables.commits.set(name, { value: null, timestamp: null, alias });
         } else {
-          tpl.variables.commits.set(name, { value: raw ? CommitHelp.ResolveFullHash(raw, fullHashes) : null, alias });
+          const { value, timestamp } = parseCommitToken(raw, fullHashes);
+          tpl.variables.commits.set(name, { value, timestamp, alias });
         }
       } else if (params.has(`${name}.alias`)) {
-        tpl.variables.commits.set(name, { value: entry?.value ?? null, alias });
+        tpl.variables.commits.set(name, { value: entry?.value ?? null, timestamp: entry?.timestamp ?? null, alias });
       }
     }
   }
@@ -1399,7 +1430,7 @@ async function resolveDynamicCommitRefs(tpl, params, ctx) {
       _errorManager.Error(`Variable "${name}" could not be loaded from the URL: dynamic reference "@${ref.token}" could not be resolved.`);
       continue;
     }
-    commits.set(name, { value, alias: existing?.alias ?? DYN_REF_DEFAULT_ALIAS[ref.token] });
+    commits.set(name, { value, timestamp: null, alias: existing?.alias ?? DYN_REF_DEFAULT_ALIAS[ref.token] });
   }
 }
 
@@ -1493,7 +1524,8 @@ function buildVariablesFromParams(params, fullHashes = []) {
   const defined = parseURLVariables(params);
   for (const name of defined.commits) {
     const raw = params.get(name);
-    commits.set(name, { value: raw ? CommitHelp.ResolveFullHash(raw, fullHashes) : null, alias: params.get(`${name}.alias`) || null });
+    const { value, timestamp } = parseCommitToken(raw, fullHashes);
+    commits.set(name, { value, timestamp, alias: params.get(`${name}.alias`) || null });
   }
   for (const name of defined.subtasks) {
     const val = params.get(name);

@@ -289,7 +289,7 @@ function buildCommitVariableSection(state) {
   const section = buildSidebarSection('Variables: Commits', 'Add commit variable', () => {
     let n = 1;
     while (state.variables.commits.has(`c${n}`)) n++;
-    state.variables.commits.set(`c${n}`, { value: null, alias: null });
+    state.variables.commits.set(`c${n}`, { value: null, timestamp: null, alias: null });
     BuildSidebar(state);
   });
 
@@ -299,7 +299,7 @@ function buildCommitVariableSection(state) {
 
     buildVarCardHeader(card, name, entry?.value !== null && entry?.value !== undefined,
       () => {
-        state.variables.commits.set(name, { value: null, alias: entry?.alias ?? null });
+        state.variables.commits.set(name, { value: null, timestamp: null, alias: entry?.alias ?? null });
         refreshGraphsUsingVariable(state, name);
         BuildSidebar(state);
       },
@@ -317,15 +317,25 @@ function buildCommitVariableSection(state) {
     const commitPicker = _ui.CreateCommitPicker(
       _gitHistoryPromise,
       _allCommitsPromise,
-      { selected: entry?.value ?? null }
+      {
+        selected: entry?.value ?? null,
+        selectedTimestamp: entry?.timestamp ?? null,
+        getRunCount: (commit) => _apirest.RunCountSync(commit),
+        loadRuns: (commit) => _apirest.LoadRuns(commit),
+      }
     );
     commitPicker.addEventListener('change', () => {
       const newValue = commitPicker.value || null;
-      state.variables.commits.set(name, { value: newValue, alias: entry?.alias ?? null });
+      const newTs = commitPicker.timestamp ?? null;
+      state.variables.commits.set(name, { value: newValue, timestamp: newTs, alias: entry?.alias ?? null });
       refreshGraphsUsingVariable(state, name);
       BuildSidebar(state);
 
       if (newValue) {
+        // Subtask discovery stays on the latest run of each type: a pinned
+        // timestamp belongs to one type only, so passing it here would empty the
+        // other type's subjects. The pinned run is honoured on the data path
+        // (resolveExperimentSlot -> LoadCommitMetrics/Values).
         Promise.all([
           _apirest.LoadCommitSubjects(TASK_TYPES.PERF, newValue),
           _apirest.LoadCommitSubjects(TASK_TYPES.VULN, newValue)
@@ -340,8 +350,8 @@ function buildCommitVariableSection(state) {
     card.appendChild(commitPicker);
 
     buildAliasRow(card, entry?.alias, (newAlias) => {
-      const cur = state.variables.commits.get(name) ?? { value: null, alias: null };
-      state.variables.commits.set(name, { value: cur.value, alias: newAlias });
+      const cur = state.variables.commits.get(name) ?? { value: null, timestamp: null, alias: null };
+      state.variables.commits.set(name, { value: cur.value, timestamp: cur.timestamp ?? null, alias: newAlias });
       refreshAllGraphAppearances(state);
     });
 

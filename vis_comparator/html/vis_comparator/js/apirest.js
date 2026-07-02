@@ -1,5 +1,5 @@
 import { JSONHelp } from './jsonhelp.js';
-import { DEFAULT_DELTA_DIVISOR } from './constants.js';
+import { DEFAULT_DELTA_DIVISOR, TASK_TYPES } from './constants.js';
 
 /**
  * REST API client for the analysis server.
@@ -12,6 +12,9 @@ class ApiREST {
   // "type/commit" -> latest timestamp, populated by LoadCommits. Lets commit-mode
   // callers omit the timestamp and have it resolved to the newest run.
   #commitLatest = new Map();
+  // "type/commit" -> number of runs, populated by LoadCommits. Summed across all
+  // loaded types by RunCountSync to drive the commit picker's "×N" badge.
+  #commitRunCount = new Map();
   // Session cache of the campaign run list.
   #campaigns = null;
 
@@ -234,6 +237,9 @@ class ApiREST {
       const commits = [];
       for (const entry of data.commits ?? []) {
         this.#commitLatest.set(`${commitType}/${entry.commit}`, entry.timestamp);
+        if (entry.count != null) {
+          this.#commitRunCount.set(`${commitType}/${entry.commit}`, entry.count);
+        }
         commits.push(entry.commit);
       }
       return commits;
@@ -252,6 +258,41 @@ class ApiREST {
    */
   LatestTimestampSync(commitType, commitID) {
     return this.#commitLatest.get(`${commitType}/${commitID}`) ?? null;
+  }
+
+  /**
+   * Total number of runs for a commit across all loaded types (Perf + Vuln),
+   * from the counts cached by LoadCommits. Drives the commit picker "×N" badge.
+   * Returns 0 when the commit is unknown / not yet loaded.
+   * @param {string} commitID
+   * @returns {number}
+   */
+  RunCountSync(commitID) {
+    let total = 0;
+    for (const type of Object.values(TASK_TYPES)) {
+      total += this.#commitRunCount.get(`${type}/${commitID}`) ?? 0;
+    }
+    return total;
+  }
+
+  /**
+   * Loads every run of a commit across all types (type-agnostic), newest first.
+   * Used by the commit picker to list runs when a commit has more than one.
+   * @param {string} commitID
+   * @returns {Promise<Array<{timestamp: number, type: string}>>} newest-first, or [] on failure
+   */
+  async LoadRuns(commitID) {
+    try {
+      const response = await fetch(`${this.#apiURI}/runs/${encodeURIComponent(commitID)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      return data.runs ?? [];
+    } catch (error) {
+      this.#errorManager.Error('Failed to load runs: ' + error.message);
+    }
+    return [];
   }
 
   /**

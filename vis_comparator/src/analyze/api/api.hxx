@@ -14,8 +14,12 @@ public:
       : dataManager_(config)
   {}
 
-  std::vector<std::pair<std::string, uint64_t>> GetCommits(std::string const& type) {
+  std::vector<ns_Analyze::DataManager::SCommitInfo> GetCommits(std::string const& type) {
     return dataManager_.Commits(type);
+  }
+
+  std::vector<std::pair<uint64_t, std::string>> GetRuns(std::string const& commit) {
+    return dataManager_.Runs(commit);
   }
 
   std::vector<ns_Analyze::DataManager::RunEntry> GetCampaigns() {

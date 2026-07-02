@@ -130,12 +130,17 @@ export function resolveExperimentSlot(slot, variables) {
   let commit   = null;
   let tasktype = null;
   let subtask  = null;
+  // Pinned run timestamp: from the slot for a literal commit, or carried by the
+  // commit variable. null = latest (dynamic). See CreateCommitPicker.
+  let pinnedTs = null;
 
   if (slot.commitVar) {
     const entry = variables?.commits?.get(slot.commitVar);
     commit = entry?.value ?? null;
+    pinnedTs = entry?.timestamp ?? null;
   } else {
     commit = slot.commit ?? null;
+    pinnedTs = slot.timestamp ?? null;
   }
 
   if (slot.subtaskVar) {
@@ -148,7 +153,10 @@ export function resolveExperimentSlot(slot, variables) {
   }
 
   if (commit && tasktype && subtask) {
-    return { commit, tasktype, subtask, timestamp: null, user: null, campaign: null };
+    // `pinned` distinguishes an explicit run from the latest timestamp that
+    // graphmanager fills in for ${DATE} — only pinned runs affect the keys below.
+    return { commit, tasktype, subtask, timestamp: pinnedTs, pinned: pinnedTs != null,
+        user: null, campaign: null };
   }
   return null;
 }
@@ -163,10 +171,12 @@ export function resolveExperimentSlot(slot, variables) {
 export function experimentKey(resolved) {
   if (!resolved) return null;
   const base = `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}`;
-  // Only campaigns disambiguate by timestamp; commit-mode keys stay 3-part even
-  // though resolved may carry a (latest) timestamp for the ${DATE} legend token.
-  return (resolved.tasktype === 'Campaign' && resolved.timestamp != null)
-    ? `${base}:${resolved.timestamp}` : base;
+  // Campaigns always disambiguate by timestamp; commit-mode keys stay 3-part
+  // unless a specific run is pinned (so two pinned runs of the same commit +
+  // subtask stay distinct). The auto-filled latest timestamp (not pinned) never
+  // widens the key.
+  const includeTs = (resolved.tasktype === 'Campaign' || resolved.pinned) && resolved.timestamp != null;
+  return includeTs ? `${base}:${resolved.timestamp}` : base;
 }
 
 /**
@@ -187,7 +197,12 @@ export function slotKey(slot, resolved) {
       ? `$${slot.campaignVar}`
       : `${resolved.commit}:${resolved.tasktype}:${resolved.subtask}:${resolved.timestamp}`;
   }
-  const commitPart  = slot.commitVar  ? `$${slot.commitVar}`  : resolved.commit;
+  // A commit variable carries its own pinned run, so `$c1` already encodes it;
+  // only a literal pinned commit needs the timestamp appended so two pinned runs
+  // of the same commit get distinct colours/visibility.
+  const commitPart  = slot.commitVar
+    ? `$${slot.commitVar}`
+    : (resolved.pinned ? `${resolved.commit}@${resolved.timestamp}` : resolved.commit);
   const subtaskPart = slot.subtaskVar ? `$${slot.subtaskVar}` : `${resolved.tasktype}:${resolved.subtask}`;
   return `${commitPart}:${subtaskPart}`;
 }

@@ -248,21 +248,47 @@ void ns_Server::RequestHandlerAPIListCommits::handleRequest(
   if (ManageCORS(request, response)) return;
 
   std::string const& type = std::get<0>(args_);
-  std::vector<std::pair<std::string, uint64_t>> commits = apis_->analyzeAPI_.GetCommits(type);
+  std::vector<ns_Analyze::DataManager::SCommitInfo> commits = apis_->analyzeAPI_.GetCommits(type);
 
   rapidjson::Document doc;
   doc.SetObject();
   auto& allocator = doc.GetAllocator();
 
   rapidjson::Value commitsArray(rapidjson::kArrayType);
-  for (auto const& [commit, timestamp] : commits) {
+  for (auto const& info : commits) {
     rapidjson::Value obj(rapidjson::kObjectType);
-    obj.AddMember("commit", rapidjson::Value(commit.c_str(), allocator), allocator);
-    obj.AddMember("timestamp", timestamp, allocator);
+    obj.AddMember("commit", rapidjson::Value(info.commit.c_str(), allocator), allocator);
+    obj.AddMember("timestamp", info.latest, allocator);
+    obj.AddMember("count", info.count, allocator);
     commitsArray.PushBack(obj, allocator);
   }
 
   doc.AddMember("commits", commitsArray, allocator);
+  SendJSONResponse(response, doc);
+}
+
+void ns_Server::RequestHandlerAPIGetCommitRuns::handleRequest(
+    Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+
+  if (ManageCORS(request, response)) return;
+
+  std::string const& commit = std::get<0>(args_);
+  std::vector<std::pair<uint64_t, std::string>> runs = apis_->analyzeAPI_.GetRuns(commit);
+
+  rapidjson::Document doc;
+  doc.SetObject();
+  auto& allocator = doc.GetAllocator();
+
+  rapidjson::Value runsArray(rapidjson::kArrayType);
+  for (auto const& [timestamp, type] : runs) {
+    rapidjson::Value obj(rapidjson::kObjectType);
+    obj.AddMember("timestamp", timestamp, allocator);
+    obj.AddMember("type", rapidjson::Value(type.c_str(), allocator), allocator);
+    runsArray.PushBack(obj, allocator);
+  }
+
+  doc.AddMember("runs", runsArray, allocator);
   SendJSONResponse(response, doc);
 }
 

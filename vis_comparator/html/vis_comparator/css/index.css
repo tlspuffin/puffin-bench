@@ -1134,6 +1134,63 @@ select:focus {
   white-space: nowrap;
 }
 
+/* "×N" badge + chevron shown on commits that have several runs. */
+.commit-run-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--color-primary, #667eea);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.commit-run-chevron {
+  font-size: 0.7rem;
+  color: var(--color-text-muted, #888);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Expanded run sublist rows under a multi-run commit. */
+.commit-picker-run-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 28px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  background: var(--color-bg-subtle, #f6f6f6);
+}
+.commit-picker-run-row:hover { background: var(--color-bg-subtle, #e8e8e8); }
+.commit-picker-run-row.selected { background: rgba(102,126,234,0.14); }
+.commit-picker-run-row.loading {
+  color: var(--color-text-muted, #888);
+  font-style: italic;
+  cursor: default;
+}
+.commit-run-num {
+  font-weight: 600;
+  color: var(--color-primary, #667eea);
+  white-space: nowrap;
+}
+.commit-run-date {
+  font-family: 'Courier New', monospace;
+  color: var(--color-text-muted, #666);
+}
+.commit-run-type {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #555);
+  background: rgba(0,0,0,0.06);
+  white-space: nowrap;
+}
+
 .campaign-filter-bar {
   display: flex;
   gap: 6px;
