@@ -72,7 +72,7 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       ofs.close();
       std::filesystem::permissions(filePath,
         std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
-        std::filesystem::perms::group_read,
+        std::filesystem::perms::group_read | std::filesystem::perms::others_read,
         std::filesystem::perm_options::replace);
     }
   };
