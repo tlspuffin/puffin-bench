@@ -278,7 +278,7 @@ class GraphManager {
   /**
    * Resolves experiment slots to concrete { commit, tasktype, subtask } objects.
    * commitVar/subtaskVar refs are looked up in state.variables; null values → unresolved.
-   * @returns {Array<{ resolved: object|null, slot, idx, commitVarName: string|null, subtaskVarName: string|null }>}
+   * @returns {Array<{ resolved: object|null, slot, idx, commitVarName: string|null, subtaskVarName: string|null, campaignVarName: string|null }>}
    */
   #ResolveExperiments(graphConfig) {
     const vars = this.#callbacks?.getState?.()?.variables;
@@ -292,8 +292,9 @@ class GraphManager {
       }
       return {
         resolved, slot, idx,
-        commitVarName:  slot.commitVar  ?? null,
-        subtaskVarName: slot.subtaskVar ?? null,
+        commitVarName:   slot.commitVar   ?? null,
+        subtaskVarName:  slot.subtaskVar  ?? null,
+        campaignVarName: slot.campaignVar ?? null,
       };
     });
   }
@@ -584,21 +585,14 @@ class GraphManager {
     const state = this.#callbacks?.getState?.();
 
     // ── Experiment labels ───────────────────────────────────────
-    resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName }, i) => {
+    resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName, campaignVarName }, i) => {
       if (i > 0) titleSpan.appendChild(document.createTextNode(' \u2022 '));
 
       // Show variable name badges for any variable-sourced sides
-      if (commitVarName) {
+      for (const varName of [commitVarName, subtaskVarName, campaignVarName].filter(Boolean)) {
         const badge = document.createElement('span');
         badge.className = 'graph-title-var-badge';
-        badge.textContent = commitVarName;
-        titleSpan.appendChild(badge);
-        titleSpan.appendChild(document.createTextNode('\u00a0'));
-      }
-      if (subtaskVarName) {
-        const badge = document.createElement('span');
-        badge.className = 'graph-title-var-badge';
-        badge.textContent = subtaskVarName;
+        badge.textContent = varName;
         titleSpan.appendChild(badge);
         titleSpan.appendChild(document.createTextNode('\u00a0'));
       }
