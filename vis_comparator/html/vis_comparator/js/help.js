@@ -65,7 +65,7 @@ export const HELP_HTML = `
   <p>Below the title bar, three toggle buttons control rendering options:</p>
   <ul>
     <li><strong>Split Y-Axes</strong> — give each metric its own Y-axis (useful when scales differ). Disabled for single-metric graphs.</li>
-    <li><strong>All Runs</strong> — overlay every individual benchmark run as a faint dotted trace.</li>
+    <li><strong>All Runs</strong> — overlay every individual client run as a faint dotted trace.</li>
     <li><strong>Confidence Bands</strong> — shade the 95% confidence interval around the mean.</li>
   </ul>
 </div>

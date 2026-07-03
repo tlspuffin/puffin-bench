@@ -984,7 +984,7 @@ class GraphManager {
           eltRaw.className = 'graph-toggle-btn';
           eltRaw.id        = 'graph_ui_raw_' + id;
           eltRaw.textContent = 'All Runs';
-          eltRaw.title     = 'Show each individual run as a separate trace';
+          eltRaw.title     = 'Show each individual client run as a separate trace';
           eltRaw.onclick   = this.ToggleRawTraces.bind(this, id);
           toggleBar.appendChild(eltRaw);
         }

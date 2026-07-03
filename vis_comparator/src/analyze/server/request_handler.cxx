@@ -459,7 +459,6 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   uint64_t min = std::get<4>(args_);
   uint64_t max = std::get<5>(args_);
   uint64_t step = std::get<6>(args_);
-  std::string aggregate = "";
 
   std::istream& stream = request.stream();
   std::stringstream ss;
@@ -471,14 +470,6 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   if (doc.HasParseError()) {
     SendErrorResponse(response, 400, "Invalid json in request body");
     return;
-  }
-
-  if (doc.HasMember("aggregate")) {
-    if (!doc["aggregate"].IsString()) {
-      SendErrorResponse(response, 400, "Invalid json in request body");
-      return;
-    }
-    aggregate = doc["aggregate"].GetString();
   }
 
   bool error;
@@ -517,7 +508,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
     cacheKey = type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
         "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
-        "@" + runTag + "#agg=" + aggregate + ";runs=" + joinU64(runs) +
+        "@" + runTag + "#runs=" + joinU64(runs) +
         ";clients=" + joinU64(clients) + ";metrics=" + metricsJoined;
     std::string cached;
     if (valuesCache.Get(cacheKey, cached)) {
@@ -534,7 +525,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;
   try {
     values = apis_->analyzeAPI_.GetCommitValues(type, commitID, timestamp, subject, min, max, step,
-        runs, clients, metrics, aggregate);
+        runs, clients, metrics);
   } catch (std::exception const& e) {
     std::cerr << "[GetCommitValues] exception: " << e.what() << std::endl;
     SendErrorResponse(response, 500, std::string("Internal error: ") + e.what());
@@ -549,7 +540,6 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   doc.AddMember("max", max, allocator);
   doc.AddMember("step", step, allocator);
   doc.AddMember("count", ((max - min) + step - 1) / step, allocator);
-  doc.AddMember("aggregate", rapidjson::Value(aggregate.c_str(), allocator), allocator);
 
   rapidjson::Value runsArray(rapidjson::kArrayType);
   for(uint64_t runID: runs) {

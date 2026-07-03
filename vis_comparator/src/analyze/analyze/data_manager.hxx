@@ -87,7 +87,7 @@ public:
       std::string const& subject, uint64_t min, uint64_t max,
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
-      std::vector<std::string> const& metrics, std::string const& aggregate);
+      std::vector<std::string> const& metrics);
   // "mtime:size" fingerprint for cache keying ("" if the run is unknown).
   std::string RunTag(std::string const& type, std::string const& commitID,
       uint64_t timestamp);

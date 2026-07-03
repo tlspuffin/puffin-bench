@@ -500,8 +500,7 @@ class ApiREST {
         body: JSON.stringify({
           runs: [],
           clients: [],
-          metrics: selectedMetrics,
-          aggregate: 'sum'
+          metrics: selectedMetrics
         })
       });
       if (!response.ok) {

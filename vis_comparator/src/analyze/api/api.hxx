@@ -48,22 +48,17 @@ public:
       std::string const& subject, uint64_t min, uint64_t max,
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
-      std::vector<std::string> const& metrics, std::string const& aggregate) {
+      std::vector<std::string> const& metrics) {
     std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> data = dataManager_.CommitValues(
-        type, commitID, timestamp, subject, min, max, step, runs, clients, metrics, aggregate);
-    uint64_t resultOffset = 0;
-    std::vector<uint64_t> indexes(runs.size());
-     std::vector<std::string> metricsRequired = metrics;
+        type, commitID, timestamp, subject, min, max, step, runs, clients, metrics);
+    std::vector<std::string> metricsRequired = metrics;
     for(std::string const& metric: metricsRequired) {
       auto const it = data.find(metric);
       if (it == data.end() || it->second.empty()) {
         continue;
       }
-      bool acrossRun = metric.find("global.") == 0;
-      if (!acrossRun) {
-        acrossRun = it->second.size() == runs.size();
-      }
-      data.merge(ns_Analyze::Statistics::ComputeStats(metric, it->second, acrossRun ? nullptr : &runs));
+      // Pool every client-run into a single distribution for mean/CI.
+      data.merge(ns_Analyze::Statistics::ComputeStats(metric, it->second, nullptr));
     }
     return data;
   }

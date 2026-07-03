@@ -629,7 +629,7 @@ ns_Analyze::DataManager::CommitValues(
     std::string const& subject, uint64_t min, uint64_t max,
     uint64_t step, std::vector<uint64_t>& runs,
     std::vector<uint64_t> const& clients,
-    std::vector<std::string> const& metrics, std::string const& aggregate) {
+    std::vector<std::string> const& metrics) {
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> result;
 
   std::optional<RunEntry> run = Resolve(type, commitID, timestamp);
@@ -681,11 +681,7 @@ ns_Analyze::DataManager::CommitValues(
     runsFolders.emplace(runID, metadataFilename.first);
   }
 
-  uint64_t nbElement = ((max - min) + step - 1) / step;
-  std::vector<char> sumValues(
-      nbElement * (sizeof(double) > sizeof(uint64_t) ? sizeof(double) : sizeof(uint64_t)), 0);
-
-  std::vector<std::vector<std::vector<struct ns_Analyze::DataManager::SInterpolations>>> 
+  std::vector<std::vector<std::vector<struct ns_Analyze::DataManager::SInterpolations>>>
       timestamps(metricsSummaries.nbRun_);
   for(auto const& [runID, _]: runsFolders) {
     timestamps[runID].resize(metricsSummaries.runSummary_[runsIDMap[runID]].nbClient_ + 1);
@@ -713,7 +709,6 @@ ns_Analyze::DataManager::CommitValues(
     }
     std::vector<uint64_t> savedIndexes = indexes;
     for (uint64_t runID: runs) {
-      bool doAggregate = (!aggregate.empty()) && clientsMetric;
       uint64_t runIndex = runsIDMap[runID];
       if (runIndex == ~0) {
         throw std::runtime_error("Unknown run ID: " + std::to_string(runID));
@@ -741,9 +736,6 @@ ns_Analyze::DataManager::CommitValues(
       }
 
       std::filesystem::path const& runFolder = itRunFolder->second;
-      if (doAggregate) {
-        memset(sumValues.data(), 0, sumValues.size());
-      }
       auto const& refSummary = metricsSummaries.runSummary_[runIndex].summary_[clientsMetric ? 1 : 0];
       if (refSummary.count(metric) == 0) {
         LOGW("Metric not found in run, skipping | type: " << type << " | commit: " << commitID
@@ -765,28 +757,12 @@ ns_Analyze::DataManager::CommitValues(
 
         switch(dataType) {
           case DataType::UINT64:
-            if (doAggregate) {
-              auto data = ExtractData<uint64_t>(archive, filename, timestamps[runID][index]);
-              uint64_t* sum = (uint64_t*)sumValues.data();
-              for (size_t i=0; i<data.size(); ++i) {
-                sum[i] += data[i];
-              }
-            } else {
-              result[metricFullname].push_back(
-                  {runID, index, { ExtractData<uint64_t>(archive, filename, timestamps[runID][index]) }});
-            }
+            result[metricFullname].push_back(
+                {runID, index, { ExtractData<uint64_t>(archive, filename, timestamps[runID][index]) }});
             break;
           case DataType::DOUBLE:
-            if (doAggregate) {
-              auto data = ExtractData<double>(archive, filename, timestamps[runID][index]);
-              double* sum = (double*)sumValues.data();
-              for (size_t i=0; i<data.size(); ++i) {
-                sum[i] += data[i];
-              }
-            } else {
-              result[metricFullname].push_back(
-                  {runID, index, { ExtractData<double>(archive, filename, timestamps[runID][index]) }});
-            }
+            result[metricFullname].push_back(
+                {runID, index, { ExtractData<double>(archive, filename, timestamps[runID][index]) }});
             break;
           default:
             LOGE("Fatal request error, serie of data have an unmanaged kind: " << DataTypeToString(dataType)
@@ -794,27 +770,6 @@ ns_Analyze::DataManager::CommitValues(
                 << " | metric: " << metricFullname
                 << " | file: " << filename
                 << " | runID: " << runID << " index: " << index);
-            return {};
-            break;
-        }
-      }
-      if (doAggregate) {
-        switch(dataType) {
-          case DataType::UINT64: {
-              uint64_t* sum = (uint64_t*)sumValues.data();
-              result[metricFullname].push_back({runID, 0, { std::vector<uint64_t>(sum, sum + nbElement) }});
-            }
-            break;
-          case DataType::DOUBLE: {
-              double* sum = (double*)sumValues.data();
-              result[metricFullname].push_back({runID, 0, { std::vector<double>(sum, sum + nbElement) }});
-            }
-            break;
-          default:
-            LOGE("Fatal request error, serie of data have an unmanaged kind: " << DataTypeToString(dataType)
-                << " | type: " << type << " | commit: " << commitID << " | subject: " << subject
-                << " | metric: " << metricFullname
-                << " | runID: " << runID);
             return {};
             break;
         }
