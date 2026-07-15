@@ -64,6 +64,7 @@ class GraphManager {
       showAxesToggle: true,
       showRawToggle:  true,
       showCIToggle:   true,
+      ciLevel:        graphConfig.ciLevel ?? 95,
       showXAxisSelect: true,
     });
     const afterEl = afterId != null ? this.#configs.get(afterId)?.graphContainer : null;
@@ -200,12 +201,14 @@ class GraphManager {
    * @param {object}              graphConfig
    * @param {Map<string, object>} dataMap
    */
-  async UpdateGraph(id, graphConfig, dataMap) {
+  async UpdateGraph(id, graphConfig, dataMap, preserveView = false) {
     const stored = this.#configs.get(id);
     if (!stored) return;
     stored.graphConfig = graphConfig;
     stored.dataMap     = dataMap;
-    stored.hiddenGroups.clear();  // legendgroups may have changed
+    // Keep the user's hidden legend selections when only the data values changed
+    // (e.g. a CI-level change); clear them when the graph identity may have changed.
+    if (!preserveView) stored.hiddenGroups.clear();  // legendgroups may have changed
 
     // Update DOM title
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
@@ -232,7 +235,7 @@ class GraphManager {
     }
     this.#SyncXAxisSelect(id);
 
-    await this.#Draw(stored.graphArea, graphConfig, dataMap, stored);
+    await this.#Draw(stored.graphArea, graphConfig, dataMap, stored, preserveView);
   }
 
   /**
@@ -245,7 +248,7 @@ class GraphManager {
     stored.graphConfig.showRaw = !stored.graphConfig.showRaw;
     document.getElementById('graph_ui_raw_' + id)
       ?.classList.toggle('active', stored.graphConfig.showRaw);
-    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
+    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored, true);
   }
 
   /**
@@ -258,7 +261,7 @@ class GraphManager {
     stored.graphConfig.showCI = !(stored.graphConfig.showCI ?? false);
     document.getElementById('graph_ui_ci_' + id)
       ?.classList.toggle('active', stored.graphConfig.showCI !== false);
-    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
+    this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored, true);
   }
 
   /**
@@ -297,6 +300,27 @@ class GraphManager {
     if (ok === false) {
       stored.graphConfig.xMetric = prev;
       this.#SyncXAxisSelect(id);
+    }
+  }
+
+  /**
+   * Change the confidence-interval level of a graph. The CI bands are computed
+   * server-side, so this triggers a re-fetch + redraw (unlike ToggleCIShadow,
+   * which only shows/hides the already-fetched band). Rolls back on fetch failure.
+   */
+  async SetCILevel(id, level) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const next = Number(level);
+    const prev = stored.graphConfig.ciLevel ?? 95;
+    if (prev === next) return;                                  // no-op
+    stored.graphConfig.ciLevel = next;                          // shared ref → persisted
+    // Only the band values change: keep the current zoom and hidden-trace selection.
+    const ok = await this.#callbacks?.reloadGraph?.(id, true);
+    if (ok === false) {
+      stored.graphConfig.ciLevel = prev;
+      const sel = document.getElementById('graph_ui_ci_level_' + id);
+      if (sel) sel.value = String(prev);
     }
   }
 
@@ -923,7 +947,7 @@ class GraphManager {
   }
 
   /** Unified draw function — replaces the former #DrawGraph / #DrawCompareGraph pair. */
-  async #Draw(container, graphConfig, dataMap, stored = null) {
+  async #Draw(container, graphConfig, dataMap, stored = null, preserveView = false) {
     const hiddenBefore = stored?.hiddenGroups ? new Set(stored.hiddenGroups) : new Set();
 
     const resolvedEntries = this.#ResolveExperiments(graphConfig);
@@ -961,6 +985,20 @@ class GraphManager {
       const { xDomain, axes } = GraphManager.#BuildSplitAxisLayout(metricLabels);
       layout.xaxis.domain = xDomain;
       Object.assign(layout, axes);
+    }
+
+    // Carry over the user's current zoom/pan when only the data changed (e.g. a
+    // CI-level change): copy any manually-set axis ranges into the fresh layout so
+    // Plotly.newPlot doesn't snap back to autorange.
+    if (preserveView && container.layout) {
+      for (const key of Object.keys(layout)) {
+        if (!/^[xy]axis\d*$/.test(key)) continue;
+        const prevAxis = container.layout[key];
+        if (prevAxis && prevAxis.autorange === false && Array.isArray(prevAxis.range)) {
+          layout[key].range     = prevAxis.range.slice();
+          layout[key].autorange = false;
+        }
+      }
     }
 
     const plotlyConfig = {
@@ -1119,9 +1157,34 @@ class GraphManager {
           eltCI.className = 'graph-toggle-btn';
           eltCI.id        = 'graph_ui_ci_' + id;
           eltCI.textContent = 'Confidence Bands';
-          eltCI.title     = 'Show 95% confidence interval around the mean';
+          eltCI.title     = 'Show the confidence interval around the mean';
           eltCI.onclick   = this.ToggleCIShadow.bind(this, id);
           toggleBar.appendChild(eltCI);
+
+          // CI level selector: re-fetches from the server (bands are computed server-side).
+          const ciWrap = document.createElement('label');
+          ciWrap.className = 'graph-ci-select';
+          ciWrap.title = 'Confidence-interval level for the bands';
+
+          const ciLabel = document.createElement('span');
+          ciLabel.className   = 'graph-ci-label';
+          ciLabel.textContent = 'CI:';
+
+          const ciSel = document.createElement('select');
+          ciSel.id = 'graph_ui_ci_level_' + id;
+          const currentCI = options.ciLevel ?? 95;
+          for (const level of [60, 70, 80, 90, 95, 98, 99]) {
+            const opt = document.createElement('option');
+            opt.value = String(level);
+            opt.textContent = level + '%';
+            if (level === currentCI) opt.selected = true;
+            ciSel.appendChild(opt);
+          }
+          ciSel.onchange = () => this.SetCILevel(id, ciSel.value);
+
+          ciWrap.appendChild(ciLabel);
+          ciWrap.appendChild(ciSel);
+          toggleBar.appendChild(ciWrap);
         }
 
         if (options?.showXAxisSelect) {

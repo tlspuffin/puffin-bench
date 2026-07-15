@@ -48,7 +48,7 @@ public:
       std::string const& subject, uint64_t min, uint64_t max,
       uint64_t step, std::vector<uint64_t>& runs,
       std::vector<uint64_t> const& clients,
-      std::vector<std::string> const& metrics) {
+      std::vector<std::string> const& metrics, int ciPercent = 95) {
     std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> data = dataManager_.CommitValues(
         type, commitID, timestamp, subject, min, max, step, runs, clients, metrics);
     for(std::string const& metric: metrics) {
@@ -57,7 +57,7 @@ public:
         continue;
       }
       // Pool every client-run into a single distribution for mean/CI.
-      data.merge(ns_Analyze::Statistics::ComputeStats(metric, it->second, nullptr));
+      data.merge(ns_Analyze::Statistics::ComputeStats(metric, it->second, nullptr, ciPercent));
     }
     return data;
   }

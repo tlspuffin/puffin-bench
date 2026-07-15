@@ -1711,6 +1711,41 @@ select.select-loading {
   background: white;
 }
 
+/* CI-level picker: sits next to the Confidence Bands toggle (left-aligned, no
+   auto margin) but reuses the X-axis selector's pill styling. */
+.graph-ci-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-dark);
+  cursor: pointer;
+  user-select: none;
+}
+
+.graph-ci-select .graph-ci-label {
+  opacity: 0.75;
+}
+
+.graph-ci-select select {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 2px solid rgba(44, 62, 80, 0.25);
+  background: #f4f5f7;
+  color: var(--color-text-dark);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.graph-ci-select select:hover {
+  border-color: var(--color-primary);
+  background: white;
+}
+
 /* =================================================================
    Toast Notifications
    ================================================================= */

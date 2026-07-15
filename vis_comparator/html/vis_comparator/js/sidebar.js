@@ -196,7 +196,7 @@ export function refreshGraphsUsingMetric(state, metricPath) {
  *   drawn (unresolved experiments/metrics or no data). Callers that optimistically
  *   mutated the config can use this to roll back on a false result.
  */
-async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false) {
+async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false, preserveView = false) {
   const resolved = config.experiments
     .map(slot => resolveExperimentSlot(slot, state.variables))
     .filter(Boolean);
@@ -225,7 +225,7 @@ async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false)
     resolved.map(exp => _apirest.LoadCommitMetricsValues(
       exp.tasktype, exp.commit, exp.subtask,
       config.min, config.max, config.delta,
-      fetchMetrics, exp.timestamp
+      fetchMetrics, exp.timestamp, config.ciLevel ?? 95
     ))
   );
 
@@ -237,7 +237,7 @@ async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false)
   );
 
   if (dataMap.size === 0) return false;
-  await _graphManager.UpdateGraph(id, config, dataMap);
+  await _graphManager.UpdateGraph(id, config, dataMap, preserveView);
   return true;
 }
 
@@ -246,10 +246,10 @@ async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false)
  * Looks up the live config in state.graphSettings so the mutated xMetric is honoured.
  * @returns {Promise<boolean>} whether the graph was redrawn (see _refetchAndRedrawGraph).
  */
-export async function reloadGraphData(state, id) {
+export async function reloadGraphData(state, id, preserveView = false) {
   const entry = state.graphSettings.find(g => g.id === id);
   if (!entry) return false;
-  return _refetchAndRedrawGraph(state, id, entry.config);
+  return _refetchAndRedrawGraph(state, id, entry.config, false, preserveView);
 }
 
 // ============================================================

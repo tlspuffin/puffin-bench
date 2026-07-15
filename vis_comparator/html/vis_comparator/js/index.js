@@ -252,7 +252,7 @@ async function restoreGraphs(configList, recomputeRange = false) {
       resolved.map(exp => apirest.LoadCommitMetricsValues(
         exp.tasktype, exp.commit, exp.subtask,
         graphConfig.min, graphConfig.max, graphConfig.delta,
-        fetchMetrics, exp.timestamp
+        fetchMetrics, exp.timestamp, graphConfig.ciLevel ?? 95
       ))
     );
 
@@ -349,8 +349,8 @@ const graphManager = new GraphManager(main, {
   getLatestTimestamp: function(type, commit) { return apirest.LatestTimestampSync(type, commit); },
   // Re-fetch + redraw a graph after its x-axis metric changed (needs a new series).
   // Returns whether the redraw happened so the caller can roll back on failure.
-  reloadGraph: function(id) {
-    return reloadGraphData(state, id).catch(err => {
+  reloadGraph: function(id, preserveView = false) {
+    return reloadGraphData(state, id, preserveView).catch(err => {
       console.error('[xaxis] reload error:', err);
       return false;
     });

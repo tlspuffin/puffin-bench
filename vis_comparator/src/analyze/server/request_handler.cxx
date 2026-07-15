@@ -489,6 +489,21 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     return;
   }
 
+  // Confidence-interval level for the mean/CI bands. Optional; defaults to 95%.
+  // Only the predefined set is accepted; anything else falls back to 95.
+  int ciLevel = 95;
+  if (doc.HasMember("ciLevel") && doc["ciLevel"].IsInt()) {
+    int const requested = doc["ciLevel"].GetInt();
+    switch (requested) {
+      case 60: case 70: case 80: case 90: case 95: case 98: case 99:
+        ciLevel = requested;
+        break;
+      default:
+        ciLevel = 95;
+        break;
+    }
+  }
+
   // Response cache: key on the normalized request (runId, params, sorted selection)
   // for an unchanged run -> hit. Built from parsed fields so byte differences in
   // the body (whitespace, key/array order) still hit the same entry.
@@ -509,7 +524,8 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     cacheKey = type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
         "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
         "@" + runTag + "#runs=" + joinU64(runs) +
-        ";clients=" + joinU64(clients) + ";metrics=" + metricsJoined;
+        ";clients=" + joinU64(clients) + ";metrics=" + metricsJoined +
+        ";ci=" + std::to_string(ciLevel);
     std::string cached;
     if (valuesCache.Get(cacheKey, cached)) {
       response.setStatus(Poco::Net::HTTPServerResponse::HTTP_OK);
@@ -525,7 +541,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;
   try {
     values = apis_->analyzeAPI_.GetCommitValues(type, commitID, timestamp, subject, min, max, step,
-        runs, clients, metrics);
+        runs, clients, metrics, ciLevel);
   } catch (std::exception const& e) {
     std::cerr << "[GetCommitValues] exception: " << e.what() << std::endl;
     SendErrorResponse(response, 500, std::string("Internal error: ") + e.what());

@@ -592,10 +592,12 @@ export async function AddGraphique(prefill = null, editId = null) {
         // Preserve the x-axis metric across an edit and fetch it alongside the y-metrics.
         const xMetric = prefill ? (prefill.xMetric ?? null) : null;
         const valueMetrics = fetchMetricSet(fetchMetrics, { xMetric });
+        // Preserve the CI level across an edit; new graphs default to 95%.
+        const ciLevel = prefill ? (prefill.ciLevel ?? 95) : 95;
 
         const results = await Promise.all(
           resolved.map(exp => _apirest.LoadCommitMetricsValues(
-            exp.tasktype, exp.commit, exp.subtask, min, max, delta, valueMetrics, exp.timestamp))
+            exp.tasktype, exp.commit, exp.subtask, min, max, delta, valueMetrics, exp.timestamp, ciLevel))
         );
         const validPairs = resolved
           .map((exp, i) => ({ exp, data: results[i] }))
@@ -611,6 +613,7 @@ export async function AddGraphique(prefill = null, editId = null) {
             showCI:    prefill ? prefill.showCI    : false,
             splitAxes: prefill ? prefill.splitAxes : true,
             xMetric:   xMetric,
+            ciLevel:   ciLevel,
           };
 
           const dataMap = new Map(

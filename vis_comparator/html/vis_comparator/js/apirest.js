@@ -484,13 +484,14 @@ class ApiREST {
    * @param {number}   timeMax         - End time in microseconds
    * @param {number}   timeStep        - Time step in microseconds
    * @param {string[]} selectedMetrics - Dot-path metric names to fetch
+   * @param {number}   [ciLevel=95]    - Confidence-interval level (percent) for the CI bands
    * @returns {Promise<{header: object, series: object}|null>}
    *   header — JSON metadata from the binary response;
    *   series — map of metric name to array of run arrays.
    *   Returns null on failure.
    */
   async LoadCommitMetricsValues(commitType, commitID, commitSubject, timeMin, timeMax, timeStep,
-      selectedMetrics, timestamp) {
+      selectedMetrics, timestamp, ciLevel = 95) {
     this.#onLoading?.(+1, 'Chargement des données…');
     try {
       const ts = timestamp ?? await this.#latestTimestamp(commitType, commitID);
@@ -505,7 +506,8 @@ class ApiREST {
         body: JSON.stringify({
           runs: [],
           clients: [],
-          metrics: selectedMetrics
+          metrics: selectedMetrics,
+          ciLevel
         })
       });
       if (!response.ok) {
