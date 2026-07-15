@@ -51,8 +51,7 @@ public:
       std::vector<std::string> const& metrics) {
     std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> data = dataManager_.CommitValues(
         type, commitID, timestamp, subject, min, max, step, runs, clients, metrics);
-    std::vector<std::string> metricsRequired = metrics;
-    for(std::string const& metric: metricsRequired) {
+    for(std::string const& metric: metrics) {
       auto const it = data.find(metric);
       if (it == data.end() || it->second.empty()) {
         continue;
