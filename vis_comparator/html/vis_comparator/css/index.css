@@ -1637,6 +1637,8 @@ select.select-loading {
   font-size: 0.82rem;
   font-weight: 600;
   padding: 4px 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
   border-radius: 999px;
   border: 2px solid rgba(44, 62, 80, 0.25);
   background: #f4f5f7;
@@ -1676,11 +1678,13 @@ select.select-loading {
 }
 
 /* X-axis selector in the graph toggle bar */
-.graph-xaxis-select {
+/* Shared pill picker (label + <select>) used by the CI-level and X-axis selectors
+   in the graph toggle bar. The <select> box is matched to .graph-toggle-btn so the
+   pickers line up vertically with the toggle buttons. */
+.graph-pill-select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;            /* push the X-axis picker to the right end of the bar */
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--color-text-dark);
@@ -1688,14 +1692,18 @@ select.select-loading {
   user-select: none;
 }
 
-.graph-xaxis-select .graph-xaxis-label {
+.graph-pill-select .graph-pill-label {
   opacity: 0.75;
 }
 
-.graph-xaxis-select select {
+.graph-pill-select select {
   font-size: 0.82rem;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 4px 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
+  width: auto;                 /* override global select { width: 100% } — size to content */
+  margin: 0;                   /* override global select { margin-bottom: 20px } — align in bar */
   border-radius: 999px;
   border: 2px solid rgba(44, 62, 80, 0.25);
   background: #f4f5f7;
@@ -1706,44 +1714,22 @@ select.select-loading {
   max-width: 220px;
 }
 
-.graph-xaxis-select select:hover {
+.graph-pill-select select:hover {
   border-color: var(--color-primary);
   background: white;
 }
 
-/* CI-level picker: sits next to the Confidence Bands toggle (left-aligned, no
-   auto margin) but reuses the X-axis selector's pill styling. */
-.graph-ci-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--color-text-dark);
-  cursor: pointer;
-  user-select: none;
+/* Push the X-axis picker to the right end of the bar. */
+.graph-xaxis-select {
+  margin-left: auto;
 }
 
-.graph-ci-select .graph-ci-label {
-  opacity: 0.75;
-}
-
-.graph-ci-select select {
-  font-size: 0.82rem;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 2px solid rgba(44, 62, 80, 0.25);
-  background: #f4f5f7;
-  color: var(--color-text-dark);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s ease;
-}
-
-.graph-ci-select select:hover {
-  border-color: var(--color-primary);
-  background: white;
+/* Fixed width so the box stays stable: its options are populated lazily on first
+   hover/focus, so a content-sized width (auto or 100%) would jump from "Time" to
+   the widest metric name the moment the cursor enters. The open dropdown still
+   shows full option text regardless of this width. */
+.graph-xaxis-select select {
+  width: 150px;
 }
 
 /* =================================================================

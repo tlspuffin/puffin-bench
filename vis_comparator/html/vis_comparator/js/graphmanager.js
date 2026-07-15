@@ -23,6 +23,9 @@ class GraphManager {
   #moveAnchorPrev = '';
   static #nextid = 0;
 
+  // Selectable confidence-interval levels (percent); must match the server's accepted set.
+  static #CI_LEVELS = [60, 70, 80, 90, 95, 98, 99];
+
   // Four distinct colours for up to 4 experiments. Beyond 4, colours cycle.
   static #PALETTE = COMMIT_PALETTE;
 
@@ -316,8 +319,10 @@ class GraphManager {
     if (prev === next) return;                                  // no-op
     stored.graphConfig.ciLevel = next;                          // shared ref → persisted
     // Only the band values change: keep the current zoom and hidden-trace selection.
+    // Treat any non-true result (fetch failure or a no-op that didn't redraw) as a
+    // failure so the dropdown never shows a level the drawn band doesn't reflect.
     const ok = await this.#callbacks?.reloadGraph?.(id, true);
-    if (ok === false) {
+    if (ok !== true) {
       stored.graphConfig.ciLevel = prev;
       const sel = document.getElementById('graph_ui_ci_level_' + id);
       if (sel) sel.value = String(prev);
@@ -1163,17 +1168,20 @@ class GraphManager {
 
           // CI level selector: re-fetches from the server (bands are computed server-side).
           const ciWrap = document.createElement('label');
-          ciWrap.className = 'graph-ci-select';
+          ciWrap.className = 'graph-pill-select';
           ciWrap.title = 'Confidence-interval level for the bands';
 
           const ciLabel = document.createElement('span');
-          ciLabel.className   = 'graph-ci-label';
+          ciLabel.className   = 'graph-pill-label';
           ciLabel.textContent = 'CI:';
 
           const ciSel = document.createElement('select');
           ciSel.id = 'graph_ui_ci_level_' + id;
-          const currentCI = options.ciLevel ?? 95;
-          for (const level of [60, 70, 80, 90, 95, 98, 99]) {
+          const ciLevels = GraphManager.#CI_LEVELS;
+          // Snap an unsupported/legacy stored level to 95 so the shown option, the
+          // config, and the server-side fallback all agree.
+          const currentCI = ciLevels.includes(Number(options.ciLevel)) ? Number(options.ciLevel) : 95;
+          for (const level of ciLevels) {
             const opt = document.createElement('option');
             opt.value = String(level);
             opt.textContent = level + '%';
@@ -1193,11 +1201,11 @@ class GraphManager {
           // graphs don't trigger metric lookups on load; the current selection is
           // shown immediately by #SyncXAxisSelect without any fetch.
           const xWrap = document.createElement('label');
-          xWrap.className = 'graph-xaxis-select';
+          xWrap.className = 'graph-pill-select graph-xaxis-select';
           xWrap.title = 'Choose the quantity plotted on the X-axis';
 
           const xLabel = document.createElement('span');
-          xLabel.className   = 'graph-xaxis-label';
+          xLabel.className   = 'graph-pill-label';
           xLabel.textContent = 'X:';
 
           const xSel = document.createElement('select');
