@@ -439,7 +439,7 @@ class ApiREST {
         }
       });
       const maxRunTime = data.runs.reduce((m, r) => Math.max(m, r.runTime), -Infinity);
-      const maxTimeMicroS = Math.ceil(maxRunTime * 1.01);
+      const maxTimeMicroS = Math.ceil(maxRunTime);
       
       return { metrics: metricsFolders, maxTimeMicroS };
     } catch (error) {
@@ -466,7 +466,12 @@ class ApiREST {
     const max = metas.reduce((m, r) => Math.max(m, r?.maxTimeMicroS ?? -1), -1);
     if (!(max > 0)) return null;
     const delta = Math.max(1, Math.floor(max / DEFAULT_DELTA_DIVISOR));
-    return { min: 0, max, delta };
+    // Extend to the next step boundary strictly past the data extent so the grid always
+    // has a point at/after the final sample (the exclusive `t < max` loop would otherwise
+    // stop one step short and drop the tail). One extra step instead of a percentage
+    // factor keeps the trailing flat region to a single point rather than many.
+    const alignedMax = (Math.floor(max / delta) + 1) * delta;
+    return { min: 0, max: alignedMax, delta };
   }
 
   /**

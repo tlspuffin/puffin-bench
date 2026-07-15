@@ -64,6 +64,7 @@ class GraphManager {
       showAxesToggle: true,
       showRawToggle:  true,
       showCIToggle:   true,
+      showXAxisSelect: true,
     });
     const afterEl = afterId != null ? this.#configs.get(afterId)?.graphContainer : null;
     if (afterEl) afterEl.after(graphContainer);
@@ -92,6 +93,8 @@ class GraphManager {
     if (graphConfig.showCI !== false) {
       document.getElementById('graph_ui_ci_' + id)?.classList.add('active');
     }
+    // Reflect a preset x-axis metric (e.g. from a loaded template) in the selector.
+    this.#SyncXAxisSelect(id);
 
     return id;
   }
@@ -219,6 +222,15 @@ class GraphManager {
       ?.classList.toggle('active', graphConfig.showRaw !== false);
     document.getElementById('graph_ui_ci_' + id)
       ?.classList.toggle('active', graphConfig.showCI !== false);
+    // Experiments/x-metric may have changed: drop the now-stale metric options (keep
+    // 'Time'), refresh the current selection, and force a repopulate on next interaction
+    // so the list can't offer metrics from the previous experiment set.
+    const xSel = document.getElementById('graph_ui_xaxis_' + id);
+    if (xSel) {
+      while (xSel.options.length > 1) xSel.remove(1);
+      xSel.dataset.populated = '';
+    }
+    this.#SyncXAxisSelect(id);
 
     await this.#Draw(stored.graphArea, graphConfig, dataMap, stored);
   }
@@ -261,6 +273,73 @@ class GraphManager {
     const eltSplit = document.getElementById('graph_ui_split_' + id);
     if (eltSplit) eltSplit.classList.toggle('active', stored.graphConfig.splitAxes);
     this.#Draw(stored.graphArea, stored.graphConfig, stored.dataMap, stored);
+  }
+
+  /**
+   * Sets the x-axis metric for a graph (null / 'time' = plot against time).
+   * Unlike the Y-axis toggles (which redraw from the cached dataMap), a metric x-axis
+   * may need a series that isn't fetched yet, so this triggers a full re-fetch + redraw
+   * via the reloadGraph callback rather than #Draw.
+   * @param {number} id
+   * @param {string|null} path  resolved metric path, or null for time
+   */
+  async SetXMetric(id, path) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const next = path || null;
+    const prev = stored.graphConfig.xMetric ?? null;
+    if (prev === next) return;                                  // no-op
+    stored.graphConfig.xMetric = next;                          // shared ref → persisted
+    // The reload needs a series that may not be in the cached dataMap, so it re-fetches.
+    // If it fails (no data), roll the config back so it can't diverge from stored.dataMap
+    // and turn a later cheap redraw (Split/CI toggle) into all-warning traces.
+    const ok = await this.#callbacks?.reloadGraph?.(id);
+    if (ok === false) {
+      stored.graphConfig.xMetric = prev;
+      this.#SyncXAxisSelect(id);
+    }
+  }
+
+  /** Shows the graph's current x-axis metric in its selector without any fetch. */
+  #SyncXAxisSelect(id) {
+    const sel = document.getElementById('graph_ui_xaxis_' + id);
+    const stored = this.#configs.get(id);
+    if (!sel || !stored) return;
+    const current = (stored.graphConfig.xMetric && stored.graphConfig.xMetric !== 'time')
+      ? stored.graphConfig.xMetric : '';
+    if (current && ![...sel.options].some(o => o.value === current)) {
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = this.#MetricDisplayName(current);
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+  }
+
+  /** Fills a graph's x-axis <select> with 'Time' + every metric available to its experiments. */
+  async #PopulateXAxisOptions(id, sel) {
+    const stored = this.#configs.get(id);
+    if (!stored) return;
+    const resolvedExps = this.#ResolveExperiments(stored.graphConfig)
+      .map(e => e.resolved).filter(Boolean);
+    let paths = [];
+    try {
+      paths = await this.#callbacks?.getMetricOptions?.(resolvedExps) ?? [];
+    } catch (err) {
+      console.error('[xaxis] metric options error:', err);
+      paths = [];
+    }
+    const current = (stored.graphConfig.xMetric && stored.graphConfig.xMetric !== 'time')
+      ? stored.graphConfig.xMetric : '';
+    if (current && !paths.includes(current)) paths = [current, ...paths];
+    while (sel.options.length > 1) sel.remove(1);  // keep the leading 'Time' option
+    for (const p of paths) {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = this.#MetricDisplayName(p);
+      sel.appendChild(opt);
+    }
+    sel.value = current;
   }
 
   /** Returns the dash style for a resolved metric path as it would be rendered. */
@@ -692,6 +771,12 @@ class GraphManager {
       }
     }
 
+    // X-axis metric: null/'time' → plot against the shared time grid (timestamps);
+    // otherwise each experiment is plotted against its own resampled x-metric series,
+    // making the curve parametric (x(t), y(t)) — it need not increase left-to-right.
+    const xMetric = (graphConfig.xMetric && graphConfig.xMetric !== 'time')
+      ? graphConfig.xMetric : null;
+
     const traces = [];
 
     resolvedEntries.forEach(({ resolved, slot, commitVarName, subtaskVarName, idx }) => {
@@ -734,6 +819,31 @@ class GraphManager {
       const fillColor = GraphManager.#HexToRgba(color, 0.2);
       const expLabel  = this.#ExperimentDisplayName(resolved, slot, state);
 
+      // ── Resolve the x-axis source for this experiment ──────────
+      //   Time  → shared grid timestamps.
+      //   Metric → this experiment's resampled x-series: xMean for aggregate traces,
+      //            xRaw[run] for individual runs. If the x-metric is absent for this
+      //            experiment we do NOT fall back to time (that would silently change
+      //            the axis meaning) — we emit a ⚠ warning trace and skip it.
+      let xMean = timestamps;   // aggregate x (mean/CI trio)
+      let xRaw  = null;         // per-run x arrays (metric mode only)
+      if (xMetric) {
+        const xMeanData = series[`${xMetric}.mean`];
+        if (!xMeanData) {
+          traces.push({
+            x: [], y: [],
+            mode: 'lines',
+            name: `${ICONS.WARN} ${expLabel} (no ${this.#MetricDisplayName(xMetric)})`,
+            line: { color, width: 2, dash: 'dot' },
+            showlegend: true,
+            visible: expHidden ? 'legendonly' : true,
+          });
+          return;
+        }
+        xMean = Array.isArray(xMeanData[0]) ? xMeanData[0] : xMeanData;
+        xRaw  = series[xMetric];
+      }
+
       // ── Render: mean + CI per experiment ───────────────────────
       metrics.forEach((metricName, metricIdx) => {
         const metricHidden   = state?.metricLegend?.get(metricName)?.visible === false;
@@ -756,8 +866,8 @@ class GraphManager {
           if (metricsMode === 'OR') {
             const traceName = graphConfig.metrics.length === 1 ? expLabel : `${expLabel} \u00b7 ${metricLabel}`;
             traces.push({
-              x: timestamps,
-              y: Array(timestamps.length).fill(0),
+              x: xMean,
+              y: Array(xMean.length).fill(0),
               mode: 'lines',
               name: `â  ${traceName} (absent)`,
               line: { width: 1.5, color, dash: 'dot' },
@@ -776,19 +886,24 @@ class GraphManager {
         if (showCI === true && series[lowerKey] && series[upperKey]) {
           const ciLower = Array.isArray(series[lowerKey][0]) ? series[lowerKey][0] : series[lowerKey];
           const ciUpper = Array.isArray(series[upperKey][0]) ? series[upperKey][0] : series[upperKey];
-          traces.push({ x: timestamps, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group, visible: traceVisible });
-          traces.push({ x: timestamps, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: ciUpper, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, fill: 'tonexty', fillcolor: fillColor, yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: ciLower, mode: 'lines', line: { width: 0 }, showlegend: false, fill: 'tonexty', fillcolor: fillColor, hoverinfo: 'skip', yaxis: yAxis, legendgroup: group, visible: traceVisible });
         } else {
-          traces.push({ x: timestamps, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group, visible: traceVisible });
+          traces.push({ x: xMean, y: meanArr, mode: 'lines', name: traceName, line: { width: 2.5, color, dash }, yaxis: yAxis, legendgroup: group, visible: traceVisible });
         }
 
         if (showRaw) {
           const rawData = series[metricName];
           if (rawData && Array.isArray(rawData[0])) {
-            rawData.forEach(runData => {
+            rawData.forEach((runData, runIdx) => {
+              // Pair run i's y with run i's own x-metric series (metric mode) or the
+              // shared time grid. No silent fallback: if this run lacks the x-metric,
+              // skip it rather than mislabel its x-axis.
+              const rawX = xMetric ? xRaw?.[runIdx] : timestamps;
+              if (!rawX) return;
               traces.push({
-                x: timestamps, y: runData,
+                x: rawX, y: runData,
                 mode: 'lines',
                 name: `${expLabel} raw`,
                 line: { width: 1, color, dash: 'dot' },
@@ -818,10 +933,19 @@ class GraphManager {
     const { splitAxes } = graphConfig;
     const splitActive = splitAxes && resolvedMetrics.length > 1;
 
+    // X-axis: time (shared grid) vs a metric (parametric per-experiment curves).
+    const xMetric = (graphConfig.xMetric && graphConfig.xMetric !== 'time')
+      ? graphConfig.xMetric : null;
+    // With a metric x-axis each experiment has its own x-values, so x-unified hover
+    // (which snaps every trace to a shared x) would be misleading — use closest.
+    const xaxis = xMetric
+      ? { title: this.#MetricDisplayName(xMetric), type: 'linear', rangemode: 'tozero' }
+      : { title: 'Time (s)', type: 'linear', ticksuffix: 's' };
+
     const layout = {
-      xaxis:     { title: 'Time (s)', type: 'linear', ticksuffix: 's' },
+      xaxis,
       yaxis:     { title: splitActive ? this.#MetricDisplayName(resolvedMetrics[0]) : 'Value', type: 'linear', rangemode: 'tozero' },
-      hovermode: 'x unified',
+      hovermode: xMetric ? 'closest' : 'x unified',
       hoverlabel: { namelength: -1 },
       showlegend: true,
       // Legend always sits outside the plot area to the right so traces are never covered.
@@ -964,7 +1088,8 @@ class GraphManager {
       container.appendChild(titleBar);
 
       // ── Toggle bar ──────────────────────────────────────────────
-      const showAnyToggle = options?.showAxesToggle || options?.showRawToggle || options?.showCIToggle;
+      const showAnyToggle = options?.showAxesToggle || options?.showRawToggle
+        || options?.showCIToggle || options?.showXAxisSelect;
       if (showAnyToggle) {
         const toggleBar = document.createElement('div');
         toggleBar.className = 'graph-toggle-bar';
@@ -997,6 +1122,43 @@ class GraphManager {
           eltCI.title     = 'Show 95% confidence interval around the mean';
           eltCI.onclick   = this.ToggleCIShadow.bind(this, id);
           toggleBar.appendChild(eltCI);
+        }
+
+        if (options?.showXAxisSelect) {
+          // X-axis selector: Time (default) or any metric. Options are populated
+          // lazily on first interaction (a fetch per experiment) so time-default
+          // graphs don't trigger metric lookups on load; the current selection is
+          // shown immediately by #SyncXAxisSelect without any fetch.
+          const xWrap = document.createElement('label');
+          xWrap.className = 'graph-xaxis-select';
+          xWrap.title = 'Choose the quantity plotted on the X-axis';
+
+          const xLabel = document.createElement('span');
+          xLabel.className   = 'graph-xaxis-label';
+          xLabel.textContent = 'X:';
+
+          const xSel = document.createElement('select');
+          xSel.id = 'graph_ui_xaxis_' + id;
+          const optTime = document.createElement('option');
+          optTime.value = '';
+          optTime.textContent = 'Time';
+          xSel.appendChild(optTime);
+
+          const populate = () => {
+            if (xSel.dataset.populated === '1') return;
+            xSel.dataset.populated = '1';
+            this.#PopulateXAxisOptions(id, xSel);
+          };
+          // pointerenter (hover) pre-fills before the click so the first open is complete;
+          // pointerdown/focus are fallbacks for keyboard/touch.
+          xSel.addEventListener('pointerenter', populate);
+          xSel.addEventListener('pointerdown', populate);
+          xSel.addEventListener('focus', populate);
+          xSel.onchange = () => this.SetXMetric(id, xSel.value || null);
+
+          xWrap.appendChild(xLabel);
+          xWrap.appendChild(xSel);
+          toggleBar.appendChild(xWrap);
         }
 
         container.appendChild(toggleBar);

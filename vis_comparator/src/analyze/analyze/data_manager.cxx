@@ -884,11 +884,11 @@ ns_Analyze::DataManager::ExtractDataTS(FileTARZST& archive, std::filesystem::pat
 
   uint64_t nbMissingElement = result.capacity() - result.size();
   if (nbMissingElement != 0) {
+    // Grid points past the final sample: carry the last real value forward (a flat
+    // continuation) rather than dropping to zero. For cumulative counters this is the
+    // correct end-of-run behaviour and it avoids a run of trailing zeros on the plot.
+    // Copy the value first: it aliases result.back(), which insert() could invalidate.
     struct ns_Analyze::DataManager::SInterpolations value = result.back();
-    value.ratios = { 0.0, 0.0 };
-    /*for(uint64_t i=0; i<nbMissingElement; ++i) {
-      result.push_back(value);
-    }*/
     result.insert(result.end(), nbMissingElement, value);
   }
 

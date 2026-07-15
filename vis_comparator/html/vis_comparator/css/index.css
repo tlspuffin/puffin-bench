@@ -1675,6 +1675,42 @@ select.select-loading {
   pointer-events: none;
 }
 
+/* X-axis selector in the graph toggle bar */
+.graph-xaxis-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;            /* push the X-axis picker to the right end of the bar */
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-dark);
+  cursor: pointer;
+  user-select: none;
+}
+
+.graph-xaxis-select .graph-xaxis-label {
+  opacity: 0.75;
+}
+
+.graph-xaxis-select select {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 2px solid rgba(44, 62, 80, 0.25);
+  background: #f4f5f7;
+  color: var(--color-text-dark);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+  max-width: 220px;
+}
+
+.graph-xaxis-select select:hover {
+  border-color: var(--color-primary);
+  background: white;
+}
+
 /* =================================================================
    Toast Notifications
    ================================================================= */

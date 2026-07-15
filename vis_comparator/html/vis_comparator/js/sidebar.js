@@ -19,6 +19,7 @@ import {
   isVarReferenced,
   experimentKey,
   slotKey,
+  fetchMetricSet,
 } from './state.js';
 import { CommitHelp } from './commithelp.js';
 
@@ -189,12 +190,17 @@ export function refreshGraphsUsingMetric(state, metricPath) {
   }
 }
 
-/** Resolves variables and re-fetches data for a graph, then redraws it in place. */
+/**
+ * Resolves variables and re-fetches data for a graph, then redraws it in place.
+ * @returns {Promise<boolean>} true if the graph was redrawn, false if nothing was
+ *   drawn (unresolved experiments/metrics or no data). Callers that optimistically
+ *   mutated the config can use this to roll back on a false result.
+ */
 async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false) {
   const resolved = config.experiments
     .map(slot => resolveExperimentSlot(slot, state.variables))
     .filter(Boolean);
-  if (resolved.length === 0) return;
+  if (resolved.length === 0) return false;
 
   // Deduplicate: two variables may resolve to the same path
   const resolvedMetrics = [...new Set(
@@ -202,7 +208,7 @@ async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false)
       .map(m => resolveMetricEntry(m, state.variables.metrics))
       .filter(m => m != null)
   )];
-  if (resolvedMetrics.length === 0) return;
+  if (resolvedMetrics.length === 0) return false;
 
   // An experiment change can alter the data extent; refit the range so we don't draw a
   // trail of zeroes or truncate the tail. Mutates the live config in state.graphSettings.
@@ -212,11 +218,14 @@ async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false)
     if (range) Object.assign(config, range);
   }
 
+  // Fetch the x-axis metric too when the x-axis is a metric (not time).
+  const fetchMetrics = fetchMetricSet(resolvedMetrics, config);
+
   const results = await Promise.all(
     resolved.map(exp => _apirest.LoadCommitMetricsValues(
       exp.tasktype, exp.commit, exp.subtask,
       config.min, config.max, config.delta,
-      resolvedMetrics, exp.timestamp
+      fetchMetrics, exp.timestamp
     ))
   );
 
@@ -227,8 +236,20 @@ async function _refetchAndRedrawGraph(state, id, config, recomputeRange = false)
       .map(p => [experimentKey(p.exp), p.data])
   );
 
-  if (dataMap.size === 0) return;
+  if (dataMap.size === 0) return false;
   await _graphManager.UpdateGraph(id, config, dataMap);
+  return true;
+}
+
+/**
+ * Re-fetches and redraws a single graph by id (used when its x-axis metric changes).
+ * Looks up the live config in state.graphSettings so the mutated xMetric is honoured.
+ * @returns {Promise<boolean>} whether the graph was redrawn (see _refetchAndRedrawGraph).
+ */
+export async function reloadGraphData(state, id) {
+  const entry = state.graphSettings.find(g => g.id === id);
+  if (!entry) return false;
+  return _refetchAndRedrawGraph(state, id, entry.config);
 }
 
 // ============================================================

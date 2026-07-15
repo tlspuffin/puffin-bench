@@ -78,6 +78,19 @@ export function resolveMetricEntry(m, metricsMap) {
 }
 
 /**
+ * Returns the metric paths to fetch for a graph: its resolved y-metrics plus the
+ * x-axis metric when the x-axis is a metric (not time). Deduplicated.
+ * @param {string[]} resolvedMetrics - already-resolved y-metric paths
+ * @param {object}   graphConfig     - graph config (reads graphConfig.xMetric)
+ * @returns {string[]}
+ */
+export function fetchMetricSet(resolvedMetrics, graphConfig) {
+  const x = graphConfig?.xMetric;
+  if (!x || x === 'time') return resolvedMetrics;
+  return [...new Set([...resolvedMetrics, x])];
+}
+
+/**
  * Returns the next color from the commit palette for a new registry entry.
  * Must be called before inserting the new entry (uses current .size as index).
  * @param {Map} commitRegistry - state.commitRegistry

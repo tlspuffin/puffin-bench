@@ -6,7 +6,7 @@
 
 import { ICONS, TASK_TYPES, DEFAULT_DELTA_DIVISOR } from './constants.js';
 import { HELP_HTML } from './help.js';
-import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey, slotKey, findGraph } from './state.js';
+import { resolveExperimentSlot, slotMode, resolveMetricEntry, nextCommitColor, setModalCancel, clearModalCancel, dedupSubtasks, globalDynamicSubtasks, globalCampaigns, experimentKey, slotKey, findGraph, fetchMetricSet } from './state.js';
 import { UI } from './ui.js';
 import { CommitHelp } from './commithelp.js';
 import { BuildSidebar, flattenMetricPaths, buildSyntheticMetrics } from './sidebar.js';
@@ -589,9 +589,13 @@ export async function AddGraphique(prefill = null, editId = null) {
           return;
         }
 
+        // Preserve the x-axis metric across an edit and fetch it alongside the y-metrics.
+        const xMetric = prefill ? (prefill.xMetric ?? null) : null;
+        const valueMetrics = fetchMetricSet(fetchMetrics, { xMetric });
+
         const results = await Promise.all(
           resolved.map(exp => _apirest.LoadCommitMetricsValues(
-            exp.tasktype, exp.commit, exp.subtask, min, max, delta, fetchMetrics, exp.timestamp))
+            exp.tasktype, exp.commit, exp.subtask, min, max, delta, valueMetrics, exp.timestamp))
         );
         const validPairs = resolved
           .map((exp, i) => ({ exp, data: results[i] }))
@@ -606,6 +610,7 @@ export async function AddGraphique(prefill = null, editId = null) {
             showRaw:   prefill ? prefill.showRaw   : (validPairs.length === 1),
             showCI:    prefill ? prefill.showCI    : false,
             splitAxes: prefill ? prefill.splitAxes : true,
+            xMetric:   xMetric,
           };
 
           const dataMap = new Map(

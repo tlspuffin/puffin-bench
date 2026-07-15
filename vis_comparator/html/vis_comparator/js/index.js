@@ -5,8 +5,8 @@ import { ApiREST } from "./apirest.js";
 import { UI } from './ui.js'
 import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
-import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, slotKey, removeGraph } from './state.js';
-import { initSidebar, BuildSidebar } from './sidebar.js';
+import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, slotKey, removeGraph, fetchMetricSet } from './state.js';
+import { initSidebar, BuildSidebar, flattenMetricPaths, reloadGraphData } from './sidebar.js';
 import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
 
 // ============================================================
@@ -239,6 +239,10 @@ async function restoreGraphs(configList, recomputeRange = false) {
       continue;
     }
 
+    // When the x-axis is a metric (not time), fetch it too so its resampled series
+    // (and .mean) is available for #PrepareTraces. Deduplicated against the y-metrics.
+    const fetchMetrics = fetchMetricSet(resolvedMetrics, graphConfig);
+
     if (recomputeRange) {
       const range = await apirest.ComputeTimeRange(resolved);
       if (range) Object.assign(graphConfig, range);
@@ -248,7 +252,7 @@ async function restoreGraphs(configList, recomputeRange = false) {
       resolved.map(exp => apirest.LoadCommitMetricsValues(
         exp.tasktype, exp.commit, exp.subtask,
         graphConfig.min, graphConfig.max, graphConfig.delta,
-        resolvedMetrics, exp.timestamp
+        fetchMetrics, exp.timestamp
       ))
     );
 
@@ -343,6 +347,24 @@ const graphManager = new GraphManager(main, {
   getState:  function()   { return state; },
   editGraph: function(id) { EditGraph(id); },
   getLatestTimestamp: function(type, commit) { return apirest.LatestTimestampSync(type, commit); },
+  // Re-fetch + redraw a graph after its x-axis metric changed (needs a new series).
+  // Returns whether the redraw happened so the caller can roll back on failure.
+  reloadGraph: function(id) {
+    return reloadGraphData(state, id).catch(err => {
+      console.error('[xaxis] reload error:', err);
+      return false;
+    });
+  },
+  // All metric paths available across the given resolved experiments (union), for the
+  // per-graph x-axis dropdown. Same source as the edit dialog's metric picker.
+  getMetricOptions: async function(resolvedExps) {
+    if (!resolvedExps || resolvedExps.length === 0) return [];
+    const metricsResults = await Promise.all(resolvedExps.map(e =>
+      apirest.LoadCommitMetrics(e.tasktype, e.commit, e.subtask, e.timestamp)));
+    const union = new Set();
+    for (const r of metricsResults) flattenMetricPaths(r).forEach(p => union.add(p));
+    return [...union].sort();
+  },
 });
 
 // Wire up module dependencies now that all objects are created.
