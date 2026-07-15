@@ -135,16 +135,53 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
   std::ostream* out = nullptr;
   try {
     Poco::URI uri(request.getURI());
-    std::string path = uri.getPath();
-    path = path.substr(prefix.size());
+    std::string urlPath = uri.getPath();
+    // Strip the "/files" prefix. What remains is "/<protocol>[/<asset...>]".
+    std::string rest = urlPath.substr(prefix.size());
 
-    if (path.compare("/") == 0) {
-      path = "index.html";
-    } else if (path[0] == '/') {
-      path = path.substr(1);
+    if (rest.empty() || rest == "/") {
+      response.setContentType("text/plain");
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send() << "404 - No protocol in URL (expected /files/<protocol>)\n";
+      return;
     }
 
-    std::filesystem::path filename = config_->html_ / path;
+    // First path segment = protocol; the remainder is the asset within the UI.
+    std::string afterSlash = rest.substr(1);            // drop leading '/'
+    size_t const slashPos = afterSlash.find('/');
+    std::string const protocol =
+        (slashPos == std::string::npos) ? afterSlash : afterSlash.substr(0, slashPos);
+
+    // The protocol segment is virtual: it only selects the dataset. Validate it
+    // against the on-disk data folders and return a clear 404 otherwise.
+    if (!apis_->ProtocolExists(protocol)) {
+      response.setContentType("text/plain");
+      response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send() << "404 - Unknown protocol '" << protocol << "'\n";
+      return;
+    }
+
+    // Bare "/files/<protocol>" (no trailing slash): redirect to the slash form so
+    // the relative asset references in index.html (css/…, js/…) resolve under
+    // /files/<protocol>/ instead of /files/.
+    if (slashPos == std::string::npos) {
+      response.redirect(prefix + "/" + protocol + "/");
+      return;
+    }
+
+    // Remainder after the protocol; a trailing slash (empty remainder) serves index.
+    std::string assetRel = afterSlash.substr(slashPos + 1);
+    if (assetRel.empty()) {
+      assetRel = "index.html";
+    }
+
+    // The UI lives under html/vis_comparator; vendored shared assets (third-party/…,
+    // e.g. plotly) sit alongside it under html/. Requests for the latter resolve to
+    // that shared copy so every protocol serves the same bundle.
+    std::filesystem::path filename =
+        (assetRel.rfind("third-party/", 0) == 0)
+            ? config_->html_ / assetRel
+            : config_->html_ / "vis_comparator" / assetRel;
     try {
       filename = std::filesystem::canonical(filename);
     } catch(...) {
@@ -241,14 +278,29 @@ static void SendErrorResponse(Poco::Net::HTTPServerResponse& response,
   out.flush();
 }
 
+// Resolves the AnalyzeAPI for the handler's protocol, or sends a 404 and returns
+// nullptr so the caller can bail out. Every data endpoint goes through this.
+static ns_API::AnalyzeAPI* ResolveProtocol(ns_API::APIS* apis,
+    std::string const& protocol, Poco::Net::HTTPServerResponse& response) {
+  try {
+    return &apis->GetProtocol(protocol);
+  } catch (ns_API::UnknownProtocolError const& e) {
+    SendErrorResponse(response, 404, e.what());
+    return nullptr;
+  }
+}
+
 void ns_Server::RequestHandlerAPIListCommits::handleRequest(
     Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& type = std::get<0>(args_);
-  std::vector<ns_Analyze::DataManager::SCommitInfo> commits = apis_->analyzeAPI_.GetCommits(type);
+  std::vector<ns_Analyze::DataManager::SCommitInfo> commits = api->GetCommits(type);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -273,8 +325,11 @@ void ns_Server::RequestHandlerAPIGetCommitRuns::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& commit = std::get<0>(args_);
-  std::vector<std::pair<uint64_t, std::string>> runs = apis_->analyzeAPI_.GetRuns(commit);
+  std::vector<std::pair<uint64_t, std::string>> runs = api->GetRuns(commit);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -298,8 +353,11 @@ void ns_Server::RequestHandlerAPIListCampaigns::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::vector<ns_Analyze::DataManager::RunEntry> campaigns =
-      apis_->analyzeAPI_.GetCampaigns();
+      api->GetCampaigns();
 
   rapidjson::Document doc;
   doc.SetArray();
@@ -329,11 +387,14 @@ void ns_Server::RequestHandlerAPIGetCommitSubjects::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
   uint64_t timestamp = std::get<2>(args_);
   std::vector<std::pair<std::string, uint64_t>> subjects =
-      apis_->analyzeAPI_.GetCommitSubjects(type, commitID, timestamp);
+      api->GetCommitSubjects(type, commitID, timestamp);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -352,12 +413,15 @@ void ns_Server::RequestHandlerAPIGetCommitMetrics::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   std::string const& type = std::get<0>(args_);
   std::string const& commitID = std::get<1>(args_);
   uint64_t timestamp = std::get<2>(args_);
   std::string const& subject = std::get<3>(args_);
   ns_Analyze::DataManager::SMetricsSummaries metricsSummaries =
-      apis_->analyzeAPI_.GetCommitMetrics(type, commitID, timestamp, subject);
+      api->GetCommitMetrics(type, commitID, timestamp, subject);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -450,6 +514,9 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  ns_API::AnalyzeAPI* api = ResolveProtocol(apis_, protocol_, response);
+  if (!api) return;
+
   static ResponseCache valuesCache(256);
 
   std::string const& type = std::get<0>(args_);
@@ -507,7 +574,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   // Response cache: key on the normalized request (runId, params, sorted selection)
   // for an unchanged run -> hit. Built from parsed fields so byte differences in
   // the body (whitespace, key/array order) still hit the same entry.
-  std::string const runTag = apis_->analyzeAPI_.GetRunTag(type, commitID, timestamp);
+  std::string const runTag = api->GetRunTag(type, commitID, timestamp);
   std::string cacheKey;
   if (!runTag.empty()) {
     auto joinU64 = [](std::vector<uint64_t> v) {
@@ -521,7 +588,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
     std::string metricsJoined;
     for (std::string const& m : sortedMetrics) { metricsJoined += m; metricsJoined += ','; }
 
-    cacheKey = type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
+    cacheKey = protocol_ + "|" + type + "/" + commitID + "/" + std::to_string(timestamp) + "/" + subject +
         "/" + std::to_string(min) + "/" + std::to_string(max) + "/" + std::to_string(step) +
         "@" + runTag + "#runs=" + joinU64(runs) +
         ";clients=" + joinU64(clients) + ";metrics=" + metricsJoined +
@@ -540,7 +607,7 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
 
   std::unordered_map<std::string, std::vector<struct ns_Analyze::DataManager::SMetricValues>> values;
   try {
-    values = apis_->analyzeAPI_.GetCommitValues(type, commitID, timestamp, subject, min, max, step,
+    values = api->GetCommitValues(type, commitID, timestamp, subject, min, max, step,
         runs, clients, metrics, ciLevel);
   } catch (std::exception const& e) {
     std::cerr << "[GetCommitValues] exception: " << e.what() << std::endl;
@@ -637,19 +704,31 @@ void ns_Server::RequestHandlerAPIGetCommitMetricsValues::handleRequest(
   ostr.flush();
 }
 
+// Per-protocol directory for saved views (userdata_/<protocol>). Views are
+// namespaced by protocol; templates (getTemplatesDir) stay shared across them.
+static std::filesystem::path getUserdataDir(ns_Server::Config const* config,
+    std::string const& protocol) {
+  return config->userdata_ / protocol;
+}
+
 void ns_Server::RequestHandlerAPISaveUserData::handleRequest(
     Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
 
   if (ManageCORS(request, response)) return;
 
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
   std::string viewName = decodeViewName(std::get<0>(args_));
   if (!isValidViewName(viewName)) {
     SendErrorResponse(response, 400, "Invalid view name");
     return;
   }
-  std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".json");
+  std::filesystem::path const dir = getUserdataDir(config_, protocol_);
+  std::filesystem::create_directories(dir);
+  std::filesystem::path const filePath = dir / (viewNameToStem(viewName) + ".json");
   std::istream& stream = request.stream();
 
   std::ofstream ofs(filePath, std::ios::binary);
@@ -670,13 +749,17 @@ void ns_Server::RequestHandlerAPILoadUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
   std::string viewName = decodeViewName(std::get<0>(args_));
   if (!isValidViewName(viewName)) {
     SendErrorResponse(response, 400, "Invalid view name");
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".json");
+      getUserdataDir(config_, protocol_) / (viewNameToStem(viewName) + ".json");
 
   rapidjson::Document doc;
   try {
@@ -695,7 +778,11 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
-  std::string const& path = config_->userdata_;
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
+  std::filesystem::path const path = getUserdataDir(config_, protocol_);
 
   rapidjson::Document doc;
   doc.SetObject();
@@ -704,8 +791,11 @@ void ns_Server::RequestHandlerAPIListUserData::handleRequest(
   try {
     rapidjson::Value files(rapidjson::kArrayType);
 
+    // A protocol with no saved views yet simply has no directory: return an
+    // empty list rather than erroring.
     if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
-      SendErrorResponse(response, 500, "Userdata directory not found");
+      doc.AddMember("files", files, allocator);
+      SendJSONResponse(response, doc);
       return;
     }
 
@@ -736,13 +826,17 @@ void ns_Server::RequestHandlerAPIDeleteUserData::handleRequest(
 
   if (ManageCORS(request, response)) return;
 
+  if (!ns_API::APIS::IsValidProtocolName(protocol_)) {
+    SendErrorResponse(response, 400, "Invalid protocol");
+    return;
+  }
   std::string viewName = decodeViewName(std::get<0>(args_));
   if (!isValidViewName(viewName)) {
     SendErrorResponse(response, 400, "Invalid view name");
     return;
   }
   std::filesystem::path const filePath =
-      config_->userdata_ / (viewNameToStem(viewName) + ".json");
+      getUserdataDir(config_, protocol_) / (viewNameToStem(viewName) + ".json");
 
   if (!std::filesystem::exists(filePath)) {
     SendErrorResponse(response, 404, "View not found: " + filePath.string());

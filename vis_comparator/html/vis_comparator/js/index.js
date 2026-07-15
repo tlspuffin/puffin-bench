@@ -1,4 +1,4 @@
-import '../../third-party/plotly/plotly-3.3.0.min.js'
+import '../third-party/plotly/plotly-3.3.0.min.js'
 const Plotly = window.Plotly;
 import { ErrorManager } from "./error.js";
 import { ApiREST } from "./apirest.js";
@@ -13,8 +13,17 @@ import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView,
 // CONFIGURATION
 // ============================================================
 
+// The protocol is the segment right after "files" in the page URL
+// (/files/<protocol>[/index.html]); it scopes every API call to that dataset.
+const protocol = window.location.pathname.split('/').filter(Boolean)[1];
+if (!protocol) {
+  document.body.textContent =
+    'No protocol in URL. Open this page as /files/<protocol> (e.g. /files/tlspuffin).';
+  throw new Error('Missing protocol segment in URL path');
+}
+
 const config = {
-  apiBase: '/api/PR',
+  apiBase: `/api/${encodeURIComponent(protocol)}/PR`,
 };
 
 // ============================================================

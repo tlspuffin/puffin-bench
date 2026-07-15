@@ -23,15 +23,19 @@ namespace ns_Server {
 class RequestHandler : public Poco::Net::HTTPRequestHandler {
 
 public:
-  void Configure(ns_Server::Config const& config, 
+  void Configure(ns_Server::Config const& config,
       ns_API::APIS& apis);
+  // Protocol segment parsed from the request URL (e.g. "tlspuffin"). Empty for
+  // routes that carry no protocol. Set by the factory for /api/<protocol>/… routes.
+  void SetProtocol(std::string const& protocol) { protocol_ = protocol; }
 
 protected:
   ns_Server::Config const* config_;
   ns_API::APIS* apis_;
+  std::string protocol_;
 };
 
-inline void RequestHandler::Configure(ns_Server::Config const& config, 
+inline void RequestHandler::Configure(ns_Server::Config const& config,
     ns_API::APIS& apis) {
   config_ = &config;
   apis_ = &apis;
