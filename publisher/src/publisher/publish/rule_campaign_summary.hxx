@@ -9,7 +9,7 @@ public:
   RuleCampaignUseSummary() : RulePerfUseSummary() {}
   RuleCampaignUseSummary(std::string const& name, std::string const& rulePath, 
       std::string const& ruleRelativePath, std::string const& filesFilter, 
-      rapidjson::Value::ConstObject const& parameters);
+      rapidjson::Value const& parameters);
   std::filesystem::path DataPath() const;
 
 protected:

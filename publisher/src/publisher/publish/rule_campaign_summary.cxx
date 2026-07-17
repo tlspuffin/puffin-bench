@@ -2,7 +2,7 @@
 
 ns_Publish::RuleCampaignUseSummary::RuleCampaignUseSummary(std::string const& name, 
     std::string const& rulePath, std::string const& ruleRelativePath, 
-    std::string const& filesFilter, rapidjson::Value::ConstObject const& parameters) 
+    std::string const& filesFilter, rapidjson::Value const& parameters) 
     : RulePerfUseSummary(name, rulePath, ruleRelativePath, "[^/]+/[^/]+/"+filesFilter, parameters, 
     "Campaign", "Campaign", false)
 {

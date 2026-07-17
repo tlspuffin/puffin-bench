@@ -1,15 +1,51 @@
 #include "rapidjson.hxx"
 #include <fstream>
 #include <rapidjson/istreamwrapper.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/prettywriter.h>
 
-void ReadJSONFile(std::string const& file, rapidjson::Document& doc) {
+bool ReadJSONFile(std::string const& file, rapidjson::Document& doc) {
   std::ifstream ifs(file);
   if (!ifs.is_open()) {
-    throw std::runtime_error("Unable to open JSON file: " + file);
+    //throw std::runtime_error("Unable to open JSON file: " + file);
+    return false;
   }
   rapidjson::IStreamWrapper isw(ifs);
   if (doc.ParseStream(isw).HasParseError()) {
-    throw std::runtime_error("Error JSON file corrupted: " + file);
+    //throw std::runtime_error("Error JSON file corrupted: " + file);
+    return false;
+  }
+  return true;
+}
+
+bool SaveJSONFile(std::string const& file, rapidjson::Document const& doc, bool pretty) {
+  rapidjson::Writer<rapidjson::StringBuffer>* writer = nullptr;
+  try {
+    rapidjson::StringBuffer buffer;
+    if (pretty) {
+      writer = new rapidjson::PrettyWriter<rapidjson::StringBuffer>(buffer);
+    } else {
+      writer = new rapidjson::Writer<rapidjson::StringBuffer>(buffer);
+    }
+    doc.Accept(*writer);
+    std::ofstream outFile(file, std::ios::trunc);
+    if (!outFile.is_open()) {
+      throw std::runtime_error("Unable to open file " + file + " to write");
+    }
+    outFile << buffer.GetString() << std::endl;
+    if (outFile.fail()) {
+      outFile.close();
+      throw std::runtime_error("Error while writing in " + file);
+    }
+    outFile.close();
+    delete writer;
+    return true;
+  } catch(...)  {
+    if (writer != nullptr) {
+      delete writer;
+    }
+    return false;
   }
 }
 

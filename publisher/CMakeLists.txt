@@ -5,20 +5,11 @@ set (CMAKE_CXX_STANDARD 17)
 
 include(CMakeExternal.cmake)
 include(CMakeTextEmbedding.cmake)
+include(CMakeBinaryEmbedding.cmake)
 
 set(DEPS_BASE_DIR "${CMAKE_SOURCE_DIR}/third-party")
 
-find_program(XXD xxd REQUIRED)
-set(PLOTLYJS_BLOB_H "plotly_3_3_0_min_js.h")
-add_custom_command(
-  OUTPUT ${PLOTLYJS_BLOB_H}
-  COMMAND ${CMAKE_COMMAND} -E env
-          OUT=${PLOTLYJS_BLOB_H}
-          sh -c "${XXD} -i -n Publisher_HTML_Ploty_JS \"${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js\" > \"${PLOTLYJS_BLOB_H}\""
-  COMMENT "Generating ${PLOTLYJS_BLOB_H} from reserve_port with xxd -i"
-  VERBATIM
-)
-add_custom_target(plotly_3_3_0_min_js_h DEPENDS ${PLOTLYJS_BLOB_H})
+EmbedBinaryFile("${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h" Publisher_HTML_Ploty_JS)
 
 set(IN_VERSION_C "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in")
 set(GENERATED_VERSION_C "${CMAKE_BINARY_DIR}/version.c")
@@ -170,41 +161,41 @@ if (NOT TARGET ZStdSeekable)
   target_link_libraries(ZStdSeekable PUBLIC ${ZStdTN})
 endif()
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_config.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_config_js.h" Publisher_HTML_SummaryPRConfig_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.html" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_html.h" Publisher_HTML_SummaryPR_HTML)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_css.h" Publisher_HTML_SummaryPR_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_js.h" Publisher_HTML_SummaryPR_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_js.h" Publisher_HTML_SummaryPRMetrics_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metricscampaign.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metricscampaign_js.h" Publisher_HTML_SummaryPRMetricsCampaign_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_managegraphs.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_managegraphs_js.h" Publisher_HTML_SummaryPRManageGraphs_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphoverview.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_js.h" Publisher_HTML_SummaryPRGraphOverview_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphoverview.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_css.h" Publisher_HTML_SummaryPRGraphOverview_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphcompare.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphcompare_js.h" Publisher_HTML_SummaryPRGraphCompare_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphmetrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_js.h" Publisher_HTML_SummaryPRGraphMetrics_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphmetrics.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_css.h" Publisher_HTML_SummaryPRGraphMetrics_CSS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_config.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_config_js.h" Publisher_HTML_SummaryPRConfig_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.html" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_html.h" Publisher_HTML_SummaryPR_HTML)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_css.h" Publisher_HTML_SummaryPR_CSS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_js.h" Publisher_HTML_SummaryPR_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_metrics_js.h" Publisher_HTML_SummaryPRMetrics_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_metricscampaign.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_metricscampaign_js.h" Publisher_HTML_SummaryPRMetricsCampaign_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_managegraphs.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_managegraphs_js.h" Publisher_HTML_SummaryPRManageGraphs_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphoverview.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphoverview_js.h" Publisher_HTML_SummaryPRGraphOverview_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphoverview.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphoverview_css.h" Publisher_HTML_SummaryPRGraphOverview_CSS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphcompare.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphcompare_js.h" Publisher_HTML_SummaryPRGraphCompare_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphmetrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphmetrics_js.h" Publisher_HTML_SummaryPRGraphMetrics_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_PR_graphmetrics.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphmetrics_css.h" Publisher_HTML_SummaryPRGraphMetrics_CSS)
 
 set(PUBLISHER_SRC
-  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/file_compressed.cxx src/utils/compress_tar_zst.cxx src/utils/dir.cxx
+  src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/file_compressed.cxx src/utils/compress_tar_zst.cxx src/utils/dir.cxx src/utils/variables.cxx
   src/publisher/config.cxx 
   src/publisher/server/config.cxx src/publisher/server/server.cxx 
   src/publisher/server/parts_handler.cxx src/publisher/server/request_handler.cxx 
   src/publisher/publish/config.cxx src/publisher/publish/publish.cxx src/publisher/publish/project.cxx src/publisher/publish/index.cxx 
-  src/publisher/publish/rule.cxx src/publisher/publish/rule_vuln3.cxx src/publisher/publish/rule_perf_summary.cxx 
+  src/publisher/publish/rule.cxx src/publisher/publish/rule_vuln3.cxx src/publisher/publish/rule_perf_summary.cxx src/publisher/publish/rule_mergeJSON.cxx
   src/publisher/publish/rule_perf_summary/generate_perf_zst.cxx src/publisher/publish/rule_campaign_summary.cxx 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_html.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_css.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_metricscampaign_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_managegraphs_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphoverview_css.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphcompare_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_graphmetrics_css.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/summary_PR_config_js.h
-  ${GENERATED_VERSION_C}
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_html.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_css.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_metrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_metricscampaign_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_managegraphs_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphoverview_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphoverview_css.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphcompare_js.h
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphmetrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_graphmetrics_css.h 
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_PR_config_js.h
+  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h ${GENERATED_VERSION_C}
 )
 
 add_library(publisher.lib STATIC ${PUBLISHER_SRC})
 target_link_libraries(publisher.lib PUBLIC ${RapidjsonTN} ${PocoTN} ${LibArchiveTN} ZStdSeekable)
-target_include_directories(publisher.lib PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
-add_dependencies(publisher.lib generate_version plotly_3_3_0_min_js_h)
+target_include_directories(publisher.lib PRIVATE ${CMAKE_SOURCE_DIR})
+add_dependencies(publisher.lib generate_version)
 
 add_executable(publisher src/publisher/main.cxx)
 target_link_libraries(publisher PRIVATE publisher.lib)

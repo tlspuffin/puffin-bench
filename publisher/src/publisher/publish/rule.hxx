@@ -47,7 +47,7 @@ public:
 
   static Rule* Build(std::string const& action, std::string const& name, 
       std::string const& rulesPath, std::string const& rulesRelativePath, 
-      std::string const& filesFilter, rapidjson::Value::ConstObject const& parameters);
+      std::string const& filesFilter, rapidjson::Value const& parameters);
 
 protected:
   TaskAnalysis ExtractExperimentsFromFile(std::string const& jsonTaskFile, 
@@ -85,7 +85,7 @@ class RuleNULL : public Rule {
 public:
    RuleNULL(std::string const& name, std::string const& rulePath, 
       std::string const& ruleRelativePath, std::string const& filesFilter, 
-      rapidjson::Value::ConstObject const& parameters)
+      rapidjson::Value const& parameters)
       : Rule(name, rulePath, ruleRelativePath, filesFilter) {}
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
       uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 

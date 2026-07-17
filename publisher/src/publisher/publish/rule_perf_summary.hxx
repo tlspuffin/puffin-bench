@@ -10,7 +10,7 @@ public:
   RulePerfUseSummary() : Rule(), folder_() {}
   RulePerfUseSummary(std::string const& name, std::string const& rulePath, 
       std::string const& ruleRelativePath, std::string const& filesFilter, 
-      rapidjson::Value::ConstObject const& parameters);
+      rapidjson::Value const& parameters);
 
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
       uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
@@ -19,7 +19,7 @@ public:
 protected:
   RulePerfUseSummary(std::string const& name, std::string const& rulePath, 
       std::string const& ruleRelativePath, std::string const& filesFilter, 
-      rapidjson::Value::ConstObject const& parameters, std::string const& type, 
+      rapidjson::Value const& parameters, std::string const& type, 
       std::filesystem::path const& folder, bool checkIDMatchFeature);
 
   bool BuildJSON(std::string const& taskDataFile, std::filesystem::path const& outputPath, 

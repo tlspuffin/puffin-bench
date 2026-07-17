@@ -4,19 +4,19 @@
 #include <fstream>
 #include <tuple>
 
-#include "embeded/publisher/summary_PR_config_js.h"
-#include "embeded/publisher/summary_PR_html.h"
-#include "embeded/publisher/summary_PR_css.h"
-#include "embeded/publisher/summary_PR_js.h"
-#include "embeded/publisher/summary_PR_metrics_js.h"
-#include "embeded/publisher/summary_PR_metricscampaign_js.h"
-#include "embeded/publisher/summary_PR_managegraphs_js.h"
-#include "embeded/publisher/summary_PR_graphoverview_js.h"
-#include "embeded/publisher/summary_PR_graphoverview_css.h"
-#include "embeded/publisher/summary_PR_graphcompare_js.h"
-#include "embeded/publisher/summary_PR_graphmetrics_js.h"
-#include "embeded/publisher/summary_PR_graphmetrics_css.h"
-#include "plotly_3_3_0_min_js.h"
+#include "embeded/publisher/html/summary_PR_config_js.h"
+#include "embeded/publisher/html/summary_PR_html.h"
+#include "embeded/publisher/html/summary_PR_css.h"
+#include "embeded/publisher/html/summary_PR_js.h"
+#include "embeded/publisher/html/summary_PR_metrics_js.h"
+#include "embeded/publisher/html/summary_PR_metricscampaign_js.h"
+#include "embeded/publisher/html/summary_PR_managegraphs_js.h"
+#include "embeded/publisher/html/summary_PR_graphoverview_js.h"
+#include "embeded/publisher/html/summary_PR_graphoverview_css.h"
+#include "embeded/publisher/html/summary_PR_graphcompare_js.h"
+#include "embeded/publisher/html/summary_PR_graphmetrics_js.h"
+#include "embeded/publisher/html/summary_PR_graphmetrics_css.h"
+#include "embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h"
 
 static ns_Publish::Config defaultConfig;
 

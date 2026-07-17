@@ -12,7 +12,7 @@
 
 ns_Publish::RulePerfUseSummary::RulePerfUseSummary(std::string const& name, 
     std::string const& rulePath, std::string const& ruleRelativePath, 
-    std::string const& filesFilter, rapidjson::Value::ConstObject const& parameters) 
+    std::string const& filesFilter, rapidjson::Value const& parameters) 
     : RulePerfUseSummary(name, rulePath, ruleRelativePath, filesFilter, parameters, 
     "Perf", "Perf", true)
 {}
@@ -69,7 +69,7 @@ RulePerfUseSummary__Process:
 
 ns_Publish::RulePerfUseSummary::RulePerfUseSummary(std::string const& name, 
     std::string const& rulePath, std::string const& ruleRelativePath, 
-    std::string const& filesFilter, rapidjson::Value::ConstObject const& parameters, 
+    std::string const& filesFilter, rapidjson::Value const& parameters, 
     std::string const& type, std::filesystem::path const& folder, bool checkIDMatchFeature) 
     : Rule(name, rulePath, ruleRelativePath, filesFilter), type_(type), 
     folder_(folder), checkIDMatchFeature_(checkIDMatchFeature)

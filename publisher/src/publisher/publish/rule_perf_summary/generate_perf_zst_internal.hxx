@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <filesystem>
+#include <fstream>
 #include <unordered_map>
 
 namespace {

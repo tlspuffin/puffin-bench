@@ -105,7 +105,7 @@ class Metrics {
               this.#commitNames[commit.id] = {};
             }
             const typeData = commit.infos?.get(type);
-            if (!typeData || !typeData.libs) return;
+            if (!typeData || !typeData.metrics) return;
             if (!this.#metricsData[type]) {
               this.#metricsData[type] = {};
             }
@@ -114,23 +114,29 @@ class Metrics {
                 Metrics.#metricStatusSuccess : (typeData.global_status === 'fail' ? 
                     Metrics.#metricStatusFail : Metrics.#metricStatusMixed));
 
-            for (const [libName, libData] of Object.entries(typeData.libs)) {
+            for (const [libName, metrics] of Object.entries(typeData.metrics)) {
               const regularLibName = libName.toLowerCase();
               if (!this.#metricsData[type][regularLibName]) {
                 this.#metricsData[type][regularLibName] = {};
               }
 
-              const cputs = libData?.cputs == 1 ? '⚙C' : (libData?.cputs == -1 ? '🦀' : '❓');
+              const cputs = typeData?.status[libName]?.cli?.cputs === true ? 
+                  '⚙C' : (typeData?.status[libName]?.cli?.cputs === false ? '🦀' : '❓');
               this.#commitNames[commit.id][regularLibName] = cputs;
 
-              switch(type) {
-                case 'Perf':
-                  this.#BuildPerfMetrics(commit.id, status, cputs, regularLibName, libData);
-                  break;
-                case 'Vuln':
-                  this.#BuildVulnMetrics(commit.id, cputs, regularLibName, libData);
-                  break;
+              for (const [metricName, runsData] of Object.entries(metrics)) {
+                if (!Array.isArray(runsData) || runsData.length === 0) continue;
+                if (!this.#metricsData[type][regularLibName][metricName]) {
+                  this.#metricsData[type][regularLibName][metricName] = [];
+                }
+                this.#metricsData[type][regularLibName][metricName].push({
+                    commit_id: commit.id,
+                    values: runsData.flat(),
+                    status: metricName.startsWith('fail_') ? Metrics.#metricStatusFail : status,
+                    cputs
+                });
               }
+
             }
         });
     });
@@ -330,114 +336,6 @@ class Metrics {
       }
     }
     return result;
-  }
-
-  #BuildPerfMetrics(commitID, status, cputs, libName, libData) {
-    const type = 'Perf'
-            
-    // Process each metric (numeric arrays only, excluding non-success runs)
-    for (const [metricName, metricValues] of Object.entries(libData)) {
-      // Skip non-arrays, empty arrays, non-numeric arrays, and metadata fields
-      if (!Array.isArray(metricValues) ||
-          metricValues.length === 0 ||
-          typeof metricValues[0] !== 'number' ||
-          metricName === 'warn_user' ||
-          metricName === 'success_count' ||
-          metricName === 'total_runs' ||
-          metricName === 'cputs') {
-        continue;
-      }
-            
-      // Only include successful runs for non-fail metrics
-      if (metricName.startsWith('fail_')) {
-        const realMetricName = metricName.slice(5);
-        // For fail metrics, include all data
-        if (!this.#metricsData[type][libName][realMetricName]) {
-          this.#metricsData[type][libName][realMetricName] = [];
-        }
-        this.#metricsData[type][libName][realMetricName].push({
-            commit_id: commitID,
-            values: metricValues,
-            status: Metrics.#metricStatusFail,
-            cputs
-        });
-      } else {
-        // For success metrics, include all data
-        if (!this.#metricsData[type][libName][metricName]) {
-          this.#metricsData[type][libName][metricName] = [];
-        }
-        this.#metricsData[type][libName][metricName].push({
-            commit_id: commitID,
-            values: metricValues,
-            status,
-            cputs
-        });
-      }
-    }
-  }
-
-  #BuildVulnMetrics(commitID, cputs, libName, libData) {
-    const type = 'Vuln'
-
-    const status = libData.success_count == 0 ? Metrics.#metricStatusFail : 
-        (((libData.success_count === libData.total_runs) || ((libData.total_runs > 10) && (libData.success_count > 2))) ? 
-            Metrics.#metricStatusSuccess : Metrics.#metricStatusMixed);
-
-    // Process each metric (numeric arrays only, excluding non-success runs)
-    for (const [metricName, metricValues] of Object.entries(libData)) {
-      // Skip non-arrays, empty arrays, non-numeric arrays, and metadata fields
-      if (!Array.isArray(metricValues) ||
-          metricValues.length === 0 ||
-          typeof metricValues[0] !== 'number' ||
-          metricName === 'warn_user' ||
-          metricName === 'success_count' ||
-          metricName === 'total_runs' ||
-          metricName === 'cputs') {
-        continue;
-      }
-            
-      // Only include successful runs for non-fail metrics
-      if (metricName.startsWith('fail_')) {
-        let realMetricName = metricName;
-        /*if (status === Metrics.#metricStatusFail) {
-          realMetricName = metricName.slice(5);
-        }*/
-        // For fail metrics, include all data
-        if (!this.#metricsData[type][libName][realMetricName]) {
-          this.#metricsData[type][libName][realMetricName] = [];
-        }
-        this.#metricsData[type][libName][realMetricName].push({
-            commit_id: commitID,
-            values: metricValues,
-            status: Metrics.#metricStatusFail,
-            cputs
-        });
-      } else {
-        let realMetricName = metricName.substring(8);
-        if (!this.#metricsData[type][libName][realMetricName]) {
-          this.#metricsData[type][libName][realMetricName] = [];
-        }
-        this.#metricsData[type][libName][realMetricName].push({
-            commit_id: commitID,
-            values: metricValues,
-            status,
-            cputs
-        });
-      }
-    }
-
-    if ((libData.success_count != null) && (libData.total_runs != null)) {
-      if (!this.#metricsData[type][libName]['ratio_success_execution']) {
-        this.#metricsData[type][libName]['ratio_success_execution'] = []
-      }
-      this.#metricsData[type][libName]['ratio_success_execution'].push({
-            commit_id: commitID,
-            values: [(libData.success_count / libData.total_runs) * 100.0],
-            status,
-            cputs
-        });
-    }
-
   }
 
   static ComputeXRange(categoryLength, highlightIndex) {

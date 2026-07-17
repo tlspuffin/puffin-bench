@@ -23,7 +23,7 @@ public:
   RuleVuln3() : Rule(), folder_() {}
   RuleVuln3(std::string const& name, std::string const& rulePath, 
       std::string const& ruleRelativePath, std::string const& filesFilter, 
-      rapidjson::Value::ConstObject const& parameters);
+      rapidjson::Value const& parameters);
   
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
       uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 

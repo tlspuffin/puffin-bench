@@ -793,10 +793,12 @@ header {
 
 .stat-field {
   font-weight: 600;
+  user-select: none;
 }
 
 .stat-value {
   color: var(--color-text-light);
+  user-select: none;
 }
 
 /* Stats tooltip */

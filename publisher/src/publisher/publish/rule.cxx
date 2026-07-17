@@ -1,4 +1,5 @@
 #include "rule.hxx"
+#include "rule_mergeJSON.hxx"
 #include "rule_vuln3.hxx"
 #include "rule_perf_summary.hxx"
 #include "rule_campaign_summary.hxx"
@@ -39,8 +40,10 @@ bool ns_Publish::Rule::Match(std::string const& file) {
 ns_Publish::Rule* ns_Publish::Rule::Build(std::string const& action, 
     std::string const& name, std::string const& rulesPath, 
     std::string const& rulesRelativePath, std::string const& filesFilter, 
-    rapidjson::Value::ConstObject const& parameters) {
-  if (action == "GenerateReportVuln3") {
+    rapidjson::Value const& parameters) {
+  if (action == "GenerateMergeJSON") {
+    return new RuleMergeJSON(name, rulesPath, rulesRelativePath, filesFilter, parameters);
+  } else if (action == "GenerateReportVuln3") {
     return new RuleVuln3(name, rulesPath, rulesRelativePath, filesFilter, parameters);
   } else if (action == "GenerateReportPerfFromSummary") {
     return new RulePerfUseSummary(name, rulesPath, rulesRelativePath, filesFilter, parameters);

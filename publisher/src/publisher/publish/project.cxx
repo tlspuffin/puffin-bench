@@ -193,7 +193,9 @@ bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {
   std::string const relativePath = std::filesystem::relative(rulesPath, path);
 
   rapidjson::Document doc;
-  ReadJSONFile(rulesFile, doc);
+  if (!ReadJSONFile(rulesFile, doc)) {
+    throw std::runtime_error("Error while trying access "+rulesFile);
+  }
 
   if (doc.HasMember("index") && doc["index"].IsString()) {
     std::filesystem::path indexFile = doc["index"].GetString();
@@ -225,19 +227,18 @@ bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {
 
     std::string const action = value["action"].GetString();
     std::string const onFiles = value["onFiles"].GetString();
-    static const rapidjson::Value emptyObject(rapidjson::kObjectType);
-    const rapidjson::Value* parametersValue = &emptyObject;
+    static rapidjson::Value const emptyObject(rapidjson::kObjectType);
+    rapidjson::Value const* parameters = &emptyObject;
     if (value.HasMember("parameters")) {
-      parametersValue = &(value["parameters"]);
+      parameters = &(value["parameters"]);
     }
-    rapidjson::Value::ConstObject const& parameters = parametersValue->GetObject();
     std::shared_ptr<Rule> rulePtr = 
-        std::shared_ptr<Rule>(Rule::Build(action, name, rulesPath, relativePath, onFiles, parameters));
+        std::shared_ptr<Rule>(Rule::Build(action, ruleName, rulesPath, relativePath, onFiles, *parameters));
     if (rulePtr) {
       rules_.push_back(rulePtr);
-      LOGI << "Add rules: " << name << " → " << action << " (" << onFiles << ") for: " << relativePath << Log::Flags::End;
+      LOGI << "Add rules: " << ruleName << " → " << action << " (" << onFiles << ") for: " << relativePath << Log::Flags::End;
     } else {
-     throw std::runtime_error("Fatal error. Invalid rules file, \"" + name + "\" object have an unknown action \"" + action + "\" in " + rulesFile);
+     throw std::runtime_error("Fatal error. Invalid rules file, \"" + ruleName + "\" object have an unknown action \"" + action + "\" in " + rulesFile);
     }
   }
   return true;

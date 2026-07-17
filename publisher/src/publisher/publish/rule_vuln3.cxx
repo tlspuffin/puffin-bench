@@ -5,7 +5,7 @@
 
 ns_Publish::RuleVuln3::RuleVuln3(std::string const& name, std::string const& rulePath, 
     std::string const& ruleRelativePath, std::string const& filesFilter, 
-    rapidjson::Value::ConstObject const& parameters) 
+    rapidjson::Value const& parameters) 
     : Rule(name, rulePath, ruleRelativePath, filesFilter), folder_("Vuln")
 {
   if (parameters.HasMember("folder") && parameters["folder"].IsString()) {
