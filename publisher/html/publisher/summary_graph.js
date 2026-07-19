@@ -1,4 +1,6 @@
-class Metrics {
+import { Metrics } from './summary_metrics.js'
+
+export class Graph {
   static GenerateEmptyGraphData(type, library, metric, commits) {
     const layout = {
         title: {
@@ -86,80 +88,52 @@ class Metrics {
     return [traces, layout];
   }
 
-  static #metricStatusSuccess = '#27ae60';
-  static #metricStatusFail =  '#e74c3c';
-  static #metricStatusMixed = '#f1c40f';
-
-  static #graphPixelPerCommit = 25;
-  static #containerRatioSize = 0.8;
-
-  #commits = null;
-  #metricsData = {};  // Structure: { type: { library: { metric: [{ commit_id, values, success }] } } }
-  #commitNames = {};
-
-  constructor(availableTypes, commits) {
-    this.#commits = commits;
-    commits.forEach(commit => {
-        availableTypes.forEach(type => {
-            if (!this.#commitNames[commit.id]) {
-              this.#commitNames[commit.id] = {};
-            }
-            const typeData = commit.infos?.get(type);
-            if (!typeData || !typeData.metrics) return;
-            if (!this.#metricsData[type]) {
-              this.#metricsData[type] = {};
-            }
-
-            const status = (typeData.global_status === 'success' ? 
-                Metrics.#metricStatusSuccess : (typeData.global_status === 'fail' ? 
-                    Metrics.#metricStatusFail : Metrics.#metricStatusMixed));
-
-            for (const [libName, metrics] of Object.entries(typeData.metrics)) {
-              const regularLibName = libName.toLowerCase();
-              if (!this.#metricsData[type][regularLibName]) {
-                this.#metricsData[type][regularLibName] = {};
-              }
-
-              const cputs = typeData?.status[libName]?.cli?.cputs === true ? 
-                  '⚙C' : (typeData?.status[libName]?.cli?.cputs === false ? '🦀' : '❓');
-              this.#commitNames[commit.id][regularLibName] = cputs;
-
-              for (const [metricName, runsData] of Object.entries(metrics)) {
-                if (!Array.isArray(runsData) || runsData.length === 0) continue;
-                if (!this.#metricsData[type][regularLibName][metricName]) {
-                  this.#metricsData[type][regularLibName][metricName] = [];
-                }
-                this.#metricsData[type][regularLibName][metricName].push({
-                    commit_id: commit.id,
-                    values: runsData.flat(),
-                    status: metricName.startsWith('fail_') ? Metrics.#metricStatusFail : status,
-                    cputs
-                });
-              }
-
-            }
-        });
+  static ColorGraphXTicks(container, commitIds, color) {
+    const toColor = new Set(commitIds);
+    const tickTexts = container.querySelectorAll('.xaxislayer-above .xtick text');
+    tickTexts.forEach(el => {
+        const raw = el.getAttribute('data-unformatted') ?? el.textContent;
+        if ([...toColor].some(id => raw.includes(id.substring(0, 14)))) {
+            el.style.fill = color;
+        }
     });
+  }
+
+  static StyleGraphXTicks(container, commitIds, style) {
+    const toStyle = new Set(commitIds);
+    const tickTexts = container.querySelectorAll('.xaxislayer-above .xtick text');
+    tickTexts.forEach(el => {
+        const raw = el.getAttribute('data-unformatted') ?? el.textContent;
+        if ([...toStyle].some(id => raw.includes(id.substring(0, 14)))) {
+            Object.assign(el.style, style);
+        }
+    });
+  }
+
+  #metrics;
+
+  constructor(metrics) {
+    this.#metrics = metrics
   }
 
   GenerateGraphData(type, library, metric) {
     // Prepare data for Plotly box plot
     const traces = [];
 
-    let librarieDataPoints = this.#metricsData[type]?.[library] ?? {}
+    let librarieDataPoints = this.#metrics.GetValuesForSubType(type, library) ?? {}
     const otherIds = new Set(
         Object.entries(librarieDataPoints)
             .filter(([key]) => key !== metric)
             .flatMap(([, points]) => points.map(element => element.commit_id))
     );
 
-    let metricDataPoints = this.#metricsData[type]?.[library]?.[metric] ?? [];
+    let metricDataPoints = this.#metrics.GetValues(type, library, metric) ?? [];
 
     const metricIds = new Set(metricDataPoints.map(element => element.commit_id));
     const unusedCommitsList = new Set([...otherIds]
         .filter(id => !metricIds.has(id))
         .map(element => { 
-            return (this.#commitNames[element]?.[library] ?? '') + ' ' + element.substring(0,14);
+            return (this.#metrics.HaveCommit(element)?.[library] ?? '') + ' ' + element.substring(0,14);
         })
     );
 
@@ -191,7 +165,7 @@ class Metrics {
       });
     }
 
-    const commitsTimeline = this.#commits.toReversed();
+    const commitsTimeline = this.#metrics.GetCommits().toReversed();
     const layout = {
         title: {
             text: `${library} - ${metric} (${type})`,
@@ -206,7 +180,7 @@ class Metrics {
             tickfont: { family: 'monospace' },
             tickvals: commitsTimeline.map(c => c.id),
             ticktext: commitsTimeline.map(c => 
-                (this.#commitNames[c.id]?.[library] ?? '') + ' ' + c.id.substring(0,14)),
+                (this.#metrics.HaveCommit(c.id)?.[library] ?? '') + ' ' + c.id.substring(0,14)),
             range: Metrics.ComputeXRange(commitsTimeline.length),
         },
         yaxis: {
@@ -277,88 +251,4 @@ class Metrics {
 
     return [traces, layout, config, unusedCommitsList, insertIdx];
   }
-
-  static ColorGraphXTicks(container, commitIds, color) {
-    const toColor = new Set(commitIds);
-    const tickTexts = container.querySelectorAll('.xaxislayer-above .xtick text');
-    tickTexts.forEach(el => {
-        const raw = el.getAttribute('data-unformatted') ?? el.textContent;
-        if ([...toColor].some(id => raw.includes(id.substring(0, 14)))) {
-            el.style.fill = color;
-        }
-    });
-  }
-
-  static StyleGraphXTicks(container, commitIds, style) {
-    const toStyle = new Set(commitIds);
-    const tickTexts = container.querySelectorAll('.xaxislayer-above .xtick text');
-    tickTexts.forEach(el => {
-        const raw = el.getAttribute('data-unformatted') ?? el.textContent;
-        if ([...toStyle].some(id => raw.includes(id.substring(0, 14)))) {
-            Object.assign(el.style, style);
-        }
-    });
-  }
-
-  HaveCommit(commitID) {
-    return this.#commitNames[commitID];
-  }
-
-  GetTypes() {
-    return Object.keys(this.#metricsData);
-  }
-
-  GetValuesForType(type) {
-    return this.#metricsData[type];
-  }
-
-  GetValuesForSubType(type, library) {
-    return this.#metricsData[type]?.[library];
-  }
-
-  GetValues(type, library, metric) {
-    return this.#metricsData[type]?.[library]?.[metric];
-  }
-
-  GetCommitMetrics(commitID) {
-    if (!this.#commitNames[commitID]) {
-      return {};
-    }
-    const result = {};
-    for (const [typeName, typeData] of Object.entries(this.#metricsData)) {
-      result[typeName] = {};
-      for (const [libName, libData] of Object.entries(typeData)) {
-        result[typeName][libName] = {};
-        for (const [valueName, valueData] of Object.entries(libData)) {
-          result[typeName][libName][valueName] = 
-              valueData.find(entry => entry.commit_id === commitID) ?? null;
-        }
-      }
-    }
-    return result;
-  }
-
-  static ComputeXRange(categoryLength, highlightIndex) {
-    const nbElementOnScreen = (window.innerWidth * Metrics.#containerRatioSize) / Metrics.#graphPixelPerCommit;
-    const windowNbElementWidth = nbElementOnScreen + 1;
-    const range = [-0.5, nbElementOnScreen + 0.5];
-    if (categoryLength > windowNbElementWidth) {
-      range[1] = categoryLength + 0.5
-      range[0] = range[1] - windowNbElementWidth;
-    }
-    if (highlightIndex != null) {
-      if (highlightIndex < range[0]) {
-        range[1] = highlightIndex + (windowNbElementWidth / 2);
-        range[0] = range[1] - windowNbElementWidth;
-      }
-    }
-    if (range[0] < -0.5) {
-      range[1] = windowNbElementWidth - 0.5;
-      range[0] = -0.5;
-    }
-    return range;
-  }
-
-};
-
-export { Metrics };
+}

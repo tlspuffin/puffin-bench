@@ -1,22 +1,24 @@
 #include "config.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "embeded/publisher/html/summary_config_js.h"
+#include "embeded/publisher/html/summary_html.h"
+#include "embeded/publisher/html/summary_css.h"
+#include "embeded/publisher/html/summary_js.h"
+#include "embeded/publisher/html/summary_render_js.h"
+#include "embeded/publisher/html/summary_data_js.h"
+#include "embeded/publisher/html/summary_metrics_js.h"
+#include "embeded/publisher/html/summary_metricscampaign_js.h"
+#include "embeded/publisher/html/summary_graph_js.h"
+#include "embeded/publisher/html/summary_managegraphs_js.h"
+#include "embeded/publisher/html/summary_graphoverview_js.h"
+#include "embeded/publisher/html/summary_graphoverview_css.h"
+#include "embeded/publisher/html/summary_graphcompare_js.h"
+#include "embeded/publisher/html/summary_graphmetrics_js.h"
+#include "embeded/publisher/html/summary_graphmetrics_css.h"
+#include "embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h"
 #include <fstream>
 #include <tuple>
-
-#include "embeded/publisher/html/summary_PR_config_js.h"
-#include "embeded/publisher/html/summary_PR_html.h"
-#include "embeded/publisher/html/summary_PR_css.h"
-#include "embeded/publisher/html/summary_PR_js.h"
-#include "embeded/publisher/html/summary_PR_metrics_js.h"
-#include "embeded/publisher/html/summary_PR_metricscampaign_js.h"
-#include "embeded/publisher/html/summary_PR_managegraphs_js.h"
-#include "embeded/publisher/html/summary_PR_graphoverview_js.h"
-#include "embeded/publisher/html/summary_PR_graphoverview_css.h"
-#include "embeded/publisher/html/summary_PR_graphcompare_js.h"
-#include "embeded/publisher/html/summary_PR_graphmetrics_js.h"
-#include "embeded/publisher/html/summary_PR_graphmetrics_css.h"
-#include "embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h"
 
 static ns_Publish::Config defaultConfig;
 
@@ -56,17 +58,20 @@ void ns_Publish::Config::Validate(bool forceInstall) const {
   std::filesystem::create_directory(html_/ "third-party", ec);
   std::filesystem::create_directory(html_/ "third-party" / "plotly", ec);
   for(auto const& [ file, data, size ] : {
-      std::tuple{ "publisher/summary_PR.html", Publisher_HTML_SummaryPR_HTML_data, Publisher_HTML_SummaryPR_HTML_size },
-      std::tuple{ "publisher/summary_PR.css", Publisher_HTML_SummaryPR_CSS_data, Publisher_HTML_SummaryPR_CSS_size },
-      std::tuple{ "publisher/summary_PR.js", Publisher_HTML_SummaryPR_JS_data, Publisher_HTML_SummaryPR_JS_size },
-      std::tuple{ "publisher/summary_PR_metrics.js", Publisher_HTML_SummaryPRMetrics_JS_data, Publisher_HTML_SummaryPRMetrics_JS_size },
-      std::tuple{ "publisher/summary_PR_metricscampaign.js", Publisher_HTML_SummaryPRMetricsCampaign_JS_data, Publisher_HTML_SummaryPRMetricsCampaign_JS_size },
-      std::tuple{ "publisher/summary_PR_managegraphs.js", Publisher_HTML_SummaryPRManageGraphs_JS_data, Publisher_HTML_SummaryPRManageGraphs_JS_size },
-      std::tuple{ "publisher/summary_PR_graphoverview.js", Publisher_HTML_SummaryPRGraphOverview_JS_data, Publisher_HTML_SummaryPRGraphOverview_JS_size },
-      std::tuple{ "publisher/summary_PR_graphoverview.css", Publisher_HTML_SummaryPRGraphOverview_CSS_data, Publisher_HTML_SummaryPRGraphOverview_CSS_size },
-      std::tuple{ "publisher/summary_PR_graphcompare.js", Publisher_HTML_SummaryPRGraphCompare_JS_data, Publisher_HTML_SummaryPRGraphCompare_JS_size },
-      std::tuple{ "publisher/summary_PR_graphmetrics.js", Publisher_HTML_SummaryPRGraphMetrics_JS_data, Publisher_HTML_SummaryPRGraphMetrics_JS_size },
-      std::tuple{ "publisher/summary_PR_graphmetrics.css", Publisher_HTML_SummaryPRGraphMetrics_CSS_data, Publisher_HTML_SummaryPRGraphMetrics_CSS_size },
+      std::tuple{ "publisher/summary.html", Publisher_HTML_Summary_HTML_data, Publisher_HTML_Summary_HTML_size },
+      std::tuple{ "publisher/summary.css", Publisher_HTML_Summary_CSS_data, Publisher_HTML_Summary_CSS_size },
+      std::tuple{ "publisher/summary.js", Publisher_HTML_Summary_JS_data, Publisher_HTML_Summary_JS_size },
+      std::tuple{ "publisher/summary_render.js", Publisher_HTML_SummaryRender_JS_data, Publisher_HTML_SummaryRender_JS_size },
+      std::tuple{ "publisher/summary_data.js", Publisher_HTML_SummaryData_JS_data, Publisher_HTML_SummaryData_JS_size },
+      std::tuple{ "publisher/summary_metrics.js", Publisher_HTML_SummaryMetrics_JS_data, Publisher_HTML_SummaryMetrics_JS_size },
+      std::tuple{ "publisher/summary_metricscampaign.js", Publisher_HTML_SummaryMetricsCampaign_JS_data, Publisher_HTML_SummaryMetricsCampaign_JS_size },
+      std::tuple{ "publisher/summary_graph.js", Publisher_HTML_SummaryGraph_JS_data, Publisher_HTML_SummaryGraph_JS_size },
+      std::tuple{ "publisher/summary_managegraphs.js", Publisher_HTML_SummaryManageGraphs_JS_data, Publisher_HTML_SummaryManageGraphs_JS_size },
+      std::tuple{ "publisher/summary_graphoverview.js", Publisher_HTML_SummaryGraphOverview_JS_data, Publisher_HTML_SummaryGraphOverview_JS_size },
+      std::tuple{ "publisher/summary_graphoverview.css", Publisher_HTML_SummaryGraphOverview_CSS_data, Publisher_HTML_SummaryGraphOverview_CSS_size },
+      std::tuple{ "publisher/summary_graphcompare.js", Publisher_HTML_SummaryGraphCompare_JS_data, Publisher_HTML_SummaryGraphCompare_JS_size },
+      std::tuple{ "publisher/summary_graphmetrics.js", Publisher_HTML_SummaryGraphMetrics_JS_data, Publisher_HTML_SummaryGraphMetrics_JS_size },
+      std::tuple{ "publisher/summary_graphmetrics.css", Publisher_HTML_SummaryGraphMetrics_CSS_data, Publisher_HTML_SummaryGraphMetrics_CSS_size },
       std::tuple{ "third-party/plotly/plotly-3.3.0.min.js", reinterpret_cast<char const*>(Publisher_HTML_Ploty_JS), static_cast<size_t const>(Publisher_HTML_Ploty_JS_len) },
   }) {
     std::filesystem::path filePath = 
@@ -83,7 +88,7 @@ void ns_Publish::Config::Validate(bool forceInstall) const {
     }
   }
   for(auto const& [ file, data, size ] : {
-      std::tuple{ "publisher/summary_PR_config.js", Publisher_HTML_SummaryPRConfig_JS_data, Publisher_HTML_SummaryPRConfig_JS_size },
+      std::tuple{ "publisher/summary_config.js", Publisher_HTML_SummaryConfig_JS_data, Publisher_HTML_SummaryConfig_JS_size },
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(html_ / file);

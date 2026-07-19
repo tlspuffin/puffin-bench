@@ -41,6 +41,9 @@ public:
       std::string const& ruleRelativePath, std::string const& filesFilter);
   bool Match(std::string const& file);
 
+  bool IsCampaign() const;
+  std::filesystem::path DataPath() const;
+
   virtual bool Apply(std::string const& file, std::filesystem::path const& outPath, 
       uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
       bool generateArtefact) = 0;
@@ -55,6 +58,8 @@ protected:
   TaskAnalysis ExtractExperimentsFromBuffer(std::string const& jsonTaskBuffer, 
       std::filesystem::path taskInfos, std::filesystem::path taskData);
 
+  void SetCampaignStatus(bool enable);
+
   static bool UpdateJSON(std::string jsonPath, rapidjson::Document& newJSON, 
       std::unordered_set<std::string>& libsManaged);
   static bool ValidateUpdatedJSON(std::string const& jsonPath);
@@ -66,9 +71,27 @@ protected:
   std::string const ruleRelativePath_;
   std::regex filesFilter_;
 
+private:
+  bool isCampaign_;
+  std::filesystem::path dataPath_;
+
+  static std::filesystem::path ExtractLiteralPathPrefix(std::string const& path);
+
 public:
   std::string debugFilesFilter_;
 };
+
+inline bool Rule::IsCampaign() const {
+  return isCampaign_;
+}
+
+inline std::filesystem::path Rule::DataPath() const {
+  return dataPath_;
+}
+
+inline void Rule::SetCampaignStatus(bool enable) {
+  isCampaign_ = enable;
+}
 
 inline bool Rule::ValidateUpdatedJSON(std::string const& jsonPath) {
   std::error_code ec;

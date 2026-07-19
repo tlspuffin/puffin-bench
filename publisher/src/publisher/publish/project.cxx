@@ -1,5 +1,4 @@
 #include "project.hxx"
-#include "rule_campaign_summary.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include <unordered_set>
@@ -143,22 +142,15 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std:
   std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::pair<std::string,std::string>>>> 
       result;
   for (auto const onerule : rules_) {
-    auto rule = std::dynamic_pointer_cast<ns_Publish::RuleCampaignUseSummary>(onerule);
-    if (!rule) {
+    if (!onerule->IsCampaign()) {
       continue;
     }
-    std::filesystem::path ruleFolder = path / rule->DataPath();
+    std::filesystem::path ruleFolder = path / onerule->DataPath();
 
     auto itDirectoryEnd = std::filesystem::recursive_directory_iterator();
     for(std::filesystem::recursive_directory_iterator it(ruleFolder); 
         it != itDirectoryEnd; ++it) {
       if (it->is_directory()) {
-        if (it.depth() >= 2) {
-          it.disable_recursion_pending();
-        }
-        continue;
-      }
-      if (it.depth() != 2) {
         continue;
       }
       if (!it->is_regular_file()) {
@@ -168,11 +160,16 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std:
         continue;
       }
       std::filesystem::path id = it->path().lexically_relative(ruleFolder);
+      std::ptrdiff_t const pathSize = std::distance(id.begin(), id.end());
+      if (pathSize < 3) {
+        continue;
+      }
       auto itID = id.begin();
+      std::advance(itID, pathSize - 3);
       std::string user = itID->string();
       std::string campaignName = (++itID)->string();
       std::string file = (++itID)->string();
-      result[user][campaignName].push_back({file, rule->DataPath() / id});
+      result[user][campaignName].push_back({file, onerule->DataPath() / id});
     }
   }
   return result;

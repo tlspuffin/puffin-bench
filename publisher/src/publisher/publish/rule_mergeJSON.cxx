@@ -1,5 +1,5 @@
 #include "rule_mergeJSON.hxx"
-#include "rule_perf_summary/generate_perf_zst.hxx"
+#include "zst/generate_perf_zst.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/file_compressed.hxx"
 #include "../../utils/rapidjson.hxx"
@@ -76,6 +76,7 @@ ns_Publish::RuleMergeJSON::RuleMergeJSON(std::string const& name, std::string co
   }
 
   generateZST_ = GetOrDefault<bool>(parameters, "generate_ZST", false);
+  SetCampaignStatus(GetOrDefault<bool>(parameters, "campaign", false));
 }
 
 bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::path const& outPath, 
@@ -184,7 +185,7 @@ bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::
       ListMergedKeys(dataField, mergedElementDst);
     } else {
       docDst.SetObject();
-      
+
       for (auto const& [key, keyValues] : mergedElementSrc) {
         for (std::string const& value : keyValues) {
           toMerge[key].insert(value);
@@ -262,7 +263,7 @@ bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::
         } else {
           it->value = rapidjson::Value(lastFiles);
         }
-      }    
+      }
     }
 
     std::string fullOutPath = outPath / dst;

@@ -1,10 +1,12 @@
-import { Metrics } from './summary_PR_metrics.js';
-import { manageGraphs } from './summary_PR_managegraphs.js';
+import { Metrics } from './summary_metrics.js';
+import { Graph } from './summary_graph.js';
+import { manageGraphs } from './summary_managegraphs.js';
 import '../third-party/plotly/plotly-3.3.0.min.js';
 const Plotly = window.Plotly;
 
 class GraphMetrics {
   #metrics;
+  #graph;
   #html;
   #selectType;
   #selectSubType;
@@ -14,6 +16,7 @@ class GraphMetrics {
 
   constructor(metrics) {
     this.#metrics = metrics;
+    this.#graph = new Graph(metrics);
     this.#Reset();
   }
 
@@ -208,8 +211,8 @@ class GraphMetrics {
     }
     
     const [ traces, layout, config, unusedCommitsList ] = 
-        this.#metrics.GenerateGraphData(selectedType, selectedLibrary, selectedMetric);
-    const ApplyColors = () => Metrics.ColorGraphXTicks(this.#graphContainer, unusedCommitsList, '#e74c3c');
+        this.#graph.GenerateGraphData(selectedType, selectedLibrary, selectedMetric);
+    const ApplyColors = () => Graph.ColorGraphXTicks(this.#graphContainer, unusedCommitsList, '#e74c3c');
     Plotly.newPlot('graph-container', traces, layout, config)
         .then((result) => { ApplyColors(); this.#graphContainer.on('plotly_afterplot', ApplyColors); });
 

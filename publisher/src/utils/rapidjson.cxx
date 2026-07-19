@@ -1,52 +1,52 @@
 #include "rapidjson.hxx"
+#include "logs.hxx"
 #include <fstream>
 #include <rapidjson/istreamwrapper.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h>
 
 bool ReadJSONFile(std::string const& file, rapidjson::Document& doc) {
   std::ifstream ifs(file);
   if (!ifs.is_open()) {
+    LOGE << "Unable to open JSON file: " << file << Log::Flags::End;
     //throw std::runtime_error("Unable to open JSON file: " + file);
     return false;
   }
   rapidjson::IStreamWrapper isw(ifs);
   if (doc.ParseStream(isw).HasParseError()) {
+    LOGE << "Error JSON file corrupted: " << file << Log::Flags::End;
     //throw std::runtime_error("Error JSON file corrupted: " + file);
     return false;
   }
   return true;
 }
 
-bool SaveJSONFile(std::string const& file, rapidjson::Document const& doc, bool pretty) {
-  rapidjson::Writer<rapidjson::StringBuffer>* writer = nullptr;
+bool SaveJSONFile(std::string const& file, rapidjson::Value const& doc, bool pretty) {
   try {
-    rapidjson::StringBuffer buffer;
+    std::ofstream ofs(file);
+    if (!ofs) {
+      throw std::runtime_error("write opening fail");
+    }
+    rapidjson::OStreamWrapper osw(ofs);
     if (pretty) {
-      writer = new rapidjson::PrettyWriter<rapidjson::StringBuffer>(buffer);
+      rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(osw);
+      writer.SetIndent(' ', 2);
+      doc.Accept(writer);
     } else {
-      writer = new rapidjson::Writer<rapidjson::StringBuffer>(buffer);
+      rapidjson::Writer<rapidjson::OStreamWrapper> writer(osw);
+      doc.Accept(writer);
     }
-    doc.Accept(*writer);
-    std::ofstream outFile(file, std::ios::trunc);
-    if (!outFile.is_open()) {
-      throw std::runtime_error("Unable to open file " + file + " to write");
+    ofs << std::endl;
+    if (ofs.fail()) {
+      throw std::runtime_error("writing fail");
     }
-    outFile << buffer.GetString() << std::endl;
-    if (outFile.fail()) {
-      outFile.close();
-      throw std::runtime_error("Error while writing in " + file);
-    }
-    outFile.close();
-    delete writer;
     return true;
+  } catch(std::exception const& e) {
+    LOGE << "Unable save JSON file: " << file << " " << e.what() << Log::Flags::End;
   } catch(...)  {
-    if (writer != nullptr) {
-      delete writer;
-    }
-    return false;
+    LOGE << "Unable save JSON file: " << file << " unknown reason" << Log::Flags::End;
   }
+  return false;
 }
 
 uint64_t ParseDurationToSeconds(const std::string& str) {

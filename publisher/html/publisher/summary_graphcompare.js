@@ -1,5 +1,5 @@
-import { Metrics } from './summary_PR_metrics.js';
-import { manageGraphs } from './summary_PR_managegraphs.js';
+import { Graph } from './summary_graph.js';
+import { manageGraphs } from './summary_managegraphs.js';
 import '../third-party/plotly/plotly-3.3.0.min.js';
 const Plotly = window.Plotly;
 
@@ -178,10 +178,10 @@ class GraphCompare {
       return;
     }
 
-    let [layout, config] = Metrics.GenerateEmptyGraphData(this.#type, lib, metric, this.#commitsID);
+    let [layout, config] = Graph.GenerateEmptyGraphData(this.#type, lib, metric, this.#commitsID);
     let traces = [];
     this.#dataPoints.forEach(dataPoint => {
-        [traces, layout] = Metrics.AddGraphData([traces, layout], 
+        [traces, layout] = Graph.AddGraphData([traces, layout], 
             dataPoint?.[this.#type]?.[lib]?.[metric]
         );
     })

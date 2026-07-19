@@ -1,10 +1,12 @@
-import { Metrics } from './summary_PR_metrics.js';
-import { manageGraphs } from './summary_PR_managegraphs.js';
+import { Metrics } from './summary_metrics.js';
+import { Graph } from './summary_graph.js';
+import { manageGraphs } from './summary_managegraphs.js';
 import '../third-party/plotly/plotly-3.3.0.min.js';
 const Plotly = window.Plotly;
 
 class GraphOverview {
   #metrics;
+  #graph;
   #html;
   #type;
   #selectLib;
@@ -23,6 +25,7 @@ class GraphOverview {
   constructor(metrics, compareCommit =null) {
     this.#Reset();
     this.#metrics = metrics;
+    this.#graph = new Graph(metrics);
     this.#compareCommit = compareCommit;
   }
 
@@ -281,11 +284,11 @@ class GraphOverview {
       return;
     }
 
-    let [traces, layout, config, unusedCommitsList] = this.#metrics.GenerateGraphData(this.#type, lib, metric);
+    let [traces, layout, config, unusedCommitsList] = this.#graph.GenerateGraphData(this.#type, lib, metric);
     let highlightIndex = -1;
     let highlights = [];
     if (this.#compareCommit) {
-      [traces, layout, config, unusedCommitsList, highlightIndex] = this.#metrics.InsertComparaisonData(
+      [traces, layout, config, unusedCommitsList, highlightIndex] = this.#graph.InsertComparaisonData(
           [traces, layout, config, unusedCommitsList], 
           this.#compareCommit.dataPoints?.[this.#type]?.[lib]?.[metric], 
           this.#compareCommit.baseCommitID
@@ -296,8 +299,8 @@ class GraphOverview {
     layout.title.font.size = 14;
     layout.margin = { l: 50, r: 20, t: 40, b: 125 };
     const ApplyColors = () => {
-      Metrics.ColorGraphXTicks(container, unusedCommitsList, '#e74c3c');
-      Metrics.StyleGraphXTicks(container, highlights, { fontWeight: 'bold' });
+      Graph.ColorGraphXTicks(container, unusedCommitsList, '#e74c3c');
+      Graph.StyleGraphXTicks(container, highlights, { fontWeight: 'bold' });
     };
     Plotly.newPlot(containerId, traces, layout, config)
         .then(() => { ApplyColors(); container.on('plotly_afterplot', ApplyColors); });

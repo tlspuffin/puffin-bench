@@ -1,8 +1,5 @@
 #include "rule.hxx"
 #include "rule_mergeJSON.hxx"
-#include "rule_vuln3.hxx"
-#include "rule_perf_summary.hxx"
-#include "rule_campaign_summary.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/dir.hxx"
 #include "../../utils/time.hxx"
@@ -16,7 +13,9 @@
 ns_Publish::Rule::Rule(std::string const& name, std::string const& rulePath, 
     std::string const& ruleRelativePath, std::string const& filesFilter) 
     : name_(name), rulePath_(rulePath), ruleRelativePath_(ruleRelativePath), 
-    filesFilter_(filesFilter), debugFilesFilter_(filesFilter)
+    filesFilter_(filesFilter), isCampaign_(false), 
+    dataPath_(ruleRelativePath / Rule::ExtractLiteralPathPrefix(filesFilter)), 
+    debugFilesFilter_(filesFilter)
 {}
 
 bool ns_Publish::Rule::Match(std::string const& file) {
@@ -43,12 +42,6 @@ ns_Publish::Rule* ns_Publish::Rule::Build(std::string const& action,
     rapidjson::Value const& parameters) {
   if (action == "GenerateMergeJSON") {
     return new RuleMergeJSON(name, rulesPath, rulesRelativePath, filesFilter, parameters);
-  } else if (action == "GenerateReportVuln3") {
-    return new RuleVuln3(name, rulesPath, rulesRelativePath, filesFilter, parameters);
-  } else if (action == "GenerateReportPerfFromSummary") {
-    return new RulePerfUseSummary(name, rulesPath, rulesRelativePath, filesFilter, parameters);
-  } else if (action == "GenerateReportCampaignFromSummary") {
-    return new RuleCampaignUseSummary(name, rulesPath, rulesRelativePath, filesFilter, parameters);
   } else {
     return new RuleNULL(name, rulesPath, rulesRelativePath, filesFilter, parameters);
   }
@@ -315,4 +308,42 @@ std::unordered_set<std::string> ns_Publish::Rule::MergeResults(
   return libsManaged;
 }
 
+std::filesystem::path ns_Publish::Rule::ExtractLiteralPathPrefix(std::string const& path) {
+  static std::string const regexSpecials = ".*+?[]()|^$\\{}";
+  std::filesystem::path result;
 
+  size_t found = -1;
+  do {
+    size_t start = found + 1;
+    found = path.find('/', start);
+    auto segment = path.substr(start, found == std::string::npos ? found : found - start);
+
+    if (segment.empty()) {
+      break;
+    }
+
+    bool quit = false;
+    std::string unescapedSegment;
+    size_t startSegment = 0;
+    size_t i = segment.find_first_of(regexSpecials);
+    while (i != std::string::npos) {
+      quit = (segment[i] != '\\') || 
+          (segment.substr(i+1, 1).find_first_of(regexSpecials) == std::string::npos);
+      if (quit) {
+        break;
+      }
+      unescapedSegment += segment.substr(startSegment, i - startSegment);
+      startSegment = ++i;
+      i = segment.find_first_of(regexSpecials, i + 1);
+    }
+    if (quit) {
+      break;
+    }
+
+    unescapedSegment += segment.substr(startSegment);
+    result /= unescapedSegment;
+
+  } while (found != std::string::npos);
+
+  return result;
+}
