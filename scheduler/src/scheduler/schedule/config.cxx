@@ -1,11 +1,10 @@
 #include "config.hxx"
-#ifdef STATIC
-#include "reserve_port-static.h"
-#else
-#include "reserve_port.h"
-#endif
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/file_compressed.hxx"
+#include "embeded/scheduler/tools/reserve_port_blob.h"
+#include "embeded/scheduler/tools/qjs.h"
+#include "embeded/scheduler/js.h"
 #include <iostream>
 #include <fstream>
 
@@ -14,7 +13,8 @@ static ns_Schedule::Config defaultConfig;
 ns_Schedule::Config::Config() 
     : toolsPath_("tools"), runPath_("runs"), 
     exportPath_("exports"), exportCanceledPath_(exportPath_ / "Canceled"), 
-    userPath_("users_data"), executors_(), monitorsPath_(runPath_ / "monitors")
+    userPath_("users_data"), executors_(), monitorsPath_(runPath_ / "monitors"),
+    apiURL_()
 {}
 
 ns_Schedule::Config::~Config() {
@@ -23,7 +23,8 @@ ns_Schedule::Config::~Config() {
   }
 }
 
-void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
+void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc, 
+    std::string const& apiURL) {
   rapidjson::Value emptyScheduleConfig(rapidjson::kObjectType);
   rapidjson::Value const* scheduleConfig = &emptyScheduleConfig;
   if (doc.HasMember(name.c_str()) && (doc[name.c_str()].IsObject())) {
@@ -70,6 +71,7 @@ void ns_Schedule::Config::Load(std::string const& name, rapidjson::Value& doc) {
     }
   }
 
+  apiURL_ = apiURL;
 }
 
 void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc, 
@@ -110,7 +112,8 @@ void ns_Schedule::Config::Validate(bool forceInstall) const {
   auto discard = std::filesystem::canonical(toolsPath_);
 
   for(auto const& [ file, data, size ] : { 
-      std::tuple{ "reserve_port", (char const*)ReservePort_Binary, (size_t)ReservePort_Binary_len }
+      std::tuple{ "reserve_port", (char const*)ReservePort_Binary, (size_t)ReservePort_Binary_len },
+      std::tuple{ "qjs", (char const*)QuickJS_Binary, (size_t)QuickJS_Binary_len }
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(toolsPath_ / file);
@@ -124,6 +127,12 @@ void ns_Schedule::Config::Validate(bool forceInstall) const {
         std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
         std::filesystem::perm_options::replace);
     }
+  }
+
+  std::filesystem::path jsPath = toolsPath_ / "js";
+  std::vector<std::string> files = FileCompressed(FolderJS, FolderJS_len).ExtractAll(jsPath, forceInstall);
+  for(std::string const& file : files) { 
+    LOGI << "Creating missing required file " << jsPath / file << Log::Flags::End;
   }
 
   discard = std::filesystem::canonical(runPath_);

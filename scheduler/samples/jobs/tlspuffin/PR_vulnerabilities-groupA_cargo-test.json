@@ -42,6 +42,9 @@
       }
     }
   },
+  "args": {
+    "TYPE": "vuln"
+  },
   "name" : "Vulnerabilities (group A) search - ${COMMIT_ID}",
   "flow" : [
     {

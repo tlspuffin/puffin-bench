@@ -5,6 +5,9 @@
     "goal": "Campaign"
   },
   "configurations": ${RUNTIME_RUN_CONFIG},
+  "args": {
+    "TYPE": "campaign"
+  },
   "name" : "Campaign - Commit ${COMMIT_ID}",
   "flow" : [
     {
@@ -38,7 +41,7 @@
         }
       },
       {
-        "step": "ExperimentEndCommon"
+        "step": "ExperimentEnd"
       }
     ],
     {

@@ -29,9 +29,11 @@ struct Config {
 
   std::unordered_map<std::string, PublisherConfig> publishers_;
 
+  std::string apiURL_;
+
   Config();
   ~Config();
-  void Load(std::string const& name, rapidjson::Value& doc);
+  void Load(std::string const& name, rapidjson::Value& doc, std::string const& apiURL);
   void Save(std::string const& name, rapidjson::Value& doc, 
       rapidjson::MemoryPoolAllocator<>& alloc) const;
   void Validate(bool forceInstall) const;

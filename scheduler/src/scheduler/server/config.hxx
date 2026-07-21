@@ -9,10 +9,12 @@ namespace ns_Server {
 struct Config {
   uint16_t port_;
   bool secure_;
+  std::string hostname_;
   std::filesystem::path key_;
   std::filesystem::path cert_;
   std::filesystem::path CA_;
   std::filesystem::path html_;
+  std::string apiURL_;
 
   Config();
   void Load(std::string const& name, rapidjson::Value& doc);

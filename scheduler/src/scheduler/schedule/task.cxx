@@ -22,7 +22,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     std::unordered_map<std::string, std::string>& args, 
     std::string const& user, std::string const& jobType, 
-    std::map<std::string, std::string> md5, 
+    std::map<std::string, std::string> md5, std::string apiURL,
     ns_Executor::ExecutorsProvider const& executorsProvider)
     : id_(id), name_(name), files_path_(inDataPath), 
     functions_path_(functionsFile),
@@ -37,11 +37,21 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
     request_cancel_(false), cancel_source_(), publish_(), 
     md5_(std::move(md5)), state_(Task::State::Pending), publish_link_(), 
-    flag_()
+    flag_(), apiURL_(apiURL)
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
   }
+
+  static rapidjson::Value const emptyObject(rapidjson::kObjectType);
+  rapidjson::Value const& extraArgs = GetOrDefault<rapidjson::Value const&>(configJSON, "args", emptyObject);
+  for(auto it = extraArgs.MemberBegin(); it != extraArgs.MemberEnd(); ++it) {
+    if ((!it->name.IsString()) || (!it->value.IsString())) {
+      continue;
+    }
+    args_.emplace(it->name.GetString(), it->value.GetString());
+  }
+
   std::unordered_map<std::string, std::string> variables;
   for (const auto& [key, value] : args_) {
     variables.emplace(key, value);
@@ -218,6 +228,8 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   state_ = StateStringToEnum(Get<std::string>(config, "state"));
   publish_link_ = Get<std::string>(config, "publish_link");
   flag_ = ParseJSONObject(config, "flag", false);
+
+  apiURL_ = Get<std::string>(config, "api_url");
 }
 
 ns_Schedule::Task::~Task() {
@@ -415,6 +427,8 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("state", rapidjson::Value(StateEnumToString(state_).c_str(), alloc), alloc);
   out.AddMember("publish_link", rapidjson::Value(publish_link_.c_str(), alloc), alloc);
   out.AddMember("flag", rapidjson::Value(FlagJSON(), alloc), alloc);
+
+  out.AddMember("api_url", rapidjson::Value(apiURL_.c_str(), alloc), alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {

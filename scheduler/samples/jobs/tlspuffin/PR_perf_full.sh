@@ -398,35 +398,47 @@ ExperimentPostLaunchSetup() {
 }
 
 ExperimentReport() {
-  local tlspuffin_outpath=$( ls experiments/ )
-  local experiment_base="./experiments/${tlspuffin_outpath}"
-  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-    read nbClients execPerSec <<< "$(
-        tail -c 8192 "${statsJSON}" |\
-        sed 's/}{/\n/g' |\
-        grep '"type":"global"' |\
-        sed 's/,/\n/g' |\
-        awk -F: '
-          $1 ~ /clients/      { clients=$2+0 }
-          $1 ~ /exec_per_sec/ { exec=$2+0 }
-          END { print clients, exec }
-        '
-    )"
-    [[ "$nbClients" =~ ^[0-9]+$ ]] || nbClients=0;
-    [[ "$execPerSec" =~ ^[0-9]+$ ]] || execPerSec=0;
-    echo "{\"nb_cores\": ${THEJOB_NB_CORES}, \"nb_clients\": ${nbClients}, \"exec_per_sec\": ${execPerSec}}" >> "${THEJOB_USER_STATE_FILE}"
+  if [ -z "$1" ]; then
+    echo "Missing experimentUUID ref parameter"
+    return 1;
+  fi
+  local -n ref_experimentUUID=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing experiment_base ref parameter"
+    return 1;
+  fi
+  local -n ref_experiment_base=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing objective_count ref parameter"
+    return 1;
+  fi
+  local -n ref_objective_count=$1;
+  shift;
+
+  ref_experimentUUID=-1
+  [ -r "./.thejob_uuid" ] && ref_experimentUUID=$( cat ./.thejob_uuid )
+  if (( ref_experimentUUID != -1)); then
+    curl -s "${THEJOB_API_URL}/task/${THEJOB_TASK_ID}/state" -o "task.json" || return 1
   fi
 
-  local objective_dir="${experiment_base}/objective"
+  local tlspuffin_outpath=$( ls experiments/ )
+  ref_experiment_base="./experiments/${tlspuffin_outpath}"
+
+  ref_objective_count=0
+  local objective_dir="${ref_experiment_base}/objective"
   if [ -d "$objective_dir" ]; then
-    local objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
+    ref_objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
     # Display the following if obejctive_count is greater than 0
-    if [ "$objective_count" -gt 0 ]; then
+    if [ "${ref_objective_count}" -gt 0 ]; then
       local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
       local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       local now=$(date +%s)
       local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-      echo "{\"objective_count\": ${objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
+      echo "{\"objective_count\": ${ref_objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
     else
       echo "{\"objective_count\": 0}" >> "${THEJOB_USER_STATE_FILE}"
     fi
@@ -438,7 +450,6 @@ ExperimentReport() {
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
-  ExperimentReport
 }
 
 ExperimentRun() {
@@ -480,6 +491,8 @@ ExperimentRun() {
     echo "Missing required global variable: experiment"
     return 1;
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local binary="";
   local last_core=0;
@@ -537,6 +550,8 @@ ExperimentRunWithCargo() {
     echo "Missing required global variable: experiment"
     return 1
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
@@ -604,6 +619,7 @@ Init () {
 
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
   LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  AddGlobalParam LIBAFL_VERSION "${LIBAFL_VER}"
   echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
   AFL_CORES_GRAMMAR=$?
   AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"
@@ -831,110 +847,30 @@ ExperimentWithCargo () {
   return ${status}
 }
 
+ExperimentEnd() {
+  ExperimentEndCommon || return 1;
+
+  local experimentUUID=-1;
+  local experiment_base='';
+  local objective_count=0;
+  ExperimentReport experimentUUID experiment_base objective_count || return 1;
+  local outFile="${THEJOB_OUT_PATH}/summary-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json"
+  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
+    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${experimentUUID}" "${outFile}" >> "${THEJOB_USER_STATE_FILE}" 
+  else
+    echo '{ "error": "stats.json not found" }' > "${outFile}"
+  fi
+}
+
 SummaryRun () {
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
-
-  local flagObjective='false';
-  local json='{ "type": "perf", "libraries": [ ';
-  local firstlib=1;
-  while read -r libresults; do
-    local lib=${libresults#"$THEJOB_ARTEFACTS_PATH"/}
-    if (( ! firstlib )); then
-      json+=","
-    fi
-    firstlib=0
-
-    local cli_json='null'
-    local trust_objective=1
-    [ -s "${THEJOB_OUT_PATH}/cli-${lib}.json" ] && {
-      cli_json=$( cat "${THEJOB_OUT_PATH}/cli-${lib}.json" );
-      trust_objective=$( echo "${cli_json}" | 
-          jq 'if .library.name == "wolfssl" then if ((.library.version | tonumber?) // 541) > 540 then 1 else -1 end else 1 end' );
-    }
-
-    json+=" { \"name\": \"${lib}\", \"cli\": ${cli_json}, \"trust_objective\": ${trust_objective}, \"data\": [ ";
-    local firstRun=1;
-    while read -r i; do
-      local idRun=$( echo "${i}" | sed 's:.*/\([0-9][0-9]*\)-stats.json$:\1:' )
-
-      local startInfos=$( head -c 1M "${i}" | sed 's/}{/}\n{/g' | head -1 );
-      local startTime=$( echo "${startInfos}" | jq -r '.time.secs_since_epoch' );
-      local endInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | tail -1 );
-      echo "${endInfos}" | jq >/dev/null 2>&1 || endInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | tail -2 | head -1 );
-      local endTime=$( echo "${endInfos}" | jq -r '.time.secs_since_epoch' );
-      local runTime=$(( endTime - startTime ));
-
-      local endGlobalInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"global".*}$' | tail -1 );
-      echo "${endGlobalInfos}" | jq >/dev/null 2>&1 || endGlobalInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"global".*}$' | tail -2 | head -1 );
-
-      local corpus=$( echo "${endGlobalInfos}" | jq -r '.corpus_size' )
-      [ -z "${corpus}" ] && corpus='null';
-      local execs=$( echo "${endGlobalInfos}" | jq -r '.total_execs' )
-      [ -z "${execs}" ] && execs='null';
-      local nbClients=$( echo "${endGlobalInfos}" | jq -r '.clients' )
-      [ -z "${nbClients}" ] && nbClients=0;
-      local objectiveSize=$( echo "${endGlobalInfos}" | jq -r '.objective_size' )
-      if [ -z "${objectiveSize}" ]; then
-        objectiveSize=0;
-      elif (( trust_objective == 1 && objectiveSize > 0 )); then
-        flagObjective='true'
-      fi
-
-      if [ -n "$( head -c 1M "${i}" | sed 's/}{/}\n{/g' | jq -c --argjson n "${nbClients}" 'select(.id == $n)' 2>/dev/null | head -1 )" ] \
-          || [ -n "$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | jq -c --argjson n "${nbClients}" 'select(.id == $n)' 2>/dev/null | head -1 )" ]; then
-        (( ++nbClients ))
-      fi
-
-      local coverages=''
-      local nbDuration=0
-      local avgDuration=0
-      local endClientsInfos=$( tail -c 1M "${i}" | sed 's/}{/}\n{/g' | grep '{"type":"client".*}$' );
-      for (( client=1; client<nbClients; ++client )); do
-
-        local startClientInfos=$( head -c 2M "${i}" | sed 's/}{/}\n{/g' | grep "\"id\":${client}" | head -1 );
-        local clientStartTime=$( echo "$startClientInfos" | jq -r '.time.secs_since_epoch' )
-
-        local endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -1 );
-        echo "${endClientInfos}" | jq  >/dev/null 2>&1 || endClientInfos=$( echo "${endClientsInfos}" | grep "\"id\":${client}" | tail -2 | head -1 );
-
-        local clientCovHit=''
-        clientCovHit=$( echo "$endClientInfos" | jq -e -r '.coverage.hit // .coverage.discovered // empty' ) || clientCovHit='';
-        local clientCovMax=''
-        clientCovMax=$( echo "$endClientInfos" | jq -e -r '.coverage.max // empty' ) || clientCovMax='';
-        local clientCoverage=0
-
-        [ -n "${clientCovHit}" ] && {
-          [ -n "${clientCovMax}" ] && {
-            clientCoverage=$( echo "scale=8; ( ${clientCovHit} / ${clientCovMax} ) * 100" | bc | LC_ALL=C xargs printf "%.6f\n" )
-            [ -n "${coverages}" ] && coverages+=","
-            coverages+="${clientCoverage}"
-          }
-        }
-
-        local clientEndTime=$( echo "$endClientInfos" | jq -r '.time.secs_since_epoch' )
-        local clientDuration=;
-        [ -n "${clientStartTime}" ] && [ -n "${clientEndTime}" ] && clientDuration=$(( clientEndTime - clientStartTime  ))
-        [ -n "${clientDuration}" ] && {
-          (( avgDuration += clientDuration ));
-          (( ++nbDuration ));
-        }
-      done
-      [ -z "${coverages}" ] && coverages=''
-      (( nbDuration > 0)) && avgDuration=$(( avgDuration / nbDuration )) || avgDuration='"NA"';
-
-      if (( ! firstRun )); then
-        json+=","
-      fi
-      firstRun=0;
-      json+=" { \"id\": \"${idRun}\", \"duration\": ${runTime}, \"corpus_size\": ${corpus}, \"total_execs\": ${execs}, \"coverage\": [ ${coverages} ], \"objective_size\": ${objectiveSize}, \"client_average_duration_s\": ${avgDuration} }";
-
-    done < <(find "${libresults}" -name "*.json" | sort -V)
-    json+=" ] }";
-  done < <(find "${THEJOB_ARTEFACTS_PATH}"  -maxdepth 1 -mindepth 1 -type d | sort -V)
-  json+=" ], \"flag_objective\": ${flagObjective} }";
-  echo "${json}" > summary.json;
+  [ -z "${TYPE}" ] && TYPE="perf"
+  [ -z "${CAMPAIGN_ID}" ] && CAMPAIGN_ID="N/A"
   CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"
-  if [ "${flagObjective}" == 'true' ]; then
+  "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_summary_run.js" "${COMMIT_ID}" "${THEJOB_USER}" "${THEJOB_TASK_ID}" "${TYPE}" "${CAMPAIGN_ID}" "${THEJOB_ARTEFACTS_PATH}" "${THEJOB_OUT_PATH}" ./summary.json
+  local flagObjective=$?
+  (( flagObjective == 2 )) && return 1;
+  if [ "${flagObjective}" == '0' ]; then
     Flag '{"color": "#6f6f00"}';
   fi
   return 0;

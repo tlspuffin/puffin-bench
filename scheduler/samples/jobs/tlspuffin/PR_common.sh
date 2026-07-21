@@ -398,35 +398,47 @@ ExperimentPostLaunchSetup() {
 }
 
 ExperimentReport() {
-  local tlspuffin_outpath=$( ls experiments/ )
-  local experiment_base="./experiments/${tlspuffin_outpath}"
-  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-    read nbClients execPerSec <<< "$(
-        tail -c 8192 "${statsJSON}" |\
-        sed 's/}{/\n/g' |\
-        grep '"type":"global"' |\
-        sed 's/,/\n/g' |\
-        awk -F: '
-          $1 ~ /clients/      { clients=$2+0 }
-          $1 ~ /exec_per_sec/ { exec=$2+0 }
-          END { print clients, exec }
-        '
-    )"
-    [[ "$nbClients" =~ ^[0-9]+$ ]] || nbClients=0;
-    [[ "$execPerSec" =~ ^[0-9]+$ ]] || execPerSec=0;
-    echo "{\"nb_cores\": ${THEJOB_NB_CORES}, \"nb_clients\": ${nbClients}, \"exec_per_sec\": ${execPerSec}}" >> "${THEJOB_USER_STATE_FILE}"
+  if [ -z "$1" ]; then
+    echo "Missing experimentUUID ref parameter"
+    return 1;
+  fi
+  local -n ref_experimentUUID=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing experiment_base ref parameter"
+    return 1;
+  fi
+  local -n ref_experiment_base=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing objective_count ref parameter"
+    return 1;
+  fi
+  local -n ref_objective_count=$1;
+  shift;
+
+  ref_experimentUUID=-1
+  [ -r "./.thejob_uuid" ] && ref_experimentUUID=$( cat ./.thejob_uuid )
+  if (( ref_experimentUUID != -1)); then
+    curl -s "${THEJOB_API_URL}/task/${THEJOB_TASK_ID}/state" -o "task.json" || return 1
   fi
 
-  local objective_dir="${experiment_base}/objective"
+  local tlspuffin_outpath=$( ls experiments/ )
+  ref_experiment_base="./experiments/${tlspuffin_outpath}"
+
+  ref_objective_count=0
+  local objective_dir="${ref_experiment_base}/objective"
   if [ -d "$objective_dir" ]; then
-    local objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
+    ref_objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
     # Display the following if obejctive_count is greater than 0
-    if [ "$objective_count" -gt 0 ]; then
+    if [ "${ref_objective_count}" -gt 0 ]; then
       local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
       local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       local now=$(date +%s)
       local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-      echo "{\"objective_count\": ${objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
+      echo "{\"objective_count\": ${ref_objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
     else
       echo "{\"objective_count\": 0}" >> "${THEJOB_USER_STATE_FILE}"
     fi
@@ -438,7 +450,6 @@ ExperimentReport() {
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
-  ExperimentReport
 }
 
 ExperimentRun() {
@@ -480,6 +491,8 @@ ExperimentRun() {
     echo "Missing required global variable: experiment"
     return 1;
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local binary="";
   local last_core=0;
@@ -537,6 +550,8 @@ ExperimentRunWithCargo() {
     echo "Missing required global variable: experiment"
     return 1
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
@@ -604,6 +619,7 @@ Init () {
 
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
   LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  AddGlobalParam LIBAFL_VERSION "${LIBAFL_VER}"
   echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
   AFL_CORES_GRAMMAR=$?
   AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"

@@ -72,6 +72,8 @@ public:
   std::string publish_link_;
   std::string flag_;
 
+  std::string apiURL_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 
@@ -84,7 +86,7 @@ public:
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
       std::unordered_map<std::string, std::string>& args, 
       std::string const& user, std::string const& jobType, 
-      std::map<std::string, std::string> md5, 
+      std::map<std::string, std::string> md5, std::string apiURL, 
       ns_Executor::ExecutorsProvider const& executorsProvider);
   Task(rapidjson::Value const& config, 
       std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 

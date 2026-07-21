@@ -398,35 +398,47 @@ ExperimentPostLaunchSetup() {
 }
 
 ExperimentReport() {
-  local tlspuffin_outpath=$( ls experiments/ )
-  local experiment_base="./experiments/${tlspuffin_outpath}"
-  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-    read nbClients execPerSec <<< "$(
-        tail -c 8192 "${statsJSON}" |\
-        sed 's/}{/\n/g' |\
-        grep '"type":"global"' |\
-        sed 's/,/\n/g' |\
-        awk -F: '
-          $1 ~ /clients/      { clients=$2+0 }
-          $1 ~ /exec_per_sec/ { exec=$2+0 }
-          END { print clients, exec }
-        '
-    )"
-    [[ "$nbClients" =~ ^[0-9]+$ ]] || nbClients=0;
-    [[ "$execPerSec" =~ ^[0-9]+$ ]] || execPerSec=0;
-    echo "{\"nb_cores\": ${THEJOB_NB_CORES}, \"nb_clients\": ${nbClients}, \"exec_per_sec\": ${execPerSec}}" >> "${THEJOB_USER_STATE_FILE}"
+  if [ -z "$1" ]; then
+    echo "Missing experimentUUID ref parameter"
+    return 1;
+  fi
+  local -n ref_experimentUUID=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing experiment_base ref parameter"
+    return 1;
+  fi
+  local -n ref_experiment_base=$1;
+  shift;
+
+  if [ -z "$1" ]; then
+    echo "Missing objective_count ref parameter"
+    return 1;
+  fi
+  local -n ref_objective_count=$1;
+  shift;
+
+  ref_experimentUUID=-1
+  [ -r "./.thejob_uuid" ] && ref_experimentUUID=$( cat ./.thejob_uuid )
+  if (( ref_experimentUUID != -1)); then
+    curl -s "${THEJOB_API_URL}/task/${THEJOB_TASK_ID}/state" -o "task.json" || return 1
   fi
 
-  local objective_dir="${experiment_base}/objective"
+  local tlspuffin_outpath=$( ls experiments/ )
+  ref_experiment_base="./experiments/${tlspuffin_outpath}"
+
+  ref_objective_count=0
+  local objective_dir="${ref_experiment_base}/objective"
   if [ -d "$objective_dir" ]; then
-    local objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
+    ref_objective_count=$(find "$objective_dir" -type f -name "*.trace" | wc -l)
     # Display the following if obejctive_count is greater than 0
-    if [ "$objective_count" -gt 0 ]; then
+    if [ "${ref_objective_count}" -gt 0 ]; then
       local last_objective=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@ %Tc %p\n" | sort -nr 2>/dev/null | head -n1 | cut -d' ' -f2-)
       local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
       local now=$(date +%s)
       local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-      echo "{\"objective_count\": ${objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
+      echo "{\"objective_count\": ${ref_objective_count}, \"last_modified\": ${last_objective_elapsed}, \"last_objective\": \"${last_objective}\"}" >> "${THEJOB_USER_STATE_FILE}"
     else
       echo "{\"objective_count\": 0}" >> "${THEJOB_USER_STATE_FILE}"
     fi
@@ -438,7 +450,6 @@ ExperimentReport() {
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
-  ExperimentReport
 }
 
 ExperimentRun() {
@@ -480,6 +491,8 @@ ExperimentRun() {
     echo "Missing required global variable: experiment"
     return 1;
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local binary="";
   local last_core=0;
@@ -537,6 +550,8 @@ ExperimentRunWithCargo() {
     echo "Missing required global variable: experiment"
     return 1
   fi
+
+  echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
@@ -604,6 +619,7 @@ Init () {
 
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
   LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  AddGlobalParam LIBAFL_VERSION "${LIBAFL_VER}"
   echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
   AFL_CORES_GRAMMAR=$?
   AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"
@@ -838,6 +854,7 @@ CheckObjectif() {
     if (( statssize > statsmaxsize )); then
       echo "Try purge ${stats}";
       cp "${stats}" "${stats}.1"
+      [ ! -e "${stats}.0" ] && cp "${stats}" "${stats}.0"
       local purgeRetries=0
       while (( statssize > statsmaxsize )); do
         truncate -s 0 "${stats}";
@@ -900,189 +917,29 @@ ExperimentWithCargo () {
 }
 
 ExperimentEnd() {
-  ExperimentEndCommon
-  SaveSummary
-}
+  ExperimentEndCommon || return 1;
 
-SaveSummary() {
-  local output="summary.json";
-  CreateArtefact "summary.json" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-summary-stats.json" "commit_id:${COMMIT_ID}" "features:${features}"
-
-  #local stats=$( cat ./.xp_state_file )
-  local stats="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-stats.json"
-  [ -r "${stats}" ] || {
-    echo "{\"error\": \"no file ${stats} not found\"}" > "${output}"
-    return 1;
-  }
-
-  local -a filesLst=()
-  [ -r "${stats}.1" ] && filesLst+=("${stats}.1")
-  filesLst+=("${stats}")
-  : > "${output}"
-  for file in "${filesLst[@]}"; do
-    awk '
-      function Validate(line, is_first,       opens, closes, i, c) {
-        if (is_first == 1) {
-          if (line !~ /^\{/) return ""
-          line = substr(line, 2)
-        } else if (is_first == 0) {
-          if (line !~ /\}$/) return ""
-          line = substr(line, 1, length(line) - 1)
-        }
-
-        opens = 0
-        closes = 0
-        for (i = 1; i <= length(line); i++) {
-          c = substr(line, i, 1)
-          if (c == "{") opens++
-          else if (c == "}") closes++
-        }
-        if (opens != closes) return ""
-        return line
-    }
-      BEGIN {
-        RS="}{"; line=""; buffer=""; first_record="";
-      }
-      {
-        sub(/\n$/, "", $0)
-
-        line = buffer
-        if (NR == 1) {
-          first_record=$0;
-          buffer = Validate($0, 1)
-        } else {
-          buffer = $0
-        }
-        if (line != "") {
-          if (Validate(line, 2) != "") {
-            print "{" line "}"
-          }
-        }
-      }
-      END {
-        if (NR == 1) {
-          if (buffer !~ /^\{/) buffer = substr(first_record, 2);
-          else buffer = ""
-        }
-        line = Validate(buffer, 0)
-        if (line != "") {
-          print "{" line "}"
-        }
-      }
-    ' "${file}" >> "${output}"
-  done
-
-  local summary=$( awk '
-    BEGIN {
-      nb = 0;
-    }
-    {
-      if ($0 ~ /"type":"global"/) {
-        if (!global_set) {
-          global = $0
-          if ($0 !~ /"objective_size":0/) {
-            global_set = 1
-          }
-        }
-      } else if ($0 ~ /"type":"client"/) {
-        if (match($0, /"id": *[0-9]+/)) {
-          id = substr($0, RSTART, RLENGTH)
-          gsub(/[^0-9]/, "", id)
-          if (id > nb) { nb = id }
-          if (!clients_set[id]) {
-            clients[id] = $0
-            if ($0 !~ /"objective_size":0/) {
-              clients_set[id] = 1
-            }
-          }
-        }
-      }
-    }
-    END {
-      if (global) print global
-
-      for (id = 1; id <= nb; id++) {
-        if (clients[id]) print clients[id]
-      }
-    }' "${output}" | jq -c '.' 2>/dev/null )
-
-  echo "${summary}" > "${output}"
-  [ -r "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json" ] && cat "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json" >> "${output}" || echo "Missing \"${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json\"" >&2
+  local experimentUUID=-1;
+  local experiment_base='';
+  local objective_count=0;
+  ExperimentReport experimentUUID experiment_base objective_count || return 1;
 
   local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
-  [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && echo '{"run_error":"fuzzer timeout"}' >> "${output}"
-}
-
-ManageResults () {
-  echo "${vulnerabilities}"
-  python_storage="/local-unsafe/demengeo"
-  if [[ ! -d "${python_storage}/puffin-bench.venv" ]]; then
-    python3 -m venv "${python_storage}/puffin-bench.venv"
-    source "${python_storage}/puffin-bench.venv/bin/activate"
-    python3 -m pip install -r ${script}/requirements.txt
+  local errorFilePresent='false';
+  [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && errorFilePresent='true';
+  
+  local outFile="${THEJOB_OUT_PATH}/summary-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json"
+  if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
+    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/vuln_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${errorFilePresent}" "${experimentUUID}" "${outFile}" >> "${THEJOB_USER_STATE_FILE}"
   else
-    source "${python_storage}/puffin-bench.venv/bin/activate"
+    echo '{ "error": "stats.json not found" }' > "${outFile}"
   fi
-  python3 ${script}/cli.py generate --commit "${COMMIT_ID}" "${THEJOB_ARTEFACTS_PATH}" out.csv
-  python3 ${script}/cli.py report --outdir out out.csv
-  CreateArtefact "./out/report" "report" "commit_id:${COMMIT_ID}"
-  return 0
 }
 
 SummaryRun () {
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
-
-  echo -n '{ "type": "vuln", "libraries": [ ' > .run-summary.json.tmp
-  local firstlib=1;
-  while read -r libresults; do
-    local lib=${libresults#"${THEJOB_ARTEFACTS_PATH}/"}
-    if (( ! firstlib )); then
-      echo -n "," >> .run-summary.json.tmp
-    fi
-    firstlib=0
-    echo -n " { \"name\": \"${lib}\", \"data\": [ " >> .run-summary.json.tmp
-    local firstRun=1;
-    local cputs="";
-    while read -r i; do
-      local statsFile="${i#"${THEJOB_ARTEFACTS_PATH}/${lib}/"}";
-      local runID="${statsFile%'-summary-stats.json'}"
-      local readmeFile="${THEJOB_ARTEFACTS_PATH}/${lib}/${runID}-README.md"
-      local jsonEntry='';
-      if [ ! -r "${readmeFile}" ]; then
-        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
-        echo "Missing required file ${readmeFile}" >&2; 
-      elif [ ! -r "${i}" ]; then
-        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
-        echo "Missing required file ${i}" >&2; 
-      elif jq -e 'has("error")' "${i}" 2>/dev/null >&2; then
-        jsonEntry=" { \"id\": \"${runID}\", \"duration\": 0, \"total_execs\": 0, \"objective_size\": 0, \"valid\": false }";
-        echo "Error in required file ${i}" >&2; 
-      else
-        local startTime=$( date -d "$( sed -n 's/* Date: \(.*\)\.[0-9][0-9]*/\1/p' "${readmeFile}" )" +%s )
-        local endTime=$( jq -r 'select(.type=="global") | .time.secs_since_epoch' "${i}" )
-        local runTime=$(( endTime - startTime ))
-
-        local objectiveSize=$( jq -n '[inputs.objective_size] | max' "${i}" );
-        [ -z "${objectiveSize}" ] && objectiveSize=0;
-        local totalExecs=$( jq 'select(.type == "global") | .total_execs' "${i}" );
-        [ -z "${totalExecs}" ] && totalExecs=0;
-        jsonEntry=" { \"id\": \"${runID}\", \"duration\": ${runTime}, \"total_execs\": ${totalExecs}";
-        local cancelByRunError=$( jq -r 'select(has("run_error")) | .run_error' "${i}" )
-        [ -n "${cancelByRunError}" ] && { jsonEntry+=", \"run_error\": \"${cancelByRunError}\""; objectiveSize=0; }
-        jsonEntry+=", \"objective_size\": ${objectiveSize}, \"valid\": true }";
-        [ -z "${cputs}" ] && cputs=$( jq -r 'select(has("cputs")) | .cputs' "${i}" )
-      fi
-      if (( ! firstRun )); then
-        echo -n "," >> .run-summary.json.tmp
-      fi
-      firstRun=0;
-      echo -n  "${jsonEntry}" >> .run-summary.json.tmp
-
-    done < <( find "${libresults}" -name "*-summary-stats.json" | sort -V )
-    echo -n " ], \"cputs\": \"${cputs}\" }" >> .run-summary.json.tmp
-  done < <( find "${THEJOB_ARTEFACTS_PATH}" -maxdepth 1 -mindepth 1 -type d | sort -V )
-  echo " ] }" >> .run-summary.json.tmp
-  mv .run-summary.json.tmp run-summary.json;
-  CreateArtefact "./run-summary.json" "run-summary.json" "commit_id:${COMMIT_ID}"
+  [ -z "${TYPE}" ] && TYPE="vuln"
+  CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"
+  "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/vuln_summary_run.js" "${COMMIT_ID}" "${THEJOB_TASK_ID}" "${TYPE}" "${THEJOB_ARTEFACTS_PATH}" "${THEJOB_OUT_PATH}" ./summary.json || return 1;
   return 0;
 }

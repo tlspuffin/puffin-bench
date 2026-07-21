@@ -355,10 +355,11 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   LocalData* localData = new LocalData(step.nb_cores_);
   if (step.group_id_ == 0) {
     localData->run_path_ = localTaskData->run_path_ / step.ID();
+    localData->artefacts_file_ = localTaskData->run_path_ / (step.ID() + "-artefacts.json");
   } else {
     localData->run_path_ = localTaskData->run_path_ / step.GID();
+    localData->artefacts_file_ = localTaskData->run_path_ / (step.GID() + "-artefacts.json");
   }
-  localData->artefacts_file_ = localTaskData->run_path_ / (step.ID() + "-artefacts.json");
   localData->fatalerror_file_ = localTaskData->run_path_ / ("fe-" + step.ID());
   localData->done_file_ = localTaskData->run_path_ / (".done-" + step.ID());
 
@@ -509,8 +510,12 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_ARTEFACTS_FILE=\"" << localData->artefacts_file_ << "\"\n"
         << "THEJOB_ARTEFACTS_PATH=\"" << step.task_->artefacts_path_ << "\"\n"
         << "THEJOB_TOOLS_PATH=\"" << step.task_->tools_path_ << "\"\n"
+        << "THEJOB_USER=\"" << step.task_->user_ << "\"\n"
         << "THEJOB_UNIQ_STEP=" << (step.next_ == &step) << "\n"
         << "THEJOB_PID=" << pid << "\n"
+        << "THEJOB_API_URL=\"" << step.task_->apiURL_ << "\"\n"
+        << "THEJOB_TASK_ID=" << step.task_->id_ << "\n"
+        << "THEJOB_STEP_UUID=\"" << step.uuid_ << "\"\n"
         << "THEJOB_STEP_ID=\"" << step.id_ << "\"\n"
         << "THEJOB_STEP_NUMID=\"" << step.step_id_ << "\"\n"
         << "THEJOB_STEP_RANK_ID=\"" << step.rank_id_ << "\"\n"
@@ -764,7 +769,7 @@ void ns_Executor::Local::GetRunningOutput(
   }
   if (fd != -1) {
     localData->fdCaptureThread_.Read(fd, data);
-  } else {
+  } else if ((type != "stdout") && (type != "stderr")) {
     try {
       data.live = true;
       data.supportSeek = true;
@@ -797,6 +802,7 @@ ns_Executor::ExecutorData* ns_Executor::Local::CreateLocalData(
 }
 
 std::pair<bool, bool> ns_Executor::Local::LimitsState() {
+  // if cgroup up and was enough cpu to start a task, does not check cpu limit during task lifecycle
   return std::make_pair<>(
       (!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_), 
       stats_.freeMemory < memMinAllowed_
@@ -1059,11 +1065,11 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
     ReleaseCores(localData->cores_);
   }
 
-  SaveArtefacts(step);
-
   std::error_code ec;
   if ((step.group_status_ == ns_Schedule::Step::stepsGroup_None_) || 
-      (step.group_status_ == ns_Schedule::Step::stepsGroup_End_)) {
+      (step.group_status_ == ns_Schedule::Step::stepsGroup_End_) ||
+      step.task_->request_cancel_) {
+    SaveArtefacts(step);
     std::filesystem::remove_all(localData->run_path_, ec);
   }
   std::filesystem::remove(localData->step_parameters_file_, ec);
@@ -1331,7 +1337,7 @@ void ns_Executor::Local::GatherStats() {
   ns_System::MemoryMonitor::MemoryStats memory;
   os_.GetLoad(global, perCores, memory, stats_.storages);
   stats_.memory = memory.UsedRatio() * 100.0;
-  stats_.freeMemory = memory.free_kb * 1024;
+  stats_.freeMemory = memory.available_kb * 1024;
   stats_.totalMemory = memory.total_kb * 1024;
   stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
   stats_.perCores.resize(perCores.size());
@@ -1456,7 +1462,8 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
     }
   }
 
-  metadataJSON.AddMember(rapidjson::Value(step.ID().c_str(), metadataAlloc), 
+  std::string const metadataKey = (step.group_id_ == 0) ? step.ID() : step.GID();
+  metadataJSON.AddMember(rapidjson::Value(metadataKey.c_str(), metadataAlloc), 
       metadata, metadataAlloc);
 
   std::lock_guard<std::mutex> lock(step.task_->metadata_index_lock_);

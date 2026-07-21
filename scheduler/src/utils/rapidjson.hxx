@@ -5,14 +5,15 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
-void ReadJSONFile(std::string const& file, rapidjson::Document& doc);
+bool ReadJSONFile(std::string const& file, rapidjson::Document& doc);
+bool SaveJSONFile(std::string const& file, rapidjson::Value const& doc, bool pretty);
 
-template<typename T> T const GetOrDefault(rapidjson::Value const& obj,
+template<typename T, typename V> inline T const GetOrDefault(V& obj,
     char const* name, T const defaultValue);
 std::filesystem::path GetOrDefaultPath(
     rapidjson::Value const& obj, char const* name,
     std::filesystem::path const defaultValue);
-template<typename T> T Get(rapidjson::Value const& obj,
+template<typename T, typename V> T Get(V& obj,
     char const* name);
 std::filesystem::path GetPath(rapidjson::Value const& obj, 
     char const* name);
@@ -20,7 +21,7 @@ std::filesystem::path GetPath(rapidjson::Value const& obj,
 uint64_t ParseDurationToSeconds(const std::string& str);
 uint64_t ParseDurationToMilliSeconds(const std::string& str);
 
-template<typename T> inline T const GetOrDefault(rapidjson::Value const& obj,
+template<typename T, typename V> inline T const GetOrDefault(V& obj,
     char const* name, T const defaultValue) {
   auto it = obj.FindMember(name);
   if (it != obj.MemberEnd()) {
@@ -40,6 +41,8 @@ template<typename T> inline T const GetOrDefault(rapidjson::Value const& obj,
       if (value.IsObject()) return value.GetObject();
     } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstArray>) {
       if (value.IsArray()) return value.GetArray();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value const&>) {
+      if (value.GetType() == defaultValue.GetType()) return value;
     }
   }
   return defaultValue;
@@ -52,7 +55,7 @@ inline std::filesystem::path GetOrDefaultPath(
   return std::filesystem::weakly_canonical(std::filesystem::path(value));
 }
 
-template<typename T> inline T Get(rapidjson::Value const& obj,
+template<typename T, typename V> inline T Get(V& obj,
     char const* name) {
   auto it = obj.FindMember(name);
   if (it != obj.MemberEnd()) {
@@ -68,10 +71,18 @@ template<typename T> inline T Get(rapidjson::Value const& obj,
       if (value.IsDouble()) return static_cast<T>(value.GetDouble());
     } else if constexpr (std::is_same_v<T, std::string>) {
       if (value.IsString()) return std::string(value.GetString());
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::Object>) {
+      if (value.IsObject()) return value.GetObject();
     } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstObject>) {
       if (value.IsObject()) return value.GetObject();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value::Array>) {
+      if (value.IsArray()) return value.GetArray();
     } else if constexpr (std::is_same_v<T, rapidjson::Value::ConstArray>) {
       if (value.IsArray()) return value.GetArray();
+    } else if constexpr (std::is_same_v<T, rapidjson::Value&>) {
+      return value;
+    } else if constexpr (std::is_same_v<T, rapidjson::Value const&>) {
+      return value;
     }
   }
   throw std::runtime_error(std::string("Missing field ") + name + " in JSON data");

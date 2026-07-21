@@ -4,6 +4,7 @@
     "key": "security/site.key",
     "cert": "security/site.pem",
     "CA": "security/CA.pem",
+    "hostname": "localhost", 
     "port": 10082, 
     "html": "html"
   },

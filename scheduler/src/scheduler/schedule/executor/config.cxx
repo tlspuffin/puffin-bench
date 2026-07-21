@@ -4,8 +4,8 @@
 #include "../../../utils/rapidjson.hxx"
 #include "../../../utils/variables.hxx"
 
-#include "embeded/scheduler/executor_sh.h"
-#include "embeded/scheduler/functions_sh.h"
+#include "embeded/scheduler/scripts/executor_sh.h"
+#include "embeded/scheduler/scripts/functions_sh.h"
 
 #include <iostream>
 #include <fstream>

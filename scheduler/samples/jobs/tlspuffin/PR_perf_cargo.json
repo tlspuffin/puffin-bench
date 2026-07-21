@@ -38,6 +38,9 @@
       }
     }
   },
+  "args": {
+    "TYPE": "perf"
+  },
   "name" : "Performance - ${COMMIT_ID}",
   "flow" : [
     {
@@ -45,7 +48,7 @@
     }, 
     [
       {
-        "run": [ "LibreSSL", "BoringSSL", "OpenSSL", "WolfSSL" ],
+        "run": [ ],
         "configuration": {
           "nb_retry": 5,
           "nb_cores": 3
@@ -69,7 +72,7 @@
         }
       },
       {
-        "step": "ExperimentEndCommon"
+        "step": "ExperimentEnd"
       }
     ],
     {

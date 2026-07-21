@@ -75,7 +75,7 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   ns_Schedule::Task* task = new ns_Schedule::Task(
     task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
     config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, 
-    user, jobType, md5, schedule);
+    user, jobType, md5, config_.apiURL_, schedule);
 
   {
     std::lock_guard<std::mutex> lock(lock_);

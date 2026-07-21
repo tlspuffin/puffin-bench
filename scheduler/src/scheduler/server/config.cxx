@@ -2,36 +2,36 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 
-#include "embeded/html/board/logsmanager_js.h"
-#include "embeded/html/board/terminal_js.h"
-#include "embeded/html/board/clipboard_js.h"
-#include "embeded/html/board/board_html.h"
-#include "embeded/html/board/board_css.h"
-#include "embeded/html/board/board_js.h"
-#include "embeded/html/board/taskcard_css.h"
-#include "embeded/html/board/taskcard_js.h"
-#include "embeded/html/board/launchers/launchers_css.h"
-#include "embeded/html/board/launchers/launchers_js.h"
-//#include "embeded/html/board/custom/header_html.h"
-#include "embeded/html/board/launchers/tlspuffin/joblauncher_css.h"
-#include "embeded/html/board/launchers/tlspuffin/joblauncher_js.h"
-#include "embeded/html/board/launchers/config_js.h"
-#include "embeded/html/board/launchers/tlspuffin/config_js.h"
-#include "embeded/html/board/launchers/tlspuffin/jobsconfig_json.h"
-#include "embeded/html/board/task_html.h"
-#include "embeded/html/board/task_css.h"
-#include "embeded/html/board/task_js.h"
-#include "embeded/html/board/history_html.h"
-#include "embeded/html/board/history_css.h"
-#include "embeded/html/board/history_js.h"
-#include "embeded/html/jobsscripts/tlspuffin/PR_campaign_json.h"
-#include "embeded/html/jobsscripts/tlspuffin/PR_perf_cargo_json.h"
-#include "embeded/html/jobsscripts/tlspuffin/PR_perf_full_sh.h"
-#include "embeded/html/jobsscripts/tlspuffin/PR_vulnerabilities_full_sh.h"
-#include "embeded/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo_json.h"
-#include "embeded/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo_json.h"
-#include "embeded/html/jobsscripts/tlspuffin/shell_nix.h"
-#include "embeded/html/jobsscripts/tlspuffin/wolfssl_put_c_patch.h"
+#include "embeded/scheduler/html/board/logsmanager_js.h"
+#include "embeded/scheduler/html/board/terminal_js.h"
+#include "embeded/scheduler/html/board/clipboard_js.h"
+#include "embeded/scheduler/html/board/board_html.h"
+#include "embeded/scheduler/html/board/board_css.h"
+#include "embeded/scheduler/html/board/board_js.h"
+#include "embeded/scheduler/html/board/taskcard_css.h"
+#include "embeded/scheduler/html/board/taskcard_js.h"
+#include "embeded/scheduler/html/board/launchers/launchers_css.h"
+#include "embeded/scheduler/html/board/launchers/launchers_js.h"
+//#include "embeded/scheduler/html/board/custom/header_html.h"
+#include "embeded/scheduler/html/board/launchers/tlspuffin/joblauncher_css.h"
+#include "embeded/scheduler/html/board/launchers/tlspuffin/joblauncher_js.h"
+#include "embeded/scheduler/html/board/launchers/config_js.h"
+#include "embeded/scheduler/html/board/launchers/tlspuffin/config_js.h"
+#include "embeded/scheduler/html/board/launchers/tlspuffin/jobsconfig_json.h"
+#include "embeded/scheduler/html/board/task_html.h"
+#include "embeded/scheduler/html/board/task_css.h"
+#include "embeded/scheduler/html/board/task_js.h"
+#include "embeded/scheduler/html/board/history_html.h"
+#include "embeded/scheduler/html/board/history_css.h"
+#include "embeded/scheduler/html/board/history_js.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/PR_campaign_json.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/PR_perf_cargo_json.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/PR_perf_full_sh.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities_full_sh.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo_json.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo_json.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/shell_nix.h"
+#include "embeded/scheduler/html/jobsscripts/tlspuffin/wolfssl_put_c_patch.h"
 
 #include <fstream>
 #include <tuple>
@@ -39,8 +39,9 @@
 static ns_Server::Config defaultConfig;
 
 ns_Server::Config::Config()
-    : port_(10082), secure_(false), key_("security/site.key"), 
-    cert_("security/site.pem"), CA_("security/CA.pem"), html_("html")
+    : port_(10082), secure_(false), hostname_("localhost"), key_("security/site.key"), 
+    cert_("security/site.pem"), CA_("security/CA.pem"), html_("html"), 
+    apiURL_(std::string(secure_ ? "https" : "http") + "://" + hostname_ + ":" + std::to_string(port_) + "/api")
 {}
 
 void ns_Server::Config::Load(std::string const& name, rapidjson::Value& doc) {
@@ -56,16 +57,21 @@ void ns_Server::Config::Load(std::string const& name, rapidjson::Value& doc) {
     cert_ = GetOrDefaultPath(*srv, "cert", std::filesystem::path(defaultConfig.cert_));
     CA_ = GetOrDefaultPath(*srv, "CA",  std::filesystem::path(defaultConfig.CA_));
   }
+  hostname_ = GetOrDefault(*srv, "hostname", defaultConfig.hostname_);
   port_ = GetOrDefault<uint16_t>(*srv, "port",
       static_cast<uint16_t>(secure_ ? 8443 : defaultConfig.port_));
 
   html_ = GetOrDefault<std::string>(*srv, "html", defaultConfig.html_);
+
+  apiURL_ = secure_ ? "https" : "http";
+  apiURL_ += "://" + hostname_ + ":" + std::to_string(port_) + "/api";
 }
 
 void ns_Server::Config::Save(std::string const& name, rapidjson::Value& doc, 
     rapidjson::MemoryPoolAllocator<>& alloc) const {
   rapidjson::Value node(rapidjson::kObjectType);
   node.AddMember("secure", secure_, alloc);
+  node.AddMember("hostname", rapidjson::Value(hostname_.c_str(), alloc), alloc);
   node.AddMember("key", rapidjson::Value(key_.c_str(), alloc), alloc);
   node.AddMember("cert", rapidjson::Value(cert_.c_str(), alloc), alloc);
   node.AddMember("CA", rapidjson::Value(CA_.c_str(), alloc), alloc);
