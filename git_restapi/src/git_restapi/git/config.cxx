@@ -2,7 +2,7 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/dir.hxx"
-#include "embeded/git_restapi/tlspuffin_history_sh.h"
+#include "embeded/git_restapi/scripts/tlspuffin_history_sh.h"
 #include <iostream>
 #include <fstream>
 
@@ -12,19 +12,16 @@ ns_GIT::Config::Config()
 
 void ns_GIT::Config::Load(std::string const& name, rapidjson::Value& doc) {
   rapidjson::Value emptyGitConfig(rapidjson::kObjectType);
-  rapidjson::Value const* gitConfig = &emptyGitConfig;
-  if (doc.HasMember(name.c_str()) && (doc[name.c_str()].IsObject())) {
-    gitConfig = &(doc[name.c_str()]);
-  }
+  rapidjson::Value const& gitConfig = GetOrDefault<rapidjson::Value const&>(doc, name.c_str(), emptyGitConfig);
 
-  scriptsPath_ = GetOrDefaultPath(*gitConfig, "scripts", scriptsPath_);
-  storage_ = GetOrDefaultPath(*gitConfig, "storage", storage_);
+  scriptsPath_ = GetOrDefaultPath(gitConfig, "scripts", scriptsPath_);
+  storage_ = GetOrDefaultPath(gitConfig, "storage", storage_);
 
   repositories_.clear();
-  if (!gitConfig->HasMember("repositories")) {
+  if (!gitConfig.HasMember("repositories")) {
     return;
   }
-  auto const& repositories = (*gitConfig)["repositories"];
+  auto const& repositories = gitConfig["repositories"];
   if (!repositories.IsObject()) {
     throw std::runtime_error("Configuration error " + name + "/repositories is not an object");
   }

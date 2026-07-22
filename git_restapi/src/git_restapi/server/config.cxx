@@ -10,18 +10,15 @@ ns_Server::Config::Config()
 
 void ns_Server::Config::Load(std::string const& name, rapidjson::Value& doc) {
   rapidjson::Value emptySrv(rapidjson::kObjectType);
-  rapidjson::Value const* srv = &emptySrv;
-  if (doc.HasMember(name.c_str()) && (doc[name.c_str()].IsObject())) {
-    srv = &(doc[name.c_str()]);
-  }
+  rapidjson::Value const& srv = GetOrDefault<rapidjson::Value const&>(doc, name.c_str(), emptySrv);
 
-  secure_ = GetOrDefault(*srv, "secure", defaultConfig.secure_);
+  secure_ = GetOrDefault(srv, "secure", defaultConfig.secure_);
   if (secure_) {
-    key_ = GetOrDefaultPath(*srv, "key", std::filesystem::path(defaultConfig.key_));
-    cert_ = GetOrDefaultPath(*srv, "cert", std::filesystem::path(defaultConfig.cert_));
-    CA_ = GetOrDefaultPath(*srv, "CA",  std::filesystem::path(defaultConfig.CA_));
+    key_ = GetOrDefaultPath(srv, "key", std::filesystem::path(defaultConfig.key_));
+    cert_ = GetOrDefaultPath(srv, "cert", std::filesystem::path(defaultConfig.cert_));
+    CA_ = GetOrDefaultPath(srv, "CA",  std::filesystem::path(defaultConfig.CA_));
   }
-  port_ = GetOrDefault<uint16_t>(*srv, "port",
+  port_ = GetOrDefault<uint16_t>(srv, "port",
       static_cast<uint16_t>(secure_ ? 8443 : defaultConfig.port_));
 }
 
