@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage": "${PROJECT}/Campaign/${TASK_USER}/${CAMPAIGN_ID}/",
+    "storage": "${PACKAGE}/Campaign/${TASK_USER}/${CAMPAIGN_ID}/",
     "goal": "Campaign"
   },
   "configurations": ${RUNTIME_RUN_CONFIG},

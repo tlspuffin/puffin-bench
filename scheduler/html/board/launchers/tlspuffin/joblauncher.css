@@ -437,6 +437,9 @@
   flex: 1;
 }
 
+.jl-package-row { display: none; }
+.jl-package-row.visible { display: flex; }
+
 .jl-timeout-row {
   display: flex;
   align-items: center;

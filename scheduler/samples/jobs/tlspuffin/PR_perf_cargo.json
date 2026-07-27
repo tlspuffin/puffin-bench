@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage": "${PROJECT}/PR/${COMMIT_ID}/Perf/",
+    "storage": "${PACKAGE}/PR/${COMMIT_ID}/Perf/",
     "goal": "Perf PR/Commit ${COMMIT_ID}"
   },
   "configurations": {

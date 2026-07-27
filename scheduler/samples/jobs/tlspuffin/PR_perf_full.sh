@@ -190,9 +190,11 @@ ExperimentSetup() {
   local features="$1";
   shift
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
-  ref_binary="${THEJOB_OUT_PATH}/tlspuffin-${THEJOB_STEP_ID}"
+  ref_binary="${THEJOB_OUT_PATH}/${PACKAGE}-${THEJOB_STEP_ID}"
   ref_last_core=$(( THEJOB_NB_CORES - 1 ))
 
   if [ ! -x "${ref_binary}" ]; then
@@ -239,6 +241,8 @@ ExperimentSetupForCargo() {
   local -n ref_esfc_features=$1;
   shift
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
   local featureLib=${ref_esfc_features};
 
   [ -z "${PREFIX_FAKETIME}" ] && PREFIX_FAKETIME="" || echo "Using faketime"
@@ -279,7 +283,7 @@ ExperimentSetupForCargo() {
     fi
   fi
 
-  local jsonCompilInfos="{ \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -551,14 +555,16 @@ ExperimentRunWithCargo() {
     return 1
   fi
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -637,6 +643,8 @@ Build() {
     return 1
   fi
 
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
+
   local cputs=false
   ComputeBuildRuntimeInfo "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
@@ -644,9 +652,9 @@ Build() {
   }
 
   [ -z "${COMMIT_ID}" ] && COMMIT_ID="main"
-  md5sum_res=$( echo "tlspuffin-${COMMIT_ID}-${features}-${vendor}" | md5sum )
-  cache_id="tlspuffin-${md5sum_res%% *}"
-  echo "tlspuffin-${COMMIT_ID}-${features}-${vendor} = ${cache_id}"
+  md5sum_res=$( echo "${PACKAGE}-${COMMIT_ID}-${features}-${vendor}" | md5sum )
+  cache_id="${PACKAGE}-${md5sum_res%% *}"
+  echo "${PACKAGE}-${COMMIT_ID}-${features}-${vendor} = ${cache_id}"
   cache_ok=1
   if [[ "${COMMIT_ID}" != "main" ]]; then
     binary=$( QueryCache -q "${cache_id}" )
@@ -658,13 +666,13 @@ Build() {
     if ${cputs}; then
       nix-shell --run "./tools/mk_vendor make '${vendor}'"
     fi
-    nix-shell --run "cargo build --bin tlspuffin --release --features=${features} -j ${THEJOB_NB_CORES}" || return 1
-    binary=$( realpath ./target/release/tlspuffin )
+    nix-shell --run "cargo build --bin \"${PACKAGE}\" --release --features=${features} -j ${THEJOB_NB_CORES}" || return 1
+    binary=$( realpath "./target/release/${PACKAGE}" )
     SetCache "${cache_id}" "${binary}"
   else
     echo "Found in cache"
   fi
-  cp "${binary}" "${THEJOB_OUT_PATH}/tlspuffin-${THEJOB_STEP_ID}" || return 1;
+  cp "${binary}" "${THEJOB_OUT_PATH}/${PACKAGE}-${THEJOB_STEP_ID}" || return 1;
 
   return 0
 }
@@ -678,6 +686,8 @@ ForcedBuild() {
     echo "Missing required global variable: experiment"
     return 1
   fi
+
+  [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
 
@@ -693,12 +703,12 @@ ForcedBuild() {
   fi
 
   rm -rf ./seeds
-  echo "nix-shell --run \"cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed\""
-  nix-shell --run "cargo run --release --bin tlspuffin --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+  echo "nix-shell --run \"cargo run --release --bin \"${PACKAGE}\" --features=${features} -j ${THEJOB_NB_CORES} -- seed\""
+  nix-shell --run "cargo run --release --bin \"${PACKAGE}\" --features=${features} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   rm -rf ./experiments
-  echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin tlspuffin --release --features=${features} -- help" || return 1
+  echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- help\""
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release --features=${features} -- help" || return 1
 }
 
 Clean() {

@@ -32,6 +32,7 @@
       "job_type": "perf",
       "color":    "#4CAF50",
       "campaign": false,
+      "package":  ["tlspuffin", "sshpuffin"],
       "config":   "/files/jobsscripts/tlspuffin/PR_perf_cargo.json",
       "script":   "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
       "files":    [
@@ -54,6 +55,7 @@
       "job_label": "Camp@${COMMIT:6} ${CAMPAIGN-ID}",
       "color":     "#a78bfa",
       "campaign":  true,
+      "package":  ["tlspuffin", "sshpuffin"],
       "config":    "/files/jobsscripts/tlspuffin/PR_campaign.json",
       "script":    "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
       "files":     [

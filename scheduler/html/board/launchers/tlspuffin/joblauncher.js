@@ -41,6 +41,9 @@ export class JobLauncher {
   #vendorInput     = null;
   #usernameInput  = null;
   #commitInfoEl   = null;
+  #packageRow      = null;
+  #packageInput    = null;
+  #packageDatalist = null;
   #launchBtn           = null;
   #confirmUnknownEl    = null;
   #confirmUnknownCheck = null;
@@ -180,6 +183,22 @@ export class JobLauncher {
     commitSection.append(commitLabel, commitWrapper, this.#commitInfoEl);
     body.appendChild(commitSection);
 
+    // ── Package (only for job types that declare a "package" list) ──
+    this.#packageRow = this.#el('div', 'jl-field-row', 'jl-package-row');
+    const packageLabel = this.#el('span', 'jl-label');
+    packageLabel.textContent = 'Package';
+    this.#packageInput = this.#el('input', 'jl-commit-input');
+    this.#packageInput.type = 'text';
+    this.#packageInput.placeholder = 'e.g. tlspuffin';
+    this.#packageInput.spellcheck = false;
+    this.#packageInput.autocomplete = 'off';
+    this.#packageInput.setAttribute('list', 'jl-package-list');
+    this.#packageInput.addEventListener('input', () => this.#validate());
+    this.#packageDatalist = this.#el('datalist');
+    this.#packageDatalist.id = 'jl-package-list';
+    this.#packageRow.append(packageLabel, this.#packageInput, this.#packageDatalist);
+    body.appendChild(this.#packageRow);
+
     // ── Campaign-only fields ──
     this.#campaignExtra = this.#el('div', 'jl-campaign-extra');
 
@@ -233,6 +252,7 @@ export class JobLauncher {
       input.addEventListener('change', () => {
         this.#selectedType = job.value;
         this.#campaignExtra.classList.toggle('visible', !!job.campaign);
+        this.#updatePackageOptions(job);
         this.#autoUpdateTitle();
         this.#validate();
       });
@@ -242,6 +262,18 @@ export class JobLauncher {
       const dot = this.#el('span', 'jl-dot');
       lbl.append(dot, ' ' + job.label);
       this.#chipsWrap.append(input, lbl);
+    }
+  }
+
+  #updatePackageOptions(job) {
+    this.#packageDatalist.innerHTML = '';
+    const packages = Array.isArray(job?.package) ? job.package : [];
+    this.#packageRow.classList.toggle('visible', packages.length > 0);
+    this.#packageInput.value = packages[0] ?? '';
+    for (const pkg of packages) {
+      const opt = this.#el('option');
+      opt.value = pkg;
+      this.#packageDatalist.appendChild(opt);
     }
   }
 
@@ -719,7 +751,8 @@ export class JobLauncher {
     const jobDef        = this.#jobDefs.find(j => j.value === this.#selectedType);
     const vendorOk      = !jobDef?.campaign || this.#vendorInput.value.trim().length > 0;
     const campaignIdOk  = !jobDef?.campaign || this.#campaignIdInput.value.trim().length > 0;
-    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && campaignIdOk);
+    const packageOk     = !jobDef?.package?.length || this.#packageInput.value.trim().length > 0;
+    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && campaignIdOk && packageOk);
   }
 
   // ── Launch ────────────────────────────────────────────────────────────────
@@ -801,7 +834,7 @@ export class JobLauncher {
         fd.append('files[]', blobs[2 + i], jobDef.files[i].split('/').pop());
 
       fd.append('args[COMMIT_ID]', commit);
-      fd.append('args[PROJECT]', 'tlspuffin');
+      fd.append('args[PACKAGE]', this.#packageInput.value.trim() || 'tlspuffin');
       if (isCampaign) {
         fd.append('args[CAMPAIGN_ID]', this.#campaignIdInput.value.trim());
         fd.append('args[SAVE_CORPUS]', 1);
@@ -863,6 +896,9 @@ export class JobLauncher {
     this.#taskNameInput.value = '';
     this.#overlay.querySelectorAll('input[name="jl-job-type"]').forEach(i => i.checked = false);
     this.#commitInput.value = '';
+    this.#packageInput.value = '';
+    this.#packageDatalist.innerHTML = '';
+    this.#packageRow.classList.remove('visible');
     this.#campaignExtra.classList.remove('visible');
     this.#timeoutDayInput.value  = '0';
     this.#timeoutInput.value     = '3';

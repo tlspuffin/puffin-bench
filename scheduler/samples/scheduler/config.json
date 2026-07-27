@@ -24,7 +24,7 @@
       "default": {
         "base_url": "http://127.0.0.1:10083",
         "notify_endpoint": "/api/notify",
-        "view_endpoint": "/files/${PROJECT}#${TASK_ID}",
+        "view_endpoint": "/files/${PACKAGE}#${TASK_ID}",
         "storage": "/home/olivier/Desktop/Archives"
       }
     },

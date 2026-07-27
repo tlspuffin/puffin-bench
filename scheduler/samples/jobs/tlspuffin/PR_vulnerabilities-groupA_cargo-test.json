@@ -1,7 +1,7 @@
 {
   "publish": {
     "server": "default",
-    "storage": "tlspuffin/PR/${COMMIT_ID}/Vuln/",
+    "storage": "${PACKAGE}/PR/${COMMIT_ID}/Vuln/",
     "goal": "Vuln PR/Commit ${COMMIT_ID}"
   },
   "configurations": {
