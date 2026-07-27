@@ -5,20 +5,17 @@ set (CMAKE_CXX_STANDARD 17)
 
 include(CMakeExternal.cmake)
 include(CMakeTextEmbedding.cmake)
+include(CMakeBinaryEmbedding.cmake)
 
 set(DEPS_BASE_DIR "${CMAKE_SOURCE_DIR}/third-party")
 
-find_program(XXD xxd REQUIRED)
-set(VISCOMPARATOR_PLOTLYJS_BLOB_H "plotly_3_3_0_min_js.h")
-add_custom_command(
-  OUTPUT ${VISCOMPARATOR_PLOTLYJS_BLOB_H}
-  COMMAND ${CMAKE_COMMAND} -E env
-          OUT=${VISCOMPARATOR_PLOTLYJS_BLOB_H}
-          sh -c "${XXD} -i -n VisComparator_HTML_Ploty_JS \"${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js\" > \"${VISCOMPARATOR_PLOTLYJS_BLOB_H}\""
-  COMMENT "Generating ${VISCOMPARATOR_PLOTLYJS_BLOB_H} from reserve_port with xxd -i"
-  VERBATIM
-)
-add_custom_target(viscomparator_plotly_3_3_0_min_js_h DEPENDS ${VISCOMPARATOR_PLOTLYJS_BLOB_H})
+get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT CMAKE_BUILD_TYPE AND NOT IS_MULTI_CONFIG)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif()
+
+EmbedBinaryFile("${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js" "${CMAKE_SOURCE_DIR}/embeded/vis_comparator/html/third-party/plotly/plotly_3_3_0_min_js.h" VisComparator_HTML_Ploty_JS)
 
 set(IN_VERSION_C "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in")
 set(GENERATED_VERSION_C "${CMAKE_BINARY_DIR}/version.c")
@@ -206,13 +203,13 @@ set(ANALYZE_SRC
   ${VISCOMPARATOR_WEBASSETS_HEADER}
   ${VISCOMPARATOR_TEMPLATES_HEADER}
 
-  ${GENERATED_VERSION_C}
+  ${CMAKE_SOURCE_DIR}/embeded/vis_comparator/html/third-party/plotly/plotly_3_3_0_min_js.h ${GENERATED_VERSION_C}
 )
 
 add_library(vis_comparator.lib STATIC ${ANALYZE_SRC})
 target_link_libraries(vis_comparator.lib PUBLIC ${RapidjsonTN} ${PocoTN} ${LibArchiveTN} ZStdSeekable)
-target_include_directories(vis_comparator.lib PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
-add_dependencies(vis_comparator.lib generate_version viscomparator_plotly_3_3_0_min_js_h)
+target_include_directories(vis_comparator.lib PRIVATE ${CMAKE_SOURCE_DIR})
+add_dependencies(vis_comparator.lib generate_version)
 
 add_executable(vis_comparator src/analyze/main.cxx)
 target_link_libraries(vis_comparator PRIVATE vis_comparator.lib)

@@ -8,7 +8,7 @@
 #include <iostream>
 #include "Poco/Exception.h"
 #include "Poco/URI.h"
-#include "plotly_3_3_0_min_js.h"
+#include "embeded/vis_comparator/html/third-party/plotly/plotly_3_3_0_min_js.h"
 
 static ns_Server::Config defaultConfig;
 
