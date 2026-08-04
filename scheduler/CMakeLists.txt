@@ -28,40 +28,6 @@ else()
   set_source_files_properties(${GENERATED_VERSION_C} PROPERTIES GENERATED TRUE)
 endif()
 
-add_executable(reserve_port src/reserve_port.c)
-
-add_executable(reserve_port-static src/reserve_port.c)
-target_link_options(reserve_port-static PRIVATE -static)
-
-EmbedBinaryTarget(reserve_port "${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/reserve_port_blob.c" ReservePort_Binary)
-EmbedBinaryTarget(reserve_port-static "${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/reserve_port_blob-static.c" ReservePort_Binary)
-
-set(QUICKJS_CMAKE_ARGS
-    "-DBUILD_SHARED_LIBS=OFF"
-    "-DQJS_BUILD_CLI_STATIC=ON"
-)
-FetchAndCreateExternalLib(
-  NAME           QuickJS
-  OUTPUT_TARGET  QuickJSTN
-  GIT_URL        https://github.com/quickjs-ng/quickjs.git
-  GIT_TAG        v0.15.1
-  CMAKE_ARGS     ${QUICKJS_CMAKE_ARGS}
-  LIBTYPE        STATIC
-  HEADERSAMPLE   "quickjs.h"
-  REQUIREDLIBS   "qjs"
-  #VERBOSE
-)
-
-if(IS_MULTI_CONFIG)
-  set(QJS_CLI_BLD "${${QuickJSTN}_INSTALL_DIR}/$<CONFIG>/bin/qjs${CMAKE_EXECUTABLE_SUFFIX}")
-else()
-  set(QJS_CLI_BLD "${${QuickJSTN}_INSTALL_DIR}/${CMAKE_BUILD_TYPE}/bin/qjs${CMAKE_EXECUTABLE_SUFFIX}")
-endif()
-EmbedBinaryFile("${QJS_CLI_BLD}" "${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/qjs.c" QuickJS_Binary)
-add_custom_target(deploy_qjs_cli ALL
-  COMMAND ${CMAKE_COMMAND} -E copy "${QJS_CLI_BLD}" "${CMAKE_BINARY_DIR}/"
-)
-
 FetchAndCreateExternalLib(
   NAME          zlib
   OUTPUT_TARGET zlibTN
@@ -174,8 +140,6 @@ FetchAndCreateExternalLib(
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/executor.sh" "${CMAKE_SOURCE_DIR}/embeded/scheduler/scripts/executor_sh.h" Executor_Script)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_SOURCE_DIR}/embeded/scheduler/scripts/functions_sh.h" Functions_Script)
 
-#EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/custom/header.html" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/custom/header_html.h" CustomHeader_HTML)
-
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/logsmanager.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/logsmanager_js.h" LogsManager_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/terminal_js.h" Terminal_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/clipboard.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/clipboard_js.h" Clipboard_JS)
@@ -193,23 +157,6 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.html" "${CMA
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h" History_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h" History_JS)
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/tlspuffin/joblauncher.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/joblauncher_css.h" TLSPuffinJobLauncher_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/tlspuffin/joblauncher.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/joblauncher_js.h" TLSPuffinJobLauncher_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/launchersconfig.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/config_js.h" LaunchersConfig_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/launcherstlspuffinconfig.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/config_js.h" TLSPuffinLaunchersConfig_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/jobsconfig.json" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/jobsconfig_json.h" JobsConfig_JSON)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/PR_campaign.json" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_campaign_json.h" PRCampaign_JSON)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/PR_perf_cargo.json" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_perf_cargo_json.h" PRPerfCargo_JSON)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/PR_perf_full.sh" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_perf_full_sh.h" PRPerfFull_SH)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/PR_vulnerabilities_full.sh" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities_full_sh.h" PRVulnerabilitiesFull_SH)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/PR_vulnerabilities-groupA_cargo.json" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo_json.h" PRVulnerabilitiesGroupACargo_JSON)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/PR_vulnerabilities-groupB_cargo.json" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo_json.h" PRVulnerabilitiesGroupBCargo_JSON)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/shell.nix" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/shell_nix.h" Shell_NIX)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/samples/jobs/tlspuffin/wolfssl_put.c.patch" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/wolfssl_put_c_patch.h" WolfsslPutC_PATCH)
-
-EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}/js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/js.c" FolderJS 
-  FILES utils.js perf_summary_run.js perf_experiment_end.js vuln_summary_run.js vuln_experiment_end.js)
-
 set(SCHEDULER_SRC 
   src/scheduler/config.cxx 
   src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/variables.cxx src/utils/file.cxx src/utils/md5_poco.cxx src/utils/file_compressed.cxx src/utils/dir.cxx
@@ -225,28 +172,12 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/scripts/executor_sh.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/scripts/functions_sh.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/logsmanager_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/terminal_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/clipboard_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_js.h
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/logsmanager_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/terminal_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/clipboard_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h
-  #${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/custom/header_html.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/joblauncher_css.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/joblauncher_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/config_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/config_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/tlspuffin/jobsconfig_json.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_campaign_json.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_perf_cargo_json.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_perf_full_sh.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities_full_sh.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo_json.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo_json.h
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/shell_nix.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/jobsscripts/tlspuffin/wolfssl_put_c_patch.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/reserve_port_blob.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/qjs.c ${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/qjs.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/js.c ${CMAKE_SOURCE_DIR}/embeded/scheduler/js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_js.h 
   ${GENERATED_VERSION_C}
 )
 
@@ -255,10 +186,10 @@ target_link_libraries(scheduler.lib PUBLIC ${RapidjsonTN} ${PocoTN} ${LibArchive
 target_include_directories(scheduler.lib PRIVATE ${CMAKE_SOURCE_DIR})
 add_dependencies(scheduler.lib generate_version)
 
-add_executable(scheduler src/scheduler/main.cxx ${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/reserve_port_blob.c)
+add_executable(scheduler src/scheduler/main.cxx)
 target_link_libraries(scheduler PRIVATE scheduler.lib)
 
-add_executable(scheduler-static src/scheduler/main.cxx ${CMAKE_SOURCE_DIR}/embeded/scheduler/tools/reserve_port_blob-static.c)
+add_executable(scheduler-static src/scheduler/main.cxx)
 target_link_libraries(scheduler-static PRIVATE scheduler.lib)
 target_link_options(scheduler-static PRIVATE -static-libgcc -static-libstdc++)
 
