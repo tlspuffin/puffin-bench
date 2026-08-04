@@ -1,10 +1,12 @@
 import { logsManager } from './logsmanager.js';
 import { Clipboard } from './clipboard.js';
+import { DropMenu } from './dropmenu.js';
 
 export class TaskCard {
 
   // Options
   #onRefresh;
+  #launchers;
 
   /**
    * @param {object}   options
@@ -12,6 +14,44 @@ export class TaskCard {
    */
   constructor(options = {}) {
     this.#onRefresh = options.onRefresh ?? (() => {});
+    this.#launchers = options.launchers ??  [];
+
+    DropMenu.CreateStyle({
+      label: `
+        ._dm_Label {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 26px;
+          height: 26px;
+          border-radius: 6px;
+          color: #aaa;
+          font-weight: bold;
+          user-select: none;
+          cursor: pointer;
+          transition: background 0.2s, color 0.2s;
+        }
+        ._dm_Label:hover {
+          background: rgba(255,255,255,0.08);
+          color: #fff;
+        }`,
+      actions: `
+        ._dm_Actions {
+          width: max-content;
+          position: absolute;
+          right: 0px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          z-index: 8000;
+          background: #2d2d2d;
+          border: 1px solid #404040;
+          border-radius: 10px;
+          padding: 10px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+          gap: 8px;
+        }`
+    });
   }
 
   // ── Public ───────────────────────────────────────────────────
@@ -26,24 +66,46 @@ export class TaskCard {
       div.classList.add('card-task-cancelling');
     }
 
-    const cancelButton = document.createElement('button');
-    cancelButton.classList.add('card-attempt-cancel-btn');
-    cancelButton.textContent = 'Cancel';
-    cancelButton.onclick = async () => {
-        if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
-          return;
-        }
-        await this.#CancelTask(task.id);
-    };
-
-    // Count active steps to decide whether to show the cancel button
     let activeCount = 0;
     steps.forEach(byId => byId.forEach(attempts =>
       attempts.forEach(s => { if (s.state === 'Running' || s.state === 'Pending') activeCount++; })
     ));
-    if (activeCount === 0 || task.request_cancel) {
-      cancelButton.style.display = 'none';
+    const taskRunning = (activeCount > 0) && (!task.request_cancel);
+
+    const actions = [];
+    if (taskRunning) {
+      actions.push(this.#CreatePriorityUI(task));
+
+      const cancelButton = document.createElement('button');
+      cancelButton.classList.add('card-attempt-cancel-btn');
+      cancelButton.dataset.help = 'task.cancel';
+      cancelButton.textContent = 'Cancel';
+      cancelButton.onclick = async () => {
+          if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
+            return;
+          }
+          await this.#CancelTask(task.id);
+      };
+      actions.push(cancelButton);
     }
+
+    if (task?.launcher?.project) {
+      const restartButton = document.createElement('button');
+      restartButton.className = 'card-task-restart-btn';
+      restartButton.dataset.help = 'task.launchagain';
+      restartButton.textContent = 'New task ...';
+      restartButton.onclick = (event) => {
+        const launcherEntry = 
+            this.#launchers.find(launcher => launcher.label === task.launcher.project);
+        if (launcherEntry) {
+          launcherEntry.open(task.launcher?.custom ?? null);
+        }
+      };
+      actions.push(restartButton);
+    }
+
+    const dropmenu = (actions.length > 0) ? 
+      (new DropMenu({label: '...', actions: actions, helpKey: 'task.menu'})).Get() : document.createElement('div');
 
     let username = '';
     if (task?.user && (task.user != '')) {
@@ -58,7 +120,7 @@ export class TaskCard {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
         ['task-value-name', 'task-label-id', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, cancelButton]
+        [this.#CreateTaskLinks(task), 'Task ' + task.id, dropmenu]
       ));
       if (username != '') {
         divCardHeader.appendChild(this.#CreateCardLine(
@@ -71,7 +133,7 @@ export class TaskCard {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
         ['task-value-name', 'task-value-name', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), task.name, cancelButton]
+        [this.#CreateTaskLinks(task), task.name, dropmenu]
       ));
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
@@ -84,7 +146,27 @@ export class TaskCard {
     separator.classList.add('card-task-separator');
     divCardHeader.appendChild(separator);
 
-    if (task?.state === 'Running') {
+    if (task?.state === 'Pending') {
+      let estimateStartTime = 18446744073709551615;
+      for(let step of task?.root_steps) {
+        if (task?.steps[step].estimated_start_time < estimateStartTime) {
+          estimateStartTime = task?.steps[step].estimated_start_time;
+        }
+      }
+      if (estimateStartTime == 18446744073709551615) {
+        estimateStartTime = 0;
+      }
+      if (estimateStartTime > 0) {
+        divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-est',
+          ['task-est-label', 'task-est-value'],
+          ['Estimated start time', new Date(estimateStartTime).toLocaleString()]
+        ));
+        const separator2 = document.createElement('div');
+        separator2.classList.add('card-task-separator');
+        divCardHeader.appendChild(separator2);
+      }
+    } else if (task?.state === 'Running') {
       const nbCores = Object.values(task?.steps || {}).reduce((total, step) => {
           if (step?.state === 'Running') {
             return total + (step?.executor_data?.cores?.length || 0);
@@ -103,6 +185,18 @@ export class TaskCard {
         separator2.classList.add('card-task-separator');
         divCardHeader.appendChild(separator2);
       }
+    }
+    if (task?.estimated_end_time > 0) {
+      const isFinished = task?.state === 'Done' || task?.state === 'Cancelled';
+      const label = isFinished ? 'End time' : 'Estimated end time';
+      divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-est',
+          ['task-est-label', 'task-est-value'],
+          [label, new Date(task?.estimated_end_time).toLocaleString()]
+      ));
+      const separator2 = document.createElement('div');
+      separator2.classList.add('card-task-separator');
+      divCardHeader.appendChild(separator2);
     }
 
     divCardHeader.appendChild(this.#CreateCardLine(
@@ -127,13 +221,41 @@ export class TaskCard {
 
       const divStepNameHeader = document.createElement('div');
       divStepNameHeader.classList.add('card-step-main-name');
-      divStepNameHeader.style.cursor = 'default';
+      divStepNameHeader.style.cursor = 'pointer';
+      divStepNameHeader.dataset.help = 'step.toggle';
 
       const divStepName = document.createElement('div');
       divStepName.classList = 'card-attempt-header';
       const nameSpan = document.createElement('span');
       nameSpan.innerText = functionName;
       divStepName.appendChild(nameSpan);
+
+      let estimateStartTime = 18446744073709551615;
+      for (const attempts of byId.values()) {
+        for (const attemp of attempts) {
+          if (attemp.state !== 'Pending') {
+            estimateStartTime = 0;
+          } else if (attemp.estimated_start_time < estimateStartTime) {
+            estimateStartTime = attemp.estimated_start_time;
+          }
+          if (estimateStartTime == 0) {
+            break;
+          }
+        }
+        if (estimateStartTime == 0) {
+          break;
+        }
+      }
+      if (estimateStartTime == 18446744073709551615) {
+        estimateStartTime = 0;
+      }
+      if (estimateStartTime > 0) {
+        const est = document.createElement('div');
+        est.dataset.help = 'step.estimate';
+        est.innerText = new Date(estimateStartTime).toLocaleString();
+        divStepName.appendChild(est);
+      }
+
       let size = 0;
       byId.forEach(attempts => size += attempts.length);
       if (size == 1) {
@@ -254,7 +376,7 @@ export class TaskCard {
         if (info instanceof HTMLElement) {
           element.appendChild(info);
         } else {
-          element.innerHTML = info;
+          element.textContent = info;
         }
         element.classList.add('card-'+style[index]);
         div.appendChild(element);
@@ -282,11 +404,15 @@ export class TaskCard {
     details.classList.add('card-attempt-details');
 
     if (step.state === 'Pending') {
-      details.appendChild(this.#CreateCardLine(
+      const estimateStartTime = ((step.estimated_start_time !== undefined) && (step.estimated_start_time > 0)) ? 
+          new Date(step.estimated_start_time).toLocaleString() : 'N/A';
+      const estimateStartTimeLine = this.#CreateCardLine(
           null, 'attempt-detail-item',
-          ['attempt-detail-value-state'],
-          ['Pending']
-      ));
+          ['attempt-detail-value-state', 'attempt-detail-value-state'],
+          ['Pending', estimateStartTime]
+      );
+      estimateStartTimeLine.dataset.help = 'step.estimate';
+      details.appendChild(estimateStartTimeLine);
     } else {
       const info = document.createElement('div');
       info.classList.add('card-attempt-details-info');
@@ -299,10 +425,12 @@ export class TaskCard {
           ['attempt-detail-label', 'attempt-detail-value'],
           ['Duration', this.#Duration(step)]));
       if (step.state !== 'Running' || step.request_cancel || taskCancelRequested) {
-        info.appendChild(this.#CreateCardLine(
+        const exitLine = this.#CreateCardLine(
             null, 'attempt-detail-item',
             ['attempt-detail-label', 'attempt-detail-value'],
-            ['Exit Code', this.#ExitCodeLabel(step)]));
+            ['Exit Code', this.#ExitCodeLabel(step)]);
+        exitLine.dataset.help = 'step.exitcode';
+        info.appendChild(exitLine);
       }
       // CPU cores and load — only when running
       if (step.state === 'Running') {
@@ -314,11 +442,13 @@ export class TaskCard {
             chip.textContent = core;
             coresList.appendChild(chip);
         });
-        info.appendChild(this.#CreateCardLine(
+        const coresLine = this.#CreateCardLine(
             null, 'attempt-detail-item',
             ['attempt-detail-label', 'attempt-detail-value'],
             ['Cores', coresList]
-        ));
+        );
+        coresLine.dataset.help = 'step.cores';
+        info.appendChild(coresLine);
         let loadMemory = '';
         let loadCores  = '';
         if (step.executor_data?.os_load) {
@@ -327,11 +457,13 @@ export class TaskCard {
               / step.executor_data.os_load.cores.length;
           loadCores = 'CPU:' + cpuLoad + ' %';
         }
-        info.appendChild(this.#CreateCardLine(
+        const loadLine = this.#CreateCardLine(
             null, 'attempt-detail-item',
             ['attempt-detail-label', 'attempt-detail-value', 'attempt-detail-value'],
             ['Load', loadMemory, loadCores]
-        ));
+        );
+        loadLine.dataset.help = 'step.load';
+        info.appendChild(loadLine);
       }
       details.appendChild(info);
 
@@ -345,6 +477,7 @@ export class TaskCard {
 
       const logsButton = document.createElement('button');
       logsButton.classList.add('card-attempt-logs-btn');
+      logsButton.dataset.help = 'step.logs';
       logsButton.textContent = 'Logs';
       logsButton.onclick = () => { logsManager.Open(step, taskName); };
 
@@ -353,6 +486,7 @@ export class TaskCard {
       if (step.state === 'Running' && !step.request_cancel && !taskCancelRequested) {
         const cancelButton = document.createElement('button');
         cancelButton.classList.add('card-attempt-cancel-btn');
+        cancelButton.dataset.help = 'step.cancel';
         cancelButton.textContent = 'Cancel';
         cancelButton.onclick = async () => {
             if (!confirm(`Cancel step "${step.name}" ?`)) {
@@ -460,19 +594,67 @@ export class TaskCard {
     return div;
   }
 
+  #CreatePriorityUI(task) {
+    const div = document.createElement('div');
+    div.className = 'card-task-priority';
+    if (task.priority === undefined) {
+      div.innerText = 'N/A';
+      return div;
+    }
+
+    div.dataset.help = 'task.priority';
+
+    const label = document.createElement('div');
+    label.className = 'card-priority-label';
+    label.innerText = 'priority'
+    div.appendChild(label);
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.classList.add('card-priority-input');
+    input.step = 1;
+    input.value = task.priority;
+
+    input.onclick = (event) => event.stopPropagation();
+    input.onchange = async (event) => {
+      event.stopPropagation();
+      const newPriority = Math.round(Number(input.value));
+      input.value = newPriority;
+      if (newPriority === task.priority) {
+        return;
+      }
+      await this.#TaskUpdatePriority(task.id, newPriority);
+    };
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        input.blur();
+      }
+    };
+    div.appendChild(input);
+
+    const button = document.createElement('button');
+    button.className = 'card-priority-set-btn';
+    button.innerText = 'Set'
+    div.appendChild(button);
+
+    return div;
+  }
+
   // ── Private — API calls ──────────────────────────────────────
 
   async #CancelTask(taskID) {
     this.#DisableUI();
 
-    let response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}`,
-        { method: 'DELETE' }
-    );
-    let data = { success: false };
-    if (response.ok) {
-      data = await response.json();
-    }
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}`,
+          { method: 'DELETE' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
 
     this.#EnableUI();
 
@@ -484,14 +666,16 @@ export class TaskCard {
   async #CancelStep(taskID, stepUUID) {
     this.#DisableUI();
 
-    let response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}/step/${stepUUID}`,
-        { method: 'DELETE' }
-    );
-    let data = { success: false };
-    if (response.ok) {
-      data = await response.json();
-    }
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}/step/${stepUUID}`,
+          { method: 'DELETE' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
 
     this.#EnableUI();
     //if (data.success) {
@@ -499,16 +683,60 @@ export class TaskCard {
     //}
   }
 
+  async #TaskUpdatePriority(taskID, newPriority) {
+    this.#DisableUI();
+
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}/priority/${newPriority}`,
+          { method: 'PATCH' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
+
+    this.#EnableUI();
+    await this.#onRefresh();
+  }
+
   // ── Private — link helper ──────────────────────────────────
 
-  #CreateTaskQuickLink(task) {
+  #CreateTaskLinks(task) {
+    const div = document.createElement('div');
+    div.className = 'card-task-links';
+    div.append(this.#CreateTaskQuickLink(task.id));
+    const publishLink = task?.publish_link;
+    if (publishLink) {
+      div.append(this.#CreatePublishQuickLink(publishLink));
+    }
+    return div;
+  }
+
+  #CreateTaskQuickLink(id) {
     const link = document.createElement('p');
     link.classList = 'card-run-path-details';
     link.innerText = '🔗';
-    link.title = `${window.location.origin}/files/board/task.html?id=${task.id}`;
+    link.dataset.help = 'task.quicklink';
+    link.dataset.url = `${window.location.origin}/files/board/task.html?id=${id}`;
     link.onclick = async (event) => {
       event.stopPropagation();
-      Clipboard.Set(event.currentTarget.title);
+      Clipboard.Set(event.currentTarget.dataset.url);
+    }
+    return link;
+  }
+
+  #CreatePublishQuickLink(publishLink) {
+    const link = document.createElement('p');
+    link.classList = 'card-run-path-details';
+    link.innerText = '🗂️';
+    link.dataset.help = 'task.publishlink';
+    link.dataset.url = publishLink;
+    link.onclick = (event) => {
+      event.stopPropagation();
+      Clipboard.Set(event.currentTarget.dataset.url);
+      window.open(event.currentTarget.dataset.url, '_blank');
     }
     return link;
   }
@@ -520,10 +748,11 @@ export class TaskCard {
     const link = document.createElement('p');
     link.classList = 'card-run-path-details';
     link.innerText = '📋';
-    link.title = step?.executor_data?.run_path;
+    link.dataset.help = 'task.steprunpath';
+    link.dataset.url = step?.executor_data?.run_path ?? '';
     link.onclick = async (event) => {
       event.stopPropagation();
-      Clipboard.Set(event.currentTarget.title);
+      Clipboard.Set(event.currentTarget.dataset.url);
     }
     return link;
   }

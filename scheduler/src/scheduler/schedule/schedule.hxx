@@ -23,7 +23,7 @@ namespace ns_Schedule {
 class Schedule : public ns_Executor::ExecutorsProvider {
 public:
   Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
-      ns_System::Linux& os, uint16_t cachePort);
+      ns_System::Linux& os, uint16_t serverPort);
   ~Schedule();
   std::string TaskManagerStateFile() const;
   uint64_t AddTask(std::string const& name, std::string const& tasksListPattern, 
@@ -34,16 +34,21 @@ public:
       std::string const& user, std::string const& jobType);
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
   bool CancelTask(uint64_t taskID, std::string const& source);
+  bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
+  bool TaskUpdateArgs(uint64_t taskID, 
+      std::unordered_map<std::string, std::string>& newArgs);
+  bool DeleteTaksDone(uint64_t taskID);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
   void GetOutput(
       std::string const& type, std::string const& taskID,
       uint64_t stepUUID, std::string const& stepID, 
       struct FileExtractedText& data);
-  bool GetTaskData(std::string const& task_id, 
+  bool GetTaskData(std::string const& taskId, 
     std::string& fileStateJSON, std::string& fileArtefacts);
-  bool GetTaskFinalData(std::string const& task_id, 
+  bool GetTaskFinalData(std::string const& taskId, 
     std::string& fileStateJSON, std::string& fileArtefacts) const;
+
 
 private:
   void ScheduleLoop();

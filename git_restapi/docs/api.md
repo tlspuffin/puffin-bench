@@ -1,22 +1,24 @@
 # git_restapi — API Reference
 
-All endpoints return JSON with `Content-Type: application/json; charset=utf-8` and chunked transfer encoding. All endpoints include `Access-Control-Allow-Origin: *` and respond to CORS preflight (`OPTIONS`) with HTTP 200.
+All endpoints return JSON with `Content-Type: application/json; charset=utf-8` and chunked transfer encoding. All endpoints include `Access-Control-Allow-Origin: *`, and CORS preflight (`OPTIONS`, on **any** path) is answered with HTTP 200.
 
-Repository names (`:repo`) in URL paths must match `[0-9a-zA-Z-_.%]+` (percent-encoding is accepted). They must correspond to a configured repository. Commit identifiers must be hexadecimal strings matching `[0-9a-fA-F]+`.
+Repository names (`:repo`) in URL paths must match `[0-9a-zA-Z-_.%]+` (percent-encoding is accepted). They must correspond to a configured repository, otherwise the response is HTTP 404. Commit identifiers must be hexadecimal strings matching `[0-9a-fA-F]+`.
 
 ---
 
 ## GET /api/git/history/:repo
 
-Returns the full commit history for a repository: recent commits on the development branch, commits in the main branch, local branches not yet merged, and optionally open GitHub pull requests when `url_pr` is configured.
+Returns the full commit history for a repository: recent commits on the development branch, commits in a pinned range of the main branch, local (remote-tracking) branches not yet merged, and — when the repository is configured with `url_pr` — open GitHub pull requests.
 
 ### Query Parameters
 
 | Parameter | Values | Description |
 |---|---|---|
-| `refresh` | `local`, `all` | Optional. Controls cache bypass and GitHub API usage. `local`: bypasses the in-memory history cache and re-runs `tlspuffin_history.sh`, but **reuses the cached PR data** — no GitHub API call is made. `all`: also forces a fresh fetch from the GitHub PR API (consumes rate-limit quota). Omit entirely to serve from the in-memory cache with no external calls at all. Use `local` or omit to conserve GitHub API quota; use `all` only when up-to-date PR data is required. |
+| `refresh` | `local`, `all` | Optional. Controls cache bypass and GitHub API usage. `local`: bypasses the in-memory/on-disk history cache and re-runs `tlspuffin_history.sh`, but **reuses the cached PR data** — no GitHub API call is made. `all`: also forces a fresh fetch from the GitHub PR API, unless the last known rate-limit state shows the quota already exhausted (in which case it falls back to the cache too). Omit entirely, or pass any other value, to serve from the in-memory cache with no external calls at all (equivalent to no refresh). |
 
-Any query parameter other than `refresh` returns HTTP 400.
+Any query parameter **other than** `refresh` returns HTTP 400. An unrecognized `refresh` value (anything other than `local`/`all`) is silently treated as "no refresh" — it does not error.
+
+Response headers on success also include `Cache-Control: no-store, no-cache, must-revalidate` and `Pragma: no-cache` (instructing HTTP caches/browsers not to cache the response — the server does its own caching internally).
 
 ### Response — 200 OK
 
@@ -72,18 +74,18 @@ When `url_pr` is configured for the repository, two additional fields are presen
 
 | Field | Description |
 |---|---|
-| `commits` | Commits on `dev` not yet in `main`, plus a pinned range of `main` commits. |
-| `commits[].alias` | Non-empty when the commit is identical (diff-quiet) to its second parent (merge commits). |
-| `standalone` | Always empty when the server uses `--no-standalone` mode (current behavior). |
-| `branches` | Tip commit of each remote-tracking branch not yet merged into `main` or `dev`. |
+| `commits` | Commits on `dev` not yet in `main`, plus a pinned range of `main` commits (the range endpoints are hardcoded commit hashes inside `tlspuffin_history.sh`). |
+| `commits[].alias` | Non-empty when the commit is diff-quiet identical to its second parent (merge commits). |
+| `standalone` | Always empty — the server always invokes the script with `--no-standalone`. |
+| `branches` | Tip commit of each remote-tracking branch not yet merged into `main` or `dev`, produced directly by `tlspuffin_history.sh` (independent of the GitHub `PR` data below). |
 | `PR` | Open pull requests fetched from the external GitHub API (`url_pr`). Present only when `url_pr` is configured. |
-| `PR[].idPR` | GitHub internal PR id. |
+| `PR[].idPR` | GitHub internal PR id (GitHub's `id` field, renamed to avoid clashing with the commit-sha `id` field). |
 | `PR[].id` | SHA of the head commit of the PR. |
 | `PR[].base` | SHA of the base commit. |
 | `PR[].base_ref` | Name of the target branch (e.g. `main`). |
 | `PR_API_Infos` | GitHub rate-limit metadata. `apiResetTS`: Unix timestamp when the limit resets. `apiRemaining`: remaining API calls. Present only when `url_pr` is configured. |
 
-The response is cached per-repo for **24 hours** in memory (`GitAPI::historyBuffer_`) and also persisted to `<storage>/<repo>/git_cache.json`. The on-disk cache is loaded at startup so the first request after a server restart does not require re-running the history script. Use `?refresh=local` or `?refresh=all` to explicitly bypass it (see query parameters above).
+The response is cached per-repo for **24 hours**, both in memory (`GitAPI::historyBuffer_`) and on disk at `<storage>/<name>/git_cache.json`. The on-disk cache is loaded at startup (its age is derived from the file's mtime), so the first request after a server restart does not require re-running the history script. Use `?refresh=local` or `?refresh=all` to explicitly bypass it (see query parameters above). Pull-request data has its own independent cache (`pr_cache.json` + `pr_infos_cache.json`), described above.
 
 ### Errors
 
@@ -91,6 +93,7 @@ The response is cached per-repo for **24 hours** in memory (`GitAPI::historyBuff
 |---|---|
 | 400 | Unknown query parameter supplied. |
 | 404 | `:repo` not found in configuration. |
+| 500 | `tlspuffin_history.sh` failed, produced invalid JSON, or the GitHub PR fetch failed on its first page. |
 
 ---
 
@@ -102,13 +105,13 @@ Returns metadata for a single commit.
 
 | Parameter | Pattern | Description |
 |---|---|---|
-| `:repo` | `[0-9a-zA-Z-_.]+` | Repository name as defined in configuration. |
+| `:repo` | `[0-9a-zA-Z-_.%]+` | Repository name as defined in configuration. |
 
 ### Query Parameters
 
 | Parameter | Pattern | Required | Description |
 |---|---|---|---|
-| `commit` | `[0-9a-fA-F]+` | Yes | Commit hash (full or abbreviated). |
+| `commit` | `[0-9a-fA-F]+` | Yes | Commit hash (full or abbreviated). A URI that doesn't match this pattern doesn't route to this handler at all and falls through to 404. |
 
 ### Response — 200 OK
 
@@ -118,17 +121,21 @@ Returns metadata for a single commit.
     {
       "id":      "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
       "date":    "2024-01-15",
-      "comment": "Fix foo"
+      "comment": "Fix foo",
+      "base":    "9f8e7d6c5b4a3928170695847362514039281706"
     }
   ]
 }
 ```
 
+`base` is the merge-base of the commit with `origin/dev`; it is present only when the underlying `git merge-base` call succeeds (it is omitted for commits with no common ancestor, or on any lookup error).
+
 ### Errors
 
 | Code | Condition |
 |---|---|
-| 404 | `:repo` not found in configuration, or URI does not match routing pattern. |
+| 404 | `:repo` not found in configuration, or URI does not match the routing pattern (e.g. missing/malformed `commit`). |
+| 500 | The `git log`/`git merge-base` subprocess failed. |
 
 ---
 
@@ -140,7 +147,7 @@ Returns metadata for multiple commits in a single request.
 
 | Parameter | Pattern | Description |
 |---|---|---|
-| `:repo` | `[0-9a-zA-Z-_.]+` | Repository name as defined in configuration. |
+| `:repo` | `[0-9a-zA-Z-_.%]+` | Repository name as defined in configuration. |
 
 ### Request Body
 
@@ -155,33 +162,34 @@ Returns metadata for multiple commits in a single request.
 }
 ```
 
-Each commit ID must match `[0-9a-fA-F]+`. Any non-hex value causes the entire request to be rejected with HTTP 400.
+Each commit ID must match `[0-9a-fA-F]+`. Any non-hex value, or a `commits` field that is missing/not an array/containing a non-string element, causes the entire request to be rejected with HTTP 400. An empty `commits` array is accepted and returns `{"commits":[]}` without invoking Git at all.
 
 ### Response — 200 OK
 
 ```json
 {
   "commits": [
-    { "id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", "date": "2024-01-15", "comment": "Fix foo" },
-    { "id": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", "date": "2024-01-14", "comment": "Add bar" }
+    { "id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", "date": "2024-01-15", "comment": "Fix foo", "base": "..." },
+    { "id": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", "date": "2024-01-14", "comment": "Add bar", "base": "..." }
   ]
 }
 ```
 
-Commits that are not found in the repository are silently omitted from the response.
+Each entry gets its own `base` field via a separate `git merge-base <id> origin/dev` lookup (see [architecture.md](architecture.md) for the performance implication on large batches). Commits that are not found in the repository are silently omitted from the response.
 
 ### Errors
 
 | Code | Condition |
 |---|---|
-| 400 | Request body is not valid JSON, `commits` field is missing, or a commit ID contains non-hex characters. |
+| 400 | Request body is not valid JSON, `commits` field is missing/not an array/contains a non-string, or a commit ID contains non-hex characters. |
 | 404 | `:repo` not found in configuration. |
+| 500 | The underlying `git log` subprocess failed. |
 
 ---
 
 ## OPTIONS (any path)
 
-CORS preflight. Returns HTTP 200 with:
+CORS preflight, handled at the routing level before any path pattern is checked — matches regardless of URI. Returns HTTP 200 with:
 
 ```
 Access-Control-Allow-Origin: *
@@ -195,11 +203,12 @@ No body.
 
 ## Routing
 
-URL matching is performed by `RequestHandlerFactory` using three compile-time `std::regex` patterns evaluated in order:
+URL matching is performed by `RequestHandlerFactory`, first on HTTP method, then (for `GET`/`POST`) on one of two compile-time `std::regex` patterns:
 
-| Pattern | Method | Handler |
+| Method | Pattern | Handler |
 |---|---|---|
-| `^/api/git/history/([0-9a-zA-Z-_.%]+)(\?.*)?$` | GET | `RequestHandlerHistory` |
-| `^/api/git/log/([0-9a-zA-Z-_.%]+)\?commit=([0-9a-fA-F]+)$` | GET | `RequestHandlerLog` |
-| `^/api/git/logs/([0-9a-zA-Z-_.%]+)$` | POST | `RequestHandlerLogs` |
-| *(anything else)* | any | `RequestHandlerError` → 404 |
+| `OPTIONS` | *(any URI)* | `RequestHandlerCORSOptions` |
+| `GET` | `^/api/git/history/([0-9a-zA-Z-_.%]+)(\?.*)?$` | `RequestHandlerHistory` |
+| `GET` | `^/api/git/log/([0-9a-zA-Z-_.%]+)\?commit=([0-9a-fA-F]+)$` | `RequestHandlerLog` |
+| `POST` | `^/api/git/logs/([0-9a-zA-Z-_.%]+)$` | `RequestHandlerLogs` |
+| `PATCH`, `PUT`, `DELETE`, or no match | — | `RequestHandlerError` → 404 |

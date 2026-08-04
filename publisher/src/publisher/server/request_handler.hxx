@@ -43,6 +43,7 @@ REQUESTHANDLER(Notify);
 REQUESTHANDLER(ProjectListData, std::string const);
 REQUESTHANDLER(ProjectListCampaigns, std::string const);
 REQUESTHANDLER(ProjectRegenerateCache, std::string const, std::string const);
+REQUESTHANDLER(ProjectDeleteTask);
 REQUESTHANDLER(ProjectDeleteData, std::string const, std::string const);
 REQUESTHANDLER(Files, std::string const, std::string const);
 

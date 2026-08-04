@@ -23,17 +23,15 @@ void ns_GIT::Config::Load(std::string const& name, rapidjson::Value& doc) {
   }
   auto const& repositories = gitConfig["repositories"];
   if (!repositories.IsObject()) {
-    throw std::runtime_error("Configuration error " + name + "/repositories is not an object");
+    throw std::runtime_error("Configuration error, " + name + "/repositories is not an object");
   }
   for(auto it = repositories.MemberBegin(); it != repositories.MemberEnd(); ++it) {
     if (!it->name.IsString()) {
-      LOGW << "Ignoring invalid configuration" << Log::Flags::End;
-      continue;
+      throw std::runtime_error("Configuration error, name error in repositories");
     }
     std::string const& name = it->name.GetString();
     if ((!(it->value.HasMember("url"))) || (!(it->value["url"].IsString()))) {
-      LOGW << "Ignoring mal formed configuration " << name << Log::Flags::End;
-      continue;
+      throw std::runtime_error("Configuration error, url attribute is invalide in repository " + name);
     }
     std::unordered_map<std::string, std::string> repos;
     if (it->value.HasMember("url_pr") && (it->value["url_pr"].IsString())) {

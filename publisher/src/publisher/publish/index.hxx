@@ -20,11 +20,12 @@ public:
       std::unordered_set<std::string>& libsManaged);
   bool HaveIndexed(std::string const& srcFile);
 
-  bool Remove(std::filesystem::path const& rootDataPath, std::string const& key, bool deleteSourceFiles);
-
-  bool Delete(std::filesystem::path const& dataDirectory);
+  bool RemoveKey(std::string const& key, std::vector<std::string>& srcFiles);
+  bool Clear(std::filesystem::path const& dataDirectory);
+  bool ClearOrphelins(std::filesystem::path const& dataDirectory, std::filesystem::path const& rootPath, uint64_t& nbDelete);
 
   std::vector<std::string> List();
+  std::pair<std::string, std::string> FindByTaskID(uint64_t taskID);
 
 private:
   struct sEntryInfos {

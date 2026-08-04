@@ -1,5 +1,6 @@
+import { Help, helpTexts } from './help.js';
 import { TaskCard } from './taskcard.js';
-import './launchers/launchers.js';
+import * as Launchers from './launchers/launchers.js';
 
 let taskCard;
 
@@ -25,12 +26,15 @@ async function GetServerStatus() {
   return [ true, data.data.tasksmanager.tasks, data.data.executors ];
 }
 
-function CreateMetric(label, value, perCores) {
+function CreateMetric(label, value, perCores, helpKey) {
   const metric = document.createElement('div');
   metric.classList.add('executor-stat-metric');
 
   const lbl = document.createElement('div');
   lbl.classList.add('executor-stat-label');
+  if (helpKey) {
+    lbl.dataset.help = helpKey;
+  }
   lbl.textContent = label;
 
   const bar = document.createElement('div');
@@ -126,11 +130,11 @@ function SetHeader(counters, executors) {
     storages.classList.add('executor-stat-storages');
     Object.entries(executor.stats.storage ?? {}).forEach(([label, storage]) => {
         const usedPercentage = Math.round((storage.capacity - storage.available) / storage.capacity * 100);
-        storages.appendChild(CreateMetric(label, usedPercentage));
+        storages.appendChild(CreateMetric(label, usedPercentage, null, 'board.storage'));
     });
     row.append(name, 
-        CreateMetric('CPU', executor.stats.load_cores, executor.stats.load_per_core), 
-        CreateMetric('MEM', executor.stats.load_memory),
+        CreateMetric('CPU', executor.stats.load_cores, executor.stats.load_per_core, 'board.cpu'), 
+        CreateMetric('MEM', executor.stats.load_memory, null, 'board.mem'),
         storages
     );
     container.appendChild(row);
@@ -144,6 +148,7 @@ async function RefreshBoard() {
   if (!success) {
     return;
   }
+  tasks.sort((a,b) => b.priority - a.priority);
   document.getElementById('container-running-steps').innerHTML = '';
   const stateCount = {};
   tasks.forEach((task, _) => {
@@ -159,6 +164,8 @@ async function RefreshBoard() {
 }
 
 function Main() {
+  new Help(helpTexts, {}, 'help-panel', 'help-button');
+
   const title = document.getElementById('header-title');
   title.innerText = `Experiment Scheduler Dashboard on ${window.location.hostname}`;
 
@@ -168,11 +175,12 @@ function Main() {
       document.getElementById('custom_header').innerHTML = data;
     });
 
-  taskCard = new TaskCard({ onRefresh: RefreshBoard });
+  taskCard = new TaskCard({ onRefresh: RefreshBoard, launchers: Launchers.launchers });
 
   document.getElementById('refresh-button').onclick = RefreshBoard;
 
   RefreshBoard();
 }
 
+Launchers.BuildUI();
 Main();

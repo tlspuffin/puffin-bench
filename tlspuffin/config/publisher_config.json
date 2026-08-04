@@ -1,0 +1,12 @@
+{
+  "logs_level": 15,
+  "server": {
+    "secure": false,
+    "port": ${PUBLISHER_PORT}
+  },
+  "publisher": {
+    "storagePath": "${DATA_PATH}/publisher",
+    "htmlPath": "${DATA_PATH}/html",
+    "orphanScanInterval": 3600
+  }
+}

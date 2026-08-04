@@ -253,10 +253,11 @@ void ns_System::CoresMonitor::Init() {
 
 void ns_System::CoresMonitor::Update() {
   t1_.GatherInfos();
-  lock_.lock();
-  cores_ratio_infos_ = t0_.CoresValuesRatio(t1_);
-  cores_global_ratio_infos_ = t0_.GlobalValuesRatio(t1_);
-  lock_.unlock();
+  {
+    std::lock_guard lock(lock_);
+    cores_ratio_infos_ = t0_.CoresValuesRatio(t1_);
+    cores_global_ratio_infos_ = t0_.GlobalValuesRatio(t1_);
+  }
   t0_.Swap(std::move(t1_));
 }
 

@@ -73,10 +73,12 @@ enum ns_Cache::Cache::GetStatus ns_Cache::Cache::Get(
 void ns_Cache::Cache::CacheLoop() {
   std::vector<struct FileToStore> dataToAdd;
   std::unique_lock lock(cacheThreadLock_);
-  while(threadRunning_) {
-    cacheThreadCV_.wait(lock);
+  while(true) {
+    cacheThreadCV_.wait(lock, [this] {
+      return !threadRunning_ || !dataToAdd_.empty();
+    });
     if (dataToAdd_.empty()) {
-      continue;
+      break;
     }
     dataToAdd.swap(dataToAdd_);
     lock.unlock();

@@ -6,6 +6,7 @@
 #include "step_configurations.hxx"
 #include "archiver.hxx"
 #include "monitor/task.hxx"
+#include "../../utils/logs.hxx"
 #include <cstdint>
 #include <string>
 #include <list>
@@ -78,6 +79,8 @@ public:
   bool IsTimedOut() const;
   bool IsOSKilled() const;
 
+  bool WasProcessed() const;
+
   std::chrono::time_point<std::chrono::system_clock> StartTime() const;
   std::chrono::milliseconds RunTime() const;
 
@@ -107,6 +110,8 @@ public:
   std::string GID() const;
 
   void UpdateStats();
+
+  void EndOfRun();
 
   ns_Schedule::Task* task_;
   std::string name_;
@@ -146,6 +151,8 @@ public:
     std::string path;
   };
   std::vector<struct Stream> readable_files_;
+
+  uint64_t estimatedStartTime_;
 
 private:
   enum class State { 
@@ -201,6 +208,10 @@ inline bool Step::IsTimedOut() const {
   return (timeout_ > 0) && (elapsed.count() >= timeout_);
 }
 
+inline bool Step::WasProcessed() const {
+  return end_processed_;
+}
+
 inline bool Step::IsOSKilled() const {
   return (state_ == State::Done) && (exit_code_ == Step::exitCode_Killed_);
 }
@@ -234,6 +245,11 @@ inline void Step::MarkRunning() {
   }
   state_ = State::Running;
   time_points_[0] = std::chrono::system_clock::now();
+  if (estimatedStartTime_ == 0) {
+    estimatedStartTime_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+        time_points_[0].time_since_epoch()).count();
+    LOGW << "Step " << ID() << " have no estimatedStartTime_" << Log::Flags::End;
+  }
 }
 
 inline void Step::MarkDone(uint16_t exit_code) {
@@ -281,10 +297,7 @@ inline bool Step::TaskCancelled() {
 }
 
 inline void Step::Execute() {
-  if (TaskFirstStep()) {
-    task_->PrepareToRun();
-  }
-  task_->executor_->Execute(*this);
+  task_->Execute(this, next_ == this);
 }
 
 inline void Step::Shutdown() {
@@ -322,6 +335,13 @@ inline std::string Step::GID() const {
   return std::to_string(group_id_ - 1) + '-' +
     std::to_string(rank_id_) + '-' +
     std::to_string(attempt_id_);
+}
+
+inline void Step::EndOfRun() {
+  if (next_ == this) {
+    task_->ApplyPendingArgs();
+  }
+  GatherFilesToLocal();
 }
 
 };

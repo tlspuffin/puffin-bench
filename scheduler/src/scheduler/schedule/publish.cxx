@@ -4,9 +4,7 @@
 #include <memory>
 #include <iostream>
 #include <fstream>
-#include <Poco/URI.h>
 #include <Poco/Net/HTMLForm.h>
-#include <Poco/Net/HTTPClientSession.h>
 #include <Poco/Net/HTTPSClientSession.h>
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Net/HTTPResponse.h>
@@ -18,33 +16,54 @@ ns_Schedule::Publish::Publish()
 
 ns_Schedule::Publish::Publish(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     rapidjson::Value const& config) : Publish() {
-  ReadJSON(publishersConfig, config);
+  ReadJSON(publishersConfig, config, true);
 }
 
 void ns_Schedule::Publish::ReadJSON(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
-    rapidjson::Value const& config) {
+    rapidjson::Value const& config, bool extractFromConfig) {
+  baseURL_.clear();
+  notifyEndpoint_.clear();
+  viewEndpoint_.clear();
+  rootStorage_.clear();
+  storage_.clear();
+  checkServerCertificat_ = false;
+
   if (!config.IsObject()) {
     throw std::runtime_error("publish config should be an object");
   }
 
   goal_ = GetOrDefault<std::string>(config, "goal", "");
 
-  std::string const server = GetOrDefault<std::string>(config, "server", "");
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
-  storage_  = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(config, "storage", ""));
-  rootStorage_.clear();
+  storage_ = GetOrDefault<std::string>(config, "storage", "");
 
-  auto const& itConfig = publishersConfig.find(server);
-  if (itConfig != publishersConfig.end()) {
-    baseURL_ = itConfig->second.baseURL_;
-    notifyEndpoint_ = itConfig->second.notifyEndpoint_;
-    viewEndpoint_ = itConfig->second.viewEndpoint_;
-    checkServerCertificat_ = itConfig->second.checkServerCertificat_;
-    //storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
-    //storage_ = storage_;
-    rootStorage_ = itConfig->second.storage_;
+  if (!extractFromConfig) {
+    try {
+      baseURL_ = Get<std::string>(config, "base_url");
+      notifyEndpoint_ = Get<std::string>(config, "notify_endpoint");
+      viewEndpoint_ = Get<std::string>(config, "view_endpoint");
+      rootStorage_ = GetPath(config, "root_storage");
+    } catch(...) {
+      extractFromConfig = true;
+      baseURL_.clear();
+      notifyEndpoint_.clear();
+      viewEndpoint_.clear();
+      rootStorage_.clear();
+    }
+  }
+  if (extractFromConfig) {
+    std::string const server = GetOrDefault<std::string>(config, "server", "");
+    auto const& itConfig = publishersConfig.find(server);
+    if (itConfig != publishersConfig.end()) {
+      baseURL_ = itConfig->second.baseURL_;
+      notifyEndpoint_ = itConfig->second.notifyEndpoint_;
+      viewEndpoint_ = itConfig->second.viewEndpoint_;
+      checkServerCertificat_ = itConfig->second.checkServerCertificat_;
+      //storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
+      //storage_ = storage_;
+      rootStorage_ = itConfig->second.storage_;
+    }
   }
 }
 
@@ -52,7 +71,7 @@ void ns_Schedule::Publish::ToJSON(rapidjson::Value& node,
     rapidjson::Document::AllocatorType& alloc) const {
   node.AddMember("base_url", rapidjson::Value(baseURL_.c_str(), alloc), alloc);
   node.AddMember("notify_endpoint", rapidjson::Value(notifyEndpoint_.c_str(), alloc), alloc);
-  node.AddMember("viewEndpoint_", rapidjson::Value(viewEndpoint_.c_str(), alloc), alloc);
+  node.AddMember("view_endpoint", rapidjson::Value(viewEndpoint_.c_str(), alloc), alloc);
   node.AddMember("check_server_certificat", checkServerCertificat_, alloc);
   node.AddMember("root_storage", rapidjson::Value(rootStorage_.c_str(), alloc), alloc);
   node.AddMember("storage", rapidjson::Value(storage_.c_str(), alloc), alloc);
@@ -110,25 +129,70 @@ void ns_Schedule::Publish::PublishResults(
   }
 }
 
+int ns_Schedule::Publish::DeleteResults(uint64_t taskID) const {
+  if (baseURL_.empty() || notifyEndpoint_.empty()) {
+    return 0;
+  }
+
+  try {
+    Poco::URI uri(baseURL_ + notifyEndpoint_);
+    uri.addQueryParameter("task_id", std::to_string(taskID));
+    std::unique_ptr<Poco::Net::HTTPClientSession> session = CreateSession(uri);
+
+    std::string path = uri.getPath().empty() ? ("/?" + uri.getRawQuery()) : uri.getPathAndQuery();
+    Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_DELETE, path);
+    request.setContentLength(0);
+
+    LOGD << "Sending remove request to " << path << " for task " << taskID << Log::Flags::End;
+    std::ostream& requestStream = session->sendRequest(request);
+    requestStream.flush();
+
+    Poco::Net::HTTPResponse response;
+    std::istream& responseStream = session->receiveResponse(response);
+    std::string responseBody;
+    Poco::StreamCopier::copyToString(responseStream, responseBody);
+
+    int const status = response.getStatus();
+    if (status == Poco::Net::HTTPResponse::HTTP_NOT_FOUND) {
+      LOGI << "Publish server does not handle task " << taskID <<
+          ", removing files locally" << Log::Flags::End;
+      return 0;
+    }
+    if ((status < 200) || (status >= 300)) {
+      LOGE << "Publish remove failed for task " << taskID << ", server returned " <<
+          status << " : " << responseBody << Log::Flags::End;
+      return 2;
+    }
+    LOGI << "Publish server removed the files of task " << taskID << Log::Flags::End;
+    return 1;
+  } catch (Poco::Exception const& e) {
+    LOGE << "Publish remove failed for task " << taskID << " : " <<
+        e.displayText() << Log::Flags::End;
+    return 2;
+  }
+}
+
+std::unique_ptr<Poco::Net::HTTPClientSession> ns_Schedule::Publish::CreateSession(Poco::URI const& uri) const {
+  std::unique_ptr<Poco::Net::HTTPClientSession> session;
+  if (uri.getScheme() == "https") {
+    Poco::Net::Context::Ptr context = new Poco::Net::Context(
+        Poco::Net::Context::CLIENT_USE, "", "", "",
+        checkServerCertificat_ ? Poco::Net::Context::VERIFY_STRICT : Poco::Net::Context::VERIFY_NONE);
+    session = std::make_unique<Poco::Net::HTTPSClientSession>(
+            uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 443, context);
+  } else {
+    session = std::make_unique<Poco::Net::HTTPClientSession>(
+        uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 80);
+  }
+  session->setTimeout(Poco::Timespan(30, 0));
+  return session;
+}
+
 void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files, 
     std::string const& archivePath) {
   try {
     Poco::URI uri(baseURL_ + notifyEndpoint_);
-    std::unique_ptr<Poco::Net::HTTPClientSession> session;
-    if (uri.getScheme() == "https") {
-      Poco::Net::Context::Ptr context = new Poco::Net::Context(
-          Poco::Net::Context::CLIENT_USE,
-          "", "", "",
-          checkServerCertificat_ ? Poco::Net::Context::VERIFY_STRICT : Poco::Net::Context::VERIFY_NONE);
-      std::unique_ptr<Poco::Net::HTTPSClientSession> httpsSession = 
-          std::make_unique<Poco::Net::HTTPSClientSession>(
-              uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 443, context);
-      session = std::move(httpsSession);
-    } else {
-      session = std::make_unique<Poco::Net::HTTPClientSession>(
-          uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 80);
-    }
-    session->setTimeout(Poco::Timespan(30, 0));
+    std::unique_ptr<Poco::Net::HTTPClientSession> session = CreateSession(uri);
 
     std::string path = uri.getPath().empty() ? "/" : uri.getPath();
     Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_POST, path);

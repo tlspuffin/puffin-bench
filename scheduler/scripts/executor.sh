@@ -2,7 +2,6 @@
 
 echo "task parameters: $*"
 
-THEJOB_GLBPARMS=
 if [ ! -r "$1" ]; then
   echo "Unable to read configuration file $1"
   exit 1
@@ -161,7 +160,7 @@ if [ ! -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
 fi
 
 echo "task env: $( cat "${THEJOB_ENV_PATH}" )"
-echo "In: ${THEJOB_GLBPARMS}"
+echo "In: ${THEJOB_GLBPARMS[*]}"
 
 echo "step run params: $( cat "${THEJOB_PARAMETERS_PATH}" )"
 echo "Params: ${THEJOB_RUNPARMS}"
@@ -173,9 +172,12 @@ THEJOB_RETVAL=$?
 StopMonitor
 popd >/dev/null
 
-if [[ "${THEJOB_UNIQ_STEP}" == "1" ]]; then
-  echo "Out: ${THEJOB_GLBPARMS}"
-  echo "${THEJOB_GLBPARMS}" > "${THEJOB_ENV_PATH}"
+if [[ "${THEJOB_UNIQ_STEP}" == "1" ]] && [[ -n "${THEJOB_GLBPARMS_MODIFIED}" ]]; then
+  echo "Out: ${THEJOB_GLBPARMS[*]}"
+  if ! SaveGlobalParam "${THEJOB_ENV_PATH}"; then
+    echo "Unable to save task environment" >&2
+    THEJOB_RETVAL=1
+  fi
 fi
 
 echo ${THEJOB_RETVAL} > "${THEJOB_DONE_FILE}.tmp"

@@ -27,6 +27,6 @@ std::string MD5(std::filesystem::path const& filepath) {
   if (file.gcount() > 0) {
     md5.update(buffer.data(), file.gcount());
   }
-    
+
   return Poco::DigestEngine::digestToHex(md5.digest());
 }

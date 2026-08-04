@@ -19,7 +19,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), 
     message_from_run_(""), state_(State::Pending), end_processed_(false),
-    user_run_state_(""), group_status_(source.group_status_), readable_files_(source.readable_files_)
+    user_run_state_(""), group_status_(source.group_status_), readable_files_(source.readable_files_), 
+    estimatedStartTime_(0)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -58,7 +59,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     stdout_(), stderr_(), exit_code_(exitCode_NotSet_), monitor_count_(0), 
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), message_from_run_(""), 
     state_(State::Pending), end_processed_(false), user_run_state_(""), 
-    group_status_(source.group_status_), readable_files_(source.readable_files_)
+    group_status_(source.group_status_), readable_files_(source.readable_files_), 
+    estimatedStartTime_(0)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -98,7 +100,7 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     monitor_count_(0), request_cancel_(false), monitor_(), monitor_path_(), 
     message_from_run_(""), state_(State::Pending), end_processed_(false), 
     user_run_state_(""), group_status_(group_status), 
-    readable_files_(MergeStreamsConfig(streamsConfigJSON))
+    readable_files_(MergeStreamsConfig(streamsConfigJSON)), estimatedStartTime_(0)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -241,6 +243,7 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
     }
   }
 
+  estimatedStartTime_ = Get<uint64_t>(config, "estimated_start_time");
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
@@ -301,13 +304,16 @@ bool ns_Schedule::Step::TaskFirstStep() {
 }
 
 bool ns_Schedule::Step::TaskLastStep() {
-  if (dependencies_.empty() || task_->request_cancel_) {
+  if (dependencies_.empty()) {
     for(ns_Schedule::Step* itStep = next_; itStep != this; itStep = itStep->next_) {
       if (!itStep->end_processed_) {
         return false;
       }
     }
     return true;
+  }
+  if (task_->request_cancel_) {
+    return task_->AllOtherStepsProcessedAfterCancel(this);
   }
   return false;
 }
@@ -406,6 +412,8 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
     streamsArray.PushBack(entry, alloc);
   }
   out.AddMember("streams", streamsArray, alloc);
+
+  out.AddMember("estimated_start_time", estimatedStartTime_, alloc);
 }
 
 void ns_Schedule::Step::UpdateStats() {

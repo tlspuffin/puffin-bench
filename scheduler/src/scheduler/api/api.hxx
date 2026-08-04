@@ -12,10 +12,10 @@ struct APIS {
   ns_API::CacheAPI cacheAPI_;
   ns_API::UsersAPI usersAPI_;
   ns_API::ScheduleAPI scheduleAPI_;
-  APIS(ns_Schedule::Config const& configSchedule, ns_Cache::Config const& configCache, int16_t cachePort) 
+  APIS(ns_Schedule::Config const& configSchedule, ns_Cache::Config const& configCache, int16_t serverPort) 
       : OSAPI_(15, { { "run", configSchedule.runPath_ }, { "export", configSchedule.exportPath_ }}), 
       cacheAPI_(configCache), usersAPI_(configSchedule), 
-      scheduleAPI_(configSchedule, usersAPI_, OSAPI_, cachePort)
+      scheduleAPI_(configSchedule, usersAPI_, OSAPI_, serverPort)
   {}
 };
 

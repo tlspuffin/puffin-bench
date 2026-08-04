@@ -35,7 +35,7 @@ shift;
 
 info="$(mktemp)"
 infoMain="$(mktemp)"
-git -C "${repo_directory}" fetch --all 2>/dev/null || git clone --filter=blob:none https://github.com/tlspuffin/tlspuffin.git "${repo_directory}"
+git -C "${repo_directory}" fetch --all --prune 2>/dev/null || git clone --filter=blob:none https://github.com/tlspuffin/tlspuffin.git "${repo_directory}"
 #git -C "${repo_directory}" checkout dev
 echo '{"commits": [' > "${output}.tmp"
 git -C "${repo_directory}" log origin/dev --first-parent --oneline --pretty=format:"%H§%ad§%s§%P" --date=short ^origin/main | sed 's/"/\\"/g'  | awk -v gwd="$repo_directory" 'BEGIN{FS="§";PREV=""} {alias=""; if (NF == 4) { n=split($4, p, " "); if (n >=2) { cmd="git -C "gwd" diff --quiet "$1" "p[2]; if (system(cmd) == 0) { alias=p[2] } } } printf(" {\"id\":\"%s\",\"date\":\"%s\",\"comment\":\"%s\", \"alias\": \"%s\", \"branch\":\"dev\"},\n", $1, $2, $3, alias);}' >> "${output}.tmp"

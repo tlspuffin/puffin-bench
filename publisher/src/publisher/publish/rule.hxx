@@ -45,8 +45,7 @@ public:
   std::filesystem::path DataPath() const;
 
   virtual bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
-      bool generateArtefact) = 0;
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged) = 0;
 
   static Rule* Build(std::string const& action, std::string const& name, 
       std::string const& rulesPath, std::string const& rulesRelativePath, 
@@ -111,8 +110,7 @@ public:
       rapidjson::Value const& parameters)
       : Rule(name, rulePath, ruleRelativePath, filesFilter) {}
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
-      bool generateArtefact) {
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged) {
     return true;
   }
 };

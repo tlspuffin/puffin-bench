@@ -14,23 +14,24 @@
       <div id="executors-stats" class="executors-stats"></div>
       <div class="header-actions">
         <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
+        <button class="refresh-button" id="help-button">❔ Help</button>
         <div id="custom_header"></div>
       </div>
     </div>
     <div class="stats-bar">
-      <div class="stat">
+      <div class="stat" data-help="board.counters">
         <span class="stat-label">Done</span>
         <span class="stat-value done" id="done-count">0</span>
       </div>
-      <div class="stat">
+      <div class="stat" data-help="board.counters">
         <span class="stat-label">Running</span>
         <span class="stat-value running" id="running-count">0</span>
       </div>
-      <div class="stat">
+      <div class="stat" data-help="board.counters">
         <span class="stat-label">Queued</span>
         <span class="stat-value queued" id="queued-count">0</span>
       </div>
-      <div class="stat">
+      <div class="stat" data-help="board.lastupdate">
         <span class="stat-label">Last update</span>
         <span class="stat-value lastupdate" id="last-update">N/A</span>
       </div>
@@ -40,6 +41,40 @@
   <div id="container-running-steps" class="container-running-steps"></div>
 
   <div id="exec-tooltip" class="exec-tooltip"></div>
+
+  <template id="help-panel">
+    <h2>What is shown</h2>
+    <p>Every task that still has running or pending steps, highest priority first.</p>
+    <p>The page does not refresh on its own: use <b>🔃 Refresh</b>. <b>Last update</b> shows the time of the last refresh.</p>
+
+    <h2>Counters</h2>
+    <p>Done, Running and Queued count <b>steps</b>, not tasks.</p>
+
+    <h2>Step states</h2>
+    <ul>
+      <li><span style="color:#FF9800">■</span> Pending: waiting for free cores, with its estimated start time</li>
+      <li><span style="color:white">■</span> Running</li>
+      <li><span style="color:#4CAF50">■</span> Done</li>
+      <li><span style="color:#45D0D4">■</span> Timed out</li>
+      <li><span style="color:red">■</span> Cancelled</li>
+      <li>A task with a red background is being cancelled</li>
+    </ul>
+
+    <h2>Executors</h2>
+    <ul>
+      <li>CPU, MEM and storage bars show each executor's load</li>
+      <li><span style="color:#FF9800">■</span> above 50%, <span style="color:#f44336">■</span> above 80%</li>
+      <li>Hover the CPU bar for the load of each core</li>
+    </ul>
+
+    <h2>Task actions</h2>
+    <p>The <b>...</b> menu of a task changes its priority, cancels it, or starts a new task from the same launcher.</p>
+
+    <h2>New task</h2>
+    <p>The <b>+</b> button at the bottom right starts a new task from one of the configured projects.</p>
+
+    <p>Hover any outlined element for details. Press <b>?</b> to toggle this panel.</p>
+  </template>
 
   <script type="module" src="board.js"></script>
 </body>

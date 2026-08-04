@@ -73,7 +73,11 @@ function(EmbedBinary INPUT_FILE OUTPUT_FILE VARPREFIX WORK_DIR)
     message(FATAL_ERROR "xxd failed embedding '${INPUT_FILE}' (exit ${_xxd_result})")
   endif()
 
-  _EmbedBinaryHeaderPath("${OUTPUT_FILE}" _header_file)
+  if(DEFINED EMBED_HEADER_FILE)
+    set(_header_file "${EMBED_HEADER_FILE}")
+  else()
+    _EmbedBinaryHeaderPath("${OUTPUT_FILE}" _header_file)
+  endif()
   if(_header_file)
     file(WRITE "${_header_file}"
       "#pragma once\n"
@@ -166,4 +170,55 @@ function(EmbedBinaryFile INPUT_FILE OUTPUT_FILE VARPREFIX)
     COMMENT "Generating C array '${VARPREFIX}' from file '${INPUT_FILE}'"
     VERBATIM
   )
+endfunction()
+
+# EmbedBinaryTargets(<varname_prefix> PATH <dir> FILES <target1> <target2> ...)
+## Embarque N cibles CMake sous UN seul symbole VARPREFIX. Chaque element de
+## FILES est a la fois le nom de la cible CMake ($<TARGET_FILE:...>) et la
+## base du nom du fichier .c genere : "<PATH>/<element>.c". Toujours .c (pas
+## de mode .h direct - cf. discussion sur xxd et static). Un unique header
+## partage est genere dans PATH, nomme d'apres VARPREFIX (minuscule).
+function(EmbedBinaryTargets VARPREFIX)
+  cmake_parse_arguments(ARG "" "PATH" "TARGETS" ${ARGN})
+
+  if(NOT ARG_PATH)
+    message(FATAL_ERROR "EmbedBinaryTargets(${VARPREFIX}): missing PATH")
+  endif()
+  list(LENGTH ARG_TARGETS _n_files)
+  if(_n_files EQUAL 0)
+    message(FATAL_ERROR "EmbedBinaryTargets(${VARPREFIX}): empty TARGETS")
+  endif()
+
+  get_filename_component(_abs_path "${ARG_PATH}" ABSOLUTE)
+  string(TOLOWER "${VARPREFIX}" _header_name)
+  set(_shared_header "${_abs_path}/${_header_name}.h")
+
+  math(EXPR _last_idx "${_n_files} - 1")
+  foreach(_i RANGE ${_last_idx})
+    list(GET ARG_TARGETS ${_i} _target)
+    set(_abs_output "${_abs_path}/${_target}.c")
+
+    set(_extra_outputs)
+    set(_header_for_call "")
+    if(_i EQUAL 0)
+      set(_header_for_call "${_shared_header}")
+      list(APPEND _extra_outputs "${_shared_header}")
+    endif()
+
+    string(MD5 _uniq "${_abs_output}")
+    set(_work_dir "${CMAKE_CURRENT_BINARY_DIR}/embed_tmp/${_uniq}")
+    add_custom_command(
+      OUTPUT "${_abs_output}" ${_extra_outputs}
+      COMMAND ${CMAKE_COMMAND}
+              -DEMBED_INPUT_FILE=$<TARGET_FILE:${_target}>
+              -DEMBED_OUTPUT_FILE=${_abs_output}
+              -DEMBED_VARPREFIX=${VARPREFIX}
+              -DEMBED_WORK_DIR=${_work_dir}
+              "-DEMBED_HEADER_FILE=${_header_for_call}"
+              -P "${CMAKE_CURRENT_SOURCE_DIR}/CMakeBinaryEmbedding.cmake"
+      DEPENDS ${_target} "${CMAKE_CURRENT_SOURCE_DIR}/CMakeBinaryEmbedding.cmake"
+      COMMENT "Generating C array '${VARPREFIX}' from target '${_target}'"
+      VERBATIM
+    )
+  endforeach()
 endfunction()

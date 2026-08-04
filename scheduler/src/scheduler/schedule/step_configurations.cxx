@@ -66,7 +66,7 @@ void ns_Schedule::StepConfigurations::ReadFromTaskJSON(rapidjson::Value const& e
   }
 }
 
-ns_Schedule::StepConfigurations::Configuration  
+ns_Schedule::StepConfigurations::Configuration 
 ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
     std::vector<rapidjson::Value const*> const& overrides) const {
   std::string id;
@@ -126,7 +126,7 @@ ns_Schedule::StepConfigurations::MakeWithOverrides(std::string const& name,
 }
 
 
-ns_Schedule::StepConfigurations::Configuration  
+ns_Schedule::StepConfigurations::Configuration 
 ns_Schedule::StepConfigurations::ReadEntryFromTaskJSON(std::string const& name, 
     rapidjson::Value const& entry, 
     Configuration& defaultConfiguration) {

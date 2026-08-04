@@ -132,43 +132,41 @@ ByStepConfig() {
   esac
 }
 
-# ─── nb_retry: intentional first-attempt failure ─────────────────────────────
+# ─── nb_retry: unconditional fan-out ──────────────────────────────────────────
 #
 # run: [
 #   {"nb_retry": 2, "args": {"label": "with_retry"}},
 #   {"nb_retry": 1, "args": {"label": "no_retry"}}
 # ]
 #
-# nb_retry=2 means 2 attempts are created; the scheduler runs attempt 1 only
-# if attempt 0 exits non-zero.  nb_retry=1 means a single attempt (no retry).
+# nb_retry is NOT a retry-on-failure mechanism. `Task::CreateStepsFromJson()`
+# builds each extra attempt as a static sibling copy that carries the exact
+# same upstream `depend_from_` set as attempt 0 (see task-step-lifecycle.md,
+# "Retries and run — static structure"), so nb_retry=2 means both attempts
+# become ready together and both run unconditionally — nothing checks a
+# sibling attempt's exit code before starting the next one. nb_retry=1 means
+# a single attempt is created at all.
 #
-# The step intentionally fails on attempt_id=0 for rank 0 to exercise the
-# retry path.  A marker file is written so that attempt 1 can prove it ran
-# after a real failure.
+# Each attempt writes its own marker file so Summary() can confirm exactly
+# which (rank, attempt) pairs actually executed.
 #
 # Expected:
-#   rank 0 attempt 0: returns 1  (triggers retry, writes marker)
-#   rank 0 attempt 1: attempt=1  marker exists
-#   rank 1 attempt 0: attempt=0  label=no_retry  (no retry ever runs)
+#   rank 0 attempt 0: runs, label=with_retry  (marker written)
+#   rank 0 attempt 1: runs, label=with_retry  (marker written — unconditionally,
+#                      not gated on attempt 0's outcome)
+#   rank 1 attempt 0: runs, label=no_retry    (marker written; nb_retry=1, so
+#                      this is the only attempt — attempt 1 never exists)
 #
 ByNbRetry() {
   local rank="${THEJOB_STEP_RANK_ID}"
   local attempt="${THEJOB_STEP_ATTEMPT_ID}"
-  local marker="${THEJOB_OUT_PATH}/retry_marker_rank${rank}.txt"
+  local marker="${THEJOB_OUT_PATH}/nbretry_marker_rank${rank}_attempt${attempt}.txt"
   echo "=== ByNbRetry rank=${rank} attempt=${attempt} | label=${label}" 1>&2
+  echo "ran" > "${marker}"
 
   if [ "${label}" = "with_retry" ]; then
-    if [ "${attempt}" = "0" ]; then
-      echo "attempt 0: intentional failure to trigger retry" 1>&2
-      echo "failed" > "${marker}"
-      return 1
-    fi
-    # attempt 1: the retry
-    check "ByNbRetry" "${rank}" "attempt"      "1"   "${attempt}"
-    check "ByNbRetry" "${rank}" "marker_exists" "yes" \
-      "$([ -f "${marker}" ] && echo 'yes' || echo 'no')"
+    check "ByNbRetry" "${rank}_attempt${attempt}" "label" "with_retry" "${label}"
   else
-    # no_retry: single attempt, must be attempt 0
     check "ByNbRetry" "${rank}" "attempt" "0"        "${attempt}"
     check "ByNbRetry" "${rank}" "label"   "no_retry" "${label}"
   fi
@@ -198,6 +196,17 @@ GroupNbCoresOverride() {
 # ─── Summary ──────────────────────────────────────────────────────────────────
 Summary() {
   echo "=== Summary ===" 1>&2
+
+  # Confirm ByNbRetry's unconditional fan-out actually happened: both attempts
+  # of rank 0 must have run, only attempt 0 of rank 1 must exist.
+  check "ByNbRetry" "0" "attempt0_ran" "yes" \
+    "$([ -f "${THEJOB_OUT_PATH}/nbretry_marker_rank0_attempt0.txt" ] && echo 'yes' || echo 'no')"
+  check "ByNbRetry" "0" "attempt1_ran" "yes" \
+    "$([ -f "${THEJOB_OUT_PATH}/nbretry_marker_rank0_attempt1.txt" ] && echo 'yes' || echo 'no')"
+  check "ByNbRetry" "1" "attempt0_ran" "yes" \
+    "$([ -f "${THEJOB_OUT_PATH}/nbretry_marker_rank1_attempt0.txt" ] && echo 'yes' || echo 'no')"
+  check "ByNbRetry" "1" "attempt1_absent" "yes" \
+    "$([ ! -f "${THEJOB_OUT_PATH}/nbretry_marker_rank1_attempt1.txt" ] && echo 'yes' || echo 'no')"
 
   local results="${THEJOB_OUT_PATH}/results.txt"
   if [ ! -f "${results}" ]; then

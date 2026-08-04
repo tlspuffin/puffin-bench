@@ -43,7 +43,8 @@ ns_Publish::Rule* ns_Publish::Rule::Build(std::string const& action,
   if (action == "GenerateMergeJSON") {
     return new RuleMergeJSON(name, rulesPath, rulesRelativePath, filesFilter, parameters);
   } else {
-    return new RuleNULL(name, rulesPath, rulesRelativePath, filesFilter, parameters);
+    //return new RuleNULL(name, rulesPath, rulesRelativePath, filesFilter, parameters);
+    return nullptr;
   }
 }
 

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PUFFIN Bench</title>
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body>
+    <iframe id="content" name="main"></iframe>
+    <div id="navigation">
+      <div class="navheader">Navigation ▲</div>
+      <div id="navitems"></div>
+      <div id="navsubitems"></div>
+    </div>
+  </body>
+  <script>
+    var selectedServiceHRef = null;
+    var curIFrameURL = null;
+
+    function CloseMenu(toShow, toClose) {
+      toClose.style.display = 'none';
+      toShow.style.display = 'flex';
+    }
+
+    function ActivateLink(href, links) {
+      links.forEach(link => link.classList.remove('active'));
+      href.classList.add('active');
+      href.innerText = href.dataset.label;
+      if (href.dataset.service_actif)  {
+        href.innerText += ` (${href.dataset.service_actif})`;
+      }
+    }
+
+    function SelectPackage(packagesServices, linksPackages, href) {
+      selectedServiceHRef = href;
+
+      linksPackages.forEach(link => {
+        if (link.getAttribute('href') === '#') return;
+        link.href = packagesServices[href.dataset.service_name](link.dataset.label);
+      })
+
+      const hrefPackage = linksPackages.find(link => link.dataset.label === href.dataset.service_actif);
+      ActivateLink(hrefPackage, linksPackages)
+
+      const floatDiv = document.getElementById('navsubitems');
+      const rootDiv = document.getElementById('navitems');
+      CloseMenu(floatDiv, rootDiv)
+    }
+
+    function CreateHRef(url, label, service, links, callback =null) {
+      const href = document.createElement('a');
+      href.target = 'main';
+      href.href = url;
+      href.dataset.label = label;
+      if (service !== null) {
+        href.dataset.service_name = service.name;
+        href.dataset.service_actif = service.default;
+        href.innerText = `${label} (${service.default})`;
+      } else {
+        href.innerText = label;
+      }
+      href.onclick = (event) => {
+          const url = href.getAttribute('href');
+          if (url === '#') {
+            event.preventDefault();
+          } else if (url === curIFrameURL) {
+            event.preventDefault();
+          }
+          curIFrameURL = url;
+          ActivateLink(href, links);
+          if (callback !== null) {
+            callback(href);
+          }
+      }
+      links.push(href);
+      const div = document.createElement('div');
+      div.className = 'navitem';
+      div.appendChild(href);
+      return [div, href];
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const SCHEDULER_PORT=10082;
+        const PUBLISHER_PORT=10083;
+        const VIS_COMPARATOR_PORT=10084;
+
+        const hostname = window.location.hostname;
+        const services = [
+          { url: `http://${hostname}:${SCHEDULER_PORT}/files/board/board.html`, label: '🗓️ Scheduler' },
+          { url: '#', label: '🗂️ Experiment results', default: null, service: { name: 'publisher', default: 'tlspuffin' } },
+          { url: '#', label: '🔬 Experiment analyzer', service: { name: 'comparator', default: 'tlspuffin' } },
+          { url: `http://${hostname}:${SCHEDULER_PORT}/files/board/history.html`, label: '📰 Experiments log' },
+        ];
+        const packages = [ 'tlspuffin', 'sshpuffin' ];
+        const packagesServices = {
+            publisher: (package) => `http://${hostname}:${PUBLISHER_PORT}/files/${package}`,
+            comparator: (package) => `http://${hostname}:${VIS_COMPARATOR_PORT}/files/${package}/index.html`,
+        };
+        const linksPackages = [];
+
+        const floatDiv = document.getElementById('navsubitems');
+        floatDiv.style.display = 'none';
+        floatDiv.ontransitionend = (event) => {
+          console.log(event.propertyName);
+          if (event.propertyName === 'max-height') {
+            const navigationContainer = document.getElementById('navigation');
+            if (!navigationContainer.matches(':hover')) {
+              floatDiv.style.display = 'none';
+              rootDiv.style.display = 'flex';
+            }
+          }
+        };
+        const subMenuBackCB = (href) => {
+          CloseMenu(rootDiv, floatDiv);
+        }
+        floatDiv.appendChild(CreateHRef('#', '👈 Back', null, linksPackages, subMenuBackCB)[0]);
+        const subMenuSelect = (href) => {
+          selectedServiceHRef.dataset.service_actif = href.dataset.label;
+          selectedServiceHRef.innerText = `${selectedServiceHRef.dataset.label} (${href.dataset.label})`;
+          selectedServiceHRef.href = packagesServices[selectedServiceHRef.dataset.service_name](selectedServiceHRef.dataset.service_actif);
+          CloseMenu(rootDiv, floatDiv);
+        }
+        packages.forEach(name => {
+            floatDiv.appendChild(CreateHRef('', name, null, linksPackages, subMenuSelect)[0]);
+        });
+
+        const rootDiv = document.getElementById('navitems');
+        const iframe = document.getElementById('content');
+        const links = [];
+        const subSelectPackage = SelectPackage.bind(null, packagesServices, linksPackages);
+        services.forEach(link => {
+            let haveCB = false;
+            let url = link.url;
+            if (url === '#') {
+              haveCB = true;
+              url = packagesServices[link.service.name](link.service.default);
+            }
+            const [div, href] = CreateHRef(url, link.label, link.service ?? null, links, haveCB ? subSelectPackage : null);
+            rootDiv.appendChild(div);
+            if (Object.hasOwn(link, 'default') && iframe) {
+              iframe.src = url;
+              href.classList.add('active');
+              curIFrameURL = url;
+            }
+        });
+    });
+  </script>
+</html>

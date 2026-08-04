@@ -1,204 +1,98 @@
-# Board — Job Launcher Configuration
+# Scheduler — Board Job Launcher
 
-This document explains how to configure new job types in the web dashboard and how the job submission flow works end to end.
+This document covers the dashboard's job-launcher `+` button: what actually ships in this repository (`html/board/launchers/launchers.js` + `launchers.css`), the plugin contract it expects, and the server-side `/api/task/new` contract that any launcher plugin ultimately has to satisfy.
 
----
-
-## History Page
-
-`history.html` / `history.js` provide a read-only view of past tasks, accessible from the board. It queries `GET /api/user/<u>/<jobType>/tasks` and displays tasks grouped by user and job type on a timeline.
-
-Each task entry uses two fields from the API response:
-- `flag.color` — colours the task card (e.g. dark yellow `#6f6f00` when a perf objective was found)
-- `publish_link` — provides a clickable link to the published result
+**Read this first**: unlike an earlier revision of this document, no concrete job launcher (job-type registry, commit picker, campaign fields, composite jobs, etc.) ships with this repository. `git ls-files html/board/launchers/` shows only `launchers.css` and `launchers.js` — no `config.js`, no `<project>/joblauncher.js`, no `jobsconfig.json`, no `git.json`. The pieces described below as "shipped" are the actual, current `launchers.js` source; the pieces described as "plugin contract" are inferred from what that source requires of a plugin, not from any example that exists in-tree.
 
 ---
 
-## Overview
+## What Ships: `launchers.js`
 
-The job launcher is a modal dialog opened from the board's `+` button. It lets the user:
-1. Pick a **job type** (defined in `jobs_config.json`)
-2. Pick or enter a **commit hash** (loaded from a git history feed)
-3. Fill in optional **campaign parameters** (only for `"campaign": true` job types)
-4. Submit — the launcher fetches the flow JSON and script from the server, then POSTs them to `/api/task/new`
+`html/board/board.js` imports `./launchers/launchers.js` as a side-effecting module (`import './launchers/launchers.js';`) — it self-installs a floating `+` button (`#new-task`, styled by `launchers.css`) in the bottom-right corner of the board.
 
----
+On load, `launchers.js`:
 
-## `jobs_config.json` — Job Type Registry
+1. Injects `launchers.css` as a `<link>`.
+2. `import`s `./config.js` and reads `config.projects` — expected to be an array of project-name strings.
+3. For each name `p` in `config.projects`, dynamically `import()`s `./${p}/joblauncher.js` and instantiates `new module.JobLauncher()`. The project name doubles as both the subdirectory to import from and the label shown in the menu — there is no separate display-label field.
+4. Wires the `+` button:
+   - **Exactly one project registered**: clicking `+` calls that project's `launcher.open()` directly — no menu.
+   - **More than one**: clicking `+` shows a small popup menu (one button per project label); clicking an entry closes the menu and calls that project's `.open()`.
+   - Clicking outside an open menu closes it.
 
-Located at `html/board/launchers/tlspuffin/jobsconfig.json`, embedded in the launcher JavaScript.
+```js
+// launchers.js, actual current logic
+const mods = await Promise.all(config.projects.map(p => import(`./${p}/joblauncher.js`)));
+export const launchers = mods.map((m, i) => {
+  const instance = new m.JobLauncher();
+  return { label: config.projects[i], open: () => instance.open() };
+});
+```
 
-### Format
+Nothing else in `launchers.js` is job-type-, campaign-, or commit-picker-specific — all of that lives inside each project's own `joblauncher.js`, which this repository does not provide.
+
+## The Plugin Contract (inferred, not shipped)
+
+To add a job launcher for a project `myproj`, based strictly on what `launchers.js` requires:
+
+1. Create `html/board/launchers/config.js` exporting `config.projects`, e.g. `export const config = { projects: ["myproj"] };`.
+2. Create `html/board/launchers/myproj/joblauncher.js` exporting a `JobLauncher` class with a no-throw, no-arg constructor and an `open()` method (called when the user picks `myproj` from the menu, or immediately if it's the only registered project). Everything past that point — modal markup, job-type selection, commit picker, form validation, and the actual submission — is entirely up to that module; `launchers.js` does not constrain it further.
+3. Whatever flow JSON / step script / auxiliary files the launcher needs, serve them from `<html>/jobsscripts/` (created empty by `Config::Validate()`, reachable at `GET /files/jobsscripts/...`) or embed them directly in the plugin module.
+4. Since none of these files are part of the embedded-resource set (`docs/build.md`), nothing here is touched by `--force-install` — you own the files once you drop them under `<html>/board/launchers/`.
+
+This mirrors the other declared extension point, `<html>/board/custom/header.html`, which `board.js` fetches (`fetch('custom/header.html')`) to inject a custom header fragment into `#custom_header` — also not shipped, also silently a no-op (fetch failure is swallowed) if absent.
+
+## Flow JSON Shape (for reference)
+
+Whatever a `joblauncher.js` plugin submits as the `config` part of `/api/task/new` is a **flow JSON** document — the same format the scheduling engine consumes directly via `POST /api/task/new`. Real examples ship under `samples/jobs/tests/*.json`. For example, `samples/jobs/tests/test_publish.json`:
 
 ```json
 {
-  "jobs": [
+  "publish": {
+    "server": "default",
+    "storage": "Y/Tests/${COMMIT_ID}/",
+    "goal": "Mesurer PR/Commit ${COMMIT_ID}"
+  },
+  "name": "Test Monitor",
+  "flow": [
+    { "step": "Step1", "run": [{"Conf_A": {}}, {"Conf_B": {}}], "configuration": {"nb_retry": 2} },
+    { "step": "Step2" },
     {
-      "value":    "vuln-a",
-      "label":    "Vuln group A",
-      "job_type": "vuln-a",
-      "color":    "#FF9800",
-      "campaign": false,
-      "config":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json",
-      "script":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh",
-      "files":    [
-        "/files/jobsscripts/tlspuffin/shell.nix",
-        "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
-      ]
+      "step": "Step3",
+      "configuration": { "timeout": "15s", "args": {"features": "..."} },
+      "monitor": { "entry_point": "MonitorStep3", "delay_start": "1s", "interval": "5s", "timeout": "10s" }
     }
   ]
 }
 ```
 
-### Fields
+`publish.storage` and `publish.goal` (and any other flow field) support `${VAR}` substitution from the `args[...]` the launcher POSTs alongside the flow — see below. `publish.server` must name a key under the server's `schedule.publisher` config section (see `docs/configuration.md`).
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `value` | string | Internal identifier, used as the chip's radio value |
-| `label` | string | Display name shown on the chip in the UI |
-| `job_type` | string | Value sent as `job_type` in the POST form (used by `UsersAPI` to index tasks) |
-| `color` | string | CSS color for the chip dot |
-| `campaign` | bool | `true` enables the campaign extra fields (timeout, vendor, features, cores, memory) |
-| `config` | URL path | Flow JSON file to submit (fetched from `/files/…`) |
-| `script` | URL path | Bash step script to submit (fetched from `/files/…`) |
-| `files` | array of URL paths | Additional files to attach (e.g. patches, Nix expressions) |
-| `composite` | array of `value` | If set, this job type launches each listed sub-job in parallel; `config`/`script` are unused |
-| `job_label` | string or array | Template for the task name. Supports `${COMMIT:N}` (first N chars of commit) and `${CAMPAIGN-ID}`. For composite jobs, an array provides one label per sub-job. |
+## Server-Side Contract: `POST /api/task/new`
 
-All URL paths are resolved by the browser relative to the board origin, so `/files/jobsscripts/…` maps to `GET /files/jobsscripts/…` on the scheduler.
+This part **is** real, current code (`ns_Server::RequestHandlerTaskNew::handleRequest`, `src/scheduler/server/request_handler.cxx`) — any launcher plugin, present or future, has to assemble a `multipart/form-data` body matching it:
 
-### Adding a new job type
+| Form field | Required | Meaning |
+|---|---|---|
+| `name` | no (defaults to `""`) | Task display name. |
+| `user` | no (defaults to `"anonymous"`) | Submitting user; tracked per-user by the Users API (`GET /api/users`, `GET /api/user/<u>/job_types`, `GET /api/user/<u>/<jobType>/tasks`). |
+| `job_type` | no (defaults to `"unknown"`) | Arbitrary string identifying the job type; used purely for grouping/history, not validated against any registry server-side. |
+| `config` | **yes** | The flow JSON file (see above). Request fails with `{"success": false, "error": "Missing config or script file."}` if absent. |
+| `script` | **yes** | The step script file (bash, sourced by `executor.sh`/`functions.sh`). Same failure mode if absent. |
+| `files[]` | no, repeatable | Extra files (patches, configs, etc.), keyed by their uploaded filename. |
+| `args[<KEY>]` | no, repeatable | Free-form key/value pairs, parsed by stripping the `args[...]` wrapper off each form field name. Duplicate keys throw a 500 (`"args[] value duplicate key found"`). These become the `${KEY}` substitution variables available inside the flow JSON. |
+| `runtime[<KEY>]` | no, repeatable | Same parsing as `args[...]` (`runtime[...]` wrapper stripped), merged into the task's runtime/step configuration ahead of dispatch. Duplicate keys throw the analogous 500. |
 
-1. Place the flow JSON and step script in `html/jobs_scripts/` (installed by the server).
-2. Add an entry to `jobsconfig.json` with `"config"` and `"script"` pointing to their `/files/jobsscripts/` paths.
-3. Reload the board — the configuration is embedded in the launcher JavaScript.
+On success the handler returns `{"success": true, "task_id": "<id>"}`; on any exception, HTTP 500 with `{"success": false, "error": "<message>"}`.
 
----
+All board API routes, including `/api/task/new`, go through `ManageCORS`, which sets `Access-Control-Allow-Origin: *` on every response — so a launcher plugin can be served from, or POST to, an origin other than the board's own. Preflight is handled too: any `OPTIONS` request is dispatched to a dedicated `RequestHandlerOptions` (matched on method alone, independent of the URI), which answers `200 OK` with the CORS headers. See `docs/api.md` for the full CORS/OPTIONS picture.
 
-## Commit Source — `git.json`
+## Building a Working Launcher
 
-The commit picker loads a JSON feed from `commitsUrl`. In `board.js` this is configured to point to an external git history service:
+Since the plugin isn't provided, if you're standing one up from scratch the practical shape (derived from the contract above, not copied from any existing UI) is:
 
-```js
-commitsUrl: `http://${window.location.hostname}:10083/api/git/history/tlspuffin`
-```
+1. `JobLauncher.open()` renders a modal: job-type selector, a way to pick or type a commit/reference, and whatever campaign-style parameters your `args`/`runtime` fields need.
+2. On submit, `fetch()` your flow JSON and step script (e.g. from `/files/jobsscripts/...`), build a `FormData` with the fields in the table above, and `POST` it to `/api/task/new`.
+3. Handle the JSON `{success, task_id}` / `{success: false, error}` response to give the user feedback.
 
-The fallback (when constructing `JobLauncher` without `commitsUrl`) is `./git.json` — a static file served from the board directory.
-
-### Expected format
-
-```json
-{
-  "commits": [
-    { "id": "abc1234def...", "date": "2026-04-17", "comment": "fix: something", "branch": "main" },
-    { "id": "789abcdef0...", "date": "2026-04-16", "comment": "feat: other",    "branch": "dev"  }
-  ],
-  "branches": [
-    { "id": "a1b2c3d4e5...", "date": "2026-04-15", "comment": "feat: wip",      "branch": "my-branch" }
-  ],
-  "PR": [
-    { "id": "b2c3d4e5f6...", "date": "2026-04-14", "comment": "pr: my feature", "branch": "pr/42", "state": "open" }
-  ],
-  "PR_API_Infos": {
-    "apiRemaining": 58,
-    "apiResetTS": 1718000000
-  }
-}
-```
-
-The UI splits commits into four tabs:
-
-| Tab | Key | Content |
-|-----|-----|---------|
-| **main/dev** | `dev` | `commits` entries with `branch = main` or `dev` |
-| **PR** | `pr_open` | `PR` entries filtered to `state = "open"` (GitHub API) |
-| **branches** | `pr` | All `branches` entries |
-| **All** | `all` | All of the above sorted by date |
-
-The **PR** tab refresh button calls `commitsUrl?refresh=all` (hits GitHub API); other tabs use `?refresh=local`. The button tooltip shows `PR_API_Infos.apiRemaining` credits and reset time when on the PR tab.
-
----
-
-## Submission Flow
-
-When the user clicks **Launch Task**, `joblauncher.js` branches on whether the selected job type is composite.
-
-### Composite job types (`"composite": [...]`)
-
-The launcher resolves each `value` in `composite` to its job definition and calls `#launchSingleJob()` for each **in parallel** (`Promise.all`). The `config`, `script`, and `files` fields on the composite entry itself are unused — they are carried by each sub-job definition.
-
-Each sub-task name is resolved from `job_label[i]` if present (supports `${COMMIT:N}` and `${CAMPAIGN-ID}` templates), otherwise falls back to `"<baseName> - <sub.label>"`.
-
-After all launches complete, a single toast summarises each sub-job result:
-
-```
-Vuln group A: OK (task_id: 42)
-Perf: FAILED - 500: internal error
-```
-
-The toast is `success` only if every sub-job returned HTTP 2xx.
-
-### Simple job types
-
-1. Fetches `config`, `script`, and each file in `files` in parallel (`Promise.all`).
-2. Assembles a `FormData` and POSTs it to `/api/task/new`.
-
-### Standard form fields (all job types)
-
-| Form field | Value |
-|------------|-------|
-| `name` | Task name from the title input (defaults to `"<label> - <commit7>"`) |
-| `user` | Username (persisted in `localStorage`) |
-| `job_type` | `job_type` from the job definition |
-| `config` | Flow JSON blob (filename = basename of `config` path) |
-| `script` | Step script blob (filename = basename of `script` path) |
-| `files[]` | Each additional file blob (one entry per item in `files`) |
-| `args[COMMIT_ID]` | Selected commit hash |
-| `args[PROJECT]` | Project name (hardcoded to `"tlspuffin"` in the tlspuffin launcher) |
-
-### Campaign-only form fields (`"campaign": true`)
-
-| Form field | Value |
-|------------|-------|
-| `runtime[RUNTIME_TIMEOUT]` | Total timeout as `"<N>m"` (days×1440 + hours×60 + minutes) |
-| `runtime[RUNTIME_NB_RUN]` | Number of attempts (integer) |
-| `runtime[RUNTIME_NB_CORES]` | Cores per step (integer) |
-| `runtime[RUNTIME_MEMORY_CORE]` | Base memory in MB (omitted if 0) |
-| `runtime[RUNTIME_MEMORY_CONSUMPTION]` | Max memory in MB (omitted if 0) |
-| `runtime[RUNTIME_RUN_CONFIG]` | JSON string — a named step configuration block (see below) |
-
-### Campaign `RUNTIME_RUN_CONFIG`
-
-For campaign jobs, the launcher derives a configuration name from the `vendor` field:
-
-```
-"wolfssl:wolfssl540"  →  config name "wolfssl540"
-```
-
-The generated `RUNTIME_RUN_CONFIG` value:
-
-```json
-{
-  "wolfssl540": {
-    "nb_cores": 8,
-    "args": {
-      "vendor":      "wolfssl:wolfssl540",
-      "features":    "cputs",
-      "extra_flags": "--put-use-clear"
-    }
-  }
-}
-```
-
-This is passed as a JSON string in the form field. The server-side parser reads `runtime` fields and merges them into the task configuration before dispatching the flow.
-
----
-
-## Validation Rules
-
-The **Launch Task** button is disabled unless:
-- `user` is non-empty (invalid characters are stripped in real-time with a visual reject animation)
-- A job type chip is selected
-- The commit field contains a known commit or a hex string ≥ 7 characters
-- If the commit is unknown (hex but not in the list): the "Unknown commit — launch anyway" checkbox is checked
-- For campaign jobs: `vendor` is non-empty; `campaign_id` allows only `[a-zA-Z0-9_@-]` characters (enforced in real-time)
+There is nothing in the current codebase constraining how the commit picker, campaign fields, or multi-job composition work beyond this — that entire UI layer is project-specific and lives outside this repository's shipped `html/board/` tree.

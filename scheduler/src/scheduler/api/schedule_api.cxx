@@ -1,8 +1,8 @@
 #include "schedule_api.hxx"
 
 ns_API::ScheduleAPI::ScheduleAPI(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
-    ns_System::Linux& os, uint16_t cache_port)
-    : config_(config), schedule_(config, users, os, cache_port)
+    ns_System::Linux& os, uint16_t serverPort)
+    : config_(config), schedule_(config, users, os, serverPort)
 {
 }
 

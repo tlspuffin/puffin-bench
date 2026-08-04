@@ -1,4 +1,6 @@
+import { Help, helpTexts } from './help.js';
 import { TaskCard } from './taskcard.js';
+import * as Launchers from './launchers/launchers.js';
 
 let taskCard;
 let dataUrl = null;
@@ -70,6 +72,8 @@ async function Refresh() {
 }
 
 function Main() {
+  new Help(helpTexts);
+
   const id = GetQueryParam('id');
   dataUrl = id ? `/api/task/${id}/state` : GetQueryParam('data');
 
@@ -81,7 +85,7 @@ function Main() {
     document.body.appendChild(btn);
   }
 
-  taskCard = new TaskCard({ onRefresh: Refresh });
+  taskCard = new TaskCard({ onRefresh: Refresh, launchers: Launchers.launchers });
 
   Refresh();
 }

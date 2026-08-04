@@ -93,6 +93,9 @@ function(FetchExternalProject)
     execute_process(COMMAND ${CMAKE_COMMAND} ${_cmake_args})
   endif()
 
+  if (NOT EXTERNAL_BUILD_J)
+    set(EXTERNAL_BUILD_J "")
+  endif()
   # Build
   if(IS_MULTI_CONFIG)
     foreach(CONFIG Debug Release)
@@ -104,13 +107,13 @@ function(FetchExternalProject)
       endif()
       message(STATUS "${FEP_NAME}: build+install ${CONFIG}...")
       execute_process(COMMAND ${CMAKE_COMMAND}
-          --build ${BLD_DIR} --config ${CONFIG} -j)
+          --build ${BLD_DIR} --config ${CONFIG} -j${EXTERNAL_BUILD_J})
       execute_process(COMMAND ${CMAKE_COMMAND}
           --install ${BLD_DIR} --config ${CONFIG} --prefix ${INSTALL_DIR}/${CONFIG})
     endforeach()
   else()
     message(STATUS "${FEP_NAME}: build+install...")
-    execute_process(COMMAND ${CMAKE_COMMAND} --build ${BLD_DIR} -j)
+    execute_process(COMMAND ${CMAKE_COMMAND} --build ${BLD_DIR} -j${EXTERNAL_BUILD_J})
     execute_process(COMMAND ${CMAKE_COMMAND} --install ${BLD_DIR})
   endif()
 

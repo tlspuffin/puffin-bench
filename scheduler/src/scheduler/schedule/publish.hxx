@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <rapidjson/document.h>
 #include <unordered_map>
+#include <Poco/URI.h>
+#include <Poco/Net/HTTPClientSession.h>
 
 namespace ns_Schedule {
 
@@ -16,13 +18,17 @@ public:
       rapidjson::Value const& config);
 
   void ReadJSON(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
-      rapidjson::Value const& config);
+      rapidjson::Value const& config, bool extractFromConfig);
   void ToJSON(rapidjson::Value& node, rapidjson::Document::AllocatorType& alloc) const;
   void PublishResults(std::unordered_map<std::string, std::string> const& taskVariables, 
       std::filesystem::path const& taskJSONfile,
       std::vector<std::filesystem::path> const& data);
 
   std::string ViewLink(std::unordered_map<std::string, std::string> const& taskVariables) const ;
+  // DeleteResults return 0: publisher let scheduler do the work, 
+  //                      1: publisher did the work successfully
+  //                      2: publisher had an error doing the cleaning
+  int DeleteResults(uint64_t taskID) const;
 
   std::string baseURL_;
   std::string notifyEndpoint_;
@@ -33,6 +39,7 @@ public:
   std::string goal_;
 
 private:
+  std::unique_ptr<Poco::Net::HTTPClientSession> CreateSession(Poco::URI const& uri) const;
   void PublishToServer(std::vector<std::string> const& files, 
     std::string const& archivePath);
 

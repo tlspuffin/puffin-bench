@@ -1,5 +1,9 @@
+import { Help, helpTexts } from './help.js';
 import { TaskCard } from './taskcard.js';
 import { Clipboard } from './clipboard.js';
+import * as Launchers from './launchers/launchers.js';
+
+const taskCard = new TaskCard({ onRefresh: () => {}, launchers: Launchers.launchers });
 
 const ui = {
   users: document.getElementById('container-users'),
@@ -7,13 +11,16 @@ const ui = {
   tasks: document.getElementById('container-tasks'),
 }
 
-const taskCard = new TaskCard({ onRefresh: () => {} });
-
 const currentSelection = {
-  name: null,
-  jobType: null,
+  name: undefined,
+  jobType: undefined,
   task: null,
-};
+  timesLineIndex: 'id'
+}
+
+const global = {
+  usersInfo: null
+}
 
 function DisableUI() {
   document.body.setAttribute('inert', '');
@@ -29,9 +36,30 @@ async function DeleteTask(task) {
   if (!confirm(`Delete experiment results of task ${task.id}:\n\t${task.name}`)) {
     return;
   }
+  let requireUIUpdate = false;
   DisableUI();
+  try {
+    const response = await fetch(
+        `http://${window.location.host}/api/task/${task.id}`,
+        { method: 'DELETE' }
+    );
+    const json = await response.json();
+    requireUIUpdate = json?.success;
+    if (!requireUIUpdate) {
+      alert(`Unable to delete task ${json?.error ?? 'unknown error'}`);
+    }
+  } catch(e) {
+    console.error(`Unable to delete ${task.id}: ${e.message}`);
+  }
   EnableUI();
-  alert('Not yet implemented');
+
+  if (requireUIUpdate) {
+    if (currentSelection.task?.id === task.id) {
+      currentSelection.task = null;
+      ui.tasks.innerHTML = '';
+    }
+    await DisplaySelectedUser(currentSelection.name, currentSelection.jobType);
+  }
 }
 
 function CreateErrorMessage(message) {
@@ -56,7 +84,7 @@ async function SelectTask(task) {
     }
     currentSelection.task = task;
   } catch (e) {
-    console.error(`Unable to load ${task.id}: ${e.message()}`);
+    console.error(`Unable to load ${task.id}: ${e.message}`);
   }
   EnableUI();
 }
@@ -64,15 +92,19 @@ async function SelectTask(task) {
 function CreateTimelinesCard(task) {
   const time = new Date(task.id).toLocaleTimeString(navigator.languages, { hour: '2-digit', minute: '2-digit' });
 
-  const div = document.createElement('div');
-  div.className = 'timesline-content';
-  div.onclick = (event) => {
+  const root = document.createElement('div');
+  root.className = 'timesline-content';
+  root.dataset.help = 'history.card';
+  root.onclick = (event) => {
       event.stopPropagation();
       SelectTask(task);
   }
 
   const state = task.cancelled ? 'cancelled' : 'done';
-  div.classList.add('state-' + state);
+  root.classList.add('state-' + state);
+
+  const div = document.createElement('div');
+  div.className = 'timesline-content-main';
 
   const timeSpan = document.createElement('span');
   timeSpan.textContent = time;
@@ -82,6 +114,7 @@ function CreateTimelinesCard(task) {
   const publishLink = task?.publish_link;
   if (publishLink) {
     publishSpan.textContent = '🗂️';
+    publishSpan.dataset.help = 'task.publishlink';
     publishSpan.onclick = (event) => {
       event.stopPropagation();
       Clipboard.Set(publishLink);
@@ -96,18 +129,27 @@ function CreateTimelinesCard(task) {
 
   const flagColor = task?.flag?.color;
   if (flagColor) {
-    div.style.setProperty('--flag-color', flagColor);
+    root.style.setProperty('--flag-color', flagColor);
   }
 
   const deleteButton = document.createElement('button');
+  deleteButton.dataset.help = 'history.delete';
   deleteButton.innerText = '💣👾';
   deleteButton.onclick = (event) => {
       event.stopPropagation();
       DeleteTask(task);
   }
   div.appendChild(deleteButton);
+  root.appendChild(div);
 
-  return div;
+  if (currentSelection.name === null) {
+      const detailInfos = document.createElement('div');
+      detailInfos.className = 'timesline-content-details';
+      detailInfos.innerText = `${task.user} / ${task.type}`;
+      root.appendChild(detailInfos);
+  }
+
+  return root;
 }
 
 function CreateTimelinesDateSeparator(ts) {
@@ -122,20 +164,72 @@ function CreateTimelinesDateSeparator(ts) {
 }
 
 function BuildTimesLine(tasks) {
-  ui.timesline.innerHTML = '';
+  tasks.history.sort(
+      (a, b) => (b?.[currentSelection.timesLineIndex] ?? b.id) - (a?.[currentSelection.timesLineIndex] ?? a.id));
+
+  const fragment = document.createDocumentFragment();
   let lastTS = null;
 
   tasks.history.forEach((task) => {
-    let currentTS = new Date(task.id).toDateString();
+    const date = task?.[currentSelection.timesLineIndex] ?? task.id;
+    let currentTS = new Date(date).toDateString();
     if ((lastTS == null) || (lastTS !== currentTS)) {
-      ui.timesline.appendChild(CreateTimelinesDateSeparator(task.id));
+      fragment.appendChild(CreateTimelinesDateSeparator(date));
       lastTS = currentTS;
     }
-    ui.timesline.appendChild(CreateTimelinesCard(task));
+    fragment.appendChild(CreateTimelinesCard(task));
   });
+
+  ui.timesline.replaceChildren(fragment);
 }
 
-async function SelectUsers(name, jobType) {
+async function SelectAllUsers(jobType) {
+  const results = {
+    running: [],
+    done: [],
+    cancelled: [],
+    all: [],
+    history: [],
+    min: null,
+    max: 0,
+  }
+  let promises = [];
+  for(let user in global.usersInfo) {
+    for(let currentJobType of global.usersInfo[user].jobs_type) {
+      if ((jobType !== null) && (currentJobType !== jobType)) {
+        continue;
+      }
+      promises.push((async () => {
+          const data = await SelectUser(user, currentJobType);
+          results.running.push(...data.running);
+          results.done.push(...data.done);
+          results.cancelled.push(...data.cancelled);
+          results.all.push(...data.all);
+          results.history.push(...data.history);
+          if ((data.all.length > 0) && ((results.min === null) || (results.min > data.min))) {
+            results.min = data.min;
+          }
+          if (results.max < data.max) {
+            results.max = data.max;
+          }
+      })());
+      if (promises.length >= 10) {
+        await Promise.all(promises);
+        promises = [];
+      }
+    }
+  }
+  if (promises.length > 0) {
+    await Promise.all(promises);
+    promises = [];
+  }
+  if (results.min === null) {
+    results.min = 0;
+  }
+  return results;
+}
+
+async function SelectUser(name, jobType) {
   const results = {
     running: [],
     done: [],
@@ -146,8 +240,6 @@ async function SelectUsers(name, jobType) {
     max: 0,
   }
 
-  DisableUI();
-
   try {
     const response = await fetch(`http://${window.location.host}/api/user/${name}/${jobType}/tasks`);
     const json = await response.json();
@@ -157,6 +249,8 @@ async function SelectUsers(name, jobType) {
         results.min = json.data[0].id;
         results.max = json.data[json.data.length - 1].id;
         json.data.reduce((acc, task) => {
+            task.user = name;
+            task.type = jobType;
             acc.all.push(task);
             if (task.running) {
               acc.running.push(task);
@@ -172,11 +266,23 @@ async function SelectUsers(name, jobType) {
       }
     }
   } catch (e) {
+    console.error(`Error in SelectUser: ${e}`);
   }
 
-  currentSelection.name = name;
-  currentSelection.jobType = jobType;
-  BuildTimesLine(results);
+  return results;
+}
+
+async function DisplaySelectedUser(name, jobType) {
+  DisableUI();
+
+  try {
+    const results = await (name !== null ? SelectUser(name, jobType) : SelectAllUsers(jobType));
+    currentSelection.name = name;
+    currentSelection.jobType = jobType;
+    BuildTimesLine(results);
+  } catch (e) {
+    console.error(`Error in DisplaySelectedUser: ${e}`);
+  }
 
   EnableUI();
 }
@@ -187,16 +293,25 @@ function BuildUserSelection(user, userData) {
 
   const userNameDiv = document.createElement('span');
   userNameDiv.className = 'user-name';
-  userNameDiv.innerText = `${user}:`;
+  userNameDiv.innerText = `${user ?? 'All'}:`;
   userDiv.appendChild(userNameDiv);
 
   userData.jobs_type.forEach(jobType => {
       const userSelection = document.createElement('button');
       userSelection.className = 'user-selection';
+      userSelection.dataset.help = (user == null) ? 'history.alljobtype' : 'history.jobtype';
       userSelection.innerText = jobType;
-      userSelection.onclick = SelectUsers.bind(null, user, jobType);
+      userSelection.onclick = DisplaySelectedUser.bind(null, user, jobType);
       userDiv.appendChild(userSelection);
   });
+  if (user == null) {
+    const userSelection = document.createElement('button');
+    userSelection.className = 'user-selection';
+    userSelection.dataset.help = 'history.all';
+    userSelection.innerText = 'All';
+    userSelection.onclick = DisplaySelectedUser.bind(null, null, null);
+    userDiv.appendChild(userSelection);
+  }
   return userDiv;
 }
 
@@ -214,7 +329,7 @@ async function ListUsersJobsType(users) {
             };
           }
         } catch(e) {
-          console.error(`Server error while retrieving user ${user}: e.message()`);
+          console.error(`Server error while retrieving user ${user}: ${e.message}`);
         }
     })());
     if (promises.length >= 10) {
@@ -240,27 +355,48 @@ async function ListUsers() {
 
 async function BuildUsersMenu() {
   DisableUI();
-  ui.users.innerHTML = '';
-  ui.timesline.innerHTML = '';
-  ui.tasks.innerHTML = '';
-  let users = await ListUsers();
-  for(let user in users) {
-    ui.users.appendChild(BuildUserSelection(user, users[user]));
+  try {
+    ui.users.innerHTML = '';
+    ui.timesline.innerHTML = '';
+    ui.tasks.innerHTML = '';
+    global.usersInfo = await ListUsers();
+    let jobsType = new Set();
+    for(let user in global.usersInfo) {
+      if (!global.usersInfo[user]?.jobs_type?.length) {
+        continue;
+      }
+      global.usersInfo[user].jobs_type.forEach(type => jobsType.add(type));
+      ui.users.appendChild(BuildUserSelection(user, global.usersInfo[user]));
+    }
+    ui.users.appendChild(BuildUserSelection(null, { jobs_type: [...jobsType].sort() }));
+  } catch(e) {
+    console.error(`Error in BuildUsersMenu: ${e}`);
   }
   EnableUI();
 }
 
 async function Refresh() {
   await BuildUsersMenu();
-  if ((currentSelection.name !== null) && (currentSelection.jobType != null)) {
-    await SelectUsers(currentSelection.name, currentSelection.jobType);
+  if ((currentSelection.name !== undefined) && (currentSelection.jobType !== undefined)) {
+    await DisplaySelectedUser(currentSelection.name, currentSelection.jobType);
     if (currentSelection.task !== null) {
       await SelectTask(currentSelection.task);
     }
   }
 }
 
+function UpdateSortIndexTimesLine(event) {
+  currentSelection.timesLineIndex = event?.target?.value ?? 'id';
+  if (currentSelection.name !== undefined && currentSelection.jobType !== undefined) {
+    DisplaySelectedUser(currentSelection.name, currentSelection.jobType);
+  }
+}
+
 function Main() {
+  new Help(helpTexts, {}, 'help-panel', 'help-button');
+  const sortIndexSelect = document.getElementById('sortIndex-select');
+  currentSelection.timesLineIndex = sortIndexSelect?.value ?? 'id';
+  sortIndexSelect.onchange = UpdateSortIndexTimesLine;
   document.getElementById('refresh-button').onclick = Refresh;
   Refresh();
 }

@@ -19,8 +19,9 @@ ns_GIT::GitAPI::GitAPI(Config const config, std::string const& name,
   char buffer[1024]{0};
   std::string outputStr;
   std::string repoPath = directory_ / "repo";
-  std::string commandLine = "git -C \"" + (directory_ / "repo").string() + 
-      "\" fetch --all >/dev/null 2>&1 || git clone --filter=blob:none " + 
+  std::string commandLine = "export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=echo; "
+      "git -C \"" + (directory_ / "repo").string() +
+      "\" fetch --all >/dev/null 2>&1 || git clone --filter=blob:none " +
       url + " \"" + repoPath + "\" 2>&1 1>/dev/null";
   FILE* output = popen(commandLine.c_str(), "r");
   if (output == nullptr) {
@@ -140,83 +141,104 @@ bool ns_GIT::GitAPI::Logs(std::vector<std::string> commitIDs, std::string& resul
     result = "{\"commits\":[]}";
     return true;
   }
-  std::string commitIDsStr;
-  for (std::string const& commit: commitIDs) {
-    commitIDsStr += commit + " ";
-  }
-  std::string const commandLine = "git -C " + (directory_ / "repo").string() + 
-      " log --oneline --no-walk --pretty=tformat:\"%H%x1F%ad%x1F%s\" --date=short " + commitIDsStr + " 2>&1";
-  
-  std::string buffer;
-  buffer.resize(4096);
-  int retInt = 0;
+
   rapidjson::Document doc;
   doc.SetObject();
   auto& alloc = doc.GetAllocator();
   rapidjson::Value commits(rapidjson::kArrayType);
-  {
-    std::shared_lock lock(lock_);
-    FILE* fstdout = popen(commandLine.c_str(), "r");
-    if (fstdout == nullptr) {
-      result = "Unable to launch git process";
-      return false;
+  for (size_t i=0; i<commitIDs.size(); i+=10) {
+    std::string commitIDsStr;
+    size_t maxIndex = (i+10) < commitIDs.size() ? (i + 10) : commitIDs.size();
+    for (size_t j=i; j<maxIndex; ++j) {
+      commitIDsStr += commitIDs[j] + " ";
     }
-    while(fgets(buffer.data(), 4096, fstdout) != nullptr) {
-      if (strchr(buffer.data(), '\n') == nullptr) {
-        pclose(fstdout);
-        result = "No end of line in command result";
+    int status = 0;
+    {
+      std::shared_lock lock(lock_);
+      status = system(("git -C " + (directory_ / "repo").string() + " log --oneline --no-walk " + commitIDsStr + " >/dev/null 2>&1").c_str());
+      if (!WIFEXITED(status)) {
+        result = "git log failled";
         return false;
       }
-      char* datePrt = strchr(buffer.data(), '\x1F');
-      if (datePrt == nullptr) {
-        pclose(fstdout);
-        result = buffer.c_str();
+    }
+    if (WEXITSTATUS(status) != 0) {
+      std::lock_guard lock(lock_);
+      int status = system(("git -C " + (directory_ / "repo").string() + " fetch --all").c_str());
+      if ((!WIFEXITED(status)) || (WEXITSTATUS(status) != 0)) {
+        result = "git fetch --all failled";
         return false;
       }
-      size_t dateIndex = datePrt - buffer.data();
-      size_t commentIndex = buffer.find("\x1F", dateIndex+1);
-      if (commentIndex == std::string::npos) {
-        pclose(fstdout);
-        result = buffer.c_str();
-        return false;
-      }
-      rapidjson::Value commit(rapidjson::kObjectType);
-      std::string commitID = buffer.substr(0, dateIndex);
-      std::string comment(buffer.substr(commentIndex + 1));
-      comment.erase(comment.find_last_not_of(" \n\r") + 1);
-      commit.AddMember("id", rapidjson::Value(commitID.c_str(), alloc), alloc);
-      commit.AddMember("date", rapidjson::Value(buffer.substr(dateIndex + 1, commentIndex - dateIndex - 1).c_str(), alloc), alloc);
-      commit.AddMember("comment", rapidjson::Value(comment.c_str(), alloc), alloc);
+    }
+    std::string const commandLine = "git -C " + (directory_ / "repo").string() + 
+        " log --oneline --no-walk --pretty=tformat:\"%H%x1F%ad%x1F%s\" --date=short " + commitIDsStr + " 2>&1";
 
-      {
-        std::string const commandLine = "git -C " + (directory_ / "repo").string() + " merge-base " + commitID + " origin/dev 2>&1";
-        FILE* fstdoutBranchInfo = popen(commandLine.c_str(), "r");
-        if (fstdoutBranchInfo != nullptr) {
-          if (fgets(buffer.data(), 4096, fstdoutBranchInfo) != nullptr) {
-            if (strchr(buffer.data(), '\n') != nullptr) {
-              std::string baseHash(buffer.data());
-              baseHash.erase(baseHash.find_last_not_of(" \n\r") + 1);
-              commit.AddMember("base", rapidjson::Value(baseHash.c_str(), alloc), alloc);
-            }
-          }
-          pclose(fstdoutBranchInfo);
+    std::string buffer;
+    buffer.resize(4096);
+    int retInt = 0;
+    {
+      std::shared_lock lock(lock_);
+      FILE* fstdout = popen(commandLine.c_str(), "r");
+      if (fstdout == nullptr) {
+        result = "Unable to launch git process";
+        return false;
+      }
+      while(fgets(buffer.data(), 4096, fstdout) != nullptr) {
+        if (strchr(buffer.data(), '\n') == nullptr) {
+          pclose(fstdout);
+          result = "No end of line in command result";
+          return false;
         }
-      }
+        char* datePrt = strchr(buffer.data(), '\x1F');
+        if (datePrt == nullptr) {
+          pclose(fstdout);
+          result = buffer.c_str();
+          return false;
+        }
+        size_t dateIndex = datePrt - buffer.data();
+        size_t commentIndex = buffer.find("\x1F", dateIndex+1);
+        if (commentIndex == std::string::npos) {
+          pclose(fstdout);
+          result = buffer.c_str();
+          return false;
+        }
+        rapidjson::Value commit(rapidjson::kObjectType);
+        std::string commitID = buffer.substr(0, dateIndex);
+        std::string comment(buffer.substr(commentIndex + 1));
+        comment.erase(comment.find_last_not_of(" \n\r") + 1);
+        commit.AddMember("id", rapidjson::Value(commitID.c_str(), alloc), alloc);
+        commit.AddMember("date", rapidjson::Value(buffer.substr(dateIndex + 1, commentIndex - dateIndex - 1).c_str(), alloc), alloc);
+        commit.AddMember("comment", rapidjson::Value(comment.c_str(), alloc), alloc);
 
-      commits.PushBack(commit, alloc);
+        {
+          std::string const commandLine = "git -C " + (directory_ / "repo").string() + " merge-base " + commitID + " origin/dev 2>&1";
+          FILE* fstdoutBranchInfo = popen(commandLine.c_str(), "r");
+          if (fstdoutBranchInfo != nullptr) {
+            if (fgets(buffer.data(), 4096, fstdoutBranchInfo) != nullptr) {
+              if (strchr(buffer.data(), '\n') != nullptr) {
+                std::string baseHash(buffer.data());
+                baseHash.erase(baseHash.find_last_not_of(" \n\r") + 1);
+                commit.AddMember("base", rapidjson::Value(baseHash.c_str(), alloc), alloc);
+              }
+            }
+            pclose(fstdoutBranchInfo);
+          }
+        }
+
+        commits.PushBack(commit, alloc);
+      }
+      if (ferror(fstdout)) {
+        pclose(fstdout);
+        result = "Error while processing output";
+        return false;
+      }
+      retInt = pclose(fstdout);
     }
-    if (ferror(fstdout)) {
-      pclose(fstdout);
-      result = "Error while processing output";
+    if ((!WIFEXITED(retInt)) || (WEXITSTATUS(retInt) != 0)) {
+      if (result.empty()) {
+        result = "Unknown error";
+      }
       return false;
     }
-    retInt = pclose(fstdout);
-  }
-  if ((!WIFEXITED(retInt)) || (WEXITSTATUS(retInt) != 0)) {
-    if (result.empty()) {
-      result = "Unknown error";
-    }
-    return false;
   }
   doc.AddMember("commits", commits, alloc);
   rapidjson::StringBuffer sb;

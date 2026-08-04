@@ -12,7 +12,13 @@
     <div class="header-top">
       <h1 id="header-title">Scheduler History</h1>
       <div class="header-actions">
+        <label class="sort_index-label" for="sortIndex-select">Sort by&nbsp;:</label>
+        <select class="sort_index-select" id="sortIndex-select" data-help="history.sort">
+          <option value="id">start time</option>
+          <option value="end_timestamp" selected>end time</option>
+        </select>
         <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
+        <button class="refresh-button" id="help-button">❔ Help</button>
       </div>
     </div>
   </div>
@@ -22,6 +28,24 @@
     <div id="container-timesline" class="container-timesline"></div>
     <div id="container-tasks" class="container-tasks"></div>
   </div>
+
+  <template id="help-panel">
+    <h2>How to use</h2>
+    <ol>
+      <li>Pick a user and a job type, or <b>All</b> for every user</li>
+      <li>Click a task in the timeline</li>
+      <li>Its final state is displayed on the right</li>
+    </ol>
+    <h2>Timeline colors</h2>
+    <ul>
+      <li><span style="color:#4CAF50">■</span> Done</li>
+      <li><span style="color:red">■</span> Cancelled</li>
+      <li>Card background: the task flag color</li>
+    </ul>
+    <h2>Deleting a task</h2>
+    <p>💣👾 removes the archived results on this server and asks the publish server to drop its copy. It cannot be undone.</p>
+    <p>Hover any outlined element for details. Press <b>?</b> to toggle this panel.</p>
+  </template>
 
   <script type="module" src="history.js"></script>
 </body>

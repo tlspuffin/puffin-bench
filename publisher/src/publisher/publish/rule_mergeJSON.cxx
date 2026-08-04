@@ -80,8 +80,7 @@ ns_Publish::RuleMergeJSON::RuleMergeJSON(std::string const& name, std::string co
 }
 
 bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
-      bool generateArtefact) {
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged) {
   std::string taskID;
   try {
     taskID = std::filesystem::path(file).stem();
@@ -91,6 +90,9 @@ bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::
     return false;
   }
 
+  std::string fullOutPath;
+  std::filesystem::path zstdFile;
+  std::error_code ec;
   try {
     std::unordered_map<std::string, std::string> variables;
     std::filesystem::path relativePath = std::filesystem::path(file).lexically_relative(rulePath_);
@@ -266,9 +268,8 @@ bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::
       }
     }
 
-    std::string fullOutPath = outPath / dst;
+    fullOutPath = outPath / dst;
     std::string fullOutDir = std::filesystem::path(fullOutPath).parent_path();
-    std::error_code ec;
     std::filesystem::create_directories(fullOutDir, ec);
     if (ec) {
       throw std::runtime_error("Unable to create directories " + fullOutDir);
@@ -277,27 +278,31 @@ bool ns_Publish::RuleMergeJSON::Apply(std::string const& file, std::filesystem::
       throw std::runtime_error("Unable to save " + fullOutPath + ".tmp");
     }
 
-    if (generateZST_ && generateArtefact) {
-      std::filesystem::path zstdFile = file;
+    if (generateZST_) {
+      zstdFile = file;
       zstdFile.replace_extension(".zst");
-      if (!ns_Analyze::Generate_Perf_ZST(file, zstdFile, "")) {
-        std::error_code ec;
-        std::filesystem::remove(fullOutPath + ".tmp", ec);
-        throw std::runtime_error("Unable to move " + fullOutPath + ".tmp to " + fullOutPath);
+      if (std::filesystem::exists(zstdFile)){
+        zstdFile.clear(); //zst file already exist, do not remove it, if this block of code fail
+      } else if (!ns_Analyze::Generate_Perf_ZST(file, zstdFile, "")) {
+        throw std::runtime_error("Generate_Perf_ZST failed to build " + zstdFile.string() +
+            " from " + file);
       }
     }
 
     std::filesystem::rename(fullOutPath + ".tmp", fullOutPath, ec);
     if (ec) {
-      std::filesystem::remove(fullOutPath + ".tmp", ec);
       throw std::runtime_error("Unable to move " + fullOutPath + ".tmp to " + fullOutPath);
     }
     libsManaged = toMerge[firstMerge_];
     outFile = dst;
     return true;
   } catch(std::runtime_error const& e) {
+    if (!zstdFile.empty()) std::filesystem::remove(zstdFile, ec);
+    if (!fullOutPath.empty()) std::filesystem::remove(fullOutPath + ".tmp", ec);
     LOGE << "RuleMergeJSON::Apply on " << file << ", error: " << e.what() << Log::Flags::End;
   } catch(...) {
+    if (!zstdFile.empty()) std::filesystem::remove(zstdFile, ec);
+    if (!fullOutPath.empty()) std::filesystem::remove(fullOutPath + ".tmp", ec);
     LOGE << "RuleMergeJSON::Apply on " << file << ", error: unknown" << Log::Flags::End;
   }
 

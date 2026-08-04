@@ -169,8 +169,9 @@ ns_Analyze::Statistics::StatsSeries ns_Analyze::Statistics::ComputeStats(
     }
     variance /= varianceDiv;
     double stddev = std::sqrt(variance);
+    double stderr = stddev / std::sqrt(nbSeries);
 
-    double margin = multiplier * stddev;
+    double margin = multiplier * stderr;
     result.mean[i] = mean;
     result.ciLower[i] = std::max(0.0, mean - margin);
     result.ciUpper[i] = mean + margin;

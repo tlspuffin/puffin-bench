@@ -7,22 +7,31 @@ void FileExtractText(std::filesystem::path const& file,
   out.supportSeek = true;
 
   std::error_code ec;
-  out.filesize = std::filesystem::file_size(file, ec);
-  if (ec) {
+  auto filesize = std::filesystem::file_size(file, ec);
+  if (ec || (filesize > INT64_MAX)) {
     out.state = FileReadState::Error_Access;
     return;
   }
+  out.filesize = filesize;
+
   std::ifstream ifs(file);
   if (!ifs) {
     out.state = FileReadState::Error_Open;
     return;
   }
-  ifs.seekg(out.requestReadOffset, out.requestReadOffset >= 0 ? std::ios::beg : std::ios::end);
+
+  out.startOffset = out.requestReadOffset;
+  if (out.requestReadOffset < 0) {
+    out.startOffset = 0;
+    if (out.requestReadOffset >= (-out.filesize)) {
+      out.startOffset = out.filesize + out.requestReadOffset;
+    }
+  }
+  ifs.seekg(out.startOffset, std::ios::beg);
   if (!ifs) {
     out.state = FileReadState::Error_OverFlow;
     return;
   }
-  out.startOffset = out.requestReadOffset;
 
   out.buffer.resize(out.requestReadSize);
   ifs.read(&out.buffer[0], out.requestReadSize);

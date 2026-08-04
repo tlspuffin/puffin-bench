@@ -44,7 +44,7 @@ All responses are JSON. All endpoints support CORS, including a dedicated `OPTIO
 
     History (`GET /api/git/history`): Runs the embedded `tlspuffin_history.sh` script against the local clone and caches the result for 24 hours (persisted to disk, reloaded on startup). Returns commits on `dev`, a range of `main` commits, local branches not yet merged, and optionally open GitHub pull requests when `url_pr` is configured for the repository.
 
-    Log lookup (`GET /api/git/log`, `POST /api/git/logs`): Runs `git log --no-walk` against the local clone and returns full commit hash, date, and commit message for each requested commit.
+    Log lookup (`GET /api/git/log`, `POST /api/git/logs`): Runs `git log --no-walk` against the local clone and returns full commit hash, date, and commit message for each requested commit, plus its merge-base with `origin/dev`.
 
 📂 Architecture at a Glance
 
@@ -66,8 +66,8 @@ All other dependencies (Poco, RapidJSON) are fetched from their upstream reposit
     cmake --build build -j$(nproc)
 
 This produces two binaries in `build/`:
-- `git_restapi` — dynamically linked
-- `git_restapi-static` — fully static binary (suitable for deployment without shared libs)
+- `git_restapi` — Poco/RapidJSON linked statically, libgcc/libstdc++ linked dynamically
+- `git_restapi-static` — same, plus `-static-libgcc -static-libstdc++` for deployment without matching system runtime libs
 
 See `docs/build.md` for the full build reference.
 
@@ -85,7 +85,11 @@ If `git_restapi-config.json` does not exist, a default configuration is written 
 
 **Force-reinstall the embedded script (server starts normally afterward):**
 
-    ./git_restapi --install
+    ./git_restapi --force-install
+
+**Install/validate only (create storage & scripts directories, install the script) and exit without starting the server or touching any repository:**
+
+    ./git_restapi --only-install
 
 See `docs/configuration.md` for the full configuration reference.
 

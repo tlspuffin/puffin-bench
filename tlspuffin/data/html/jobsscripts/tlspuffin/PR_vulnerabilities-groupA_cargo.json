@@ -1,0 +1,95 @@
+{
+  "publish": {
+    "server": "default",
+    "storage": "${PACKAGE}/PR/${COMMIT_ID}/Vuln/",
+    "goal": "Vuln PR/Commit ${COMMIT_ID}"
+  },
+  "configurations": {
+    "BUF": {
+      "args": {
+        "experiment": "BUF",
+        "features": "wolfssl540,fix-CVE-2022-42905",
+        "vendor": "wolfssl:wolfssl540-buf"
+      }
+    },
+    "CDOS": {
+      "args": {
+        "experiment": "CDOS",
+        "features": "wolfssl530,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl530-cdos"
+      }
+    },
+    "HEAP": {
+      "args": {
+        "experiment": "HEAP",
+        "features": "wolfssl540,asan,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl540-heap"
+      }
+    },
+    "SDOS2": {
+      "args": {
+        "experiment": "SDOS2",
+        "features": "wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173",
+        "extra_flags": "'--put-use-clear'",
+        "vendor": "wolfssl:wolfssl540-sdos2"
+      }
+    },
+    "SKIP": {
+      "args": {
+        "experiment": "SKIP",
+        "features": "wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173",
+        "vendor": "wolfssl:wolfssl510-skip"
+      }
+    }
+  },
+  "args": {
+    "TYPE": "vuln"
+  },
+  "name" : "Vulnerabilities (group A) search - ${COMMIT_ID}",
+  "flow" : [
+    {
+      "step": "Init",
+      "configuration": {
+          "nb_cores": 4
+        }
+    },
+    [
+      {
+        "run": [],
+        "configuration": {
+          "nb_cores": 4,
+          "nb_retry": 5
+        },
+        "streams": [
+          { "name": "error", "path": "current_log/error.log" }
+        ]
+      },
+      {
+        "step": "ForcedBuild",
+        "configuration": {
+          "nb_cores": 4
+        }
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "timeout": "${RUNTIME_TIMEOUT}"
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
+      },
+      {
+        "step": "ExperimentEnd"
+      }
+    ],
+    {
+      "step": "SummaryRun"
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}
