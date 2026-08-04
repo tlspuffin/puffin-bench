@@ -37,7 +37,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
     request_cancel_(false), cancel_source_(), publish_(), 
     md5_(std::move(md5)), state_(Task::State::Pending), publish_link_(), 
-    flag_(), apiURL_(apiURL)
+    flag_(), apiURL_(apiURL), priority_(0)
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
@@ -88,6 +88,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   if (configurations != nullptr) {
     configurations_.ReadFromTaskJSON(*configurations);
   }
+
+  priority_ = GetOrDefault<int64_t>(configJSON, "priority", priority_);
 
   CreateStepsFromJson(configJSON);
 }
@@ -230,6 +232,8 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   flag_ = ParseJSONObject(config, "flag", false);
 
   apiURL_ = Get<std::string>(config, "api_url");
+
+  priority_ = Get<int64_t>(config, "priority");
 }
 
 ns_Schedule::Task::~Task() {
@@ -429,6 +433,8 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("flag", rapidjson::Value(FlagJSON(), alloc), alloc);
 
   out.AddMember("api_url", rapidjson::Value(apiURL_.c_str(), alloc), alloc);
+
+  out.AddMember("priority", priority_, alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {
@@ -614,6 +620,9 @@ void ns_Schedule::Task::CreateStepsFromJson(
           } else {
             step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
           }
+          if (!executor_->CanRun(step)) {
+            throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
+          }
 
           current_stack.push_back(step);
           steps_.push_front(step);
@@ -627,6 +636,9 @@ void ns_Schedule::Task::CreateStepsFromJson(
           step = attemptStep;
         }
       } else {
+        if (!executor_->CanRun(step)) {
+          throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
+        }
         current_stack.push_back(step);
         steps_.push_front(step);
         ns_Schedule::Step* attemptStep = step;

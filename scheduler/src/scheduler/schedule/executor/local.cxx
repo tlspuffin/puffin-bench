@@ -11,6 +11,7 @@
 #include <sstream>
 #include <filesystem>
 #include <set>
+#include <unordered_set>
 #include <iostream>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -230,6 +231,10 @@ ns_Executor::Local::~Local() {
 
 }
 
+ bool ns_Executor::Local::CanRun(ns_Schedule::Step* step) const {
+  return step->nb_cores_ <= nbCoresMax_;
+}
+
 bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
   if (task->executor_data_ == nullptr) {
     task->executor_data_ = new LocalTaskData();
@@ -315,11 +320,26 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
   }
   freeMemory -= memMinAllowed_;
 
-  for(auto step : steps) {
+  int64_t priority = (*steps.begin())->task_->priority_;
+  bool stepSkiped = false;
+
+  for(auto const step : steps) {
+    if (step->task_->executor_ != this) {
+      continue;
+    }
+    int64_t curPriority = step->task_->priority_;
+    if (curPriority != priority) {
+      if (stepSkiped) {
+        break;
+      }
+      priority = curPriority;
+    }
+
     uint64_t nbCoresRequired = step->nb_cores_;
     uint64_t memoryRequired = step->memory_max_;
     if ((!step->IsReady()) || (nbCoresRequired > nbCoresFree) || 
         ((memoryRequired > 0) && (memoryRequired > freeMemory))) {
+      stepSkiped |= step->IsPending();
       continue;
     }
     nbCoresFree -= nbCoresRequired;
@@ -335,6 +355,211 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
   }
 
   return result;
+}
+
+void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> const& steps) const {
+  if (steps.empty()) {
+    return;
+  }
+
+  uint64_t freeCores = nbCoresMax_;
+  std::vector<uint64_t> cores(nbCoresMax_, 0);
+  std::vector<uint64_t> indexFreeCores(freeCores);
+  for(uint64_t i=0; i<freeCores; ++i) {
+    indexFreeCores[i] = i;
+  }
+  uint64_t minTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+
+  std::unordered_set<ns_Schedule::Step*> stepsSet;
+  std::list<ns_Schedule::Step*> currentSteps;
+  for(auto step : steps) {
+    if (step->task_->executor_ != this) {
+      continue;
+    }
+    if (step->IsPending()) {
+      if (step->nb_cores_ > nbCoresMax_) {
+        for(auto step : steps) {
+          if (step->task_->executor_ != this) {
+            continue;
+          }
+          if (step->IsPending()) {
+            step->estimatedStartTime_ = 0;
+          }
+        }
+        return;
+      }
+      step->estimatedStartTime_ = 0;
+      auto const& [_, success] = stepsSet.insert(step);
+      if (success) {
+        currentSteps.push_back(step);
+      }
+    } else {
+      if (step->IsRunning()) {
+        if (step->nb_cores_ > freeCores) {
+          for(auto step : steps) {
+            if (step->task_->executor_ != this) {
+              continue;
+            }
+            if (step->IsPending()) {
+              step->estimatedStartTime_ = 0;
+            }
+          }
+          return;
+        }
+        uint64_t endTime = 
+            std::chrono::duration_cast<std::chrono::milliseconds>(step->StartTime().time_since_epoch()).count() + 
+            (step->timeout_ == 0 ? 3600000 : (step->timeout_ * 1000));
+        if (endTime <= minTime) {
+          endTime = minTime + 3600000;
+        }
+        cores[freeCores-1] = endTime;
+        for(uint64_t i=1; i<step->nb_cores_; ++i) {
+          cores[(freeCores-1)-i] = endTime;
+        }
+        freeCores -= step->nb_cores_;
+      }
+
+      for(ns_Schedule::Step* child: step->dependencies_) {
+        bool available = true;
+        for(ns_Schedule::Step* parent: child->depend_from_) {
+          if (parent->estimatedStartTime_ == 0) {
+            available = false;
+            break;
+          }
+        }
+        if (!available) {
+          continue;
+        }
+        auto const& [_, success] = stepsSet.insert(child);
+        if (success) {
+          child->estimatedStartTime_ = 0;
+          currentSteps.push_back(child);
+        }
+      }
+    }
+  }
+  if (currentSteps.empty()) {
+    return;
+  }
+  if (freeCores == 0) {
+    uint64_t min = std::numeric_limits<uint64_t>::max();
+    for(uint64_t i=0; i<nbCoresMax_; ++i) {
+      if ((cores[i] < min) && (cores[i] > minTime)) {
+        min = cores[i];
+        indexFreeCores[0] = i;
+        freeCores = 1;
+      } else if (cores[i] == min) {
+        indexFreeCores[freeCores] = i;
+        ++freeCores;
+      }
+    }
+    minTime = min;
+  }
+
+  auto stepStart = currentSteps.begin();
+  int64_t priority = (*stepStart)->task_->priority_;
+  bool skipped = false;
+  auto stepIT = stepStart;
+  while(true) {
+    int64_t curPriority = priority;
+    if (stepIT != currentSteps.end()) {
+      ns_Schedule::Step& step = *(*stepIT);
+      curPriority = step.task_->priority_;
+    }
+    if ((curPriority < priority) || (stepIT == currentSteps.end())) {
+      if (skipped) {
+        stepIT = stepStart;
+        skipped = false;
+
+        uint64_t oldFreeCores = freeCores;
+        uint64_t min = std::numeric_limits<uint64_t>::max();
+        for(uint64_t i=0; i<nbCoresMax_; ++i) {
+          if ((cores[i] < min) && (cores[i] > minTime)) {
+            freeCores = oldFreeCores;
+            min = cores[i];
+            indexFreeCores[freeCores] = i;
+            ++freeCores;
+          } else if (cores[i] == min) {
+            indexFreeCores[freeCores] = i;
+            ++freeCores;
+          }
+        }
+        minTime = min;
+        continue;
+      } else if (stepIT == currentSteps.end()) {
+        break;
+      }
+      priority = curPriority;
+      stepStart = stepIT;
+    }
+    ns_Schedule::Step& step = *(*stepIT);
+    if (!step.IsPending() || step.estimatedStartTime_ != 0) {
+      ++stepIT;
+      continue;
+    }
+    uint64_t notStartBefore = 0;
+    for (ns_Schedule::Step* parent : step.depend_from_) {
+      notStartBefore = std::max(notStartBefore, EstimatedFinishTime(parent));
+    }
+    if ((step.nb_cores_ <= freeCores) && (minTime >= notStartBefore)) {
+      step.estimatedStartTime_ = minTime;
+
+      bool firstChild = true;
+      for(ns_Schedule::Step* child: step.dependencies_) {
+        bool available = true;
+        for(ns_Schedule::Step* parent: child->depend_from_) {
+          if (parent->estimatedStartTime_ == 0) {
+            available = false;
+            break;
+          }
+        }
+        if (!available) {
+          continue;
+        }
+        child->estimatedStartTime_ = 0;
+        auto childIT = currentSteps.insert(stepIT, child);
+        if (firstChild && (stepIT == stepStart)) {
+          stepStart = childIT;
+        }
+        firstChild = false;
+        skipped = true;
+      }
+      bool stepITisStart = stepIT == stepStart;
+      stepIT = currentSteps.erase(stepIT);
+      if (stepITisStart) {
+        stepStart = stepIT;
+      }
+
+      uint64_t endTime = minTime + (step.timeout_ == 0 ? 3600000 : (step.timeout_ * 1000));
+      for(uint64_t i=0; i<step.nb_cores_; ++i) {
+        cores[indexFreeCores[(freeCores - 1) - i]] = endTime;
+      }
+      freeCores -= step.nb_cores_;
+      if (freeCores == 0) {
+        uint64_t min = std::numeric_limits<uint64_t>::max();
+        for(uint64_t i=0; i<nbCoresMax_; ++i) {
+          if ((cores[i] < min) && (cores[i] > minTime)) {
+            min = cores[i];
+            indexFreeCores[0] = i;
+            freeCores = 1;
+          } else if (cores[i] == min) {
+            indexFreeCores[freeCores] = i;
+            ++freeCores;
+          }
+        }
+        minTime = min;
+        if (skipped) {
+          stepIT =  stepStart;
+          skipped = false;
+          continue;
+        }
+      }
+    } else {
+      skipped = true;
+      ++stepIT;
+    }
+  }
 }
 
 inline bool RedirectOutput(int outhandler, int errhandler){
@@ -1476,4 +1701,19 @@ void ns_Executor::Local::SaveArtefacts(ns_Schedule::Step& step) {
 
   std::error_code ec;
   std::filesystem::remove(localData->artefacts_file_, ec);
+}
+
+inline uint64_t ns_Executor::Local::EstimatedFinishTime(ns_Schedule::Step const* step) {
+  if (step->IsDone()) {
+    auto endTP = step->StartTime() + step->RunTime();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        endTP.time_since_epoch()).count();
+  }
+
+  uint64_t duration = step->timeout_ == 0 ? 3600000 : (step->timeout_ * 1000);
+  if (step->IsRunning()) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        step->StartTime().time_since_epoch()).count() + duration;
+  }
+  return step->estimatedStartTime_ + duration;
 }

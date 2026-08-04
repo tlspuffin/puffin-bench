@@ -1,0 +1,1 @@
+<user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property user.slice AllowedCPUs=*

@@ -1,0 +1,40 @@
+{
+  "index": "summary.html",
+  "Perf": {
+    "onFiles": "PR/[0-9a-fA-F]+/Perf/[0-9]+\\.zip",
+    "action": "GenerateMergeJSON",
+    "parameters": {
+      "src": "./artefacts/summary.json",
+      "dst": "Perf/${FILE_RELATIVE_PATH_1}.json",
+      "keep": ["type", "commit_id"],
+      "merge": [ "libraries" ],
+      "strategy": { "comparator": ">=", "field": "timestamp" },
+      "generate_ZST": true
+    }
+  },
+  "Vuln": {
+    "onFiles": "PR/[0-9a-fA-F]+/Vuln/[0-9]+\\.zip",
+    "action": "GenerateMergeJSON",
+    "parameters": {
+      "src": "./artefacts/summary.json",
+      "dst": "Vuln/${FILE_RELATIVE_PATH_1}.json",
+      "keep": ["type", "commit_id"],
+      "merge": [ "libraries" ],
+      "strategy": { "comparator": ">=", "field": "timestamp" },
+      "generate_ZST": false
+    }
+  },
+  "Campaign": {
+    "onFiles": "Campaign/.*/[0-9]+\\.zip",
+    "action": "GenerateMergeJSON",
+    "parameters": {
+      "src": "./artefacts/summary.json",
+      "dst": "Campaign/${FILE_RELATIVE_PATH_1}/${FILE_RELATIVE_PATH_2}-${FILENAME}.json",
+      "keep": ["type", "commit_id", "user", "campaign_id"],
+      "merge": [ "libraries" ],
+      "strategy": { "comparator": ">=", "field": "timestamp" },
+      "generate_ZST": true,
+      "campaign": true
+    }
+  }
+}

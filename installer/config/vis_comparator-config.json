@@ -1,0 +1,13 @@
+{
+  "server": {
+    "secure": false,
+    "port": ${VIS_COMPARATOR_PORT},
+    "html": "${DATA_PATH}/html",
+    "userdata": "${DATA_PATH}/users_data/vis_comparator",
+	  "git_history_url": "http://cacio-calc.loria.fr:10081/api/git/history/tlspuffin", 
+    "pesto_git_history_url": "http://pesto-calc.loria.fr:10083/api/git/history/tlspuffin"
+  },
+  "data": {
+    "data": "${DATA_PATH}/publisher"
+  }
+}

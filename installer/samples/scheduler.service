@@ -1,0 +1,14 @@
+[Unit]
+Description=Scheduler XP
+After=network-online.target
+
+[Service]
+Slice=-.slice
+User=${USERNAME}
+WorkingDirectory=${BINARY_PATH}
+ExecStart=${BINARY_PATH}/scheduler
+Restart=always
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target

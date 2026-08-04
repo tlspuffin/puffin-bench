@@ -144,6 +144,7 @@ async function RefreshBoard() {
   if (!success) {
     return;
   }
+  tasks.sort((a,b) => b.priority - a.priority);
   document.getElementById('container-running-steps').innerHTML = '';
   const stateCount = {};
   tasks.forEach((task, _) => {

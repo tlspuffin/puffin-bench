@@ -1,10 +1,6 @@
 #include "config.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
-#include "../../utils/file_compressed.hxx"
-#include "embeded/scheduler/tools/reserve_port_blob.h"
-#include "embeded/scheduler/tools/qjs.h"
-#include "embeded/scheduler/js.h"
 #include <iostream>
 #include <fstream>
 
@@ -110,30 +106,6 @@ void ns_Schedule::Config::Save(std::string const& name, rapidjson::Value& doc,
 
 void ns_Schedule::Config::Validate(bool forceInstall) const {
   auto discard = std::filesystem::canonical(toolsPath_);
-
-  for(auto const& [ file, data, size ] : { 
-      std::tuple{ "reserve_port", (char const*)ReservePort_Binary, (size_t)ReservePort_Binary_len },
-      std::tuple{ "qjs", (char const*)QuickJS_Binary, (size_t)QuickJS_Binary_len }
-  }) {
-    std::filesystem::path filePath = 
-        std::filesystem::weakly_canonical(toolsPath_ / file);
-    if (!std::filesystem::exists(filePath)) {
-      LOGI << "Creating missing required file " << filePath << Log::Flags::End;
-      std::ofstream ofs(filePath, std::ios::binary);
-      ofs.write(data, size);
-      ofs.close();
-      std::filesystem::permissions(filePath,
-        std::filesystem::perms::owner_all |
-        std::filesystem::perms::group_read | std::filesystem::perms::group_exec, 
-        std::filesystem::perm_options::replace);
-    }
-  }
-
-  std::filesystem::path jsPath = toolsPath_ / "js";
-  std::vector<std::string> files = FileCompressed(FolderJS, FolderJS_len).ExtractAll(jsPath, forceInstall);
-  for(std::string const& file : files) { 
-    LOGI << "Creating missing required file " << jsPath / file << Log::Flags::End;
-  }
 
   discard = std::filesystem::canonical(runPath_);
   discard = std::filesystem::canonical(userPath_);

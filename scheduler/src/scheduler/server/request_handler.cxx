@@ -18,7 +18,7 @@ inline static bool ToBool(std::string const& v) {
 bool ns_Server::RequestHandler::ManageCORS(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.set("Access-Control-Allow-Origin", "*");
-  response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE, PATCH, PUT");
   response.set("Access-Control-Allow-Headers", "Content-Type");
 
   if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_OPTIONS) {
@@ -79,8 +79,18 @@ void ns_Server::RequestHandlerError::handleRequest(Poco::Net::HTTPServerRequest&
   response.send() << "404 - Path not found: " << request.getURI();
 }
 
+
+void ns_Server::RequestHandlerOptions::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  ManageCORS(request, response);
+}
+
 void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -133,6 +143,8 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       if ((fullkey.find("runtime[") != 0) || (fullkey.rfind("]") != (fullkey.size()-1))) {
         continue;
       }
+      // Field names are "runtime[RUNTIME_<key>]"
+      // 16 = strlen("runtime[") + strlen("RUNTIME_");
       std::string key = fullkey.substr(16, fullkey.size() - 17);
       if (key.empty()) {
         throw std::runtime_error("Empty key in runtime[]");
@@ -193,11 +205,11 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
   std::ostream* out = nullptr;
   try {
     std::string const& taskid = std::get<0>(args_);
-    uint64_t stepuuid = std::get<1>(args_);
+    uint64_t stepuuid = std::stoull(std::get<1>(args_));
     std::string const& stepid = std::get<2>(args_);
     std::string const& type = std::get<3>(args_);
-    ssize_t readsize = std::get<4>(args_);
-    ssize_t readoffset = std::get<5>(args_);
+    ssize_t readsize = std::stoll(std::get<4>(args_));
+    ssize_t readoffset = std::stoll(std::get<5>(args_));
 
     if ((type.empty()) || (taskid.empty()) || (stepid.empty())) {
       throw std::runtime_error("Missing required parameter(s)");
@@ -227,7 +239,7 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
         R"(, "state": )" << (int)(data.state) << R"(, "support_seek": )" << data.supportSeek << 
         R"(, "start_offset": )" << data.startOffset << R"(, "file_start_offset": )" << data.fileStartOffset << 
         R"(, "live": )" << data.live << "}";
-  } catch(std::runtime_error const& e) {
+  } catch(std::exception const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {
       out = &(response.send());
@@ -239,8 +251,6 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
 
 void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
-  uint64_t taskID = std::get<0>(args_);
-
   if (ManageCORS(request, response)) {
     return;
   }
@@ -252,13 +262,15 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
 
   std::ostream* out = nullptr;
   try {
+    uint64_t taskID = std::stoull(std::get<0>(args_));
+
     if (!apis_->scheduleAPI_.CancelTask(taskID)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("task cancel failed");
     }
     out = &(response.send());
     *out << R"({"success": true})";
-  } catch(std::runtime_error const& e) {
+  } catch(std::exception const& e) {
     out = &(response.send());
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
@@ -267,9 +279,6 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
 
 void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
-  uint64_t taskID = std::get<0>(args_);
-  uint64_t stepUUID = std::get<1>(args_);
-
   if (ManageCORS(request, response)) {
     return;
   }
@@ -281,17 +290,51 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
 
   std::ostream* out = nullptr;
   try {
+    uint64_t taskID = std::stoull(std::get<0>(args_));
+    uint64_t stepUUID = std::stoull(std::get<1>(args_));
+
     if (!apis_->scheduleAPI_.CancelStep(taskID, stepUUID)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("step cancel failed");
     }
     out = &(response.send());
     *out << R"({"success": true})";
-  } catch(std::runtime_error const& e) {
+  } catch(std::exception const& e) {
     out = &(response.send());
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
   out->flush();
+}
+
+void ns_Server::RequestHandlerTaskUpdatePriority::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  std::string taskIDStr = std::get<0>(args_);
+  std::string newPriorityStr = std::get<1>(args_);
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  Poco::Net::HTTPResponse::HTTPStatus status = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
+  try {
+    uint64_t taskID = std::stoull(taskIDStr);
+    int64_t newPriority = std::stoll(newPriorityStr);
+
+    if (!apis_->scheduleAPI_.TaskUpdatePriority(taskID, newPriority)) {
+      status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
+      throw std::runtime_error("update task priority failed");
+    }
+
+    out = &(response.send());
+    *out << R"({"success": true})";
+    out->flush();
+  } catch(std::exception const& e) {
+    if (out == nullptr) {
+      response.setStatus(status);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
 }
 
 void ns_Server::RequestHandlerTaskGetArtefacts::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -414,7 +457,7 @@ void ns_Server::RequestHandlerUserJobsTypeList::handleRequest(Poco::Net::HTTPSer
     std::vector<std::string> jobsType;
     if (!apis_->usersAPI_.UserJobTypes(user, jobsType)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-      throw std::runtime_error("step cancel failed");
+      throw std::runtime_error("get user job's type failed");
     }
     out = &(response.send());
     *out << R"({"success": true, "data": [)";
@@ -452,7 +495,7 @@ void ns_Server::RequestHandlerUserTasksList::handleRequest(Poco::Net::HTTPServer
     rapidjson::Value data(rapidjson::kArrayType);
     if (!apis_->usersAPI_.UserTasks(user, jobType, data, allocator)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-      throw std::runtime_error("step cancel failed");
+      throw std::runtime_error("getting user task's list failed");
     }
     doc.AddMember("success", true, allocator);
     doc.AddMember("data", data, allocator);
@@ -471,6 +514,10 @@ void ns_Server::RequestHandlerUserTasksList::handleRequest(Poco::Net::HTTPServer
 
 void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -508,6 +555,10 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
 
 void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -536,6 +587,10 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
 
 void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   std::string const& prefix = std::get<0>(args_);
 
   std::ostream* out = nullptr;

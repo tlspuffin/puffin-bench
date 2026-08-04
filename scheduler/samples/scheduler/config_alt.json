@@ -1,0 +1,44 @@
+{
+  "logs_level": 15,
+  "server": {
+    "secure": false,
+    "key": "scheduler/security/site.key",
+    "cert": "scheduler/security/site.pem",
+    "CA": "scheduler/security/CA.pem",
+    "hostname": "localhost", 
+    "port": 10082, 
+    "html": "scheduler/html"
+  },
+  "schedule": {
+    "runPath": "scheduler/runs",
+    "userPath": "scheduler/users_data",
+    "exportPath": "scheduler/exports",
+    "toolsPath": "scheduler/tools",
+    "executors": {
+      "local": {
+        "name": "local",
+        "type": 1,
+        "cores": [
+          1, 2, 3, 4, 5
+        ],
+        "scriptPath": "scheduler/scripts",
+        "logsSize": 16777216,
+        "cgroupPath": "/sys/fs/cgroup/scheduler.service",
+        "cpuMaxLoad": 90,
+        "memMinimumRatio": 0.15
+      }
+    },
+    "publisher": {
+      "default": {
+        "base_url": "http://127.0.0.1:10083",
+        "notify_endpoint": "/api/notify",
+        "view_endpoint": "/files/${PACKAGE}#${TASK_ID}",
+        "storage": "publisher"
+      }
+    }
+  },
+  "cache": {
+    "storagePath": "scheduler/cache",
+    "mappingFile": "cache.json"
+  }
+}

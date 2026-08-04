@@ -72,10 +72,13 @@ public:
       ns_System::Linux& os);
   ~Local();
 
+  bool CanRun(ns_Schedule::Step* step) const;
+
   bool TaskPrepareToRun(ns_Schedule::Task* task);
   bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data);
 
   std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps);
+  void EstimatedStepsStartTime(std::list<ns_Schedule::Step*> const& steps) const;
   void Execute(ns_Schedule::Step& step);
   std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps);
   void Shutdown(ns_Schedule::Step& step);
@@ -138,6 +141,7 @@ private:
 
   static bool PinCoresToProcess(std::vector<uint64_t> const& cores_);
   static void SaveArtefacts(ns_Schedule::Step& step);
+  static uint64_t EstimatedFinishTime(ns_Schedule::Step const* step);
 };
 
 };

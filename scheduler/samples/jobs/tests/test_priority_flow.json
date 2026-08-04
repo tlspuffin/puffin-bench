@@ -1,0 +1,10 @@
+{
+  "name": "Priority Test",
+  "priority": ${RUNTIME_PRIORITY},
+  "flow": [
+    {
+      "step": "Sleep",
+      "configuration": { "nb_cores": ${RUNTIME_NB_CORES}, "nb_retry": 1 }
+    }
+  ]
+}

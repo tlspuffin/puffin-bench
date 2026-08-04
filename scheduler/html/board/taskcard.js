@@ -45,6 +45,8 @@ export class TaskCard {
       cancelButton.style.display = 'none';
     }
 
+    const priorityUI = activeCount > 0 ? this.#CreatePriorityUI(task) : document.createElement('div');
+
     let username = '';
     if (task?.user && (task.user != '')) {
       username = task.user;
@@ -57,8 +59,8 @@ export class TaskCard {
       taskName = task.id;
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-label-id', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, cancelButton]
+        ['task-value-name', 'task-label-id', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, priorityUI, cancelButton]
       ));
       if (username != '') {
         divCardHeader.appendChild(this.#CreateCardLine(
@@ -70,8 +72,8 @@ export class TaskCard {
     } else {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-value-name', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), task.name, cancelButton]
+        ['task-value-name', 'task-value-name', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), task.name, priorityUI, cancelButton]
       ));
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
@@ -84,7 +86,28 @@ export class TaskCard {
     separator.classList.add('card-task-separator');
     divCardHeader.appendChild(separator);
 
-    if (task?.state === 'Running') {
+    if (task?.state === 'Pending') {
+      let estimateStartTime = 18446744073709551615;
+      for(let step of task?.root_steps) {
+        if (task?.steps[step].estimated_start_time < estimateStartTime) {
+          estimateStartTime = task?.steps[step].estimated_start_time;
+        }
+      }
+      if (estimateStartTime == 18446744073709551615) {
+        estimateStartTime = 0;
+      }
+      if (estimateStartTime > 0) {
+        divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-est',
+          ['task-est-label', 'task-est-value'],
+          ['Estimated start time', new Date(estimateStartTime).toLocaleString()]
+        ));
+        const separator2 = document.createElement('div');
+        separator2.classList.add('card-task-separator');
+        divCardHeader.appendChild(separator2);
+      }
+    }
+    else if (task?.state === 'Running') {
       const nbCores = Object.values(task?.steps || {}).reduce((total, step) => {
           if (step?.state === 'Running') {
             return total + (step?.executor_data?.cores?.length || 0);
@@ -134,6 +157,32 @@ export class TaskCard {
       const nameSpan = document.createElement('span');
       nameSpan.innerText = functionName;
       divStepName.appendChild(nameSpan);
+
+      let estimateStartTime = 18446744073709551615;
+      for (const attempts of byId.values()) {
+        for (const attemp of attempts) {
+          if (attemp.state !== 'Pending') {
+            estimateStartTime = 0;
+          } else if (attemp.estimated_start_time < estimateStartTime) {
+            estimateStartTime = attemp.estimated_start_time;
+          }
+          if (estimateStartTime == 0) {
+            break;
+          }
+        }
+        if (estimateStartTime == 0) {
+          break;
+        }
+      }
+      if (estimateStartTime == 18446744073709551615) {
+        estimateStartTime = 0;
+      }
+      if (estimateStartTime > 0) {
+        const est = document.createElement('div');
+        est.innerText = new Date(estimateStartTime).toLocaleString();
+        divStepName.appendChild(est);
+      }
+
       let size = 0;
       byId.forEach(attempts => size += attempts.length);
       if (size == 1) {
@@ -282,10 +331,12 @@ export class TaskCard {
     details.classList.add('card-attempt-details');
 
     if (step.state === 'Pending') {
+      const estimateStartTime = ((step.estimated_start_time !== undefined) && (step.estimated_start_time > 0)) ? 
+          new Date(step.estimated_start_time).toLocaleString() : 'N/A';
       details.appendChild(this.#CreateCardLine(
           null, 'attempt-detail-item',
-          ['attempt-detail-value-state'],
-          ['Pending']
+          ['attempt-detail-value-state', 'attempt-detail-value-state'],
+          ['Pending', estimateStartTime]
       ));
     } else {
       const info = document.createElement('div');
@@ -460,19 +511,53 @@ export class TaskCard {
     return div;
   }
 
+  #CreatePriorityUI(task) {
+    if (task.priority === undefined) {
+      const div = document.createElement('div');
+      div.innerText = 'N/A';
+      return div;
+    }
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.classList.add('card-priority-input');
+    input.step = 1;
+    input.value = task.priority;
+
+    input.onclick = (event) => event.stopPropagation();
+    input.onchange = async (event) => {
+      event.stopPropagation();
+      const newPriority = Math.round(Number(input.value));
+      input.value = newPriority;
+      if (newPriority === task.priority) {
+        return;
+      }
+      await this.#TaskUpdatePriority(task.id, newPriority);
+    };
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        input.blur();
+      }
+    };
+
+    return input;
+  }
+
   // ── Private — API calls ──────────────────────────────────────
 
   async #CancelTask(taskID) {
     this.#DisableUI();
 
-    let response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}`,
-        { method: 'DELETE' }
-    );
-    let data = { success: false };
-    if (response.ok) {
-      data = await response.json();
-    }
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}`,
+          { method: 'DELETE' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
 
     this.#EnableUI();
 
@@ -484,19 +569,39 @@ export class TaskCard {
   async #CancelStep(taskID, stepUUID) {
     this.#DisableUI();
 
-    let response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}/step/${stepUUID}`,
-        { method: 'DELETE' }
-    );
-    let data = { success: false };
-    if (response.ok) {
-      data = await response.json();
-    }
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}/step/${stepUUID}`,
+          { method: 'DELETE' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
 
     this.#EnableUI();
     //if (data.success) {
       await this.#onRefresh();
     //}
+  }
+
+  async #TaskUpdatePriority(taskID, newPriority) {
+    this.#DisableUI();
+
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}/${newPriority}`,
+          { method: 'PATCH' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
+
+    this.#EnableUI();
+    await this.#onRefresh();
   }
 
   // ── Private — link helper ──────────────────────────────────

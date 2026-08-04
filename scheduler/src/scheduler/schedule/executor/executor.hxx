@@ -49,10 +49,13 @@ public:
 
   std::string Name() const;
 
+  virtual bool CanRun(ns_Schedule::Step* step) const = 0;
+
   virtual bool TaskPrepareToRun(ns_Schedule::Task* task) = 0;
   virtual bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data) = 0;
 
   virtual std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& tasks) = 0;
+  virtual void EstimatedStepsStartTime(std::list<ns_Schedule::Step*> const& tasks) const = 0;
   virtual void Execute(ns_Schedule::Step& step) = 0;
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
   virtual void Shutdown(ns_Schedule::Step& step) = 0;

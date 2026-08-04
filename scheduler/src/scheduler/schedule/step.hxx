@@ -6,6 +6,7 @@
 #include "step_configurations.hxx"
 #include "archiver.hxx"
 #include "monitor/task.hxx"
+#include "../../utils/logs.hxx"
 #include <cstdint>
 #include <string>
 #include <list>
@@ -147,6 +148,8 @@ public:
   };
   std::vector<struct Stream> readable_files_;
 
+  uint64_t estimatedStartTime_;
+
 private:
   enum class State { 
     Pending, 
@@ -234,6 +237,11 @@ inline void Step::MarkRunning() {
   }
   state_ = State::Running;
   time_points_[0] = std::chrono::system_clock::now();
+  if (estimatedStartTime_ == 0) {
+    estimatedStartTime_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+        time_points_[0].time_since_epoch()).count();
+    LOGW << "Step " << ID() << " have no estimatedStartTime_" << Log::Flags::End;
+  }
 }
 
 inline void Step::MarkDone(uint16_t exit_code) {
