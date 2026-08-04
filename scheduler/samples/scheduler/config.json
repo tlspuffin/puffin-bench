@@ -1,14 +1,19 @@
 {
+  "logs_level": 15,
   "server": {
     "secure": false,
-    "key": "security/site.key",
-    "cert": "security/site.pem",
-    "CA": "security/CA.pem",
+    "key": "scheduler/security/site.key",
+    "cert": "scheduler/security/site.pem",
+    "CA": "scheduler/security/CA.pem",
     "hostname": "localhost", 
     "port": 10082, 
-    "html": "html"
+    "html": "scheduler/html"
   },
   "schedule": {
+    "runPath": "scheduler/runs",
+    "userPath": "scheduler/users_data",
+    "exportPath": "scheduler/exports",
+    "toolsPath": "scheduler/tools",
     "executors": {
       "local": {
         "name": "local",
@@ -17,7 +22,11 @@
         "excludeCores": [
           0
         ],
-        "scriptPath": "../scripts"
+        "scriptPath": "scheduler/scripts",
+        "logsSize": 16777216,
+        "cgroupPath": "/sys/fs/cgroup/scheduler.service",
+        "cpuMaxLoad": 90,
+        "memMinimumRatio": 0.15
       }
     },
     "publisher": {
@@ -25,16 +34,12 @@
         "base_url": "http://127.0.0.1:10083",
         "notify_endpoint": "/api/notify",
         "view_endpoint": "/files/${PACKAGE}#${TASK_ID}",
-        "storage": "/home/olivier/Desktop/Archives"
+        "storage": "publisher"
       }
-    },
-    "runPath": "runs",
-    "userPath": "users_data",
-    "exportPath": "exports",
-    "toolsPath": "tools"
+    }
   },
   "cache": {
-    "storagePath": "cache",
+    "storagePath": "scheduler/cache",
     "mappingFile": "cache.json"
   }
 }

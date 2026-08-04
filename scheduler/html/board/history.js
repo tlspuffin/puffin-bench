@@ -1,5 +1,6 @@
 import { TaskCard } from './taskcard.js';
 import { Clipboard } from './clipboard.js';
+import * as Launchers from './launchers/launchers.js';
 
 const ui = {
   users: document.getElementById('container-users'),
@@ -7,12 +8,13 @@ const ui = {
   tasks: document.getElementById('container-tasks'),
 }
 
-const taskCard = new TaskCard({ onRefresh: () => {} });
+const taskCard = new TaskCard({ onRefresh: () => {}, launchers: Launchers.launchers });
 
 const currentSelection = {
   name: null,
   jobType: null,
   task: null,
+  timesLineIndex: 'id'
 };
 
 function DisableUI() {
@@ -29,9 +31,30 @@ async function DeleteTask(task) {
   if (!confirm(`Delete experiment results of task ${task.id}:\n\t${task.name}`)) {
     return;
   }
+  let requireUIUpdate = false;
   DisableUI();
+  try {
+    const response = await fetch(
+        `http://${window.location.host}/api/task/${task.id}`,
+        { method: 'DELETE' }
+    );
+    const json = await response.json();
+    requireUIUpdate = json?.success;
+    if (!requireUIUpdate) {
+      alert(`Unable to delete task ${json?.error ?? 'unknown error'}`);
+    }
+  } catch(e) {
+    console.error(`Unable to delete ${task.id}: ${e.message}`);
+  }
   EnableUI();
-  alert('Not yet implemented');
+
+  if (requireUIUpdate) {
+    if (currentSelection.task?.id === task.id) {
+      currentSelection.task = null;
+      ui.tasks.innerHTML = '';
+    }
+    await SelectUsers(currentSelection.name, currentSelection.jobType);
+  }
 }
 
 function CreateErrorMessage(message) {
@@ -56,7 +79,7 @@ async function SelectTask(task) {
     }
     currentSelection.task = task;
   } catch (e) {
-    console.error(`Unable to load ${task.id}: ${e.message()}`);
+    console.error(`Unable to load ${task.id}: ${e.message}`);
   }
   EnableUI();
 }
@@ -122,13 +145,17 @@ function CreateTimelinesDateSeparator(ts) {
 }
 
 function BuildTimesLine(tasks) {
+  tasks.history.sort(
+      (a, b) => (b?.[currentSelection.timesLineIndex] ?? b.id) - (a?.[currentSelection.timesLineIndex] ?? a.id));
+
   ui.timesline.innerHTML = '';
   let lastTS = null;
 
   tasks.history.forEach((task) => {
-    let currentTS = new Date(task.id).toDateString();
+    const date = task?.[currentSelection.timesLineIndex] ?? task.id;
+    let currentTS = new Date(date).toDateString();
     if ((lastTS == null) || (lastTS !== currentTS)) {
-      ui.timesline.appendChild(CreateTimelinesDateSeparator(task.id));
+      ui.timesline.appendChild(CreateTimelinesDateSeparator(date));
       lastTS = currentTS;
     }
     ui.timesline.appendChild(CreateTimelinesCard(task));
@@ -172,11 +199,16 @@ async function SelectUsers(name, jobType) {
       }
     }
   } catch (e) {
+    console.error(`Error in SelectUsers (0): ${e}`);
   }
 
-  currentSelection.name = name;
-  currentSelection.jobType = jobType;
-  BuildTimesLine(results);
+  try {
+    currentSelection.name = name;
+    currentSelection.jobType = jobType;
+    BuildTimesLine(results);
+  } catch (e) {
+    console.error(`Error in SelectUsers (1): ${e}`);
+  }
 
   EnableUI();
 }
@@ -214,7 +246,7 @@ async function ListUsersJobsType(users) {
             };
           }
         } catch(e) {
-          console.error(`Server error while retrieving user ${user}: e.message()`);
+          console.error(`Server error while retrieving user ${user}: ${e.message}`);
         }
     })());
     if (promises.length >= 10) {
@@ -240,12 +272,16 @@ async function ListUsers() {
 
 async function BuildUsersMenu() {
   DisableUI();
-  ui.users.innerHTML = '';
-  ui.timesline.innerHTML = '';
-  ui.tasks.innerHTML = '';
-  let users = await ListUsers();
-  for(let user in users) {
-    ui.users.appendChild(BuildUserSelection(user, users[user]));
+  try {
+    ui.users.innerHTML = '';
+    ui.timesline.innerHTML = '';
+    ui.tasks.innerHTML = '';
+    let users = await ListUsers();
+    for(let user in users) {
+      ui.users.appendChild(BuildUserSelection(user, users[user]));
+    }
+  } catch(e) {
+    console.error(`Error in BuildUsersMenu: ${e}`);
   }
   EnableUI();
 }
@@ -260,7 +296,17 @@ async function Refresh() {
   }
 }
 
+function UpdateSortIndexTimesLine(event) {
+  currentSelection.timesLineIndex = event?.target?.value ?? 'id';
+  if (currentSelection.name !== null && currentSelection.jobType !== null) {
+    SelectUsers(currentSelection.name, currentSelection.jobType);
+  }
+}
+
 function Main() {
+  const sortIndexSelect = document.getElementById('sortIndex-select');
+  currentSelection.timesLineIndex = sortIndexSelect?.value ?? 'id';
+  sortIndexSelect.onchange = UpdateSortIndexTimesLine;
   document.getElementById('refresh-button').onclick = Refresh;
   Refresh();
 }

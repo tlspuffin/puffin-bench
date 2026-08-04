@@ -1,0 +1,42 @@
+{
+  "logs_level": 15,
+  "server": {
+    "secure": false,
+    "hostname": "localhost",
+    "port": ${SCHEDULER_PORT},
+    "html": "${DATA_PATH}/html"
+  },
+  "schedule": {
+    "toolsPath": "${DATA_PATH}/tools",
+    "runPath": "${DATA_PATH}/runs",
+    "userPath": "${DATA_PATH}/users_data/scheduler",
+    "exportPath": "${DATA_PATH}/exports",
+    "executors": {
+      "local": {
+        "name": "local",
+        "type": 1,
+        "nbCores": ${NB_CORES},
+        "excludeCores": [
+          0
+        ],
+        "scriptPath": "${DATA_PATH}/scripts",
+        "logsSize": 16777216,
+        "cgroupPath": "/sys/fs/cgroup/scheduler.service",
+        "cpuMaxLoad": 90,
+        "memMinimumRatio": 0.15
+      }
+    },
+    "publisher": {
+      "default": {
+        "base_url": "http://127.0.0.1:${PUBLISHER_PORT}",
+        "notify_endpoint": "/api/notify",
+        "view_endpoint": "/files/${PACKAGE}#${TASK_ID}",
+        "storage": "${DATA_PATH}/publisher"
+      }
+    }
+  },
+  "cache": {
+    "storagePath": "${DATA_PATH}/cache",
+    "mappingFile": "cache.json"
+  }
+}

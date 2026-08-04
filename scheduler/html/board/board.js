@@ -1,5 +1,5 @@
 import { TaskCard } from './taskcard.js';
-import './launchers/launchers.js';
+import * as Launchers from './launchers/launchers.js';
 
 let taskCard;
 
@@ -144,6 +144,7 @@ async function RefreshBoard() {
   if (!success) {
     return;
   }
+  tasks.sort((a,b) => b.priority - a.priority);
   document.getElementById('container-running-steps').innerHTML = '';
   const stateCount = {};
   tasks.forEach((task, _) => {
@@ -168,11 +169,12 @@ function Main() {
       document.getElementById('custom_header').innerHTML = data;
     });
 
-  taskCard = new TaskCard({ onRefresh: RefreshBoard });
+  taskCard = new TaskCard({ onRefresh: RefreshBoard, launchers: Launchers.launchers });
 
   document.getElementById('refresh-button').onclick = RefreshBoard;
 
   RefreshBoard();
 }
 
+Launchers.BuildUI();
 Main();

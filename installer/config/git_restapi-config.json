@@ -1,0 +1,17 @@
+{
+  "logs_level": 15,
+  "server": {
+    "secure": false,
+    "port": ${GIT_RESTAPI_PORT}
+  },
+  "git": {
+    "scripts": "${DATA_PATH}/repo/.scripts",
+    "storage": "${DATA_PATH}/repo",
+    "repositories": {
+      "tlspuffin": {
+        "url": "https://github.com/tlspuffin/tlspuffin.git",
+        "url_pr": "https://api.github.com/repos/tlspuffin/tlspuffin/pulls?state=all"
+      }
+    }
+  }
+}

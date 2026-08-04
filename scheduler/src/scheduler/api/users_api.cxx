@@ -63,7 +63,9 @@ bool ns_API::UsersAPI::Add(ns_Schedule::Task* task, bool running) {
   value.RemoveMember("publish_link");
   value.AddMember("publish_link", rapidjson::Value(task->publish_link_.c_str(), alloc_), alloc_);
   value.RemoveMember("flag");
-  value.AddMember("flag", rapidjson::Value(task->FlagJSON(), alloc_), alloc_);
+  value.AddMember("flag", task->FlagJSON(alloc_), alloc_);
+  value.RemoveMember("end_timestamp");
+  value.AddMember("end_timestamp", task->estimatedEndTime_, alloc_);
   return SaveNoLock();
 }
 
@@ -139,7 +141,7 @@ bool ns_API::UsersAPI::UserTasks(std::string const& user, std::string const& job
       std::error_code ec;
       bool entryOK = running || 
           ((!cancelled) && std::filesystem::exists(storagePath_ / ( id + ".json"), ec)) || 
-          std::filesystem::exists(storagePath_ / "Canceled" / ( id + ".json"), ec);   
+          std::filesystem::exists(storagePath_ / "Canceled" / ( id + ".json"), ec);
       if (entryOK) {
         rapidjson::Value entry;
         entry.CopyFrom(value, alloc);
@@ -163,6 +165,47 @@ bool ns_API::UsersAPI::UserTasks(std::string const& user, std::string const& job
   return true;
 }
 
+std::string ns_API::UsersAPI::GetPublishLink(uint64_t taskID) {
+  std::string const taskIDStr = std::to_string(taskID);
+  std::unique_lock lock(lockDB_);
+  for (auto itUser = doc_.MemberBegin(); itUser != doc_.MemberEnd(); ++itUser) {
+    if (!itUser->value.IsObject()) {
+      continue;
+    }
+    for (auto itJobType = itUser->value.MemberBegin(); itJobType != itUser->value.MemberEnd(); ++itJobType) {
+      if (!itJobType->value.IsObject()) {
+        continue;
+      }
+      if (itJobType->value.HasMember(taskIDStr.c_str())) {
+        auto const& publishLink = itJobType->value.FindMember("publish_link");
+        return (publishLink != (itJobType->value.MemberEnd()) && publishLink->value.IsString()) ? 
+            publishLink->value.GetString() : "";
+      }
+    }
+  }
+  return "";
+}
+
+bool ns_API::UsersAPI::DeleteTask(uint64_t taskID) {
+  std::string const taskIDStr = std::to_string(taskID);
+  std::unique_lock lock(lockDB_);
+  for (auto itUser = doc_.MemberBegin(); itUser != doc_.MemberEnd(); ++itUser) {
+    if (!itUser->value.IsObject()) {
+      continue;
+    }
+    for (auto itJobType = itUser->value.MemberBegin(); itJobType != itUser->value.MemberEnd(); ++itJobType) {
+      if (!itJobType->value.IsObject()) {
+        continue;
+      }
+      if (itJobType->value.HasMember(taskIDStr.c_str())) {
+        itJobType->value.RemoveMember(taskIDStr.c_str());
+        return SaveNoLock();
+      }
+    }
+  }
+  return false;
+}
+
 bool ns_API::UsersAPI::SaveNoLock() {
   std::string filename = (storagePath_ / "users.json").string();
   FILE* fp = std::fopen((filename + "tmp").c_str(), "w");
@@ -179,3 +222,4 @@ bool ns_API::UsersAPI::SaveNoLock() {
 
   return true;
 }
+

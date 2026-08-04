@@ -16,13 +16,14 @@ int main(int argc, char *argv[]) {
   bool overrideLogsLevel = false;
   unsigned int userLogsLevel = 0;
   bool forceInstall = false;
+  bool onlyInstall = false;
   std::string configFile = "git_restapi-config.json";
   for(int i=1; i<argc; i++) {
     if (argv[i][0] != '-') {
       configFile = argv[i];
     } else {
       bool used = false;
-      std::vector<std::string> parameters{"--install", "--logslevel"};
+      std::vector<std::string> parameters{"--force-install", "--only-install", "--logslevel"};
       for(size_t j=0; j<parameters.size(); ++j) {
         if (parameters[j].compare(argv[i]) == 0) {
           switch(j) {
@@ -31,6 +32,10 @@ int main(int argc, char *argv[]) {
               used = true;
               break;
             case 1:
+              onlyInstall = true;
+              used = true;
+              break;
+            case 2:
               if ((i+1) >= argc) {
                 LOGE << "Missing number parameter for --logslevel. Aborting" << Log::Flags::End;
                 return 1;
@@ -51,12 +56,19 @@ int main(int argc, char *argv[]) {
       }
     }
   }
-  if ((!config.Load(configFile)) && (!std::filesystem::exists(configFile))) {
-    config.Save(configFile);
-    LOGA << "Config file " << configFile << " not found, create a default one and exit" << Log::Flags::End;
+  if (!config.Load(configFile)) {
+    if (!std::filesystem::exists(configFile)) {
+      config.Save(configFile);
+      LOGA << "Config file " << configFile << " not found, create a default one and exit" << Log::Flags::End;
+    } else {
+      LOGA << "Config file" << configFile << " corrupted, exiting" << Log::Flags::End;
+    }
     return 1;
   }
   config.Validate(forceInstall);
+  if (onlyInstall) {
+    return 0;
+  }
   if (overrideLogsLevel) {
     logs.SetLevel(userLogsLevel);
   } else {

@@ -50,31 +50,46 @@ bool SaveJSONFile(std::string const& file, rapidjson::Value const& doc, bool pre
 }
 
 uint64_t ParseDurationToSeconds(const std::string& str) {
-  if (str.empty()) return 0;
-  char unit = str.back();
-  uint64_t value = std::stoull(str.substr(0, str.size() - 1));
-  if (unit == 'd') return value * 60 * 60 * 24;
-  if (unit == 'h') return value * 60 * 60;
-  if (unit == 'm') return value * 60;
-  if (unit == 's') return value;
-  return value;
+  if (str.empty()) throw std::runtime_error("ParseDurationToSeconds: error, empty duration not supported");
+  size_t pos = 0;
+  while (pos < str.size() && isdigit((unsigned char)(str[pos]))) {
+    ++pos;
+  }
+  uint64_t value = std::stoull(str.substr(0, pos));
+  std::string unit = str.substr(pos);
+  uint64_t unitValueS = 0;
+  if (unit == "d") unitValueS = 60 * 60 * 24;
+  if (unit == "h") unitValueS = 60 * 60;
+  if (unit == "m") unitValueS = 60;
+  if (unit == "s") unitValueS = 1;
+  if (unitValueS == 0) {
+    throw std::runtime_error("ParseDurationToSeconds: error, bad duration string: " + str);
+  }
+  if ((UINT64_MAX / unitValueS) < value) {
+    throw std::runtime_error("ParseDurationToSeconds: error, duration is too big: " + str);
+  }
+  return value * unitValueS;
 }
 
 uint64_t ParseDurationToMilliSeconds(const std::string& str) {
-  if (str.empty()) return 0;
-
+  if (str.empty()) throw std::runtime_error("ParseDurationToMilliSeconds: error, empty duration not supported");
   size_t pos = 0;
-  while (pos < str.size() && isdigit(str[pos])) {
+  while (pos < str.size() && isdigit((unsigned char)(str[pos]))) {
     ++pos;
   }
-
   uint64_t value = std::stoull(str.substr(0, pos));
   std::string unit = str.substr(pos);
-
-  if (unit == "d")  return value * 24 * 60 * 60 * 1000;
-  if (unit == "h")  return value * 60 * 60 * 1000;
-  if (unit == "m")  return value * 60 * 1000;
-  if (unit == "s")  return value * 1000;
-  if (unit == "ms") return value;
-  return value;
+  uint64_t unitValueMS = 0;
+  if (unit == "d")  unitValueMS = 24 * 60 * 60 * 1000;
+  if (unit == "h")  unitValueMS = 60 * 60 * 1000;
+  if (unit == "m")  unitValueMS = 60 * 1000;
+  if (unit == "s")  unitValueMS = 1000;
+  if (unit == "ms") unitValueMS = 1;
+  if (unitValueMS == 0) {
+    throw std::runtime_error("ParseDurationToMilliSeconds: error, bad duration string: " + str);
+  }
+  if ((UINT64_MAX / unitValueMS) < value) {
+    throw std::runtime_error("ParseDurationToMilliSeconds: error, duration is too big: " + str);
+  }
+  return value * unitValueMS;
 }

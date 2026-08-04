@@ -103,6 +103,10 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
         throw std::runtime_error("Config of Local executor require uint64 in cores list");
       }
       uint64_t coreIndex = arr[i].GetUint64();
+      if (coreIndex >= maxNbCores) {
+        throw std::runtime_error("Config of Local executor requires more cores than system have (" + 
+            std::to_string(maxNbCores) + ")");
+      }
       indexes.push_back(coreIndex);
     }
     cores_.assign(maxNbCores, false);

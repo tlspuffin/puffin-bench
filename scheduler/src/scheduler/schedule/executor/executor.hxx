@@ -44,15 +44,18 @@ public:
     std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> storages;
   };
 
-  static Executor* Build(ns_Executor::Config* config, uint16_t cachePort, ns_System::Linux& os);
+  static Executor* Build(ns_Executor::Config* config, uint16_t serverPort, ns_System::Linux& os);
   virtual ~Executor();
 
   std::string Name() const;
 
+  virtual bool CanRun(ns_Schedule::Step* step) const = 0;
+
   virtual bool TaskPrepareToRun(ns_Schedule::Task* task) = 0;
-  virtual bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data) = 0;
+  virtual bool TaskFinalize(ExecutorTaskData* data, ns_Schedule::Task* task) = 0;
 
   virtual std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& tasks) = 0;
+  virtual void EstimatedStepsStartTime(std::list<ns_Schedule::Step*> const& tasks) const = 0;
   virtual void Execute(ns_Schedule::Step& step) = 0;
   virtual std::list<ns_Schedule::Step*> CheckFinishedSteps(std::list<ns_Schedule::Step*>& runningSteps) = 0;
   virtual void Shutdown(ns_Schedule::Step& step) = 0;
@@ -69,6 +72,9 @@ public:
   virtual std::pair<int8_t, int8_t> UpdateTaskStats(ExecutorTaskData* data, std::vector<ns_Executor::ExecutorData*> stepsData) const = 0;
   virtual void UpdateStepStats(ExecutorData* data) const = 0;
   virtual void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const = 0;
+
+  virtual void SyncTaskEnvironment(ExecutorTaskData* data) const = 0;
+  virtual void UpdateTaskEnvironment(ExecutorTaskData* data) = 0;
 
 protected:
   Executor(std::string const& name);

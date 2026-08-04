@@ -1,0 +1,119 @@
+{
+  "vendors": {
+    "tlspuffin": {
+      "c": [
+        "openssl:openssl340",
+        "openssl:openssl320",
+        "openssl:openssl312",
+        "openssl:openssl111u",
+        "openssl:openssl111k",
+        "openssl:openssl111j",
+        "openssl:openssl102u",
+        "openssl:openssl101f",
+        "wolfssl:wolfssl580",
+        "wolfssl:wolfssl572",
+        "wolfssl:wolfssl552",
+        "wolfssl:wolfssl540",
+        "wolfssl:wolfssl530",
+        "wolfssl:wolfssl520",
+        "wolfssl:wolfssl510"
+      ],
+      "rust": [
+        "openssl111",
+        "openssl111j",
+        "openssl111u",
+        "openssl312",
+        "openssl102u",
+        "openssl101f",
+        "libressl333",
+        "wolfssl430",
+        "wolfssl510",
+        "wolfssl520",
+        "wolfssl530",
+        "wolfssl540",
+        "wolfssl552",
+        "wolfssl572",
+        "wolfsslmaster",
+        "boringsslmaster",
+        "boringssl202311",
+        "boringssl202403"
+      ]
+    },
+    "sshpuffin": {
+      "c": [
+        "libssh:libssh0104",
+        "wolfssh:wolfssh"
+      ],
+      "rust": []
+    }
+  },
+  "jobs": [
+    {
+      "value":    "vuln-a",
+      "label":    "Vuln group A",
+      "job_type": "vuln-a",
+      "color":    "#FF9800",
+      "campaign": false,
+      "timeout":  true,
+      "timeout_default": { "d": 0, "h": 3, "m": 10 },
+      "config":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json",
+      "script":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh",
+      "files":    [
+        "/files/jobsscripts/tlspuffin/shell.nix",
+        "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":    "vuln-b",
+      "label":    "Vuln group B",
+      "job_type": "vuln-b",
+      "color":    "#45D0D4",
+      "campaign": false,
+      "timeout":  true,
+      "timeout_default": { "d": 2, "h": 0, "m": 10 },
+      "config":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo.json",
+      "script":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh",
+      "files":    [
+        "/files/jobsscripts/tlspuffin/shell.nix",
+        "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":    "perf",
+      "label":    "Perf",
+      "job_type": "perf",
+      "color":    "#4CAF50",
+      "campaign": false,
+      "package":  ["tlspuffin", "sshpuffin"],
+      "config":   "/files/jobsscripts/tlspuffin/PR_perf_cargo.json",
+      "script":   "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
+      "files":    [
+        "/files/jobsscripts/tlspuffin/shell.nix",
+        "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
+      ]
+    },
+    {
+      "value":     "evaluate-pr",
+      "label":     "PR",
+      "color":     "#F43F5E",
+      "campaign":  false,
+      "composite": ["vuln-a", "perf"],
+      "job_label": ["PR@{COMMIT:6}-VulnA", "PR@{COMMIT:6}-Perf"]
+    },
+    {
+      "value":     "campaign",
+      "label":     "Campaign",
+      "job_type":  "campaign",
+      "job_label": "Camp@${COMMIT:6} ${CAMPAIGN-ID}",
+      "color":     "#a78bfa",
+      "campaign":  true,
+      "package":  ["tlspuffin", "sshpuffin"],
+      "config":    "/files/jobsscripts/tlspuffin/PR_campaign.json",
+      "script":    "/files/jobsscripts/tlspuffin/PR_perf_full.sh",
+      "files":     [
+        "/files/jobsscripts/tlspuffin/shell.nix",
+        "/files/jobsscripts/tlspuffin/wolfssl_put.c.patch"
+      ]
+    }
+  ]
+}

@@ -15,8 +15,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT IS_MULTI_CONFIG)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
 endif()
 
-EmbedBinaryFile("${CMAKE_CURRENT_SOURCE_DIR}/html/third-party/plotly/plotly-3.3.0.min.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h" Publisher_HTML_Ploty_JS)
-
 set(IN_VERSION_C "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in")
 set(GENERATED_VERSION_C "${CMAKE_BINARY_DIR}/version.c")
 if (NOT TARGET generate_version)
@@ -167,22 +165,6 @@ if (NOT TARGET ZStdSeekable)
   target_link_libraries(ZStdSeekable PUBLIC ${ZStdTN})
 endif()
 
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_config.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_config_js.h" Publisher_HTML_SummaryConfig_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary.html" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_html.h" Publisher_HTML_Summary_HTML)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_css.h" Publisher_HTML_Summary_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_js.h" Publisher_HTML_Summary_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_render.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_render_js.h" Publisher_HTML_SummaryRender_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_data.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_data_js.h" Publisher_HTML_SummaryData_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_metrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_metrics_js.h" Publisher_HTML_SummaryMetrics_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_metricscampaign.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_metricscampaign_js.h" Publisher_HTML_SummaryMetricsCampaign_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_graph.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graph_js.h" Publisher_HTML_SummaryGraph_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_managegraphs.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_managegraphs_js.h" Publisher_HTML_SummaryManageGraphs_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_graphoverview.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphoverview_js.h" Publisher_HTML_SummaryGraphOverview_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_graphoverview.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphoverview_css.h" Publisher_HTML_SummaryGraphOverview_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_graphcompare.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphcompare_js.h" Publisher_HTML_SummaryGraphCompare_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_graphmetrics.js" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphmetrics_js.h" Publisher_HTML_SummaryGraphMetrics_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/publisher/summary_graphmetrics.css" "${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphmetrics_css.h" Publisher_HTML_SummaryGraphMetrics_CSS)
-
 set(PUBLISHER_SRC
   src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/file_compressed.cxx src/utils/compress_tar_zst.cxx src/utils/dir.cxx src/utils/variables.cxx
   src/publisher/config.cxx 
@@ -191,15 +173,7 @@ set(PUBLISHER_SRC
   src/publisher/publish/config.cxx src/publisher/publish/publish.cxx src/publisher/publish/project.cxx src/publisher/publish/index.cxx 
   src/publisher/publish/rule.cxx src/publisher/publish/rule_mergeJSON.cxx
   src/publisher/publish/zst/generate_perf_zst.cxx 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_html.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_css.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_render_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_data_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_metrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_metricscampaign_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graph_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_managegraphs_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphoverview_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphoverview_css.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphcompare_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphmetrics_js.h ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_graphmetrics_css.h 
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/summary_config_js.h
-  ${CMAKE_SOURCE_DIR}/embeded/publisher/html/third-party/plotly/plotly_3_3_0_min_js.h ${GENERATED_VERSION_C}
+  ${GENERATED_VERSION_C}
 )
 
 add_library(publisher.lib STATIC ${PUBLISHER_SRC})

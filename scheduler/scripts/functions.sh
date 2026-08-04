@@ -1,5 +1,9 @@
 #!/bin/bash
 
+declare -A THEJOB_GLBPARMS=()
+declare -A THEJOB_GLBPARMS_KEYS=()
+declare THEJOB_GLBPARMS_MODIFIED=
+
 THEJOB_UTILS_PATH="$( realpath "${BASH_SOURCE[0]}" )"
 
 QueryCache() {
@@ -13,7 +17,7 @@ QueryCache() {
 
   local cache_id="$1"
   local timeout="${2:-0}"
-  local server_url="http://localhost:${THEJOB_CACHE_PORT}/api/cache"
+  local server_url="http://localhost:${THEJOB_SERVER_PORT}/api/cache"
   local delay=1
   if [ -z "$cache_id" ]; then
     #echo "Usage: $0 <cache_id> [timeout_seconds]"
@@ -70,20 +74,50 @@ SetCache() {
   local file="$1"
   [ ! -r "${file}" ] && return 64;
   shift
-  curl -s -X PUT "http://localhost:${THEJOB_CACHE_PORT}/api/cache/${cache_id}" -H "Content-Type: application/json" --data-binary "{\"path\": \"${file}\"}"
+  curl -s -X PUT "http://localhost:${THEJOB_SERVER_PORT}/api/cache/${cache_id}" -H "Content-Type: application/json" --data-binary "{\"path\": \"${file}\"}"
   return $?
 }
 
-AddParam() {
-  local varname="$1"
-  local key="$2"
-  local value="$3"
-  value="${value//\"/\\\"}"
-  eval "$varname+=\ \"$key=\\\"$value\\\"\""
+AddGlobalParam() {
+  local key="$1"
+  local value="$2"
+  THEJOB_GLBPARMS[$key]="$key=$value"
+  THEJOB_GLBPARMS_KEYS[$key]=$key
+  THEJOB_GLBPARMS_MODIFIED='true';
 }
 
-AddGlobalParam() {
-  AddParam THEJOB_GLBPARMS "$1" "$2"
+SaveGlobalParam() {
+  local file="$1"
+  local key
+  local tmpfile="${file}.sh.tmp"
+  : > "${tmpfile}" || return 1;
+  for key in "${!THEJOB_GLBPARMS[@]}"; do
+    printf '%s\n' "${THEJOB_GLBPARMS[$key]}" >> "${tmpfile}" || {
+      rm -f "${tmpfile}";
+      return 1;
+    }
+  done
+  mv "${tmpfile}" "${file}" || {
+      rm -f "${tmpfile}";
+      return 1;
+    }
+  return 0;
+}
+
+LoadGlobalParam() {
+  local file="$1"
+  local key
+  local value
+  THEJOB_GLBPARMS=()
+  THEJOB_GLBPARMS_KEYS=()
+  [[ -r "$file" ]] || return
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    declare -g "$key=$value"
+    THEJOB_GLBPARMS_KEYS[$key]=$key
+    THEJOB_GLBPARMS["$key"]=$line
+  done < "$file"
 }
 
 CreateArtefact() {
@@ -172,7 +206,7 @@ StartMonitor() {
     while true ; do
       if [ -z "${monitor_timeout_s}" ]; then
         ${monitor_entry} "${monitor_output_tmp}" $@
-      else 
+      else
         timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
         case $? in
           124)
@@ -240,8 +274,7 @@ SetupEnv() {
   eval ${THEJOB_SH_CONFIG_DATA}
 
   if [ -r "${THEJOB_ENV_PATH}" ]; then
-    THEJOB_GLBPARMS=$( cat "${THEJOB_ENV_PATH}" )
-    eval ${THEJOB_GLBPARMS}
+    LoadGlobalParam "${THEJOB_ENV_PATH}"
   fi
 
   if [ -r "${THEJOB_PARAMETERS_PATH}" ]; then

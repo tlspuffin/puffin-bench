@@ -5,6 +5,7 @@
 #include "../../utils/variables.hxx"
 #include "../../utils/file_compressed.hxx"
 #include "../../utils/logs.hxx"
+#include "../../utils/rapidjson.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -35,7 +36,7 @@
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
-    ns_System::Linux& os, uint16_t cachePort) 
+    ns_System::Linux& os, uint16_t serverPort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
       monitor_(config.monitorsPath_), archiver_(), os_(os), users_(users)
@@ -43,7 +44,7 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::Users
   static int installHandler = InstallSigUSRHandler();
 
   for (auto const& executorConfig : config.executors_) {
-    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, cachePort, os_);
+    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, serverPort, os_);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
 
@@ -103,23 +104,21 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
 
   std::string tasksList;
   {
-    auto const nbRetryIt = runtimeConfig.find("NB_RUN");
-    auto const nbCoreIt = runtimeConfig.find("NB_CORES");
-    auto const timeoutIt = runtimeConfig.find("TIMEOUT");
-    auto const memoryCoreIt = runtimeConfig.find("MEMORY_CORE");
-    auto const memoryConsumptionIT = runtimeConfig.find("MEMORY_CONSUMPTION");
-    auto const runsSelectIt = runtimeConfig.find("RUN_SELECT");
-    auto const runsConfigIt = runtimeConfig.find("RUN_CONFIG");
-    tasksList = ResolveVariables(tasksListPattern, {
-      { "RUNTIME_NB_RUN", nbRetryIt != runtimeConfig.end() ? nbRetryIt->second : "1" },
-      { "RUNTIME_NB_CORES", nbCoreIt != runtimeConfig.end() ? nbCoreIt->second : "1" },
-      { "RUNTIME_TIMEOUT", timeoutIt != runtimeConfig.end() ? timeoutIt->second : "3h" },
-      { "RUNTIME_MEMORY_CORE", memoryCoreIt != runtimeConfig.end() ? memoryCoreIt->second : "0" },
-      { "RUNTIME_MEMORY_CONSUMPTION", 
-          memoryConsumptionIT != runtimeConfig.end() ? memoryConsumptionIT->second : "0" },
-      { "RUNTIME_RUN_SELECT", runsSelectIt != runtimeConfig.end() ? runsSelectIt->second : "" },
-      { "RUNTIME_RUN_CONFIG", runsConfigIt != runtimeConfig.end() ? runsConfigIt->second : "" },
-    });
+    std::unordered_map<std::string, std::string> variablesValue;
+    for (auto const& [key, value, defaultValue]: {
+          std::tuple{"NB_RUN", "RUNTIME_NB_RUN", "1"},
+          std::tuple{"NB_CORES", "RUNTIME_NB_CORES", "1"},
+          std::tuple{"TIMEOUT", "RUNTIME_TIMEOUT", "3h"},
+          std::tuple{"MEMORY_CORE", "RUNTIME_MEMORY_CORE", "0"},
+          std::tuple{"MEMORY_CONSUMPTION", "RUNTIME_MEMORY_CONSUMPTION", "0"},
+          std::tuple{"RUN_SELECT", "RUNTIME_RUN_SELECT", ""},
+          std::tuple{"RUN_CONFIG", "RUNTIME_RUN_CONFIG", ""},
+          std::tuple{"PRIORITY", "RUNTIME_PRIORITY", "0"},
+        }) {
+      auto const it = runtimeConfig.find(key);
+      variablesValue.emplace(value, it != runtimeConfig.end() ? it->second : defaultValue);
+    }
+    tasksList = ResolveVariables(tasksListPattern, variablesValue);
   }
 
   rapidjson::Document stepsJSON;
@@ -152,10 +151,17 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
   users_.Add(task, true);
   SaveStatus(false);
 
-  for(ns_Schedule::Step* step : task->root_steps_) {
-    steps_.push_back(step);
+  int64_t priority = task->priority_;
+  auto stepIT = steps_.begin();
+  for(; stepIT != steps_.end(); ++stepIT) {
+    if ((*stepIT)->task_->priority_ < priority) {
+      break;
+    }
   }
-  
+  for(ns_Schedule::Step* step : task->root_steps_) {
+    steps_.insert(stepIT, step);
+  }
+
   if (!threadRunning_) {
     if (thread_.joinable()) {
       lockThread_.unlock();
@@ -196,6 +202,171 @@ bool ns_Schedule::Schedule::CancelTask(uint64_t taskID, std::string const& sourc
   return false;
 }
 
+bool ns_Schedule::Schedule::TaskUpdatePriority(uint64_t taskID, int64_t newPriority) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  auto itBegin = steps_.begin();
+  auto itEnd = steps_.end();
+  bool found = false;
+  for (auto it = steps_.begin(); it != steps_.end(); ++it) {
+    ns_Schedule::Step* step = *it;
+    if ((step->task_->id_ == taskID) && (!found)) {
+      itBegin = it;
+      found = true;
+      if (step->task_->priority_ == newPriority) {
+        return true;
+      }
+    } else if ((found) && (step->task_->id_ != taskID)) {
+      itEnd = it;
+      break;
+    }
+  }
+  if (!found) {
+    return false;
+  }
+  auto stepIT = steps_.begin();
+  for(; stepIT != steps_.end(); ++stepIT) {
+    if ((*stepIT)->task_->priority_ < newPriority) {
+      break;
+    }
+  }
+  (*itBegin)->task_->priority_ = newPriority;
+  if (stepIT != itBegin) {
+    steps_.splice(stepIT, steps_, itBegin, itEnd);
+  }
+  SaveStatus(false);
+  return true;
+}
+
+bool ns_Schedule::Schedule::TaskUpdateArgs(uint64_t taskID, 
+    std::unordered_map<std::string, std::string>& newArgs) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  if (!tasksManager_.TaskUpdateArgs(taskID, newArgs)) {
+    return false;
+  }
+  SaveStatus(false);
+  return true;
+}
+
+bool ns_Schedule::Schedule::DeleteTaksDone(uint64_t taskID) {
+  std::string taskIDStr = std::to_string(taskID);
+  bool isSymLink = false;
+  std::filesystem::path artefact;
+  for(auto const& name: { 
+      config_.exportPath_ / (taskIDStr + ".zip"), 
+      config_.exportCanceledPath_ / (taskIDStr + ".zip"), 
+      config_.exportPath_ / (taskIDStr + ".tgz"), 
+      config_.exportCanceledPath_ / (taskIDStr + ".tgz") }) {
+
+    std::error_code ec;
+    if (std::filesystem::is_symlink(name, ec)) {
+      artefact = name;
+      isSymLink = true;
+      break;
+    } else if (std::filesystem::exists(name, ec)) {
+      artefact = name;
+      break;
+    }
+  }
+  if (artefact.empty()) {
+    LOGW << "Error deleting task " << taskIDStr << ", artefact not found" << Log::Flags::End;
+    return false;
+  }
+
+  std::string json = artefact.parent_path() / (taskIDStr + ".json");
+  std::error_code ec;
+  if (!std::filesystem::exists(json, ec)) {
+    LOGW << "Error deleting task " << taskIDStr << ", json not found" << Log::Flags::End;
+    return false;
+  }
+
+  int remoteDelete = 0;
+  try {
+    rapidjson::Document doc;
+    if (!ReadJSONFile(json, doc)) {
+      return false;
+    }
+    auto const& itTask = doc.FindMember("task");
+    if ((itTask == doc.MemberEnd()) || (!itTask->value.IsObject())) {
+      return false;
+    }
+    auto const& task = itTask->value;
+    auto const& itTaskPublish = task.FindMember("publish");
+    if ((itTaskPublish == task.MemberEnd()) || (!itTaskPublish->value.IsObject())) {
+      return false;
+    }
+    auto const& itTaskPublishLink = task.FindMember("publish_link");
+    std::string publishLink = ((itTaskPublishLink != task.MemberEnd()) && (itTaskPublishLink->value.IsString())) ?
+        itTaskPublishLink->value.GetString() : users_.GetPublishLink(taskID);
+    if (!publishLink.empty()) {
+      Publish publish;
+      publish.ReadJSON(config_.publishers_, itTaskPublish->value);
+      remoteDelete = publish.DeleteResults(taskID, publishLink);
+      if (remoteDelete >= 2) {
+        LOGW << "Error deleting task " << taskIDStr << ", publish server error" << Log::Flags::End;
+        return false;
+      }
+    }
+  } catch (std::exception const& e) {
+    LOGW << "Error deleting task " << taskIDStr << ": " << e.what() << Log::Flags::End;
+    return false;
+  }
+
+  std::vector<std::string> toDeleteLocal = { artefact, json };
+  std::vector<std::string> toDeleteRemote;
+  if (isSymLink && (remoteDelete == 0)) {
+    for (std::string const& file: toDeleteLocal) {
+      std::filesystem::path remoteFile;
+      bool status = std::filesystem::exists(file, ec);
+      if (status && (!ec)) {
+        remoteFile = std::filesystem::read_symlink(file, ec);
+        if (ec) {
+          LOGW << "Error deleting task " << taskIDStr << ": " << 
+              " unable to read link " << file << Log::Flags::End;
+          return false;
+        }
+      }
+      toDeleteRemote.emplace_back(remoteFile);
+    }
+  }
+  bool success = true;
+  std::vector<size_t> deletedRemote;
+  for(size_t i=0; i<toDeleteRemote.size(); ++i) {
+    if (toDeleteRemote[i].empty()) {
+      deletedRemote.push_back(i);
+      continue;
+    }
+    std::filesystem::remove(toDeleteRemote[i], ec);
+    if (!ec) {
+      deletedRemote.push_back(i);
+    } else {
+      success = false;
+    }
+  }
+  if (toDeleteRemote.empty()) {
+    for (std::string const& file: toDeleteLocal) {
+      std::filesystem::remove(file, ec);
+      if (ec) {
+        LOGW << "Error deleting task " << taskIDStr << ": delete fail on " << 
+            file << Log::Flags::End;
+        success = false;
+      }
+    }
+  } else {
+    for(size_t i=0; i<deletedRemote.size(); ++i) {
+      std::filesystem::remove(toDeleteLocal[deletedRemote[i]], ec);
+      if (ec) {
+        LOGW << "Error deleting task " << taskIDStr << ": delete fail on " << 
+            toDeleteLocal[deletedRemote[i]] << Log::Flags::End;
+        success = false;
+      }
+    }
+  }
+  if (success) {
+    users_.DeleteTask(taskID);
+  }
+  return success;
+}
+
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
   auto const& executorIT = executors_.find(name);
   if (executorIT == executors_.end()) {
@@ -213,6 +384,18 @@ void ns_Schedule::Schedule::GetOutput(
     std::string const& type, std::string const& taskID, 
     uint64_t stepUUID, std::string const& stepID,
     struct FileExtractedText& data) {
+
+  int64_t constexpr maxRequestReadSize = 64LL * 1024 * 1024;
+  if (data.requestReadSize > maxRequestReadSize) {
+    LOGW << "GetOutput error: max request read size is " << maxRequestReadSize << 
+        " asked " << data.requestReadSize << Log::Flags::End;
+    return;
+  }
+  if (data.requestReadSize < 0) {
+    LOGW << "GetOutput error: can not request read size below zero: " << data.requestReadSize << 
+        " for logs/" << type << "." << stepID << ".txt for task " << taskID << Log::Flags::End;
+    return;
+  }
 
   tasksManager_.GetRunningOutput(type, 
       std::stoull(taskID), stepUUID, data);
@@ -240,18 +423,52 @@ void ns_Schedule::Schedule::GetOutput(
   }
   FileCompressed fileCompressed(archiveName);
   std::string outputFile = "logs/" + type + "." + stepID + ".txt";
-  data.buffer.resize(data.requestReadOffset + data.requestReadSize);
   data.supportSeek = true;
   data.partialFile = false;
   try {
-    int64_t readSize = fileCompressed.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), &data.filesize);
-    fileCompressed.StopExtractFileData();
-    data.buffer.resize(readSize);
-    if (data.buffer.size() > data.requestReadOffset) {
-      data.buffer.erase(0, data.requestReadOffset);
+    if (fileCompressed.ExtractFileData(outputFile, 0, nullptr, &data.filesize) == -1) {
+      fileCompressed.StopExtractFileData();
+      data.startOffset = 0;
+      data.filesize = 0;
+      data.fileStartOffset = 0;
+      data.buffer.resize(0);
+      data.state = FileReadState::Error_Access;
+      return;
     }
-    data.startOffset = data.requestReadOffset;
+    if (data.requestReadOffset >= 0) {
+      data.startOffset = data.requestReadOffset;
+    } else if (data.requestReadOffset < 0) {
+      data.startOffset = 0;
+      if (data.requestReadOffset >= (-data.filesize)) {
+        data.startOffset = data.filesize + data.requestReadOffset;
+      }
+    }
+    if (data.startOffset < data.filesize) {
+      if (data.startOffset > 0) {
+        int64_t constexpr skipSize = 64LL * 1024 * 1024;
+        std::string discardBuffer;
+        discardBuffer.resize(skipSize);
+        int64_t remaining = data.startOffset;
+        while(remaining != 0) {
+          int64_t requested = static_cast<int64_t>(std::min<int64_t>(remaining, skipSize));
+          int64_t readSize = fileCompressed.ExtractFileData(outputFile, requested, discardBuffer.data(), nullptr);
+          if (readSize != requested) {
+            LOGW << "GetOutput error: Read in archive returned " << readSize << Log::Flags::End;
+            throw std::exception();
+          }
+          remaining -= requested;
+        }
+      }
+      data.buffer.resize(data.requestReadSize);
+      int64_t readSize = fileCompressed.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), nullptr);
+      if (readSize < 0) {
+        LOGW << "GetOutput error: Read in archive returned " << readSize << Log::Flags::End;
+        throw std::exception();
+      }
+      data.buffer.resize(readSize);
+    }
     data.state = data.buffer.size() == data.requestReadSize ? FileReadState::Ok : FileReadState::EndOfFile;
+    fileCompressed.StopExtractFileData();
   } catch(...) {
     LOGW << "GetOutput error: unable to find " << outputFile << " in " << archiveName << Log::Flags::End;
     data.buffer.resize(0);
@@ -260,32 +477,32 @@ void ns_Schedule::Schedule::GetOutput(
   }
 }
 
-bool ns_Schedule::Schedule::GetTaskData(std::string const& task_id, 
+bool ns_Schedule::Schedule::GetTaskData(std::string const& taskID, 
     std::string& fileStateJSON, std::string& fileArtefacts) {
-  if (GetTaskFinalData(task_id, fileStateJSON, fileArtefacts)) {
+  if (GetTaskFinalData(taskID, fileStateJSON, fileArtefacts)) {
     return true;
   }
-  fileStateJSON = tasksManager_.GetTaskState(stoull(task_id));
+  fileStateJSON = tasksManager_.GetTaskState(stoull(taskID));
   return !fileStateJSON.empty();
 }
 
-bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id, 
+bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& taskID, 
     std::string& fileStateJSON, std::string& fileArtefacts) const {
-  fileStateJSON = config_.exportPath_ / (task_id + ".json");
-  fileArtefacts = config_.exportPath_ / (task_id + ".zip");
+  fileStateJSON = config_.exportPath_ / (taskID + ".json");
+  fileArtefacts = config_.exportPath_ / (taskID + ".zip");
   bool artefactFound = std::filesystem::exists(fileArtefacts);
   if (!artefactFound) {
-    fileArtefacts = config_.exportPath_ / (task_id + ".tgz");
+    fileArtefacts = config_.exportPath_ / (taskID + ".tgz");
     artefactFound = std::filesystem::exists(fileArtefacts);
   }
   if (std::filesystem::exists(fileStateJSON) && artefactFound) {
     return true;
   }
-  fileStateJSON = config_.exportCanceledPath_ / (task_id + ".json");
-  fileArtefacts = config_.exportCanceledPath_ / (task_id + ".zip");
+  fileStateJSON = config_.exportCanceledPath_ / (taskID + ".json");
+  fileArtefacts = config_.exportCanceledPath_ / (taskID + ".zip");
   artefactFound = std::filesystem::exists(fileArtefacts);
   if (!artefactFound) {
-    fileArtefacts = config_.exportCanceledPath_ / (task_id + ".tgz");
+    fileArtefacts = config_.exportCanceledPath_ / (taskID + ".tgz");
     artefactFound = std::filesystem::exists(fileArtefacts);
   }
   if (std::filesystem::exists(fileStateJSON) && artefactFound) {
@@ -299,8 +516,9 @@ bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id,
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
   std::list<ns_Schedule::Step*> result;
 
-  for(auto const& executor : executors_) {
-    std::list<ns_Schedule::Step*> elements = executor.second->FindRunnableSteps(steps_);
+  for(auto const& [name, executor] : executors_) {
+    executor->EstimatedStepsStartTime(steps_);
+    std::list<ns_Schedule::Step*> elements = executor->FindRunnableSteps(steps_);
     result.insert(result.end(), elements.begin(), elements.end());
   }
 
@@ -433,6 +651,9 @@ inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
 void ns_Schedule::Schedule::ManageEndOfStep(
     ns_Schedule::Step* step, std::ofstream& stepsDoneFile) {
   DEBUG_STEP_MSG("Step removed", step);
+
+  step->EndOfRun();
+
   AppendStepToFinishLog(step->task_->steps_file_, *step);
   AppendStepToFinishLog(stepsDoneFile, *step);
 
@@ -453,7 +674,6 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     }
   }
   steps_.remove(step);
-  step->GatherFilesToLocal();
 
   if (step->TaskLastStep()) {
     uint64_t task_id = step->TaskID();
@@ -579,7 +799,7 @@ bool ns_Schedule::Schedule::LimitRessourcesUsages() {
     }
     SRessourcesSummary const* worst = SRessourcesSummary::ToKillMem(tasks);
     CancelTask(worst->task->id_, "memory pressure too high");
-    
+
     auto it = executorsCPUFull.find(executor);
     if (it == executorsCPUFull.end()) {
       continue;

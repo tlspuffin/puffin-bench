@@ -12,6 +12,11 @@
     <div class="header-top">
       <h1 id="header-title">Scheduler History</h1>
       <div class="header-actions">
+        <label class="sort_index-label" for="sortIndex-select">Sort by&nbsp;:</label>
+        <select class="sort_index-select" id="sortIndex-select">
+          <option value="id">start time</option>
+          <option value="end_timestamp" selected>end time</option>
+        </select>
         <button class="refresh-button" id="refresh-button">🔃 Refresh</button>
       </div>
     </div>

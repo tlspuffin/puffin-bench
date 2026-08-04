@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.21.0)
 project(gitrestapi)
 
 set (CMAKE_CXX_STANDARD 17)
@@ -121,5 +121,4 @@ target_link_libraries(git_restapi PRIVATE git_restapi.lib)
 add_executable(git_restapi-static src/git_restapi/main.cxx )
 target_link_libraries(git_restapi-static PRIVATE git_restapi.lib)
 target_link_options(git_restapi-static PRIVATE -static-libgcc -static-libstdc++)
-
 

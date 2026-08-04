@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
       configFile = argv[i];
     } else {
       bool used = false;
-      std::vector<std::string> parameters{"--force-install", "--install", "--logslevel"};
+      std::vector<std::string> parameters{"--force-install", "--only-install", "--logslevel"};
       for(size_t j=0; j<parameters.size(); ++j) {
         if (parameters[j].compare(argv[i]) == 0) {
           switch(j) {
@@ -30,7 +30,6 @@ int main(int argc, char *argv[]) {
               used = true;
               break;
             case 1:
-              forceInstall = true;
               onlyInstall = true;
               used = true;
               break;

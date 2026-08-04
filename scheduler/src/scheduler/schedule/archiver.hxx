@@ -18,10 +18,10 @@ struct ArchiveJob {
   std::unordered_map<std::string, std::string> variables_;
   std::filesystem::path archivePath_;
   std::vector<std::filesystem::path> sources_; //1st always the task.json
-  std::filesystem::path deleteDir_;  
+  std::filesystem::path deleteDir_;
   std::filesystem::path baseDir_;
   bool doPublish_;
-  
+
   ArchiveJob() : publish_(), variables_({}), archivePath_(""), sources_({}), 
       deleteDir_(""), baseDir_(""), doPublish_(false) {}
   ArchiveJob(Publish& publish, std::unordered_map<std::string, std::string> variables, 
@@ -37,17 +37,17 @@ class Archiver {
 public:
   Archiver();
   ~Archiver();
-    
+
   void AddJob(struct ArchiveJob& job);
-    
+
   size_t PendingJobs();
-    
+
   void WaitForCompletion();
-    
+
 private:
   void ThreadLoop();
   bool ProcessJob(ArchiveJob const& job);
-    
+
   std::thread thread_;
   std::mutex queueMutex_;
   std::condition_variable queueCV_;

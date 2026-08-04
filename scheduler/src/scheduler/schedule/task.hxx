@@ -74,6 +74,12 @@ public:
 
   std::string apiURL_;
 
+  int64_t priority_;
+
+  uint64_t estimatedEndTime_;
+
+  std::string launcher_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 
@@ -98,24 +104,40 @@ public:
 
   void Cancel(std::string const& source);
 
+  void Execute(ns_Schedule::Step* step, bool uniqueStep);
   bool PrepareToRun();
 
   struct ArchiveJob FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
       rapidjson::Document::AllocatorType& alloc, 
-      ns_Schedule::Step const* step) const;
+      ns_Schedule::Step const* step);
 
   struct ns_Schedule::SRessourcesSummary UpdateStats(std::vector<ns_Schedule::Step*> steps);
 
-  rapidjson::Document FlagJSON() const;
+  rapidjson::Value FlagJSON(rapidjson::Document::AllocatorType& alloc) const;
+
+  bool AllOtherStepsProcessedAfterCancel(ns_Schedule::Step* step) const;
+
+  void UpdateArgs(std::unordered_map<std::string, std::string>& newArgs);
+  void ApplyPendingArgs();
 
 private:
   bool CreateRunFolders();
+  bool DeleteRunFolders();
 
   void CreateStepsFromJson(rapidjson::Value const& configJSON);
 
+  void Destroy();
+
+  bool IsPending() const;
+
+  rapidjson::Value StringToJSON(rapidjson::Document::AllocatorType& alloc, std::string const& data) const;
+
   std::list<ns_Schedule::Step*> steps_;
+
+  std::mutex argsMutex_;
+  std::unordered_map<std::string, std::string> argsToUpdate_;
 
   static std::unordered_map<std::string, std::string> 
   LoadGlobalParameters(std::filesystem::path const& file);
@@ -127,13 +149,21 @@ private:
   static State StateStringToEnum(std::string const& state);
 };
 
-inline rapidjson::Document Task::FlagJSON() const  {
-  rapidjson::Document flagDoc;
-  flagDoc.Parse((flag_.empty() ? "{}" : flag_).c_str());
-  if (flagDoc.HasParseError()) {
-    flagDoc.Parse("{}");
+inline rapidjson::Value Task::FlagJSON(rapidjson::Document::AllocatorType& alloc) const {
+  return StringToJSON(alloc, flag_);
+}
+
+inline rapidjson::Value Task::StringToJSON(rapidjson::Document::AllocatorType& alloc, std::string const& data) const  {
+  rapidjson::Document doc;
+  doc.Parse((data.empty() ? "{}" : data).c_str());
+  if (doc.HasParseError()) {
+    doc.Parse("{}");
   }
-  return flagDoc;
+  return rapidjson::Value(doc, alloc);
+}
+
+inline bool Task::IsPending() const {
+  return executor_data_ == nullptr;
 }
 
 };

@@ -30,14 +30,6 @@ Improvements identified from the current design. Items are independent unless no
 
 ---
 
-## Configurable rule actions
-
-**Current:** Available actions are hard-coded (`GenerateReportVuln3`, `GenerateReportPerfFromSummary`, `NULL`). Adding a new processing action requires recompiling the server.
-
-**Improvement:** Allow actions to be defined as external scripts or plugins, loaded from a directory at startup, so new report types can be added without recompilation.
-
----
-
 ## Authentication
 
 **Current:** The REST API has no authentication mechanism. Any process with network access can submit archives or read results.

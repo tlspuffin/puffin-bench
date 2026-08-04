@@ -26,6 +26,37 @@ h1 {
   color: #ddd;
 }
 
+.sort_index-label {
+  color: #aaa;
+  font-size: 0.85em;
+}
+
+.sort_index-select {
+  background: #353535;
+  border: 1px solid #505050;
+  color: #ccc;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.sort_index-select:hover {
+  background: #404040;
+  color: white;
+}
+
+.sort_index-select:focus-visible {
+  outline: 2px solid #707070;
+  outline-offset: 1px;
+}
+
+.sort_index-select option {
+  background: #232323;
+  color: #ccc;
+}
+
 .refresh-button {
   background: #353535;
   border: 1px solid #505050;

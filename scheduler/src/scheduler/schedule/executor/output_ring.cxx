@@ -252,6 +252,8 @@ void ns_Executor::MemoryRing::Read(struct FileExtractedText& data) {
     data.requestReadOffset = (tail >= virtualSize_) ? 0 : static_cast<ssize_t>(virtualSize_ - tail);
   }
   if (data.requestReadOffset >= virtualSize_) {
+    data.startOffset = data.requestReadOffset;
+    data.fileStartOffset = full_ ? (virtualSize_ - maxSize_) : 0;
     return;
   }
 
@@ -262,14 +264,15 @@ void ns_Executor::MemoryRing::Read(struct FileExtractedText& data) {
   ssize_t readSize = virtualReadEndOffset - data.requestReadOffset;
 
   if (!full_) {
-    data.startOffset = 0;
+    data.startOffset = data.requestReadOffset;
     data.fileStartOffset = 0;
     data.buffer.resize(readSize);
     memcpy(data.buffer.data(), &buffer_.data()[data.requestReadOffset], readSize);
-    data.startOffset = 0;
   } else {
     ssize_t virtualFileStartOffset = virtualSize_ - maxSize_;
     if (virtualReadEndOffset < virtualFileStartOffset) {
+      data.startOffset = virtualFileStartOffset;
+      data.fileStartOffset = virtualFileStartOffset;
       return;
     }
     data.startOffset = data.requestReadOffset;

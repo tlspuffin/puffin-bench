@@ -23,6 +23,8 @@ public:
   bool UserJobTypes(std::string const& user, std::vector<std::string>& result);
   bool UserTasks(std::string const& user, std::string const& jobType, 
       rapidjson::Value& result, rapidjson::Document::AllocatorType& alloc);
+  std::string GetPublishLink(uint64_t taskID);
+  bool DeleteTask(uint64_t taskID);
 
 private:
   bool Save();

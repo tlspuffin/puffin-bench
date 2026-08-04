@@ -13,7 +13,7 @@ namespace ns_API {
 class ScheduleAPI {
 public:
   ScheduleAPI(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
-      ns_System::Linux& os, uint16_t cache_port);
+      ns_System::Linux& os, uint16_t serverPort);
 
   std::string TaskManagerStateFile() const;
   uint64_t AddTask(std::string const& name, 
@@ -29,9 +29,11 @@ public:
     std::string const& taskID, uint64_t stepUUID, std::string const& stepID, 
     struct FileExtractedText& data);
   bool CancelStep(uint64_t taskID, uint64_t stepID);
-  bool CancelTask(uint64_t taskID);
-  bool GetTaskData(std::string const& task_id, std::string& fileStateJSON, std::string& fileArtefacts);
-  bool GetTaskFinalData(std::string const& task_id, std::string& fileStateJSON, std::string& fileArtefacts) const;
+  bool CancelOrDeleteTask(uint64_t taskID);
+  bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
+  bool TaskUpdateArgs(uint64_t taskID, std::unordered_map<std::string, std::string>& newArgs);
+  bool GetTaskData(std::string const& taskID, std::string& fileStateJSON, std::string& fileArtefacts);
+  bool GetTaskFinalData(std::string const& taskID, std::string& fileStateJSON, std::string& fileArtefacts) const;
 
 private:
   ns_Schedule::Config const& config_;
@@ -46,18 +48,27 @@ inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
   return schedule_.CancelStep(taskID, stepUUID);
 }
 
-inline bool ScheduleAPI::CancelTask(uint64_t taskID) {
-  return schedule_.CancelTask(taskID, "rest api request");
+inline bool ScheduleAPI::CancelOrDeleteTask(uint64_t taskID) {
+  return schedule_.CancelTask(taskID, "rest api request") || schedule_.DeleteTaksDone(taskID);
 }
 
-inline bool ScheduleAPI::GetTaskData(std::string const& task_id, 
+inline bool ScheduleAPI::TaskUpdatePriority(uint64_t taskID, int64_t newPriority) {
+  return schedule_.TaskUpdatePriority(taskID, newPriority);
+}
+
+inline bool ScheduleAPI::TaskUpdateArgs(uint64_t taskID, 
+    std::unordered_map<std::string, std::string>& newArgs) {
+  return schedule_.TaskUpdateArgs(taskID, newArgs);
+}
+
+inline bool ScheduleAPI::GetTaskData(std::string const& taskID, 
     std::string& fileStateJSON, std::string& fileArtefacts) {
-  return schedule_.GetTaskData(task_id, fileStateJSON, fileArtefacts);
+  return schedule_.GetTaskData(taskID, fileStateJSON, fileArtefacts);
 }
 
-inline bool ScheduleAPI::GetTaskFinalData(std::string const& task_id, 
+inline bool ScheduleAPI::GetTaskFinalData(std::string const& taskID, 
     std::string& fileStateJSON, std::string& fileArtefacts) const {
-  return schedule_.GetTaskFinalData(task_id, fileStateJSON, fileArtefacts);
+  return schedule_.GetTaskFinalData(taskID, fileStateJSON, fileArtefacts);
 }
 
 };

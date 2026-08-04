@@ -7,7 +7,7 @@
 
 ns_Schedule::Archiver::Archiver() 
   : threadRunning_(true), jobsProcessed_(0), jobsFailed_(0)
-{   
+{
   thread_ = std::thread(&Archiver::ThreadLoop, this);
 }
 
@@ -17,7 +17,7 @@ ns_Schedule::Archiver::~Archiver() {
     threadRunning_ = false;
   }
   queueCV_.notify_one();
-    
+
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -61,7 +61,7 @@ void ns_Schedule::Archiver::ThreadLoop() {
     ArchiveJob job;
     {
       std::unique_lock<std::mutex> lock(queueMutex_);
-      queueCV_.wait(lock, [this] { return !jobs_.empty() || !threadRunning_.load(); });            
+      queueCV_.wait(lock, [this] { return !jobs_.empty() || !threadRunning_.load(); });
       if (!threadRunning_.load() && jobs_.empty()) {
         break;
       }
@@ -95,7 +95,7 @@ void ns_Schedule::Archiver::ThreadLoop() {
       jobsFailed_++;
       LOGW << "[Archiver] Failed: " << job.archivePath_ << Log::Flags::End;
     }
-  }    
+  }
   LOGI << "[Archiver] Thread stopped" << Log::Flags::End;
 }
 
@@ -109,7 +109,7 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
       LOGW << "[Archiver] Error: source not found: " << source << Log::Flags::End;
       return false;
     }
-  }   
+  }
   std::filesystem::path archivePath(job.archivePath_);
   if (archivePath.has_parent_path()) {
     std::error_code ec;
@@ -155,7 +155,7 @@ bool ns_Schedule::Archiver::ProcessJob(ArchiveJob const& job) {
   }
   cmd << " 2>&1";
   LOGI << "[Archiver] Command: " << cmd.str() << Log::Flags::End;
-    
+
   FILE* pipe = popen(cmd.str().c_str(), "r");
   if (!pipe) {
     LOGW << "[Archiver] Error: failed to execute tar command" << Log::Flags::End;

@@ -1,0 +1,12 @@
+{
+  "server": {
+    "secure": false,
+    "port": ${VIS_COMPARATOR_PORT},
+    "html": "${DATA_PATH}/html",
+    "userdata": "${DATA_PATH}/users_data/vis_comparator",
+    "git_history_url": "http://127.0.0.1:${GIT_RESTAPI_PORT}/api/git/history/tlspuffin"
+  },
+  "data": {
+    "data": "${DATA_PATH}/publisher"
+  }
+}
