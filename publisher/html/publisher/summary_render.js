@@ -358,7 +358,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
   if (type == "Campaign") {
     const displayLabel = document.createElement('a');
     displayLabel.textContent = label;
-    displayLabel.href = config.vis_comparator_campaign(typeData.user, typeData.campaign_id);
+    displayLabel.href = config.vis_comparator_campaign(project, typeData.user, typeData.campaign_id);
     headerLabel.appendChild(displayLabel);
   } else {
     const displayLabel = document.createElement('span');
@@ -377,7 +377,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
     let libs = [];
     Object.keys(typeData.metrics).forEach(lib => libs.push(lib));
     btnAnalyze.onclick = (event) => {
-      window.open(config.vis_comparator_perf_multiple(typeData.commit_id, libs), "_blank");
+      window.open(config.vis_comparator_perf_multiple(project, typeData.commit_id, libs), "_blank");
     }
     headerActions.appendChild(btnAnalyze);
   }
@@ -444,7 +444,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
 
       let libNameLabel = libName;
       if (type == "Perf") {
-        libNameLabel = `<a href=${config.vis_comparator_perf(typeData.commit_id, libName)}>${libName}</a>`;
+        libNameLabel = `<a href=${config.vis_comparator_perf(project, typeData.commit_id, libName)}>${libName}</a>`;
       }
 
       const libItemsHeader = document.createElement('div');

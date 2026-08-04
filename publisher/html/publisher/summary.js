@@ -18,12 +18,12 @@ const config = {
   taskInfoURL: `${configURLS.scheduler}/files/board/task.html`,
   artefactURL: (taskID) => `${configURLS.scheduler}/api/task/${taskID}/artefacts`,
 
-  vis_comparator: configURLS.vis_comparator,
-  vis_comparator_perf: (commitID, libraryName) => `${configURLS.vis_comparator}?template=TwoTasksTemplate_2C1S&c1=${commitID}&c2=@dev-base&c2.alias=Dev&s1=Perf%3A${libraryName}`,
-  vis_comparator_campaign: (user, campaignID) => `${configURLS.vis_comparator}?k1=${encodeURIComponent(user+':'+campaignID.replace(/-(?=[^-]*$)/, ":"))}`,
-  vis_comparator_perf_multiple: (commitID, librariesName) => {
+  vis_comparator: (project) => configURLS.vis_comparator(project),
+  vis_comparator_perf: (project, commitID, libraryName) => `${configURLS.vis_comparator(project)}?template=TwoTasksTemplate_2C1S&c1=${commitID}&c2=@dev-base&c2.alias=Dev&s1=Perf%3A${libraryName}`,
+  vis_comparator_campaign: (project, user, campaignID) => `${configURLS.vis_comparator(project)}?k1=${encodeURIComponent(user+':'+campaignID.replace(/-(?=[^-]*$)/, ":"))}`,
+  vis_comparator_perf_multiple: (project, commitID, librariesName) => {
     const libraries = librariesName.map((name, index) => `&s${index+1}=${encodeURIComponent(`Perf:${name}`)}`).join('');
-    return `${configURLS.vis_comparator}?template=PerfCompareTemplate&c1=${commitID}&c2=@dev-base&c2.alias=Dev${libraries}`
+    return `${configURLS.vis_comparator(project)}?template=PerfCompareTemplate&c1=${commitID}&c2=@dev-base&c2.alias=Dev${libraries}`
   },
 }
 
