@@ -25,6 +25,9 @@ bool Config::Load(std::string const& filepath) {
   }
   server_.Load("server", doc);
   git_.Load("git", doc);
+  if (success && git_.repositories_.empty()) {
+    throw std::runtime_error("Configuration error, no repositories configured");
+  }
   return success;
 }
 
