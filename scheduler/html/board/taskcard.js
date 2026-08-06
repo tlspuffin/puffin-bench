@@ -45,6 +45,8 @@ export class TaskCard {
       cancelButton.style.display = 'none';
     }
 
+    const priorityUI = activeCount > 0 ? this.#CreatePriorityUI(task) : document.createElement('div');
+
     let username = '';
     if (task?.user && (task.user != '')) {
       username = task.user;
@@ -57,8 +59,8 @@ export class TaskCard {
       taskName = task.id;
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-label-id', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, cancelButton]
+        ['task-value-name', 'task-label-id', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, priorityUI, cancelButton]
       ));
       if (username != '') {
         divCardHeader.appendChild(this.#CreateCardLine(
@@ -70,8 +72,8 @@ export class TaskCard {
     } else {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-value-name', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), task.name, cancelButton]
+        ['task-value-name', 'task-value-name', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskQuickLink(task), task.name, priorityUI, cancelButton]
       ));
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
@@ -460,19 +462,47 @@ export class TaskCard {
     return div;
   }
 
+  #CreatePriorityUI(task) {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.classList.add('card-priority-input');
+    input.step = 1;
+    input.value = task.priority;
+
+    input.onclick = (event) => event.stopPropagation();
+    input.onchange = async (event) => {
+      event.stopPropagation();
+      const newPriority = Math.round(Number(input.value));
+      input.value = newPriority;
+      if (newPriority === task.priority) {
+        return;
+      }
+      await this.#TaskUpdatePriority(task.id, newPriority);
+    };
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        input.blur();
+      }
+    };
+
+    return input;
+  }
+
   // ── Private — API calls ──────────────────────────────────────
 
   async #CancelTask(taskID) {
     this.#DisableUI();
 
-    let response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}`,
-        { method: 'DELETE' }
-    );
-    let data = { success: false };
-    if (response.ok) {
-      data = await response.json();
-    }
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}`,
+          { method: 'DELETE' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
 
     this.#EnableUI();
 
@@ -484,19 +514,39 @@ export class TaskCard {
   async #CancelStep(taskID, stepUUID) {
     this.#DisableUI();
 
-    let response = await fetch(
-        `http://${window.location.host}/api/task/${taskID}/step/${stepUUID}`,
-        { method: 'DELETE' }
-    );
-    let data = { success: false };
-    if (response.ok) {
-      data = await response.json();
-    }
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}/step/${stepUUID}`,
+          { method: 'DELETE' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
 
     this.#EnableUI();
     //if (data.success) {
       await this.#onRefresh();
     //}
+  }
+
+  async #TaskUpdatePriority(taskID, newPriority) {
+    this.#DisableUI();
+
+    try {
+      let response = await fetch(
+          `http://${window.location.host}/api/task/${taskID}/${newPriority}`,
+          { method: 'PATCH' }
+      );
+      let data = { success: false };
+      if (response.ok) {
+        data = await response.json();
+      }
+    } catch(e) {}
+
+    this.#EnableUI();
+    await this.#onRefresh();
   }
 
   // ── Private — link helper ──────────────────────────────────

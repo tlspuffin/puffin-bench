@@ -26,7 +26,7 @@ Built for Linux environments, it provides precise control over task execution, r
 
     Serialization: RapidJSON (Configuration & State management)
 
-    Compression: libarchive (read & write)
+    Compression: `zip` CLI (invoked via `popen()`) for writing task archives; libarchive for reading them back (log extraction)
 
 🌐 API Endpoints
 
@@ -35,13 +35,14 @@ Built for Linux environments, it provides precise control over task execution, r
 | POST | `/api/task/new` | Submit a new task (multipart: flow JSON + script) |
 | GET | `/api/tasks/running` | Snapshot of all tasks and steps |
 | GET | `/api/task/<id>/...` | Step output, final state, artefacts |
+| PATCH | `/api/task/<id>/<priority>` | Update a task's scheduling priority |
 | DELETE | `/api/task/<id>` | Cancel a task |
-| DELETE | `/api/task/<id>/step/<uuid>` | Cancel a single step |
+| DELETE | `/api/task/<id>/step/<stepUUID>` | Cancel a single step (`stepUUID` is the step's globally-unique `uuid_`, not its per-task `step_id_`) |
 | GET/PUT | `/api/cache/<id>` | Store or retrieve a cached file |
 | GET | `/api/users`, `/api/user/...` | User and job-type tracking |
 | GET | `/files/*` | Static file serving (dashboard, scripts) |
 
-All endpoints support CORS preflight (`OPTIONS`). See `docs/api.md` for the full reference.
+Note: no route actually handles `OPTIONS` today — every handler sends CORS headers on real requests, but preflight requests fall through to a 404. See `docs/api.md` for the full reference and this caveat in detail.
 
 ⚙️ How It Works
 
@@ -73,7 +74,7 @@ See `docs/architecture.md` for the full design documentation and `docs/component
 
 🔨 Building
 
-**Prerequisites:** CMake ≥ 3.21, Git, a C++17 compiler, `xxd` (for the `reserve_port` blob header), and OpenSSL development headers (`libssl-dev` or equivalent).
+**Prerequisites:** CMake ≥ 3.21, Git, a C++17 compiler, `xxd` and `zip` (both required at configure time by unconditionally-included CMake helper scripts, even though neither is currently invoked by any embedding target), and OpenSSL development headers (`libssl-dev` or equivalent).
 
 All other dependencies (Poco, RapidJSON, libarchive, zlib) are fetched from their upstream git repositories and built automatically during the first CMake configuration.
 
@@ -81,22 +82,27 @@ All other dependencies (Poco, RapidJSON, libarchive, zlib) are fetched from thei
     cmake --build build -j$(nproc)
 
 This produces two binaries in `build/`:
-- `srv` — dynamically linked scheduler
-- `srv-static` — fully static binary (suitable for deployment without shared libs)
+- `scheduler` — dynamically linked scheduler
+- `scheduler-static` — same binary, statically linked against libgcc/libstdc++ (suitable for deployment without a matching libstdc++ on the target host)
 
-See `docs/build.md` for the full build reference.
+There is no `cmake --install` target; deployment is a manual copy of the binary, a `config.json`, and (for systemd) the files under `samples/system/`. See `docs/build.md` for the full build reference.
 
 🚀 Running
 
-**First run — install static files:**
+**First run:**
 
-    ./srv --install
+`config.json` must exist and six directories it points at must already exist on disk — the process extracts embedded files into some of them but does not create the directories themselves (a missing one aborts the process with an explicit `filesystem_error` naming the path, one at a time). From a repository checkout (where `html/` and `scripts/` already exist as source):
 
-This extracts the embedded board files into the `html/board/` directory configured in `config.json`. Run once, or with `--force-install` to overwrite existing files.
+    mkdir -p tools runs users_data exports cache
+    ./scheduler config.json                    # no config.json yet: writes a default one and exits — run again
+    ./scheduler config.json --only-install      # extracts the embedded board dashboard and step-runner scripts, exits
+    ./scheduler config.json                     # starts the server
+
+`--force-install` (combinable with `--only-install`) overwrites embedded files that already exist; without it, only missing files are (re)written. See `docs/configuration.md` (First Run / Required Directories) for the full explanation, including the binary-only deployment case.
 
 **Start the server:**
 
-    ./srv config.json
+    ./scheduler config.json
 
 **Open the board dashboard:**
 
@@ -106,7 +112,7 @@ The dashboard polls `GET /api/tasks/running` automatically and shows running tas
 
 **Submit a job from the dashboard:**
 
-Click the `+` button to open the job launcher. Select a job type, pick or paste a commit hash, then click **Launch Task**. The available job types are defined in `html/board/jobs_config.json` — edit that file to add new job types without recompiling.
+The `+` button opens `html/board/launchers/launchers.js`, a generic per-project plugin loader — not a fixed job launcher. It reads a project registry from `./config.js` (`config.projects`) and dynamically imports a `joblauncher.js` module per project. Neither `config.js` nor any project subfolder ships in this repository; you supply them yourself under `html/board/launchers/<project>/` to add a launcher UI without recompiling the server. See `docs/board-job-launcher.md` for the exact plugin contract, and `samples/jobs/tests/*.json` for example flow JSON that any launcher (or a plain `curl` to `POST /api/task/new`) can submit.
 
 See `docs/configuration.md` for the full configuration reference.
 

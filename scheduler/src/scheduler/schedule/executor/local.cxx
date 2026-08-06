@@ -315,11 +315,23 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
   }
   freeMemory -= memMinAllowed_;
 
+  int64_t priority = (*steps.begin())->task_->priority_;
+  bool stepSkiped = false;
+
   for(auto step : steps) {
+    int64_t curPriority = step->task_->priority_;
+    if (curPriority != priority) {
+      if (stepSkiped) {
+        break;
+      }
+      priority = curPriority;
+    }
+
     uint64_t nbCoresRequired = step->nb_cores_;
     uint64_t memoryRequired = step->memory_max_;
     if ((!step->IsReady()) || (nbCoresRequired > nbCoresFree) || 
         ((memoryRequired > 0) && (memoryRequired > freeMemory))) {
+      stepSkiped |= step->IsPending();
       continue;
     }
     nbCoresFree -= nbCoresRequired;

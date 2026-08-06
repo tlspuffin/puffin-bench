@@ -74,6 +74,8 @@ public:
 
   std::string apiURL_;
 
+  int64_t priority_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 

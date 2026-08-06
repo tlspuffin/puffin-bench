@@ -44,6 +44,29 @@
   background: #404040;
 }
 
+.card-priority-input {
+  width: 3.5em;
+  background: #1a1a1a;
+  color: white;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 6px 4px;
+  text-align: center;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.card-priority-input:hover {
+  border-color: #777;
+}
+
+.card-priority-input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: #232323;
+}
+
 .card-task-cancelling {
   background: rgba(211, 47, 47, 0.15);
   transition: background 0.2s;
@@ -55,6 +78,7 @@
 .card-task-id {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   font-size: large;
   font-weight: bold;

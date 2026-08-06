@@ -34,6 +34,7 @@ public:
       std::string const& user, std::string const& jobType);
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
   bool CancelTask(uint64_t taskID, std::string const& source);
+  bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
   void GetOutput(

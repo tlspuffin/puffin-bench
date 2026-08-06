@@ -18,9 +18,8 @@
       "local": {
         "name": "local",
         "type": 1,
-        "nbCores": 1,
-        "excludeCores": [
-          0
+        "cores": [
+          1, 2, 3, 4, 5
         ],
         "scriptPath": "scheduler/scripts",
         "logsSize": 16777216,

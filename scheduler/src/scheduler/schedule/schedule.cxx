@@ -103,23 +103,21 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
 
   std::string tasksList;
   {
-    auto const nbRetryIt = runtimeConfig.find("NB_RUN");
-    auto const nbCoreIt = runtimeConfig.find("NB_CORES");
-    auto const timeoutIt = runtimeConfig.find("TIMEOUT");
-    auto const memoryCoreIt = runtimeConfig.find("MEMORY_CORE");
-    auto const memoryConsumptionIT = runtimeConfig.find("MEMORY_CONSUMPTION");
-    auto const runsSelectIt = runtimeConfig.find("RUN_SELECT");
-    auto const runsConfigIt = runtimeConfig.find("RUN_CONFIG");
-    tasksList = ResolveVariables(tasksListPattern, {
-      { "RUNTIME_NB_RUN", nbRetryIt != runtimeConfig.end() ? nbRetryIt->second : "1" },
-      { "RUNTIME_NB_CORES", nbCoreIt != runtimeConfig.end() ? nbCoreIt->second : "1" },
-      { "RUNTIME_TIMEOUT", timeoutIt != runtimeConfig.end() ? timeoutIt->second : "3h" },
-      { "RUNTIME_MEMORY_CORE", memoryCoreIt != runtimeConfig.end() ? memoryCoreIt->second : "0" },
-      { "RUNTIME_MEMORY_CONSUMPTION", 
-          memoryConsumptionIT != runtimeConfig.end() ? memoryConsumptionIT->second : "0" },
-      { "RUNTIME_RUN_SELECT", runsSelectIt != runtimeConfig.end() ? runsSelectIt->second : "" },
-      { "RUNTIME_RUN_CONFIG", runsConfigIt != runtimeConfig.end() ? runsConfigIt->second : "" },
-    });
+    std::unordered_map<std::string, std::string> variablesValue;
+    for (auto const& [key, value, defaultValue]: {
+          std::tuple{"NB_RUN", "RUNTIME_NB_RUN", "1"},
+          std::tuple{"NB_CORES", "RUNTIME_NB_CORES", "1"},
+          std::tuple{"TIMEOUT", "RUNTIME_TIMEOUT", "3h"},
+          std::tuple{"MEMORY_CORE", "RUNTIME_MEMORY_CORE", "0"},
+          std::tuple{"MEMORY_CONSUMPTION", "RUNTIME_MEMORY_CONSUMPTION", "0"},
+          std::tuple{"RUN_SELECT", "RUNTIME_RUN_SELECT", ""},
+          std::tuple{"RUN_CONFIG", "RUNTIME_RUN_CONFIG", ""},
+          std::tuple{"PRIORITY", "RUNTIME_PRIORITY", "0"},
+        }) {
+      auto const it = runtimeConfig.find(key);
+      variablesValue.emplace(value, it != runtimeConfig.end() ? it->second : defaultValue);
+    }
+    tasksList = ResolveVariables(tasksListPattern, variablesValue);
   }
 
   rapidjson::Document stepsJSON;
@@ -152,8 +150,15 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
   users_.Add(task, true);
   SaveStatus(false);
 
+  int64_t priority = task->priority_;
+  auto stepIT = steps_.begin();
+  for(; stepIT != steps_.end(); ++stepIT) {
+    if ((*stepIT)->task_->priority_ < priority) {
+      break;
+    }
+  }
   for(ns_Schedule::Step* step : task->root_steps_) {
-    steps_.push_back(step);
+    steps_.insert(stepIT, step);
   }
   
   if (!threadRunning_) {
@@ -194,6 +199,41 @@ bool ns_Schedule::Schedule::CancelTask(uint64_t taskID, std::string const& sourc
     }
   }
   return false;
+}
+
+bool ns_Schedule::Schedule::TaskUpdatePriority(uint64_t taskID, int64_t newPriority) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  auto itBegin = steps_.begin();
+  auto itEnd = steps_.end();
+  bool found = false;
+  for (auto it = steps_.begin(); it != steps_.end(); ++it) {
+    ns_Schedule::Step* step = *it;
+    if ((step->task_->id_ == taskID) && (!found)) {
+      itBegin = it;
+      found = true;
+      if (step->task_->priority_ == newPriority) {
+        return true;
+      }
+    } else if ((found) && (step->task_->id_ != taskID)) {
+      itEnd = it;
+      break;
+    }
+  }
+  if (!found) {
+    return false;
+  }
+  auto stepIT = steps_.begin();
+  for(; stepIT != steps_.end(); ++stepIT) {
+    if ((*stepIT)->task_->priority_ < newPriority) {
+      break;
+    }
+  }
+  (*itBegin)->task_->priority_ = newPriority;
+  if (stepIT != itBegin) {
+    steps_.splice(stepIT, steps_, itBegin, itEnd);
+  }
+  SaveStatus(false);
+  return true;
 }
 
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {

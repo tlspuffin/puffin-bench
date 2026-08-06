@@ -133,6 +133,8 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
       if ((fullkey.find("runtime[") != 0) || (fullkey.rfind("]") != (fullkey.size()-1))) {
         continue;
       }
+      // Field names are "runtime[RUNTIME_<key>]"
+      // 16 = strlen("runtime[") + strlen("RUNTIME_");
       std::string key = fullkey.substr(16, fullkey.size() - 17);
       if (key.empty()) {
         throw std::runtime_error("Empty key in runtime[]");
@@ -292,6 +294,36 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
   out->flush();
+}
+
+void ns_Server::RequestHandlerTaskUpdatePriority::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  std::string taskIDStr = std::get<0>(args_);
+  std::string newPriorityStr = std::get<1>(args_);
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  Poco::Net::HTTPResponse::HTTPStatus status = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
+  try {
+    uint64_t taskID = std::stoull(taskIDStr);
+    int64_t newPriority = std::stoll(newPriorityStr);
+
+    if (!apis_->scheduleAPI_.TaskUpdatePriority(taskID, newPriority)) {
+      throw std::runtime_error("step cancel failed");
+    }
+
+    out = &(response.send());
+    *out << R"({"success": true})";
+    out->flush();
+  } catch(std::exception const& e) {
+    if (out == nullptr) {
+      response.setStatus(status);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
 }
 
 void ns_Server::RequestHandlerTaskGetArtefacts::handleRequest(Poco::Net::HTTPServerRequest& request,
