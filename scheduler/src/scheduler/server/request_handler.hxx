@@ -43,6 +43,7 @@ inline void RequestHandler::Configure(ns_Server::Config const& config,
 }
 
 REQUESTHANDLER(Error);
+REQUESTHANDLER(Options);
 REQUESTHANDLER(TaskNew);
 REQUESTHANDLER(TasksRunning);
 REQUESTHANDLER(TaskOutputs, std::string const, uint64_t, 

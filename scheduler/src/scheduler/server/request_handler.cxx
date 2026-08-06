@@ -18,7 +18,7 @@ inline static bool ToBool(std::string const& v) {
 bool ns_Server::RequestHandler::ManageCORS(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   response.set("Access-Control-Allow-Origin", "*");
-  response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  response.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE, PATCH, PUT");
   response.set("Access-Control-Allow-Headers", "Content-Type");
 
   if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_OPTIONS) {
@@ -79,8 +79,18 @@ void ns_Server::RequestHandlerError::handleRequest(Poco::Net::HTTPServerRequest&
   response.send() << "404 - Path not found: " << request.getURI();
 }
 
+
+void ns_Server::RequestHandlerOptions::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  ManageCORS(request, response);
+}
+
 void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -503,6 +513,10 @@ void ns_Server::RequestHandlerUserTasksList::handleRequest(Poco::Net::HTTPServer
 
 void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -540,6 +554,10 @@ void ns_Server::RequestHandlerCachePut::handleRequest(Poco::Net::HTTPServerReque
 
 void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
   response.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -568,6 +586,10 @@ void ns_Server::RequestHandlerCacheGet::handleRequest(Poco::Net::HTTPServerReque
 
 void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
   std::string const& prefix = std::get<0>(args_);
 
   std::ostream* out = nullptr;

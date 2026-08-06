@@ -131,6 +131,7 @@ Matches HTTP method + URI against a fixed set of compile-time `std::regex` patte
 - `RequestHandlerTaskNew` — parses the multipart form (`PartsHandler`, `server/parts_handler.hxx`) for `config`/`script`/`files[]` parts and `args[...]`/`runtime[...]` fields, then calls `ScheduleAPI::AddTask`.
 - `RequestHandlerTaskOutputs` — reads a slice of stdout/stderr (live or archived), Base64-encodes it into the JSON response.
 - `RequestHandlerFiles` — static file server for `/files/*`, canonicalizes and checks the resolved path stays under `config_->html_`.
+- `RequestHandlerOptions` — matched by the factory on method alone (any URI); answers CORS preflight by calling `ManageCORS()`, which replies `200 OK` for `OPTIONS`.
 
 ---
 

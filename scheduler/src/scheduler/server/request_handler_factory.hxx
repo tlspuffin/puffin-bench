@@ -98,6 +98,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         requestHandler = new RequestHandlerTaskCancelStep(
             std::stoul(matches[1].str()), std::stoul(matches[2].str()));
       }
+    } else if (method == "OPTIONS") {
+      requestHandler = new RequestHandlerOptions();
     }
 
     if (requestHandler != nullptr) {

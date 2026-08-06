@@ -85,7 +85,7 @@ This part **is** real, current code (`ns_Server::RequestHandlerTaskNew::handleRe
 
 On success the handler returns `{"success": true, "task_id": "<id>"}`; on any exception, HTTP 500 with `{"success": false, "error": "<message>"}`.
 
-All board API routes (including `/api/task/new`) go through `ManageCORS`, which sets `Access-Control-Allow-Origin: *` and answers `OPTIONS` preflight requests with `200 OK` — so a launcher plugin can be served from, or POST to, an origin other than the board's own if needed.
+All board API routes, including `/api/task/new`, go through `ManageCORS`, which sets `Access-Control-Allow-Origin: *` on every response — so a launcher plugin can be served from, or POST to, an origin other than the board's own. Preflight is handled too: any `OPTIONS` request is dispatched to a dedicated `RequestHandlerOptions` (matched on method alone, independent of the URI), which answers `200 OK` with the CORS headers. See `docs/api.md` for the full CORS/OPTIONS picture.
 
 ## Building a Working Launcher
 

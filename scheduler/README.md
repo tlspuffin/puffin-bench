@@ -42,7 +42,7 @@ Built for Linux environments, it provides precise control over task execution, r
 | GET | `/api/users`, `/api/user/...` | User and job-type tracking |
 | GET | `/files/*` | Static file serving (dashboard, scripts) |
 
-Note: no route actually handles `OPTIONS` today — every handler sends CORS headers on real requests, but preflight requests fall through to a 404. See `docs/api.md` for the full reference and this caveat in detail.
+Note: every handler sends CORS headers (`Access-Control-Allow-Origin: *`), and `OPTIONS` preflight requests are answered `200 OK` by a dedicated handler matched on method alone, independent of the URI. See `docs/api.md` for the full reference.
 
 ⚙️ How It Works
 

@@ -135,8 +135,9 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 | PATCH | `/api/task/<id>/<priority>` | `RequestHandlerTaskUpdatePriority` |
 | DELETE | `/api/task/<id>` | `RequestHandlerTaskCancel` |
 | DELETE | `/api/task/<id>/step/<uuid>` | `RequestHandlerTaskCancelStep` |
+| OPTIONS | any path | `RequestHandlerOptions` |
 
-Any unmatched request falls through to `RequestHandlerError` (404). Cache and user path segments are restricted to `[a-zA-Z0-9_-]` by the routing regex — see `docs/roadmap.md`. CORS (`Access-Control-Allow-Origin: *`, `OPTIONS` preflight) is handled per-handler via `RequestHandler::ManageCORS`, not globally.
+Any unmatched `GET`/`POST`/`PUT`/`PATCH`/`DELETE` request falls through to `RequestHandlerError` (404). `OPTIONS` is dispatched separately, on method alone (independent of URI), to `RequestHandlerOptions`. Cache and user path segments are restricted to `[a-zA-Z0-9_-]` by the routing regex — see `docs/roadmap.md`. CORS (`Access-Control-Allow-Origin: *`, `OPTIONS` preflight) is handled by every handler via `RequestHandler::ManageCORS`, called first thing in each `handleRequest()` — not a global Poco-level filter, but applied uniformly across all handlers including `RequestHandlerOptions`.
 
 ---
 

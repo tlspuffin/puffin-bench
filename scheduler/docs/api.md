@@ -8,19 +8,19 @@ Base URL: `http[s]://<host>:<port>/api`
 
 ## CORS and OPTIONS
 
-Most handlers call `RequestHandler::ManageCORS()` first, which unconditionally sets:
+Every handler calls `RequestHandler::ManageCORS()` first, which unconditionally sets:
 
 ```
 Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Methods: GET, POST, OPTIONS, DELETE, PATCH, PUT
 Access-Control-Allow-Headers: Content-Type
 ```
 
 and, if the request method is `OPTIONS`, replies `200 OK` with no body and returns.
 
-**Important:** `RequestHandlerFactory::createRequestHandler()` only dispatches on `GET`, `POST`, `PUT`, `PATCH`, `DELETE` — there is no `OPTIONS` branch. An `OPTIONS` request never reaches a handler that would call `ManageCORS()`; it always falls through to `RequestHandlerError`, which returns `404 Path not found: <uri>`. In practice CORS preflight is **not** actually served by any route today, even though every handler that does answer a real request sends the CORS headers above.
+`RequestHandlerFactory::createRequestHandler()` dispatches `OPTIONS` to a dedicated `RequestHandlerOptions`, purely on method — the factory does **not** check whether the URI matches any real route for this branch. `RequestHandlerOptions::handleRequest()` does nothing but call `ManageCORS()`, so **every** `OPTIONS` request, on any path (including one that doesn't correspond to a real endpoint), gets `200 OK` with the CORS headers above. CORS preflight is fully served today.
 
-`ManageCORS()` is also **not called** by `RequestHandlerTaskNew` (`POST /api/task/new`), `RequestHandlerCachePut`, `RequestHandlerCacheGet`, or `RequestHandlerFiles` — those four handlers never set CORS headers on their responses.
+`ManageCORS()` is called by every handler, including `RequestHandlerTaskNew` (`POST /api/task/new`), `RequestHandlerCachePut`, `RequestHandlerCacheGet`, and `RequestHandlerFiles` — all responses carry the CORS headers above.
 
 ---
 
@@ -525,5 +525,6 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | PATCH | `/api/task/(\d+)/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
 | DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancel` |
 | DELETE | `/api/task/(\d+)/step/(\d+)` | `RequestHandlerTaskCancelStep` |
+| OPTIONS | any URI (dispatched on method alone, no URI match) | `RequestHandlerOptions` |
 
-Any unmatched method/URI combination (including all `OPTIONS` requests) resolves to `RequestHandlerError` (`404`).
+Any unmatched `GET`/`POST`/`PUT`/`PATCH`/`DELETE` method/URI combination resolves to `RequestHandlerError` (`404`). Every `OPTIONS` request resolves to `RequestHandlerOptions` (`200 OK`, CORS headers only, no body) regardless of URI — see "CORS and OPTIONS" above.
