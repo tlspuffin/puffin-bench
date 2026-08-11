@@ -339,8 +339,9 @@ bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id,
 std::list<ns_Schedule::Step*> ns_Schedule::Schedule::SearchTasksToRun() {
   std::list<ns_Schedule::Step*> result;
 
-  for(auto const& executor : executors_) {
-    std::list<ns_Schedule::Step*> elements = executor.second->FindRunnableSteps(steps_);
+  for(auto const& [name, executor] : executors_) {
+    executor->EstimatedStepsStartTime(steps_);
+    std::list<ns_Schedule::Step*> elements = executor->FindRunnableSteps(steps_);
     result.insert(result.end(), elements.begin(), elements.end());
   }
 

@@ -111,6 +111,19 @@
   color: #bbb;
 }
 
+.card-task-est {
+  display: flex;
+  justify-content: start;
+  gap: 1rem;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.card-task-est-value {
+  color: #FF9800;
+}
+
 .card-task-label-args {
   margin-top: 10px;
   font-weight: 500;

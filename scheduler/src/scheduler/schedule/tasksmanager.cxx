@@ -72,10 +72,16 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   }
   md5["#"] = MD5(idMD5);
 
-  ns_Schedule::Task* task = new ns_Schedule::Task(
-    task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
-    config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, 
-    user, jobType, md5, config_.apiURL_, schedule);
+  ns_Schedule::Task* task = nullptr;
+  try {
+    task = new ns_Schedule::Task(
+        task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
+        config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, 
+        user, jobType, md5, config_.apiURL_, schedule);
+  } catch (std::exception const& e) {
+    std::filesystem::remove_all(inDataPath);
+    throw;
+  }
 
   {
     std::lock_guard<std::mutex> lock(lock_);

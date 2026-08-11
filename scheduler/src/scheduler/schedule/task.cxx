@@ -620,6 +620,9 @@ void ns_Schedule::Task::CreateStepsFromJson(
           } else {
             step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
           }
+          if (!executor_->CanRun(step)) {
+            throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
+          }
 
           current_stack.push_back(step);
           steps_.push_front(step);
@@ -633,6 +636,9 @@ void ns_Schedule::Task::CreateStepsFromJson(
           step = attemptStep;
         }
       } else {
+        if (!executor_->CanRun(step)) {
+          throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
+        }
         current_stack.push_back(step);
         steps_.push_front(step);
         ns_Schedule::Step* attemptStep = step;
