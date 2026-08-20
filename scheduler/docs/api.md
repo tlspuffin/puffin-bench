@@ -42,7 +42,7 @@ Content-Type: multipart/form-data
 | `script` | file part | yes | Bash script defining step functions |
 | `files[]` | file part(s) | no | Additional input files; repeatable, uploaded and made available to steps |
 | `args[KEY]` | form field | no | One entry per key; becomes a task-level argument available to all steps |
-| `runtime[KEY]` | form field | no | One entry per key; used to resolve `${RUNTIME_KEY}`-style placeholders embedded in the flow JSON (e.g. `"priority": ${RUNTIME_PRIORITY}`) |
+| `runtime[RUNTIME_KEY]` | form field | no | One entry per key (field name must include the `RUNTIME_` prefix inside the brackets); used to resolve `${RUNTIME_KEY}`-style placeholders embedded in the flow JSON (e.g. `-F "runtime[RUNTIME_PRIORITY]=10"` resolves `"priority": ${RUNTIME_PRIORITY}`) |
 | `user` | form field | no (defaults to `"anonymous"`) | Username for task tracking |
 | `job_type` | form field | no (defaults to `"unknown"`) | Job category for the user/job-type index |
 
@@ -71,7 +71,7 @@ curl -X POST http://localhost:10082/api/task/new \
   -F "config=@./flow.json" \
   -F "script=@./run.sh" \
   -F "args[COMMIT_ID]=abc123" \
-  -F "runtime[PRIORITY]=10" \
+  -F "runtime[RUNTIME_PRIORITY]=10" \
   -F "user=alice" \
   -F "job_type=perf"
 ```

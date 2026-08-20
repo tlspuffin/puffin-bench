@@ -205,11 +205,11 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
   std::ostream* out = nullptr;
   try {
     std::string const& taskid = std::get<0>(args_);
-    uint64_t stepuuid = std::get<1>(args_);
+    uint64_t stepuuid = std::stoull(std::get<1>(args_));
     std::string const& stepid = std::get<2>(args_);
     std::string const& type = std::get<3>(args_);
-    ssize_t readsize = std::get<4>(args_);
-    ssize_t readoffset = std::get<5>(args_);
+    ssize_t readsize = std::stoll(std::get<4>(args_));
+    ssize_t readoffset = std::stoll(std::get<5>(args_));
 
     if ((type.empty()) || (taskid.empty()) || (stepid.empty())) {
       throw std::runtime_error("Missing required parameter(s)");
@@ -239,7 +239,7 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
         R"(, "state": )" << (int)(data.state) << R"(, "support_seek": )" << data.supportSeek << 
         R"(, "start_offset": )" << data.startOffset << R"(, "file_start_offset": )" << data.fileStartOffset << 
         R"(, "live": )" << data.live << "}";
-  } catch(std::runtime_error const& e) {
+  } catch(std::exception const& e) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     if (out == nullptr) {
       out = &(response.send());
@@ -251,8 +251,6 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
 
 void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
-  uint64_t taskID = std::get<0>(args_);
-
   if (ManageCORS(request, response)) {
     return;
   }
@@ -264,13 +262,15 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
 
   std::ostream* out = nullptr;
   try {
+    uint64_t taskID = std::stoull(std::get<0>(args_));
+
     if (!apis_->scheduleAPI_.CancelTask(taskID)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("task cancel failed");
     }
     out = &(response.send());
     *out << R"({"success": true})";
-  } catch(std::runtime_error const& e) {
+  } catch(std::exception const& e) {
     out = &(response.send());
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
@@ -279,9 +279,6 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
 
 void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
-  uint64_t taskID = std::get<0>(args_);
-  uint64_t stepUUID = std::get<1>(args_);
-
   if (ManageCORS(request, response)) {
     return;
   }
@@ -293,13 +290,16 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
 
   std::ostream* out = nullptr;
   try {
+    uint64_t taskID = std::stoull(std::get<0>(args_));
+    uint64_t stepUUID = std::stoull(std::get<1>(args_));
+
     if (!apis_->scheduleAPI_.CancelStep(taskID, stepUUID)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("step cancel failed");
     }
     out = &(response.send());
     *out << R"({"success": true})";
-  } catch(std::runtime_error const& e) {
+  } catch(std::exception const& e) {
     out = &(response.send());
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
@@ -320,7 +320,8 @@ void ns_Server::RequestHandlerTaskUpdatePriority::handleRequest(Poco::Net::HTTPS
     int64_t newPriority = std::stoll(newPriorityStr);
 
     if (!apis_->scheduleAPI_.TaskUpdatePriority(taskID, newPriority)) {
-      throw std::runtime_error("step cancel failed");
+      status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
+      throw std::runtime_error("update task priority failed");
     }
 
     out = &(response.send());
@@ -456,7 +457,7 @@ void ns_Server::RequestHandlerUserJobsTypeList::handleRequest(Poco::Net::HTTPSer
     std::vector<std::string> jobsType;
     if (!apis_->usersAPI_.UserJobTypes(user, jobsType)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-      throw std::runtime_error("step cancel failed");
+      throw std::runtime_error("get user job's type failed");
     }
     out = &(response.send());
     *out << R"({"success": true, "data": [)";
@@ -494,7 +495,7 @@ void ns_Server::RequestHandlerUserTasksList::handleRequest(Poco::Net::HTTPServer
     rapidjson::Value data(rapidjson::kArrayType);
     if (!apis_->usersAPI_.UserTasks(user, jobType, data, allocator)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-      throw std::runtime_error("step cancel failed");
+      throw std::runtime_error("getting user task's list failed");
     }
     doc.AddMember("success", true, allocator);
     doc.AddMember("data", data, allocator);

@@ -46,10 +46,10 @@ REQUESTHANDLER(Error);
 REQUESTHANDLER(Options);
 REQUESTHANDLER(TaskNew);
 REQUESTHANDLER(TasksRunning);
-REQUESTHANDLER(TaskOutputs, std::string const, uint64_t, 
-    std::string const, std::string const, ssize_t , ssize_t);
-REQUESTHANDLER(TaskCancel, uint64_t);
-REQUESTHANDLER(TaskCancelStep, uint64_t, uint64_t);
+REQUESTHANDLER(TaskOutputs, std::string const, std::string const, 
+    std::string const, std::string const, std::string const , std::string const);
+REQUESTHANDLER(TaskCancel, std::string const);
+REQUESTHANDLER(TaskCancelStep, std::string const, std::string const);
 REQUESTHANDLER(TaskUpdatePriority, std::string const, std::string const);
 REQUESTHANDLER(TaskGetArtefacts, std::string const);
 REQUESTHANDLER(TaskGetState, bool, std::string const);

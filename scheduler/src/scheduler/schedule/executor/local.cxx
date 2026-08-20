@@ -380,6 +380,9 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
     if (step->IsPending()) {
       if (step->nb_cores_ > nbCoresMax_) {
         for(auto step : steps) {
+          if (step->task_->executor_ != this) {
+            continue;
+          }
           if (step->IsPending()) {
             step->estimatedStartTime_ = 0;
           }
@@ -395,6 +398,9 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       if (step->IsRunning()) {
         if (step->nb_cores_ > freeCores) {
           for(auto step : steps) {
+            if (step->task_->executor_ != this) {
+              continue;
+            }
             if (step->IsPending()) {
               step->estimatedStartTime_ = 0;
             }

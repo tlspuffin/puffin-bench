@@ -54,8 +54,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       std::smatch matches;
       if (std::regex_match(uri, matches, regexTaskOutputs)) {
         requestHandler = new RequestHandlerTaskOutputs(matches[1].str(), 
-            std::stoull(matches[2].str()), matches[3].str(), matches[4].str(), 
-            std::stoll(matches[5].str()), std::stoll(matches[6].str()));
+            matches[2].str(), matches[3].str(), matches[4].str(), 
+            matches[5].str(), matches[6].str());
       } else if (std::regex_match(uri, matches, regexTaskGetArtefacts)) {
         requestHandler = new RequestHandlerTaskGetArtefacts(matches[1].str());
       } else if (std::regex_match(uri, matches, regexTaskGetFinalState)) {
@@ -92,11 +92,10 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     } else if (method == "DELETE") {
       std::smatch matches;
       if (std::regex_match(uri, matches, regexTaskCancel)) {
-        requestHandler = new RequestHandlerTaskCancel(
-            std::stoul(matches[1].str()));
+        requestHandler = new RequestHandlerTaskCancel(matches[1].str());
       } else if (std::regex_match(uri, matches, regexTaskCancelStep)) {
         requestHandler = new RequestHandlerTaskCancelStep(
-            std::stoul(matches[1].str()), std::stoul(matches[2].str()));
+            matches[1].str(), matches[2].str());
       }
     } else if (method == "OPTIONS") {
       requestHandler = new RequestHandlerOptions();
