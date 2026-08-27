@@ -20,7 +20,7 @@ FileCompressed::~FileCompressed() {
   StopExtractFileData();
 }
 
-std::unordered_map<std::string, uint64_t> FileCompressed::ListFiles(std::regex const& pattern) {
+std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> FileCompressed::ListFiles(std::regex const& pattern) {
   struct archive* archive = archive_read_new();
   archive_read_support_format_all(archive);
   archive_read_support_filter_all(archive);
@@ -29,12 +29,13 @@ std::unordered_map<std::string, uint64_t> FileCompressed::ListFiles(std::regex c
     throw std::runtime_error("Error, unable to open file " + filename_);
   }
 
-  std::unordered_map<std::string, uint64_t> results;
+  std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> results;
   struct archive_entry* entry;
   while (archive_read_next_header(archive, &entry) == ARCHIVE_OK) {
     std::string name = archive_entry_pathname(entry);
     if (std::regex_search(name, pattern)) {
-      results.try_emplace(name, archive_entry_size(entry));
+      results.try_emplace(name, 
+          std::tuple<uint64_t, mode_t>{ archive_entry_size(entry), archive_entry_perm(entry) });
     }
     archive_read_data_skip(archive);
   }
@@ -115,13 +116,14 @@ void FileCompressed::ExtractFile(std::string const& srcfile, std::string const& 
 
 std::vector<std::string> FileCompressed::ExtractAll(std::string const& targetDir, bool overwrite) {
   std::vector<std::string> result;
-  for (auto const& [name, size] : ListFiles()) {
+  for (auto const& [name, infos] : ListFiles()) {
     std::filesystem::path dst = std::filesystem::path(targetDir) / name;
     if (!overwrite && std::filesystem::exists(dst)) {
       continue;
     }
     std::filesystem::create_directories(dst.parent_path());
     ExtractFile(name, dst.string());
+    std::filesystem::permissions(dst, static_cast<std::filesystem::perms>(std::get<1>(infos)));
     result.push_back(name);
   }
   return result;

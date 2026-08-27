@@ -262,11 +262,10 @@ void ns_Executor::MemoryRing::Read(struct FileExtractedText& data) {
   ssize_t readSize = virtualReadEndOffset - data.requestReadOffset;
 
   if (!full_) {
-    data.startOffset = 0;
+    data.startOffset = data.requestReadOffset;
     data.fileStartOffset = 0;
     data.buffer.resize(readSize);
     memcpy(data.buffer.data(), &buffer_.data()[data.requestReadOffset], readSize);
-    data.startOffset = 0;
   } else {
     ssize_t virtualFileStartOffset = virtualSize_ - maxSize_;
     if (virtualReadEndOffset < virtualFileStartOffset) {

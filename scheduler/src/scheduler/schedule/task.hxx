@@ -76,6 +76,8 @@ public:
 
   int64_t priority_;
 
+  uint64_t estimatedEndTime_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 

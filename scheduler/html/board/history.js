@@ -13,6 +13,7 @@ const currentSelection = {
   name: null,
   jobType: null,
   task: null,
+  timesLineIndex: 'id'
 };
 
 function DisableUI() {
@@ -122,6 +123,9 @@ function CreateTimelinesDateSeparator(ts) {
 }
 
 function BuildTimesLine(tasks) {
+  tasks.history.sort(
+      (a, b) => (b?.[currentSelection.timesLineIndex] ?? b.id) - (a?.[currentSelection.timesLineIndex] ?? a.id));
+
   ui.timesline.innerHTML = '';
   let lastTS = null;
 
@@ -172,11 +176,16 @@ async function SelectUsers(name, jobType) {
       }
     }
   } catch (e) {
+    console.error(`Error in SelectUsers (0): ${e}`);
   }
 
-  currentSelection.name = name;
-  currentSelection.jobType = jobType;
-  BuildTimesLine(results);
+  try {
+    currentSelection.name = name;
+    currentSelection.jobType = jobType;
+    BuildTimesLine(results);
+  } catch (e) {
+    console.error(`Error in SelectUsers (1): ${e}`);
+  }
 
   EnableUI();
 }
@@ -240,12 +249,16 @@ async function ListUsers() {
 
 async function BuildUsersMenu() {
   DisableUI();
-  ui.users.innerHTML = '';
-  ui.timesline.innerHTML = '';
-  ui.tasks.innerHTML = '';
-  let users = await ListUsers();
-  for(let user in users) {
-    ui.users.appendChild(BuildUserSelection(user, users[user]));
+  try {
+    ui.users.innerHTML = '';
+    ui.timesline.innerHTML = '';
+    ui.tasks.innerHTML = '';
+    let users = await ListUsers();
+    for(let user in users) {
+      ui.users.appendChild(BuildUserSelection(user, users[user]));
+    }
+  } catch(e) {
+    console.error(`Error in BuildUsersMenu: ${e}`);
   }
   EnableUI();
 }
@@ -260,7 +273,17 @@ async function Refresh() {
   }
 }
 
+function UpdateSortIndexTimesLine(event) {
+  currentSelection.timesLineIndex = event?.target?.value ?? 'id';
+  if (currentSelection.name !== null && currentSelection.jobType !== null) {
+    SelectUsers(currentSelection.name, currentSelection.jobType);
+  }
+}
+
 function Main() {
+  const sortIndexSelect = document.getElementById('sortIndex-select');
+  currentSelection.timesLineIndex = sortIndexSelect?.value ?? 'id';
+  sortIndexSelect.onchange = UpdateSortIndexTimesLine;
   document.getElementById('refresh-button').onclick = Refresh;
   Refresh();
 }

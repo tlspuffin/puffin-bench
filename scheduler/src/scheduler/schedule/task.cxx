@@ -37,7 +37,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
     request_cancel_(false), cancel_source_(), publish_(), 
     md5_(std::move(md5)), state_(Task::State::Pending), publish_link_(), 
-    flag_(), apiURL_(apiURL), priority_(0)
+    flag_(), apiURL_(apiURL), priority_(0), estimatedEndTime_(0)
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
@@ -234,6 +234,8 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
   apiURL_ = Get<std::string>(config, "api_url");
 
   priority_ = Get<int64_t>(config, "priority");
+
+  estimatedEndTime_ = Get<int64_t>(config, "estimated_end_time");
 }
 
 ns_Schedule::Task::~Task() {
@@ -275,6 +277,9 @@ bool ns_Schedule::Task::PrepareToRun() {
 
 struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
     std::filesystem::path const& savePath) {
+  estimatedEndTime_ = 
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
   if (steps_file_.is_open()) {
     steps_file_.close();
   }
@@ -435,6 +440,8 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("api_url", rapidjson::Value(apiURL_.c_str(), alloc), alloc);
 
   out.AddMember("priority", priority_, alloc);
+
+  out.AddMember("estimated_end_time", estimatedEndTime_, alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {

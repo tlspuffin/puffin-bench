@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <regex>
+#include <sys/types.h>
 #include <archive.h>
 
 class FileCompressed {
@@ -11,7 +12,7 @@ public:
   FileCompressed(std::string const& filename);
   FileCompressed(unsigned char const* data, size_t dataSize);
   ~FileCompressed();
-  std::unordered_map<std::string, uint64_t> ListFiles(std::regex const& pattern =std::regex(".*"));
+  std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> ListFiles(std::regex const& pattern =std::regex(".*"));
   int64_t ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize);
   void StopExtractFileData();
   void ExtractFile(std::string const& srcfile, std::string const& dstFile);

@@ -362,6 +362,13 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
     return;
   }
 
+  for (auto step : steps) {
+    if (step->task_->executor_ != this) {
+      continue;
+    }
+    step->task_->estimatedEndTime_ = 0;
+  }
+
   uint64_t freeCores = nbCoresMax_;
   std::vector<uint64_t> cores(nbCoresMax_, 0);
   std::vector<uint64_t> indexFreeCores(freeCores);
@@ -385,6 +392,7 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
           }
           if (step->IsPending()) {
             step->estimatedStartTime_ = 0;
+            step->task_->estimatedEndTime_ = 0;
           }
         }
         return;
@@ -403,15 +411,19 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
             }
             if (step->IsPending()) {
               step->estimatedStartTime_ = 0;
+              step->task_->estimatedEndTime_ = 0;
             }
           }
           return;
         }
         uint64_t endTime = 
             std::chrono::duration_cast<std::chrono::milliseconds>(step->StartTime().time_since_epoch()).count() + 
-            (step->timeout_ == 0 ? 3600000 : (step->timeout_ * 1000));
+            (step->timeout_ == 0 ? 600000 : (step->timeout_ * 1000));
         if (endTime <= minTime) {
-          endTime = minTime + 3600000;
+          endTime = minTime + 600000;
+        }
+        if (step->dependencies_.empty() && (step->task_->estimatedEndTime_ < endTime)) {
+          step->task_->estimatedEndTime_ = endTime;
         }
         cores[freeCores-1] = endTime;
         for(uint64_t i=1; i<step->nb_cores_; ++i) {
@@ -504,6 +516,9 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
     }
     if ((step.nb_cores_ <= freeCores) && (minTime >= notStartBefore)) {
       step.estimatedStartTime_ = minTime;
+      if (step.dependencies_.empty() && (step.task_->estimatedEndTime_ < minTime)) {
+        step.task_->estimatedEndTime_ = minTime;
+      }
 
       bool firstChild = true;
       for(ns_Schedule::Step* child: step.dependencies_) {
@@ -531,7 +546,7 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
         stepStart = stepIT;
       }
 
-      uint64_t endTime = minTime + (step.timeout_ == 0 ? 3600000 : (step.timeout_ * 1000));
+      uint64_t endTime = minTime + (step.timeout_ == 0 ? 600000 : (step.timeout_ * 1000));
       for(uint64_t i=0; i<step.nb_cores_; ++i) {
         cores[indexFreeCores[(freeCores - 1) - i]] = endTime;
       }
@@ -1710,7 +1725,7 @@ inline uint64_t ns_Executor::Local::EstimatedFinishTime(ns_Schedule::Step const*
         endTP.time_since_epoch()).count();
   }
 
-  uint64_t duration = step->timeout_ == 0 ? 3600000 : (step->timeout_ * 1000);
+  uint64_t duration = step->timeout_ == 0 ? 600000 : (step->timeout_ * 1000);
   if (step->IsRunning()) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         step->StartTime().time_since_epoch()).count() + duration;

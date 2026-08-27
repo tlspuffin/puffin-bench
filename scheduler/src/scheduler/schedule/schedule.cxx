@@ -287,9 +287,7 @@ void ns_Schedule::Schedule::GetOutput(
     int64_t readSize = fileCompressed.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), &data.filesize);
     fileCompressed.StopExtractFileData();
     data.buffer.resize(readSize);
-    if (data.buffer.size() > data.requestReadOffset) {
-      data.buffer.erase(0, data.requestReadOffset);
-    }
+    data.buffer.erase(0, data.requestReadOffset);
     data.startOffset = data.requestReadOffset;
     data.state = data.buffer.size() == data.requestReadSize ? FileReadState::Ok : FileReadState::EndOfFile;
   } catch(...) {

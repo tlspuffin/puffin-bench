@@ -106,8 +106,7 @@ export class TaskCard {
         separator2.classList.add('card-task-separator');
         divCardHeader.appendChild(separator2);
       }
-    }
-    else if (task?.state === 'Running') {
+    } else if (task?.state === 'Running') {
       const nbCores = Object.values(task?.steps || {}).reduce((total, step) => {
           if (step?.state === 'Running') {
             return total + (step?.executor_data?.cores?.length || 0);
@@ -126,6 +125,18 @@ export class TaskCard {
         separator2.classList.add('card-task-separator');
         divCardHeader.appendChild(separator2);
       }
+    }
+    if (task?.estimated_end_time > 0) {
+      const isFinished = task?.state === 'Done' || task?.state === 'Cancelled';
+      const label = isFinished ? 'End time' : 'Estimated end time';
+      divCardHeader.appendChild(this.#CreateCardLine(
+          null, 'task-est',
+          ['task-est-label', 'task-est-value'],
+          [label, new Date(task?.estimated_end_time).toLocaleString()]
+      ));
+      const separator2 = document.createElement('div');
+      separator2.classList.add('card-task-separator');
+      divCardHeader.appendChild(separator2);
     }
 
     divCardHeader.appendChild(this.#CreateCardLine(
