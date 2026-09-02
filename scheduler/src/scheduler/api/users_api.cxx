@@ -141,7 +141,7 @@ bool ns_API::UsersAPI::UserTasks(std::string const& user, std::string const& job
       std::error_code ec;
       bool entryOK = running || 
           ((!cancelled) && std::filesystem::exists(storagePath_ / ( id + ".json"), ec)) || 
-          std::filesystem::exists(storagePath_ / "Canceled" / ( id + ".json"), ec);   
+          std::filesystem::exists(storagePath_ / "Canceled" / ( id + ".json"), ec);
       if (entryOK) {
         rapidjson::Value entry;
         entry.CopyFrom(value, alloc);

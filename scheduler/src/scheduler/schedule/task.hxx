@@ -119,6 +119,8 @@ private:
 
   void CreateStepsFromJson(rapidjson::Value const& configJSON);
 
+  void Destroy();
+
   std::list<ns_Schedule::Step*> steps_;
 
   static std::unordered_map<std::string, std::string> 

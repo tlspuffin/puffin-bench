@@ -15,7 +15,7 @@ ns_Monitor::Task::Task(ns_Schedule::Step const* step, rapidjson::Value const& js
   intervalS_ = std::to_string(ParseDurationToSeconds(value));
   value = GetOrDefault<std::string>(json, "timeout", "0s");
   timeoutS_ = std::to_string(ParseDurationToSeconds(value));
-  value = GetOrDefault<std::string>(json, "delay_start", "0ms");
+  value = GetOrDefault<std::string>(json, "delay_start", "0s");
   delayStartS_ = std::to_string(ParseDurationToSeconds(value));
 }
 

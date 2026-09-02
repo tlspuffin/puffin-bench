@@ -240,7 +240,7 @@ All dependencies below (except OpenSSL and the `zip`/`xxd` command-line tools) a
 | inotify for monitor files | Low-overhead, kernel-push notification instead of polling |
 | FDCaptureThread + epoll | Single thread multiplexes stdout/stderr of all running step processes via `MemoryRing` buffers |
 | Archiver runs in a separate thread | Archive creation (`zip` subprocess) and HTTP publish do not block the scheduling loop |
-| Content-addressed cache | Steps can skip recompilation by ID; MD5 verification is optional; `Cache::Put` is non-blocking (background copy) |
+| Content-addressed cache | Steps can skip recompilation by ID; `computeMD5` is accepted on `Put` but not currently implemented (no MD5 is ever computed or checked); `Cache::Put` is non-blocking (enqueues and returns — the background `CacheLoop()` thread does the actual copy) |
 | State written to `tasksmanager.json` | Allows external tools (dashboard, scripts) to read state without hitting the API — the board's `GET /api/tasks/running` handler literally streams this file back |
 | Cancelled tasks archived separately | `<exportPath>/Canceled/` keeps cancelled tasks distinct from completed runs |
 | Task priority is mutable at runtime | `PATCH /api/task/<id>/<priority>` re-splices a task's pending steps within the shared `steps_` queue, which is kept sorted by descending `Task::priority_` |

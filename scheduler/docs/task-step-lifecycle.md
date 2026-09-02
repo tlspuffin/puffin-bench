@@ -294,13 +294,21 @@ execution time:
   `next_`/`previous_`, all sharing the same `depend_from_`/`dependencies_` set as the first
   attempt.
 
-If `attempt_id=0` fails, `attempt_id=1` becomes ready via the same downstream/upstream removal
-logic used for any dependency — note that this is NOT automatic in the current code: a failed
-attempt still counts as satisfying a downstream dependency once processed by
-`ManageEndOfStep()`, since dependency clearing is driven by "this step instance finished", not by
-"the logical step's last attempt succeeded". Steps inside a group cannot carry their own `run`
-field — `Task::CreateStepsFromJson()` throws `"step inside a group can not have a run field"` (the
-`run` list is only valid at the group level or on standalone steps).
+Despite the name, `nb_retry` is **not** a retry-on-failure mechanism. Each attempt copy is built
+with `depend_from_(source.depend_from_)` — the exact same upstream dependency list carried by
+attempt 0, not `[attempt 0]` — so all `R` attempts of a step become `IsReady()` at the same
+instant, as soon as the upstream step(s) finish, regardless of any attempt's exit code.
+`Executor::FindRunnableSteps()` will dispatch as many of them concurrently as resources allow;
+nothing in `ManageEndOfStep()`, the executor, or anywhere else inspects a sibling attempt's
+`exit_code_` before starting the next one. Symmetrically, a downstream step's `depend_from_`
+(outside a group) is seeded from every rank *and* every attempt of the step(s) it depends on, so
+it only becomes ready once **all** of them have finished — attempts are joined as parallel
+siblings, not raced or chained on failure. In short, `nb_retry_ = R` is a static fan-out of `R`
+unconditional copies of the same step, resolved once at submission time in
+`Task::CreateStepsFromJson()` — there is no execution-time branch on success/failure anywhere in
+the current code. Steps inside a group cannot carry their own `run` field —
+`Task::CreateStepsFromJson()` throws `"step inside a group can not have a run field"` (the `run`
+list is only valid at the group level or on standalone steps).
 
 ---
 

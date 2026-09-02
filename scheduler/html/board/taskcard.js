@@ -314,7 +314,7 @@ export class TaskCard {
         if (info instanceof HTMLElement) {
           element.appendChild(info);
         } else {
-          element.innerHTML = info;
+          element.textContent = info;
         }
         element.classList.add('card-'+style[index]);
         div.appendChild(element);

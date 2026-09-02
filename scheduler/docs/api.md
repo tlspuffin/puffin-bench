@@ -218,14 +218,14 @@ Regex: `/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr|[0-9]+)/(\d+)/
 | `stepUUID` | uint64 | Step UUID |
 | `stepID` | string | Step logical ID, e.g. `"0-0-0"` |
 | `type` | `stdout` \| `stderr` \| integer | Which stream to read. An integer selects entry `type` (0-based) from the step's declared `streams` array in the flow JSON, for live-tailing arbitrary files the step writes |
-| `size` | uint64 | Maximum bytes to return |
-| `offset` | int64 | Byte offset from the start of the retained data |
+| `size` | uint64 | Maximum bytes to return. Capped at 64 MiB (`Schedule::GetOutput()`'s `maxRequestReadSize` constant) — a request above that cap, or a negative `size`, is rejected before any read is attempted (`state` stays `NotExecuted`, so the handler responds `500`) |
+| `offset` | int64 | Byte offset into the retained data. `offset >= 0` counts from the start. `offset < 0` counts back from the **end** instead (tail read): effective start = `filesize + offset`. If `|offset|` exceeds the current `filesize`, the effective start clamps to `0` rather than erroring |
 
 Resolution order (`Schedule::GetOutput()`):
 1. If the task is still in memory (running/pending), the read is served by the executor:
-   - `type == "stdout"`/`"stderr"`: reads from the step's in-memory ring buffer (`MemoryRing`, via `FDCaptureThread::Read()`), sets `partial=true`.
+   - `type == "stdout"`/`"stderr"`: reads from the step's in-memory ring buffer (`MemoryRing`, via `FDCaptureThread::Read()`), sets `partial=true`. `MemoryRing::Read()` applies the same negative-offset-from-end resolution independently (`output_ring.cxx`); if the ring has wrapped, `file_start_offset` in the response marks how much of the logical stream has already been evicted and is no longer readable even at `offset=0`.
    - `type` is numeric: resolved as an index into `Step::readable_files_` (the `streams` array); the file is read live off disk under the task's run directory, with `live=true`, `supportSeek=true`, `partial=true`.
-2. Otherwise (task not in memory) and `type` is `stdout`/`stderr`: the first existing archive among `exportPath/<taskID>.zip`, `exportPath/Canceled/<taskID>.zip`, `exportPath/<taskID>.tgz`, `exportPath/Canceled/<taskID>.tgz` is opened, and `logs/<type>.<stepID>.txt` is extracted (`FileCompressed::ExtractFileData`). Numeric `type` is not resolvable for completed tasks.
+2. Otherwise (task not in memory) and `type` is `stdout`/`stderr`: the first existing archive among `exportPath/<taskID>.zip`, `exportPath/Canceled/<taskID>.zip`, `exportPath/<taskID>.tgz`, `exportPath/Canceled/<taskID>.tgz` is opened, and `logs/<type>.<stepID>.txt` is extracted (`FileCompressed::ExtractFileData`). Numeric `type` is not resolvable for completed tasks. The 64 MiB/negative-`size` cap is checked upfront, before either path runs, since it doesn't depend on the file. Negative-`offset` resolution, however, needs `filesize` — for this archive path that means it can only happen *after* the archive is opened and `ExtractFileData(outputFile, 0, nullptr, &data.filesize)` has located the entry and reported its size; only then is `data.startOffset = data.filesize + data.requestReadOffset` computed. (The live `MemoryRing` path resolves it immediately instead, since `virtualSize_` is already tracked in memory — no "opening" step there.)
 
 **Response `200 OK`:**
 ```json
@@ -434,7 +434,7 @@ Content-Type: application/json
 | `computeMD5` | `false` | Accepted and stored on the pending request, but **not currently used** — `Cache`'s background copy thread always records an empty MD5 string; no MD5 is actually computed for cached files in the present implementation (`FileInformations::md5_` stays `""` regardless of this flag) |
 | `force` | `false` | Overwrite if `id` already exists |
 
-The copy itself is asynchronous: `Cache::Put()` registers a placeholder entry and returns immediately; a background thread performs the `std::filesystem::copy_file` and flips the entry to "full" once done.
+The copy itself is asynchronous: `Cache::Put()` only checks `force`/existing status and enqueues the request (it does not touch the cache index itself) and returns immediately; the background `CacheLoop()` thread is what registers the placeholder entry, performs the `std::filesystem::copy_file`, and flips the entry to "full" once done. Until `CacheLoop()` picks up the request, `GET /api/cache/<id>` can still return `"Not Available"` rather than `"Locked"`.
 
 **Response `200 OK`:**
 ```json

@@ -20,7 +20,7 @@ FileCompressed::~FileCompressed() {
   StopExtractFileData();
 }
 
-std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> FileCompressed::ListFiles(std::regex const& pattern) {
+std::unordered_map<std::string, std::tuple<int64_t, mode_t>> FileCompressed::ListFiles(std::regex const& pattern) {
   struct archive* archive = archive_read_new();
   archive_read_support_format_all(archive);
   archive_read_support_filter_all(archive);
@@ -29,13 +29,13 @@ std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> FileCompressed::Li
     throw std::runtime_error("Error, unable to open file " + filename_);
   }
 
-  std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> results;
+  std::unordered_map<std::string, std::tuple<int64_t, mode_t>> results;
   struct archive_entry* entry;
   while (archive_read_next_header(archive, &entry) == ARCHIVE_OK) {
     std::string name = archive_entry_pathname(entry);
     if (std::regex_search(name, pattern)) {
       results.try_emplace(name, 
-          std::tuple<uint64_t, mode_t>{ archive_entry_size(entry), archive_entry_perm(entry) });
+          std::tuple<int64_t, mode_t>{ archive_entry_size(entry), archive_entry_perm(entry) });
     }
     archive_read_data_skip(archive);
   }
@@ -44,7 +44,14 @@ std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> FileCompressed::Li
   return results;
 }
 
-int64_t FileCompressed::ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize) {
+int64_t FileCompressed::ExtractFileData(std::string const& filename, int64_t const readSize, char* buffer, int64_t* fileSize) {
+  if (readSize < 0) {
+    if (fileSize != nullptr) {
+      *fileSize = -1;
+    }
+    return -1;
+  }
+
   if (filename != inArchiveFilename_) {
     if (archive_ != nullptr) {
       archive_read_free(archive_);
@@ -76,9 +83,9 @@ int64_t FileCompressed::ExtractFileData(std::string const& filename, uint64_t co
     }
     if (notfound) {
       if (fileSize != nullptr) {
-        *fileSize = 0;
+        *fileSize = -1;
       }
-      return 0;
+      return -1;
     }
   } else if (archive_ == nullptr) {
     throw std::runtime_error("Error, illegal state reached, archive_ null with inArchiveFilename_ not empty");
@@ -100,17 +107,27 @@ void FileCompressed::StopExtractFileData() {
   inArchiveFilesize_ = 0;
 }
 
-void FileCompressed::ExtractFile(std::string const& srcfile, std::string const& dstFile) {
+void FileCompressed::ExtractFile(std::string const& srcFile, std::string const& dstFile) {
   std::ofstream ofs(dstFile, std::ios::binary);
   if (!ofs.is_open()) {
     throw std::runtime_error("Unable to create file " + dstFile);
   }
 
   std::vector<char> buffer(1024*1024);
-  int64_t size = ExtractFileData(srcfile, buffer.size(), buffer.data(), nullptr);
+  int64_t size = ExtractFileData(srcFile, buffer.size(), buffer.data(), nullptr);
   while(size > 0) {
     ofs.write(buffer.data(), size);
-    size = ExtractFileData(srcfile, buffer.size(), buffer.data(), nullptr);
+    if (!ofs) {
+      ofs.close();
+      std::filesystem::remove(dstFile);
+      throw std::runtime_error("Unable to write file " + dstFile);
+    }
+    size = ExtractFileData(srcFile, buffer.size(), buffer.data(), nullptr);
+  }
+  ofs.close();
+  if (size < 0) {
+    std::filesystem::remove(dstFile);
+    throw std::runtime_error("Unable to extract file " + srcFile + " to " + dstFile);
   }
 }
 

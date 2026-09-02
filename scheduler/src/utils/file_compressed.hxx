@@ -12,10 +12,10 @@ public:
   FileCompressed(std::string const& filename);
   FileCompressed(unsigned char const* data, size_t dataSize);
   ~FileCompressed();
-  std::unordered_map<std::string, std::tuple<uint64_t, mode_t>> ListFiles(std::regex const& pattern =std::regex(".*"));
-  int64_t ExtractFileData(std::string const& filename, uint64_t const readSize, char* buffer, uint64_t* fileSize);
+  std::unordered_map<std::string, std::tuple<int64_t, mode_t>> ListFiles(std::regex const& pattern =std::regex(".*"));
+  int64_t ExtractFileData(std::string const& filename, int64_t const readSize, char* buffer, int64_t* fileSize);
   void StopExtractFileData();
-  void ExtractFile(std::string const& srcfile, std::string const& dstFile);
+  void ExtractFile(std::string const& srcFile, std::string const& dstFile);
   std::vector<std::string> ExtractAll(std::string const& targetDir, bool overwrite);
 
 private:
@@ -24,7 +24,7 @@ private:
   size_t const memorySize_;
   struct archive* archive_;
   std::string inArchiveFilename_;
-  uint64_t inArchiveFilesize_;
+  int64_t inArchiveFilesize_;
 
   int OpenArchive(struct archive* archive) const;
 };

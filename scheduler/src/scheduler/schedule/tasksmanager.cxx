@@ -42,43 +42,46 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
   }
 
   std::filesystem::path inDataPath = config_.userPath_ / (std::to_string(task_id));
-  std::filesystem::create_directory(inDataPath);
-  std::filesystem::path functionsFile = inDataPath / (std::to_string(task_id) + ".sh");
-  std::ofstream ofs(functionsFile, std::ios::trunc | std::ios::binary);
-  if (!ofs.is_open()) {
-    throw std::runtime_error("Unable to create functions file: " + functionsFile.string() + 
-        " : " + strerror(errno));
+  if (!std::filesystem::create_directory(inDataPath)) {
+    throw std::runtime_error("Unable to create or already existing : " + inDataPath.string());
   }
-  ofs << functions;
-  ofs.close();
-  std::map<std::string, std::string> md5;
-  md5["."] = MD5(functions);
-
-  for(auto const& file: files) {
-    std::filesystem::path filename = inDataPath / file.first;
-    std::ofstream ofs(filename, std::ios::trunc | std::ios::binary);
-    if (!ofs.is_open()) {
-      throw std::runtime_error("Unable to create functions file: " + filename.string() + 
-          " : " + strerror(errno));
-    }
-    ofs.write(reinterpret_cast<const char*>(file.second.data()), file.second.size());
-    ofs.close();
-    md5["." + file.first] = MD5(reinterpret_cast<const char*>(file.second.data()), file.second.size());
-  }
-
-  std::string idMD5;
-  for(auto const& [key, value]: md5) {
-    idMD5 += key + ":" + value + "\n";
-  }
-  md5["#"] = MD5(idMD5);
 
   ns_Schedule::Task* task = nullptr;
-  try {
+  try{
+    std::filesystem::path functionsFile = inDataPath / (std::to_string(task_id) + ".sh");
+    std::ofstream ofs(functionsFile, std::ios::trunc | std::ios::binary);
+    if (!ofs.is_open()) {
+      throw std::runtime_error("Unable to create functions file: " + functionsFile.string() + 
+          " : " + strerror(errno));
+    }
+    ofs << functions;
+    ofs.close();
+    std::map<std::string, std::string> md5;
+    md5["."] = MD5(functions);
+
+    for(auto const& file: files) {
+      std::filesystem::path filename = inDataPath / file.first;
+      std::ofstream ofs(filename, std::ios::trunc | std::ios::binary);
+      if (!ofs.is_open()) {
+        throw std::runtime_error("Unable to create functions file: " + filename.string() + 
+            " : " + strerror(errno));
+      }
+      ofs.write(reinterpret_cast<const char*>(file.second.data()), file.second.size());
+      ofs.close();
+      md5["." + file.first] = MD5(reinterpret_cast<const char*>(file.second.data()), file.second.size());
+    }
+
+    std::string idMD5;
+    for(auto const& [key, value]: md5) {
+      idMD5 += key + ":" + value + "\n";
+    }
+    md5["#"] = MD5(idMD5);
+
     task = new ns_Schedule::Task(
         task_id, name, rootJSON, inDataPath, functionsFile, config_.toolsPath_, 
         config_.runPath_, config_.monitorsPath_ , config_.publishers_, args, 
         user, jobType, md5, config_.apiURL_, schedule);
-  } catch (std::exception const& e) {
+  } catch(std::exception const& e) {
     std::filesystem::remove_all(inDataPath);
     throw;
   }
@@ -92,11 +95,11 @@ ns_Schedule::Task* ns_Schedule::TasksManager::CreateTask(
 }
 
 void ns_Schedule::TasksManager::DeleteTask(ns_Schedule::Task* task) {
-  DeleteTaskInternal(task);
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.remove(task);
   }
+  DeleteTaskInternal(task);
 }
 
 void ns_Schedule::TasksManager::DeleteTasks() {
@@ -118,12 +121,13 @@ void ns_Schedule::TasksManager::DeleteTasks() {
 }
 
 void ns_Schedule::TasksManager::TaskEnded(ns_Schedule::Task* task) {
-  DeleteTaskInternal(task);
   {
     std::lock_guard<std::mutex> lock(lock_);
     tasks_.remove(task);
   }
+  DeleteTaskInternal(task);
 }
+
 void ns_Schedule::TasksManager::GetRunningOutput(
     std::string const& type, uint64_t taskID, uint64_t stepUUID, 
     struct FileExtractedText& data) {
@@ -219,37 +223,6 @@ std::string ns_Schedule::TasksManager::GetTaskState(uint64_t taskID) {
 }
 
 void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {
-  std::unordered_set<ns_Schedule::Step*> uniqueSteps;
-  for(auto rootStep: task->root_steps_) {
-    if (!rootStep->depend_from_.empty()) {
-      throw std::runtime_error("Trying to delete a non-root task: name=" +
-          rootStep->name_ + ", uuid=" + std::to_string(rootStep->uuid_));
-    }
-
-    uniqueSteps.insert(rootStep);
-    std::stack<ns_Schedule::Step*> stepToClear;
-    stepToClear.push(rootStep);
-    do {
-      std::unordered_set<ns_Schedule::Step*> localSteps;
-      while (!stepToClear.empty()) {
-        ns_Schedule::Step* step = stepToClear.top();
-        stepToClear.pop();
-        for(ns_Schedule::Step* childStep : step->dependencies_) {
-          uniqueSteps.insert(childStep);
-          localSteps.insert(childStep);
-        }
-      }
-      for(ns_Schedule::Step* step : localSteps) {
-        stepToClear.push(step);
-      }
-    } while(!stepToClear.empty());
-  }
-
-  for(ns_Schedule::Step* step : uniqueSteps) {
-    delete step;
-  }
-  uniqueSteps.clear();
-
   delete task;
 }
 

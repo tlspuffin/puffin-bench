@@ -160,7 +160,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
   for(ns_Schedule::Step* step : task->root_steps_) {
     steps_.insert(stepIT, step);
   }
-  
+
   if (!threadRunning_) {
     if (thread_.joinable()) {
       lockThread_.unlock();
@@ -254,6 +254,18 @@ void ns_Schedule::Schedule::GetOutput(
     uint64_t stepUUID, std::string const& stepID,
     struct FileExtractedText& data) {
 
+  int64_t constexpr maxRequestReadSize = 64LL * 1024 * 1024;
+  if (data.requestReadSize > maxRequestReadSize) {
+    LOGW << "GetOutput error: max request read size is " << maxRequestReadSize << 
+        " asked " << data.requestReadSize << Log::Flags::End;
+    return;
+  }
+  if (data.requestReadSize < 0) {
+    LOGW << "GetOutput error: can not request read size below zero: " << data.requestReadSize << 
+        " for logs/" << type << "." << stepID << ".txt for task " << taskID << Log::Flags::End;
+    return;
+  }
+
   tasksManager_.GetRunningOutput(type, 
       std::stoull(taskID), stepUUID, data);
   if (data.state != FileReadState::NotExecuted) {
@@ -280,16 +292,52 @@ void ns_Schedule::Schedule::GetOutput(
   }
   FileCompressed fileCompressed(archiveName);
   std::string outputFile = "logs/" + type + "." + stepID + ".txt";
-  data.buffer.resize(data.requestReadOffset + data.requestReadSize);
   data.supportSeek = true;
   data.partialFile = false;
   try {
-    int64_t readSize = fileCompressed.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), &data.filesize);
-    fileCompressed.StopExtractFileData();
-    data.buffer.resize(readSize);
-    data.buffer.erase(0, data.requestReadOffset);
-    data.startOffset = data.requestReadOffset;
+    if (fileCompressed.ExtractFileData(outputFile, 0, nullptr, &data.filesize) == -1) {
+      fileCompressed.StopExtractFileData();
+      data.startOffset = 0;
+      data.filesize = 0;
+      data.fileStartOffset = 0;
+      data.buffer.resize(0);
+      data.state = FileReadState::Error_Access;
+      return;
+    }
+    if (data.requestReadOffset >= 0) {
+      data.startOffset = data.requestReadOffset;
+    } else if (data.requestReadOffset < 0) {
+      data.startOffset = 0;
+      if (data.requestReadOffset >= (-data.filesize)) {
+        data.startOffset = data.filesize + data.requestReadOffset;
+      }
+    }
+    if (data.startOffset < data.filesize) {
+      if (data.startOffset > 0) {
+        int64_t constexpr skipSize = 64LL * 1024 * 1024;
+        std::string discardBuffer;
+        discardBuffer.resize(skipSize);
+        int64_t remaining = data.startOffset;
+        while(remaining != 0) {
+          int64_t requested = static_cast<int64_t>(std::min<int64_t>(remaining, skipSize));
+          int64_t readSize = fileCompressed.ExtractFileData(outputFile, requested, discardBuffer.data(), nullptr);
+          if (readSize != requested) {
+            LOGW << "GetOutput error: Read in archive returned " << readSize << Log::Flags::End;
+            throw std::exception();
+          }
+          remaining -= requested;
+        }
+      }
+      data.buffer.resize(data.requestReadSize);
+      int64_t readSize = fileCompressed.ExtractFileData(outputFile, data.buffer.size(), data.buffer.data(), nullptr);
+      if (readSize < 0) {
+        LOGW << "GetOutput error: Read in archive returned " << readSize << Log::Flags::End;
+        throw std::exception();
+      }
+      data.buffer.resize(readSize);
+    }
     data.state = data.buffer.size() == data.requestReadSize ? FileReadState::Ok : FileReadState::EndOfFile;
+    fileCompressed.StopExtractFileData();
   } catch(...) {
     LOGW << "GetOutput error: unable to find " << outputFile << " in " << archiveName << Log::Flags::End;
     data.buffer.resize(0);
@@ -618,7 +666,7 @@ bool ns_Schedule::Schedule::LimitRessourcesUsages() {
     }
     SRessourcesSummary const* worst = SRessourcesSummary::ToKillMem(tasks);
     CancelTask(worst->task->id_, "memory pressure too high");
-    
+
     auto it = executorsCPUFull.find(executor);
     if (it == executorsCPUFull.end()) {
       continue;

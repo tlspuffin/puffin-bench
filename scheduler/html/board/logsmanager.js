@@ -259,7 +259,7 @@ class LogsManager {
       if (this.#type == type) {
         this.#outputs[type].tab.classList.add('active');
         this.#outputs[type].container.classList.add('active');
-        this.#outputs[type].content.classList.add('active');  
+        this.#outputs[type].content.classList.add('active');
       } else {
         this.#outputs[type].tab.classList.remove('active');
         this.#outputs[type].container.classList.remove('active');
@@ -311,7 +311,6 @@ class LogsManager {
     if (step.id !== '' && step.id !== '.') stepName += ` ${step.id}`;
     stepName += ` (${taskName})`;
 
-    
     this.#UpdateActiveTab();
 
     LogsManager.#modal.stepName.innerText = stepName;

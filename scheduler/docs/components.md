@@ -168,7 +168,7 @@ Single executable unit with a private state machine: `Pending → Running → Do
 
 ## `TasksManager` (`schedule/tasksmanager.hxx` / `.cxx`)
 
-Task registry, guarded by its own `std::mutex lock_` (independent of `Schedule::lockThread_`). `CreateTask()` assigns the millisecond-timestamp ID, writes the uploaded functions script and `files[]` uploads to `<userPath>/<id>/`, computes per-file and aggregate MD5s, then constructs the `Task`. `LoadStatus()` (rebuild tasks from a serialized `tasksmanager.json`) exists and is functional but is not called anywhere (see `docs/roadmap.md`). `ToJSON()` / `GetTaskState()` serialize live task state for the API and dashboard.
+Task registry, guarded by its own `std::mutex lock_` (independent of `Schedule::lockThread_`). `CreateTask()` assigns the millisecond-timestamp ID, writes the uploaded functions script and `files[]` uploads to `<userPath>/<id>/`, computes per-file and aggregate MD5s, then constructs the `Task`. `LoadStatus()` (rebuild tasks from a serialized `tasksmanager.json`) exists and compiles, but is not merely unused — its call site in the `Schedule` constructor (`schedule.cxx`) is explicitly commented out, with the comment "step group not managed by Executor::Local reload system": the reload path predates step groups and was never updated to reattach them correctly, so it is disabled on purpose rather than dormant (see `docs/task-step-lifecycle.md`, "State Persistence and Reload", and `docs/roadmap.md`). `ToJSON()` / `GetTaskState()` serialize live task state for the API and dashboard.
 
 ---
 
@@ -228,9 +228,9 @@ Configuration + execution object for result publishing, carried by `Task` and co
 
 Content-addressed file store identified by opaque string IDs (restricted to `[a-zA-Z0-9_-]` by the HTTP routing regex — see `docs/roadmap.md`).
 
-- **Put**: enqueues onto `dataToAdd_` and returns immediately; a background `CacheLoop()` thread copies the file and optionally computes an MD5, then flips `FileInformations::full_`.
+- **Put**: only validates `force`/existing status and enqueues onto `dataToAdd_`, returning immediately — it does not touch `data_` itself. The background `CacheLoop()` thread is what inserts the placeholder entry, copies the file, and flips `FileInformations::full_`; there's a real (if usually short) window right after `Put()` returns where `Get()` on that ID still reports `NO`, not `PARTIAL`. `computeMD5` is accepted and threaded through but never acted upon — `FileInformations::md5_` stays `""` unconditionally.
 - **Get**: `shared_lock` on `dataLock_`; returns `OK` (ready), `PARTIAL` (still copying), or `NO` (unknown ID).
-- **Persistence**: ID→path (+MD5) mapping stored under the configured storage path as JSON, rebuilt (`LoadData()`) at startup; a copy log (`SaveCopyLog`/`DeleteCopyLog`) tracks in-flight copies for crash diagnostics.
+- **Persistence**: ID→path mapping (plus an always-empty `md5` field) stored under the configured storage path as JSON, rebuilt (`LoadData()`) at startup; a copy log (`SaveCopyLog`/`DeleteCopyLog`) tracks in-flight copies for crash diagnostics.
 
 ---
 

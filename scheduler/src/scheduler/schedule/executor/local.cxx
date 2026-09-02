@@ -621,7 +621,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       );
     }
   } 
-#ifdef UPDATE_CHILD_UMASK  
+#ifdef UPDATE_CHILD_UMASK
   else {
     std::filesystem::permissions(localData->run_path_, 
         std::filesystem::perms::owner_all | std::filesystem::perms::group_read | 

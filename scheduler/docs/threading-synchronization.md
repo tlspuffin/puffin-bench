@@ -212,9 +212,11 @@ void Linux::ThreadLoop() {
 ```cpp
 void Cache::CacheLoop() {
   unique_lock lock(cacheThreadLock_);
-  while (threadRunning_) {
-    cacheThreadCV_.wait(lock);                    // unconditional wait, re-checks dataToAdd_ after wake
-    if (dataToAdd_.empty()) continue;
+  while (true) {
+    cacheThreadCV_.wait(lock, [this] {
+      return !threadRunning_ || !dataToAdd_.empty();
+    });                                            // predicate wait: immune to lost/spurious wakeups
+    if (dataToAdd_.empty()) break;                 // woke up because threadRunning_ went false
     dataToAdd.swap(dataToAdd_);
     lock.unlock();
       { lock_guard(dataLock_); insert stub FileInformations{full_=false} for each pending id }
@@ -223,6 +225,7 @@ void Cache::CacheLoop() {
       SaveData(); DeleteCopyLog();
     lock.lock();
   }
+  threadRunning_ = false;                           // reasserted unlocked on the way out
 }
 ```
 

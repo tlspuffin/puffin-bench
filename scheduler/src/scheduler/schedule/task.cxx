@@ -105,146 +105,147 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     throw std::runtime_error("Task JSON must be an object");
   }
 
-  id_ = Get<uint64_t>(config, "id");
-  name_ = Get<std::string>(config, "name");
-  files_path_ = GetPath(config, "files_path");
-  functions_path_ = GetPath(config, "functions_path");
-  tools_path_ = GetPath(config, "tools_path");
-  run_root_path_ = GetPath(config, "run_root_path");
-  logs_path_ = GetPath(config, "logs_path");
-  env_path_ = GetPath(config, "env_path");
-  outputs_path_ = GetPath(config, "outputs_path");
-  artefacts_path_ = GetPath(config, "artefacts_path");
-  monitors_path_ = GetPath(config, "monitors_path");
-  executor_name_ = Get<std::string>(config, "executor_name");
-  executor_ = executorsProvider.GetExecutor(executor_name_);
-  if (executor_ == nullptr) {
-    throw std::runtime_error("Task error, unable to find executor " + executor_name_);
-  }
-  if (config.HasMember("executor_data") && config["executor_data"].IsObject()) {
-    executor_data_ = executor_->CreateLocalTaskData(config["executor_data"]);
-  }
+  try {
+    id_ = Get<uint64_t>(config, "id");
+    name_ = Get<std::string>(config, "name");
+    files_path_ = GetPath(config, "files_path");
+    functions_path_ = GetPath(config, "functions_path");
+    tools_path_ = GetPath(config, "tools_path");
+    run_root_path_ = GetPath(config, "run_root_path");
+    logs_path_ = GetPath(config, "logs_path");
+    env_path_ = GetPath(config, "env_path");
+    outputs_path_ = GetPath(config, "outputs_path");
+    artefacts_path_ = GetPath(config, "artefacts_path");
+    monitors_path_ = GetPath(config, "monitors_path");
+    executor_name_ = Get<std::string>(config, "executor_name");
+    executor_ = executorsProvider.GetExecutor(executor_name_);
+    if (executor_ == nullptr) {
+      throw std::runtime_error("Task error, unable to find executor " + executor_name_);
+    }
+    if (config.HasMember("executor_data") && config["executor_data"].IsObject()) {
+      executor_data_ = executor_->CreateLocalTaskData(config["executor_data"]);
+    }
 
-  if ((config.HasMember("args")) && (config["args"].IsArray())) {
+    if ((config.HasMember("args")) && (config["args"].IsArray())) {
     rapidjson::Value const& argsArray = config["args"];
-    for (rapidjson::SizeType i = 0; i < argsArray.Size(); i++) {
-      rapidjson::Value const& argObject = argsArray[i];
-      if (!argObject.IsObject()) {
-        LOGE << "Warning: Invalid arg object at index " << i << Log::Flags::End;
-        continue;
-      }
-      try {
-        std::string key = Get<std::string>(argObject, "key");
-        std::string value = Get<std::string>(argObject, "value");
-        if (!key.empty()) {
-          args_[key] = value;
+      for (rapidjson::SizeType i = 0; i < argsArray.Size(); i++) {
+        rapidjson::Value const& argObject = argsArray[i];
+        if (!argObject.IsObject()) {
+          LOGE << "Warning: Invalid arg object at index " << i << Log::Flags::End;
+          continue;
         }
-      } catch (const std::exception& e) {
-        LOGE << "Warning: Failed to parse arg at index " << i 
-            << ": " << e.what() << Log::Flags::End;
+        try {
+          std::string key = Get<std::string>(argObject, "key");
+          std::string value = Get<std::string>(argObject, "value");
+          if (!key.empty()) {
+            args_[key] = value;
+          }
+        } catch (const std::exception& e) {
+          LOGE << "Warning: Failed to parse arg at index " << i 
+              << ": " << e.what() << Log::Flags::End;
+        }
       }
     }
-  }
 
-  std::list<ns_Schedule::Step*> loadedSteps;
-  std::unordered_map<uint64_t, ns_Schedule::Step*> loadedStepsIndex;
-  std::unordered_map<uint64_t, ns_Schedule::Step::UUIDDependencies> loadedStepsDeps;
-  if (config.HasMember("steps") && config["steps"].IsObject()) {
-    rapidjson::Value const& stepsObject = config["steps"];
-    for (auto stepIt = stepsObject.MemberBegin(); 
-        stepIt != stepsObject.MemberEnd(); ++stepIt) {
-      uint64_t stepUUID = std::stoull(stepIt->name.GetString());
-      const rapidjson::Value& stepConfig = stepIt->value;
-      ns_Schedule::Step::UUIDDependencies& dependencies = loadedStepsDeps[stepUUID];
-      ns_Schedule::Step* step = new Step(this, stepConfig, dependencies);
-      loadedSteps.push_back(step);
-      loadedStepsIndex.emplace(stepUUID, step);
+    std::list<ns_Schedule::Step*> loadedSteps;
+    std::unordered_map<uint64_t, ns_Schedule::Step*> loadedStepsIndex;
+    std::unordered_map<uint64_t, ns_Schedule::Step::UUIDDependencies> loadedStepsDeps;
+    if (config.HasMember("steps") && config["steps"].IsObject()) {
+      rapidjson::Value const& stepsObject = config["steps"];
+      for (auto stepIt = stepsObject.MemberBegin(); 
+          stepIt != stepsObject.MemberEnd(); ++stepIt) {
+        uint64_t stepUUID = std::stoull(stepIt->name.GetString());
+        const rapidjson::Value& stepConfig = stepIt->value;
+        ns_Schedule::Step::UUIDDependencies& dependencies = loadedStepsDeps[stepUUID];
+        ns_Schedule::Step* step = new Step(this, stepConfig, dependencies);
+        steps_.push_back(step);
+        loadedSteps.push_back(step);
+        loadedStepsIndex.emplace(stepUUID, step);
+      }
     }
-  }
-  for (ns_Schedule::Step* step: loadedSteps) {
-    uint64_t uuid = step->uuid_;
-    step->next_ = loadedStepsIndex[loadedStepsDeps[uuid].next];
-    step->previous_ = loadedStepsIndex[loadedStepsDeps[uuid].previous];
-    for(auto& stepUUID: loadedStepsDeps[uuid].depend_from) {
-      step->depend_from_.push_back(loadedStepsIndex[stepUUID]);
-    }
-    for(auto& stepUUID: loadedStepsDeps[uuid].dependencies) {
-      step->dependencies_.push_back(loadedStepsIndex[stepUUID]);
-    }
-    if (step->IsRunning()) {
-      executor_->CheckReloadRunning(*step);
+    for (ns_Schedule::Step* step: loadedSteps) {
+      uint64_t uuid = step->uuid_;
+      step->next_ = loadedStepsIndex.at(loadedStepsDeps.at(uuid).next);
+      step->previous_ = loadedStepsIndex.at(loadedStepsDeps.at(uuid).previous);
+      for(auto& stepUUID: loadedStepsDeps.at(uuid).depend_from) {
+        step->depend_from_.push_back(loadedStepsIndex.at(stepUUID));
+      }
+      for(auto& stepUUID: loadedStepsDeps.at(uuid).dependencies) {
+        step->dependencies_.push_back(loadedStepsIndex.at(stepUUID));
+      }
       if (step->IsRunning()) {
-        stepsRunning.push_back(step);
-        stepsPending.push_back(step);
-      } else if (step->IsDone()) {
-        stepsDone.push_back(step);
+        executor_->CheckReloadRunning(*step);
+        if (step->IsRunning()) {
+          stepsRunning.push_back(step);
+          stepsPending.push_back(step);
+        } else if (step->IsDone()) {
+          stepsDone.push_back(step);
+          stepsPending.push_back(step);
+        }
+      }
+      if (step->IsReady()) {
         stepsPending.push_back(step);
       }
     }
-    if (step->IsReady()) {
-      stepsPending.push_back(step);
-    }
-  }
 
-  if (config.HasMember("root_steps") && config["root_steps"].IsArray()) {
-    const rapidjson::Value& rootStepsArray = config["root_steps"];
-    for (rapidjson::SizeType i = 0; i < rootStepsArray.Size(); i++) {
-      if (!rootStepsArray[i].IsUint64()) {
-        LOGW << "Warning: Invalid root_step UUID at index " << i << Log::Flags::End;
-        continue;
+    if (config.HasMember("root_steps") && config["root_steps"].IsArray()) {
+      const rapidjson::Value& rootStepsArray = config["root_steps"];
+      for (rapidjson::SizeType i = 0; i < rootStepsArray.Size(); i++) {
+        if (!rootStepsArray[i].IsUint64()) {
+          LOGW << "Warning: Invalid root_step UUID at index " << i << Log::Flags::End;
+          continue;
+        }
+        uint64_t stepUUID = rootStepsArray[i].GetUint64();
+        root_steps_.push_back(loadedStepsIndex.at(stepUUID));
       }
-      uint64_t stepUUID = rootStepsArray[i].GetUint64();
-      root_steps_.push_back(loadedStepsIndex[stepUUID]);
     }
-  }
 
-  if (root_steps_.empty()) {
-    throw std::runtime_error("Task must have at least one root step");
-  }
-
-  std::filesystem::path stepsFile = logs_path_ / ".steps.json";
-  steps_file_.open(stepsFile, std::ios::app);
-  if (!steps_file_.is_open()) {
-    throw std::runtime_error("Unable to create file " + 
-        stepsFile.string());
-  }
-
-  user_ = GetOrDefault<std::string>(config, "user", "anonymous");
-  job_type_ = GetOrDefault<std::string>(config, "job_type", "unknown");
-
-  request_cancel_ = Get<bool>(config, "request_cancel");
-  cancel_source_ = Get<std::string>(config, "cancel_source");
-
-  if (config.HasMember("publish")) {
-    publish_.ReadJSON(publishersConfig, config["publish"]);
-  }
-
-  rapidjson::Value::ConstObject md5Object = Get<rapidjson::Value::ConstObject>(config, "md5");
-  for(auto const& md5: md5Object) {
-    if ((!md5.name.IsString()) || (!md5.value.IsString())) {
-      throw std::runtime_error("Task have malformated md5 informations");
+    if (root_steps_.empty()) {
+      throw std::runtime_error("Task must have at least one root step");
     }
-    md5_[md5.name.GetString()] = md5.value.GetString();
+
+    std::filesystem::path stepsFile = logs_path_ / ".steps.json";
+    steps_file_.open(stepsFile, std::ios::app);
+    if (!steps_file_.is_open()) {
+      throw std::runtime_error("Unable to create file " + 
+          stepsFile.string());
+    }
+
+    user_ = GetOrDefault<std::string>(config, "user", "anonymous");
+    job_type_ = GetOrDefault<std::string>(config, "job_type", "unknown");
+
+    request_cancel_ = Get<bool>(config, "request_cancel");
+    cancel_source_ = Get<std::string>(config, "cancel_source");
+
+    if (config.HasMember("publish")) {
+      publish_.ReadJSON(publishersConfig, config["publish"]);
+    }
+
+    rapidjson::Value::ConstObject md5Object = Get<rapidjson::Value::ConstObject>(config, "md5");
+    for(auto const& md5: md5Object) {
+      if ((!md5.name.IsString()) || (!md5.value.IsString())) {
+        throw std::runtime_error("Task have malformated md5 informations");
+      }
+      md5_[md5.name.GetString()] = md5.value.GetString();
+    }
+
+    state_ = StateStringToEnum(Get<std::string>(config, "state"));
+    publish_link_ = Get<std::string>(config, "publish_link");
+    flag_ = ParseJSONObject(config, "flag", false);
+
+    apiURL_ = Get<std::string>(config, "api_url");
+
+    priority_ = Get<int64_t>(config, "priority");
+
+    estimatedEndTime_ = Get<int64_t>(config, "estimated_end_time");
+  } catch(std::exception const& e) {
+    Destroy();
+    throw;
   }
-
-  state_ = StateStringToEnum(Get<std::string>(config, "state"));
-  publish_link_ = Get<std::string>(config, "publish_link");
-  flag_ = ParseJSONObject(config, "flag", false);
-
-  apiURL_ = Get<std::string>(config, "api_url");
-
-  priority_ = Get<int64_t>(config, "priority");
-
-  estimatedEndTime_ = Get<int64_t>(config, "estimated_end_time");
 }
 
 ns_Schedule::Task::~Task() {
-  if (steps_file_.is_open()) {
-    steps_file_.close();
-  }
-  if (executor_data_ != nullptr) {
-    delete executor_data_;
-  }
+  Destroy();
 }
 
 void ns_Schedule::Task::Cancel(std::string const& source) {
@@ -514,123 +515,145 @@ void ns_Schedule::Task::CreateStepsFromJson(
     GroupStepConfigurations groupConfigurations;
     rapidjson::Value const* groupConfigurationJSON = nullptr;
     std::queue<rapidjson::Value const*> flowElements;
-    if (flowElement.IsObject()) {
-      flowElements.push(&flowElement);
-    } else if (flowElement.IsArray()) {
-      for(auto const& element: flowElement.GetArray()) {
-        if (!element.IsObject()) {
-          continue;
-        }
-        if (!element.HasMember("step")) {
-          if (element.HasMember("configuration") && element["configuration"].IsObject()) {
-            groupConfigurations.ReadFromTaskJSON(element["configuration"]);
-            groupConfigurationJSON = &element["configuration"];
+    ns_Schedule::Step* step = nullptr;
+    try {
+      if (flowElement.IsObject()) {
+        flowElements.push(&flowElement);
+      } else if (flowElement.IsArray()) {
+        for(auto const& element: flowElement.GetArray()) {
+          if (!element.IsObject()) {
+            continue;
           }
-          if (element.HasMember("streams") && element["streams"].IsArray()) {
-            streamsConfigJSON[0] = &element["streams"];
-          }
-          if (element.HasMember("run") && element["run"].IsArray()) {
-            rapidjson::Value const& run_array = element["run"];
-            if (run_array.Size() != 0) {
-              for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-                runList.push_back(&(run_array[j]));
-              }
-            } else {
-              if (configurationsList.empty()) {
-                throw std::runtime_error("empty run array requiere a global configuration object");
-              }
-              runList = configurationsList;
+          if (!element.HasMember("step")) {
+            if (element.HasMember("configuration") && element["configuration"].IsObject()) {
+              groupConfigurations.ReadFromTaskJSON(element["configuration"]);
+              groupConfigurationJSON = &element["configuration"];
             }
+            if (element.HasMember("streams") && element["streams"].IsArray()) {
+              streamsConfigJSON[0] = &element["streams"];
+            }
+            if (element.HasMember("run") && element["run"].IsArray()) {
+              rapidjson::Value const& run_array = element["run"];
+              if (run_array.Size() != 0) {
+                for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+                  runList.push_back(&(run_array[j]));
+                }
+              } else {
+                if (configurationsList.empty()) {
+                  throw std::runtime_error("empty run array requiere a global configuration object");
+                }
+                runList = configurationsList;
+              }
+            }
+          } else if (element.HasMember("step")) {
+            flowElements.push(&element);
           }
-        } else if (element.HasMember("step")) {
-          flowElements.push(&element);
         }
-      }
-    } else {
-      continue;
-    }
-
-    uint64_t group_id = flowElements.size() == 1 ? 0 : (step_id + 1);
-    bool stepsGroupStart = group_id != 0;
-    do {
-      rapidjson::Value const& stepJSON = *(flowElements.front());
-      flowElements.pop();
-
-      if (!stepJSON.HasMember("step") || !stepJSON["step"].IsString()) {
+      } else {
         continue;
       }
 
-      uint16_t stepsGroupStatus = Step::stepsGroup_None_;
-      if (group_id != 0) {
-        if (stepsGroupStart) {
-          stepsGroupStatus = Step::stepsGroup_Begin_;
-        } else if (flowElements.empty()) {
-          stepsGroupStatus = Step::stepsGroup_End_;
-        } else {
-          stepsGroupStatus = Step::stepsGroup_In_;
+      size_t flowElementsSize = flowElements.size();
+      if (flowElementsSize == 0) {
+        throw std::runtime_error("empty flow is not supported");
+      }
+
+      uint64_t group_id = flowElementsSize == 1 ? 0 : (step_id + 1);
+      bool stepsGroupStart = group_id != 0;
+      do {
+        rapidjson::Value const& stepJSON = *(flowElements.front());
+        flowElements.pop();
+
+        if (!stepJSON.HasMember("step") || !stepJSON["step"].IsString()) {
+          continue;
         }
-      }
 
-      current_stack.clear();
-
-      std::string const& step_name = stepJSON["step"].GetString();
-
-      rapidjson::Value const* monitorJSON = nullptr;
-      if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
-        monitorJSON = &(stepJSON["monitor"]);
-      }
-
-      streamsConfigJSON[1] = nullptr;
-      if (stepJSON.HasMember("streams") && stepJSON["streams"].IsArray()) {
-        streamsConfigJSON[1] = &stepJSON["streams"];
-      }
-
-      std::vector<rapidjson::Value const*> configurationsStack;
-      if (groupConfigurationJSON != nullptr) {
-        configurationsStack.push_back(groupConfigurationJSON);
-      }
-      if (stepJSON.HasMember("configuration")) {
-        configurationsStack.push_back(&stepJSON["configuration"]);
-      }
-
-      rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
-      ns_Schedule::Step* step = new ns_Schedule::Step(this, step_name, 
-          run_id++, step_id, group_id, stepsGroupStatus, parent_stack, 
-          groupConfigurations, configurationsStack, runConfiguration, 
-          monitorJSON, streamsConfigJSON);
-      configurationsStack.push_back(runConfiguration);
-
-      ns_Schedule::Step* first_step = step;
-      if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
-        if (stepsGroupStatus != Step::stepsGroup_None_) {
-          throw std::runtime_error("step inside a group can not have a run field");
-        }
-        rapidjson::Value const& run_array = stepJSON["run"];
-        if (run_array.Size() != 0) {
-          for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
-            runList.push_back(&(run_array[j]));
-          }
-        } else {
-          if (configurationsList.empty()) {
-            throw std::runtime_error("empty run array requiere a global configuration object");
-          }
-          runList = configurationsList;
-        }
-      }
-      if (!runList.empty()) {
-        for(size_t j=0; j<runList.size(); ++j) {
-          rapidjson::Value const& run = *(runList[j]);
-          if (j != 0) {
-            step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, group_id, 
-                parent_stack, configurationsStack, groupConfigurations, &run);
-            step = step->next_;
+        uint16_t stepsGroupStatus = Step::stepsGroup_None_;
+        if (group_id != 0) {
+          if (stepsGroupStart) {
+            stepsGroupStatus = Step::stepsGroup_Begin_;
+          } else if (flowElements.empty()) {
+            stepsGroupStatus = Step::stepsGroup_End_;
           } else {
-            step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
+            stepsGroupStatus = Step::stepsGroup_In_;
           }
+        }
+
+        current_stack.clear();
+
+        std::string const& step_name = stepJSON["step"].GetString();
+
+        rapidjson::Value const* monitorJSON = nullptr;
+        if (stepJSON.HasMember("monitor") && (stepJSON["monitor"].IsObject())) {
+          monitorJSON = &(stepJSON["monitor"]);
+        }
+
+        streamsConfigJSON[1] = nullptr;
+        if (stepJSON.HasMember("streams") && stepJSON["streams"].IsArray()) {
+          streamsConfigJSON[1] = &stepJSON["streams"];
+        }
+
+        std::vector<rapidjson::Value const*> configurationsStack;
+        if (groupConfigurationJSON != nullptr) {
+          configurationsStack.push_back(groupConfigurationJSON);
+        }
+        if (stepJSON.HasMember("configuration")) {
+          configurationsStack.push_back(&stepJSON["configuration"]);
+        }
+
+        rapidjson::Value const* runConfiguration = &runEmptyConfiguration;
+        step = new ns_Schedule::Step(this, step_name, 
+            run_id++, step_id, group_id, stepsGroupStatus, parent_stack, 
+            groupConfigurations, configurationsStack, runConfiguration, 
+            monitorJSON, streamsConfigJSON);
+        configurationsStack.push_back(runConfiguration);
+
+        ns_Schedule::Step* first_step = step;
+        if (stepJSON.HasMember("run") && stepJSON["run"].IsArray()) {
+          if (stepsGroupStatus != Step::stepsGroup_None_) {
+            throw std::runtime_error("step inside a group can not have a run field");
+          }
+          rapidjson::Value const& run_array = stepJSON["run"];
+          if (run_array.Size() != 0) {
+            for (rapidjson::SizeType j = 0; j < run_array.Size(); ++j) {
+              runList.push_back(&(run_array[j]));
+            }
+          } else {
+            if (configurationsList.empty()) {
+              throw std::runtime_error("empty run array requiere a global configuration object");
+            }
+            runList = configurationsList;
+          }
+        }
+        if (!runList.empty()) {
+          for(size_t j=0; j<runList.size(); ++j) {
+            rapidjson::Value const& run = *(runList[j]);
+            if (j != 0) {
+              step->next_ = new ns_Schedule::Step(*step, run_id++, j, 0, group_id, 
+                  parent_stack, configurationsStack, groupConfigurations, &run);
+              step = step->next_;
+            } else {
+              step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
+            }
+            if (!executor_->CanRun(step)) {
+              throw std::runtime_error("Step " + step->ID() + " require too much ressources");
+            }
+
+            current_stack.push_back(step);
+            steps_.push_front(step);
+            ns_Schedule::Step* attemptStep = step;
+            for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
+              attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt, parent_stack);
+              attemptStep = attemptStep->next_;
+              current_stack.push_back(attemptStep);
+              steps_.push_front(attemptStep);
+            }
+            step = attemptStep;
+          }
+        } else {
           if (!executor_->CanRun(step)) {
             throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
           }
-
           current_stack.push_back(step);
           steps_.push_front(step);
           ns_Schedule::Step* attemptStep = step;
@@ -640,55 +663,72 @@ void ns_Schedule::Task::CreateStepsFromJson(
             current_stack.push_back(attemptStep);
             steps_.push_front(attemptStep);
           }
-          step = attemptStep;
         }
-      } else {
-        if (!executor_->CanRun(step)) {
-          throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
-        }
-        current_stack.push_back(step);
-        steps_.push_front(step);
-        ns_Schedule::Step* attemptStep = step;
-        for (uint64_t attempt=1; attempt<step->nb_retry_; ++attempt) {
-          attemptStep->next_ = new ns_Schedule::Step(*attemptStep, run_id++, attempt, parent_stack);
-          attemptStep = attemptStep->next_;
-          current_stack.push_back(attemptStep);
-          steps_.push_front(attemptStep);
-        }
-      }
-      first_step->previous_ = current_stack.back();
-      first_step->previous_->next_ = first_step;
+        first_step->previous_ = current_stack.back();
+        first_step->previous_->next_ = first_step;
 
-      if (!parent_stack.empty()) {
-        if ((parent_stack.front()->group_status_ == Step::stepsGroup_None_) || 
+        if (!parent_stack.empty()) {
+          if ((parent_stack.front()->group_status_ == Step::stepsGroup_None_) || 
             (parent_stack.front()->group_status_ == Step::stepsGroup_End_)) {
-          for(auto& parent : parent_stack) {
-            parent->dependencies_.insert(
-                parent->dependencies_.end(),
-                current_stack.rbegin(), current_stack.rend()
-            );
-          }
-        } else {
-          for(auto& parent : parent_stack) {
-            for(auto& step : current_stack) {
-              if ((parent->rank_id_ == step->rank_id_) && (parent->attempt_id_ == step->attempt_id_)) {
-                parent->dependencies_.push_back(step);
+            for(auto& parent : parent_stack) {
+              parent->dependencies_.insert(
+                  parent->dependencies_.end(),
+                  current_stack.rbegin(), current_stack.rend()
+              );
+            }
+          } else {
+            for(auto& parent : parent_stack) {
+              for(auto& step : current_stack) {
+                if ((parent->rank_id_ == step->rank_id_) && (parent->attempt_id_ == step->attempt_id_)) {
+                  parent->dependencies_.push_back(step);
+                }
               }
             }
           }
         }
+
+        if (is_root_steps) {
+          root_steps_ = current_stack;
+          is_root_steps = false;
+        }
+
+        parent_stack = current_stack;
+
+        step_id++;
+        stepsGroupStart = false;
+      } while (!flowElements.empty());
+    } catch (std::exception const& e) {
+      bool doDelete = true;
+      for(ns_Schedule::Step* s: steps_) {
+        doDelete &= (s != step);
+        delete s;
       }
-
-      if (is_root_steps) {
-        root_steps_ = current_stack;
-        is_root_steps = false;
+      if (doDelete) {
+        delete step;
       }
+      root_steps_.clear();
+      steps_.clear();
+      throw;
+    }
+    step = nullptr;
+  }
+  if (root_steps_.empty()) {
+    Destroy();
+    throw std::runtime_error("empty flow is not supported");
+  }
+}
 
-      parent_stack = current_stack;
-
-      step_id++;
-      stepsGroupStart = false;
-    } while (!flowElements.empty());
+void ns_Schedule::Task::Destroy() {
+  for(ns_Schedule::Step* step: steps_) {
+    delete step;
+  }
+  root_steps_.clear();
+  steps_.clear();
+  if (steps_file_.is_open()) {
+    steps_file_.close();
+  }
+  if (executor_data_ != nullptr) {
+    delete executor_data_;
   }
 }
 

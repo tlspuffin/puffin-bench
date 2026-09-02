@@ -24,9 +24,9 @@ Declared per-step in the flow JSON under `steps[].monitor` (parsed by `ns_Monito
 | `entry_point` | yes | — | Bash function name called as the monitor |
 | `interval` | yes | — | How often the monitor function re-runs |
 | `timeout` | no | `"0s"` (no timeout) | Maximum duration for a single monitor invocation |
-| `delay_start` | no | `"0ms"` | Delay after step start before the first monitor invocation |
+| `delay_start` | no | `"0s"` | Delay after step start before the first monitor invocation |
 
-All three duration fields accept human-readable duration strings (`"10s"`, `"2m"`, `"1h"`, ...), parsed by `ParseDurationToSeconds()` and stored internally as integer seconds. `ns_Monitor::Task::ToJSON()` re-serializes them with an explicit `"s"` suffix.
+All three duration fields accept human-readable duration strings (`"10s"`, `"2m"`, `"1h"`, ...), parsed by `ParseDurationToSeconds()` and stored internally as integer seconds. `ns_Monitor::Task::ToJSON()` re-serializes them with an explicit `"s"` suffix. `ParseDurationToSeconds()` only recognizes `d`/`h`/`m`/`s` suffixes — no `ms` — so a `"0ms"` default (as previously documented here for `delay_start`) would actually throw at parse time; `"0s"` is the correct, working default.
 
 `ns_Monitor::Task::ToArgs()` builds the single space-joined string `"<entry_point> <interval_s> <timeout_s> <delay_start_s>"`, which is how the monitor configuration is threaded through to `executor.sh` as `THEJOB_MONITOR_PARAMETERS_PATH` content.
 
@@ -140,7 +140,7 @@ If the step is not in memory (task finished), `Schedule::GetOutput()` falls back
 struct FileInformations {
   std::filesystem::path path_;   // location in cache storage
   std::string md5_;              // currently always "" — see note below
-  bool full_;                    // true once the background copy has completed
+  std::atomic<bool> full_;       // true once the background copy has completed
 };
 std::unordered_map<std::string, FileInformations> data_;   // id -> file info
 std::shared_mutex dataLock_;                                 // guards data_
@@ -153,19 +153,24 @@ A separate mutex/condition-variable pair guards the `dataToAdd_` work queue cons
 ```
 CacheAPI::Put(path, id, force, computeMD5)
   -> Cache::Put():
-       shared/unique_lock(dataLock_):
-         if id exists and !force: return false
-         data_[id] = { path=storagePath_/id, md5="", full=false }   // placeholder
-       push FileToStore{id, srcPath, computeMD5} onto dataToAdd_, notify
-       return true   // caller does not wait for the copy
+       if !force and Cache::Get(id, ...) != NO: throw runtime_error("File already exist: <id>")
+       lock_guard(cacheThreadLock_): dataToAdd_.push_back(FileToStore{id, srcPath, computeMD5})
+       notify_one()
+       return true   // caller does not wait for the copy — data_ is NOT touched here
 
 CacheLoop() background thread:
-  for each FileToStore:
+  wait until dataToAdd_ is non-empty, then swap it out under cacheThreadLock_
+  lock_guard(dataLock_): for each pending entry,
+      data_.emplace(id, { path=storagePath_/id, md5="", full_=false })   // placeholder inserted HERE, not in Put()
+  SaveData()
+  for each pending entry:
     std::filesystem::copy_file(srcPath, storagePath_/id)
-    on success: data_[id].full_ = true
+    on success: data_[id].full_.store(true)
     on failure: erase data_[id]
-    SaveCopyLog() / SaveData() (index persistence, see below)
+  SaveData() / SaveCopyLog() / DeleteCopyLog() (index persistence, see below)
 ```
+
+`Cache::Put()` never touches `data_` — it only checks current status via `Get()` (throwing, not returning `false`, if the id already exists and `force` is not set) and enqueues onto `dataToAdd_`. The placeholder is inserted by `CacheLoop()` once it actually picks up the batch. Consequence: immediately after `Put()` returns, a concurrent `Get(id)` can still observe `NO` (`"Not Available"`) rather than `PARTIAL` (`"Locked"`) — there is a real, if usually short, window before the id shows up in `data_` at all.
 
 **MD5 is accepted but not implemented for the cache path.** The `computeMD5` request field is parsed and threaded through as `FileToStore::md5_`, but `Cache.cxx` never calls into `utils/md5_poco.hxx`'s `MD5()` functions to actually hash the copied file — `FileInformations::md5_` is hardcoded to `""` regardless of the flag. `MD5()` (via `Poco::MD5Engine`) is used elsewhere in the codebase (e.g. `tasksmanager.cxx`), but not to verify or record cached file content today.
 
