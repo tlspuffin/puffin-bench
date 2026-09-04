@@ -1,5 +1,6 @@
 import { logsManager } from './logsmanager.js';
 import { Clipboard } from './clipboard.js';
+import { DropMenu } from './dropmenu.js';
 
 export class TaskCard {
 
@@ -26,31 +27,35 @@ export class TaskCard {
       div.classList.add('card-task-cancelling');
     }
 
-    const cancelButton = document.createElement('button');
-    cancelButton.classList.add('card-attempt-cancel-btn');
-    cancelButton.textContent = 'Cancel';
-    cancelButton.onclick = async () => {
-        if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
-          return;
-        }
-        await this.#CancelTask(task.id);
-    };
-
-    // Count active steps to decide whether to show the cancel button
     let activeCount = 0;
     steps.forEach(byId => byId.forEach(attempts =>
       attempts.forEach(s => { if (s.state === 'Running' || s.state === 'Pending') activeCount++; })
     ));
-    if (activeCount === 0 || task.request_cancel) {
-      cancelButton.style.display = 'none';
-    }
+    const displayDropMenu = (activeCount > 0) && (!task.request_cancel);
 
-    const priorityUI = activeCount > 0 ? this.#CreatePriorityUI(task) : document.createElement('div');
+    const actions = [];
+    if (displayDropMenu) {
+      actions.push(this.#CreatePriorityUI(task));
+
+      const cancelButton = document.createElement('button');
+      cancelButton.classList.add('card-attempt-cancel-btn');
+      cancelButton.textContent = 'Cancel';
+      cancelButton.onclick = async () => {
+          if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
+            return;
+          }
+          await this.#CancelTask(task.id);
+      };
+      actions.push(cancelButton);
+    }
 
     let username = '';
     if (task?.user && (task.user != '')) {
       username = task.user;
     }
+
+    const dropmenu = displayDropMenu ? 
+      (new DropMenu({label: '...', actions: actions})).Get() : document.createElement('div');
 
     const divCardHeader = document.createElement('div');
     divCardHeader.id = 'card-task-header';
@@ -59,8 +64,8 @@ export class TaskCard {
       taskName = task.id;
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-label-id', 'task-value-name', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), 'Task ' + task.id, priorityUI, cancelButton]
+        ['task-value-name', 'task-label-id', 'task-value-name'],
+        [this.#CreateTaskLinks(task), 'Task ' + task.id, dropmenu]
       ));
       if (username != '') {
         divCardHeader.appendChild(this.#CreateCardLine(
@@ -72,8 +77,8 @@ export class TaskCard {
     } else {
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-id',
-        ['task-value-name', 'task-value-name', 'task-value-name', 'task-value-name'],
-        [this.#CreateTaskQuickLink(task), task.name, priorityUI, cancelButton]
+        ['task-value-name', 'task-value-name', 'task-value-name'],
+        [this.#CreateTaskLinks(task), task.name, dropmenu]
       ));
       divCardHeader.appendChild(this.#CreateCardLine(
         null, 'task-name',
@@ -523,11 +528,16 @@ export class TaskCard {
   }
 
   #CreatePriorityUI(task) {
+    const div = document.createElement('div');
+    div.className = 'card-task-priority';
     if (task.priority === undefined) {
-      const div = document.createElement('div');
       div.innerText = 'N/A';
       return div;
     }
+
+    const label = document.createElement('div');
+    label.innerText = 'priority'
+    div.appendChild(label);
 
     const input = document.createElement('input');
     input.type = 'number';
@@ -550,8 +560,13 @@ export class TaskCard {
         input.blur();
       }
     };
+    div.appendChild(input);
 
-    return input;
+    const button = document.createElement('button');
+    button.innerText = 'Set'
+    div.appendChild(button);
+
+    return div;
   }
 
   // ── Private — API calls ──────────────────────────────────────
@@ -617,14 +632,38 @@ export class TaskCard {
 
   // ── Private — link helper ──────────────────────────────────
 
-  #CreateTaskQuickLink(task) {
+  #CreateTaskLinks(task) {
+    const div = document.createElement('div');
+    div.className = 'card-task-links';
+    div.append(this.#CreateTaskQuickLink(task.id));
+    const publishLink = task?.publish_link;
+    if (publishLink) {
+      div.append(this.#CreatePublishQuickLink(publishLink));
+    }
+    return div;
+  }
+
+  #CreateTaskQuickLink(id) {
     const link = document.createElement('p');
     link.classList = 'card-run-path-details';
     link.innerText = '🔗';
-    link.title = `${window.location.origin}/files/board/task.html?id=${task.id}`;
+    link.title = `${window.location.origin}/files/board/task.html?id=${id}`;
     link.onclick = async (event) => {
       event.stopPropagation();
       Clipboard.Set(event.currentTarget.title);
+    }
+    return link;
+  }
+
+  #CreatePublishQuickLink(publishLink) {
+    const link = document.createElement('p');
+    link.classList = 'card-run-path-details';
+    link.innerText = '🗂️';
+    link.title = publishLink;
+    link.onclick = (event) => {
+      event.stopPropagation();
+      Clipboard.Set(event.currentTarget.title);
+      window.open(event.currentTarget.title, '_blank');
     }
     return link;
   }

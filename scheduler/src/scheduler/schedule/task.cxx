@@ -325,6 +325,17 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
   std::filesystem::path finalSavePath = savePath / id;
 
   std::filesystem::path taskJSONfile = savePath / (id+".json");
+
+  std::unordered_map<std::string, std::string> variables = LoadGlobalParameters(env_path_);
+  for (const auto& [key, value] : args_) {
+    variables.emplace(key, value);
+  }
+  variables.emplace("TASK_ID", id);
+  variables.emplace("TASK_USER", user_);
+  variables.emplace("TASK_JOB_TYPE", job_type_);
+
+  publish_link_ = publish_.ViewLink(variables);
+
   try {
     if (!std::filesystem::create_directory(finalSavePath)) {
       throw std::runtime_error("Unable to create save directory (" + finalSavePath.string() + ")");
@@ -362,16 +373,6 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
         "All keep in " << run_root_path_ << Log::Flags::End;
     return ArchiveJob();
   }
-
-  std::unordered_map<std::string, std::string> variables = LoadGlobalParameters(env_path_);
-  for (const auto& [key, value] : args_) {
-    variables.emplace(key, value);
-  }
-  variables.emplace("TASK_ID", id);
-  variables.emplace("TASK_USER", user_);
-  variables.emplace("TASK_JOB_TYPE", job_type_);
-
-  publish_link_ = publish_.ViewLink(variables);
 
   executor_->TaskFinalize(executor_data_, this);
 

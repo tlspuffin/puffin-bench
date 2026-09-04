@@ -93,6 +93,18 @@
   font-family: monospace;
 }
 
+.card-task-links {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+}
+
+.card-task-priority {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+}
+
 .card-task-separator {
   margin-top: 5px;
   border-bottom: 2px solid #555;
