@@ -337,6 +337,48 @@ void ns_Server::RequestHandlerTaskUpdatePriority::handleRequest(Poco::Net::HTTPS
   }
 }
 
+void ns_Server::RequestHandlerTaskUpdateArgs::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  std::string taskIDStr = std::get<0>(args_);
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  Poco::Net::HTTPResponse::HTTPStatus status = Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
+  try {
+    Poco::Net::HTMLForm form;
+    form.read(request.stream());
+    std::unordered_map<std::string, std::string> newArgs;
+    for (auto& [fullkey, value] : form) {
+      if ((fullkey.find("args[") != 0) || (fullkey.rfind("]") != (fullkey.size()-1))) {
+        continue;
+      }
+      std::string key = fullkey.substr(5, fullkey.size() - 6);
+      if (key.empty()) {
+        throw std::runtime_error("Empty key in args[]");
+      }
+      newArgs[key] = value;
+    }
+
+    uint64_t taskID = std::stoull(taskIDStr);
+    if (!apis_->scheduleAPI_.TaskUpdateArgs(taskID, newArgs)) {
+      status = Poco::Net::HTTPResponse::HTTP_BAD_REQUEST;
+      throw std::runtime_error("update task args failed");
+    }
+
+    out = &(response.send());
+    *out << R"({"success": true})";
+    out->flush();
+  } catch(std::exception const& e) {
+    if (out == nullptr) {
+      response.setStatus(status);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
+}
+
 void ns_Server::RequestHandlerTaskGetArtefacts::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   if (ManageCORS(request, response)) {

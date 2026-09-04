@@ -64,7 +64,7 @@ Before running the step function, the local executor (`src/scheduler/schedule/ex
 |----------|---------|
 | `THEJOB_CORES` | Comma-separated list of assigned CPU core indices (e.g. `"2,3,4,5"`) |
 | `THEJOB_NB_CORES` | Number of assigned cores; computed by `executor.sh` itself by counting `THEJOB_CORES` entries (not sent by the C++ side) |
-| `THEJOB_CACHE_PORT` | Port of the local cache HTTP server (`http://localhost:${THEJOB_CACHE_PORT}/api/cache`) |
+| `THEJOB_SERVER_PORT` | Port of the local cache HTTP server (`http://localhost:${THEJOB_SERVER_PORT}/api/cache`) |
 
 ### Control
 
@@ -77,7 +77,7 @@ Before running the step function, the local executor (`src/scheduler/schedule/ex
 
 ### Step and Task Arguments
 
-Flow JSON step `args` (via `configuration`/`run`) and task-level `args` (from `POST /api/task/new` `args[KEY]` fields) are both written to disk as `KEY="value" ...` and `eval`'d by `SetupEnv` — task args from `THEJOB_ENV_PATH`, step args from `THEJOB_PARAMETERS_PATH`. Both therefore appear as ordinary shell variables:
+Flow JSON step `args` (via `configuration`/`run`) are written to `THEJOB_PARAMETERS_PATH` as `KEY="value" ...` and `eval`'d by `SetupEnv`. Task-level `args` (from `POST /api/task/new` `args[KEY]` fields, and later merges via `PATCH /api/task/<id>/args`, see [api.md](api.md)) go through a different path: they're written to `THEJOB_ENV_PATH` one `KEY=value` per line (no quoting) and loaded by `LoadGlobalParam`, which `declare -g`s each line directly instead of `eval`ing the file — so a value is taken verbatim as everything after the first `=` on its line, not shell-unescaped. Both mechanisms end up exposing the same thing to a step function: ordinary shell variables.
 
 ```bash
 # Flow JSON: "configuration": {"args": {"COMMIT_ID": "abc123"}}
@@ -108,7 +108,7 @@ Sourced automatically by `executor.sh`. All functions below are available withou
 
 ### `QueryCache [-q] <cache_id> [timeout_s]`
 
-Polls `GET http://localhost:${THEJOB_CACHE_PORT}/api/cache/<cache_id>` and inspects the response's `state` field (`Ok`, `Locked`, `Not Available` — the exact strings `CacheAPI::Get()` returns, see `docs/monitoring-output-cache.md`).
+Polls `GET http://localhost:${THEJOB_SERVER_PORT}/api/cache/<cache_id>` and inspects the response's `state` field (`Ok`, `Locked`, `Not Available` — the exact strings `CacheAPI::Get()` returns, see `docs/monitoring-output-cache.md`).
 
 ```bash
 local binary=$(QueryCache -q "abc123_openssl_asan" 300)
@@ -147,9 +147,9 @@ Issues `PUT /api/cache/<cache_id>` with `{"path": "<file>"}`. Returns `64` immed
 AddGlobalParam "AFL_CORES_GRAMMAR" "4"
 ```
 
-- Values accumulate in `THEJOB_GLBPARMS` for the duration of the step (double quotes in `value` are escaped automatically).
-- Written to `THEJOB_ENV_PATH` **only at step end, and only if `THEJOB_UNIQ_STEP=1`** — an earlier attempt in a retry chain does not propagate its params.
-- Available to later steps of the same task as plain shell variables (via `SetupEnv`'s `eval`), **not** to concurrently running parallel steps.
+- Values accumulate in the `THEJOB_GLBPARMS` associative array for the duration of the step, and set `THEJOB_GLBPARMS_MODIFIED` so `executor.sh` knows there's something new to persist.
+- Written to `THEJOB_ENV_PATH` via `SaveGlobalParam` **only at step end, and only if `THEJOB_UNIQ_STEP=1` and at least one `AddGlobalParam` call happened this step** — an earlier attempt in a retry chain does not propagate its params, and a step that never calls `AddGlobalParam` doesn't rewrite the file. `SaveGlobalParam` writes to a temp file and renames it into place (atomic against a concurrent reader); if it fails, `executor.sh` fails the step (`THEJOB_RETVAL=1`) even if the entrypoint itself succeeded.
+- Available to later steps of the same task as plain shell variables (loaded by `SetupEnv` via `LoadGlobalParam`, one `KEY=value` line per param — see [executor.md](executor.md)), **not** to concurrently running parallel steps.
 
 ---
 
@@ -318,6 +318,7 @@ Experiment() {
 - The next step's `SetupEnv` reads and `eval`s `THEJOB_ENV_PATH` — each param becomes a real shell variable.
 - Task-level `args` (submitted at `POST /api/task/new`) are seeded into `THEJOB_ENV_PATH` the same way, once, before the first step runs (`Task::PrepareToRun()`), so they are indistinguishable from global params to later steps.
 - When a step has retries (`nb_retry > 1`) and `THEJOB_UNIQ_STEP=0` (not the last attempt), params are **not** written to disk — only the final attempt in a retry chain propagates params forward.
+- `PATCH /api/task/<id>/args` (see [api.md](api.md)) queues additional args server-side (`Task::argsToUpdate_`); they're merged into the task's args around its next unique step (`Task::ApplyPendingArgs()`, both just before and just after that step runs), so they show up to steps from that point on the same way as any other task-level arg — not necessarily to a step already running when the call is made.
 
 ---
 

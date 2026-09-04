@@ -293,16 +293,37 @@ Calls `Schedule::CancelStep(taskID, stepUUID)`, which scans the step list for th
 ### Update Task Priority
 
 ```
-PATCH /api/task/<taskID>/<priority>
+PATCH /api/task/<taskID>/priority/<priority>
 ```
 
-Regex: `/api/task/(\d+)/(-?\d+)` — this route is **not present in the README's summary table** but is registered and functional. `priority` is a signed integer (`int64_t`); larger values are scheduled sooner. Calls `Schedule::TaskUpdatePriority(taskID, newPriority)`, which sets `Task::priority_` and re-orders the task's steps within the scheduler's internal step list so it stays sorted with higher-priority tasks earlier. No-op (returns success) if the new priority equals the current one.
+Regex: `/api/task/(\d+)/priority/(-?\d+)`. `priority` is a signed integer (`int64_t`); larger values are scheduled sooner. Calls `Schedule::TaskUpdatePriority(taskID, newPriority)`, which sets `Task::priority_` and re-orders the task's steps within the scheduler's internal step list so it stays sorted with higher-priority tasks earlier. No-op (returns success) if the new priority equals the current one.
 
 **Response `200 OK`:**
 ```json
 { "success": true }
 ```
 **Response `500 Internal Server Error`** if no step for `taskID` was found: `{ "success": false, "error": "step cancel failed" }` (the error message is copy-pasted from the cancel-step path in the current implementation).
+
+---
+
+### Update Task Args
+
+```
+PATCH /api/task/<taskID>/args
+```
+
+Regex: `/api/task/(\d+)/args$`. Body is a multipart/urlencoded form with one `args[KEY]=value` field per argument to set, exactly like the `args[...]` fields accepted by `POST /api/task/new` (an empty `KEY` is rejected). Calls `Schedule::TaskUpdateArgs(taskID, newArgs)` → `TasksManager::TaskUpdateArgs()` → `Task::UpdateArgs()`, which merges `newArgs` into the task's pending-updates map (`Task::argsToUpdate_`); existing pending keys are overwritten, others are kept.
+
+The merged args are not applied to `Task::args_` synchronously. They take effect the next time `Task::ApplyPendingArgs()` runs, which happens right before and right after the task's next **unique** step (the last/only attempt of a step, `next_ == this`) executes:
+- If the task is still `Pending`, the pending args are merged directly into `Task::args_` in memory.
+- If the task is `Running`, `Task::args_` is reloaded from `THEJOB_ENV_PATH` (picking up anything the shell side wrote via `AddGlobalParam`/`SaveGlobalParam`), the pending args are merged in, and the result is written back to `THEJOB_ENV_PATH` — so a call to this endpoint is visible to the *next* step that runs, not necessarily instantly.
+
+**Response `200 OK`:**
+```json
+{ "success": true }
+```
+**Response `400 Bad Request`** if `taskID` doesn't match a known task: `{ "success": false, "error": "update task args failed" }`
+**Response `500 Internal Server Error`** on a malformed form (e.g. an empty key in `args[]`) or any other exception: `{ "success": false, "error": "<exception message>" }`
 
 ---
 
@@ -522,7 +543,8 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | GET | `/files/*` (prefix match) | `RequestHandlerFiles` |
 | POST | `/api/task/new` (literal) | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCachePut` |
-| PATCH | `/api/task/(\d+)/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/task/(\d+)/priority/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/task/(\d+)/args$` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancel` |
 | DELETE | `/api/task/(\d+)/step/(\d+)` | `RequestHandlerTaskCancelStep` |
 | OPTIONS | any URI (dispatched on method alone, no URI match) | `RequestHandlerOptions` |

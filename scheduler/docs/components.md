@@ -98,6 +98,7 @@ Key methods called by HTTP handlers:
 - `GetOutput(type, taskID, stepUUID, stepID, data)` — reads live or archived stdout/stderr.
 - `CancelTask(taskID)` / `CancelStep(taskID, stepUUID)` — forwards to `Schedule`, tagging the cancel source as `"rest api request"`.
 - `TaskUpdatePriority(taskID, newPriority)` — re-orders a task's steps in the pending queue.
+- `TaskUpdateArgs(taskID, newArgs)` — queues arg updates, applied around the task's next unique step (see [task-step-lifecycle.md](task-step-lifecycle.md)).
 - `GetTaskData(taskID, ...)` / `GetTaskFinalData(taskID, ...)` — resolve state/artefact file paths for a running or archived task.
 - `TaskManagerStateFile()` — path to `tasksmanager.json`, streamed directly by `/api/tasks/running`.
 
@@ -156,13 +157,13 @@ The central scheduling engine. Implements `ExecutorsProvider`. Owns `TasksManage
 
 ## `Task` (`schedule/task.hxx` / `.cxx`)
 
-Workflow container. `id_` is a `uint64_t` assigned by `TasksManager::CreateTask()` as the submission time in milliseconds since epoch (monotonically bumped if two tasks land in the same millisecond). Holds `root_steps_` (the DAG entry points), `configurations_` (`StepConfigurations`), `args_`, `publish_` (a `Publish` config copy), `executor_`/`executor_data_`, and per-task filesystem paths (`run_root_path_`, `logs_path_`, `artefacts_path_`, ...). Two constructors: one builds a task from a submitted flow JSON (`CreateStepsFromJson`), the other rebuilds a task from a previously-serialized JSON blob (used by the disabled crash-recovery path). `FinalizeAndArchive()` moves `logs/`/`artefacts/` into the export directory, writes the task JSON snapshot, and returns an `ArchiveJob` for the `Archiver`.
+Workflow container. `id_` is a `uint64_t` assigned by `TasksManager::CreateTask()` as the submission time in milliseconds since epoch (monotonically bumped if two tasks land in the same millisecond). Holds `root_steps_` (the DAG entry points), `configurations_` (`StepConfigurations`), `args_`, `publish_` (a `Publish` config copy), `executor_`/`executor_data_`, and per-task filesystem paths (`run_root_path_`, `logs_path_`, `artefacts_path_`, ...). Two constructors: one builds a task from a submitted flow JSON (`CreateStepsFromJson`), the other rebuilds a task from a previously-serialized JSON blob (used by the disabled crash-recovery path). `FinalizeAndArchive()` moves `logs/`/`artefacts/` into the export directory, writes the task JSON snapshot, and returns an `ArchiveJob` for the `Archiver` — or, if the task never left `Pending`, just deletes the run folders (`DeleteRunFolders()`) and returns early. `args_` can be updated at runtime via `UpdateArgs()`/`ApplyPendingArgs()` (queued in `argsToUpdate_`, applied around the next unique step) — see [task-step-lifecycle.md](task-step-lifecycle.md).
 
 ---
 
 ## `Step` (`schedule/step.hxx` / `.cxx`)
 
-Single executable unit with a private state machine: `Pending → Running → Done / TimedOut / Cancelled / Shutdown / LaunchError`. `IsReady()` is true when `state_ == Pending && depend_from_.empty()`. Steps are linked both as a retry chain (`next_`/`previous_`) and as a DAG (`dependencies_`/`depend_from_`). `ID()` is `"<step_id>-<rank_id>-<attempt_id>"`, used to name log/monitor files. `Execute()` calls `Task::PrepareToRun()` on the first step of a task, then delegates to `task_->executor_->Execute(*this)`.
+Single executable unit with a private state machine: `Pending → Running → Done / TimedOut / Cancelled / Shutdown / LaunchError`. `IsReady()` is true when `state_ == Pending && depend_from_.empty()`. Steps are linked both as a retry chain (`next_`/`previous_`) and as a DAG (`dependencies_`/`depend_from_`). `ID()` is `"<step_id>-<rank_id>-<attempt_id>"`, used to name log/monitor files. `Execute()` delegates to `Task::Execute(this, uniqueStep)` (`uniqueStep = next_ == this`), which applies any pending arg updates for a unique step, calls `Task::PrepareToRun()` the first time the task runs (`state_ == Pending`), then `task_->executor_->Execute(*this)` — see [task-step-lifecycle.md](task-step-lifecycle.md).
 
 ---
 

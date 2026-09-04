@@ -304,13 +304,16 @@ bool ns_Schedule::Step::TaskFirstStep() {
 }
 
 bool ns_Schedule::Step::TaskLastStep() {
-  if (dependencies_.empty() || task_->request_cancel_) {
+  if (dependencies_.empty()) {
     for(ns_Schedule::Step* itStep = next_; itStep != this; itStep = itStep->next_) {
       if (!itStep->end_processed_) {
         return false;
       }
     }
     return true;
+  }
+  if (task_->request_cancel_) {
+    return task_->AllOtherStepsProcessedAfterCancel(this);
   }
   return false;
 }

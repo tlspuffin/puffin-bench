@@ -173,11 +173,12 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
 }
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
-    uint16_t cachePort, ns_System::Linux& os)
+    uint16_t serverPort, ns_System::Linux& os)
     : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
       nbCoresMax_(config_.nbCores_), coresFree_(config_.cores_), nbChild_(0), 
-      cachePort_(cachePort), cgroupRoot_(config.cgroupPath_), cgroupRootCapabilities_(0), 
-      cgroupDisableUpdateSliceUser_(false), cpuMaxLoad_(config_.cpuMaxLoad_), memMinAllowed_(0)
+      serverPort_(serverPort), cgroupRoot_(config.cgroupPath_), 
+      cgroupRootCapabilities_(0), cgroupDisableUpdateSliceUser_(false), 
+      cpuMaxLoad_(config_.cpuMaxLoad_), memMinAllowed_(0)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -271,7 +272,7 @@ bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
   return true;
 }
 
-bool ns_Executor::Local::TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data) {
+bool ns_Executor::Local::TaskFinalize(ExecutorTaskData* data, ns_Schedule::Task* task) {
   ns_Executor::LocalTaskData* localTaskData = 
       dynamic_cast<ns_Executor::LocalTaskData*>(data);
   if (localTaskData == nullptr) {
@@ -766,7 +767,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         << "THEJOB_PARAMETERS_PATH=\"" << localData->step_parameters_file_ << "\"\n"
         << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
         << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
-        << "THEJOB_CACHE_PORT=\"" << cachePort_ << "\"\n"
+        << "THEJOB_SERVER_PORT=\"" << serverPort_ << "\"\n"
         << "THEJOB_USER_STATE_FILE=\"" << localData->user_state_file_ << "\"\n"
         << "THEJOB_FLAG_FILE=\"" << localTaskData->flag_file_ << "\"\n"
         << "THEJOB_DONE_FILE=\"" << localData->done_file_ << "\"\n";
@@ -1126,6 +1127,12 @@ void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAll
   }
   stats.AddMember("storage", storages, alloc);
   root.AddMember("stats", stats, alloc);
+}
+
+void ns_Executor::Local::SyncTaskEnvironment(ExecutorTaskData* data) const {
+}
+
+void ns_Executor::Local::UpdateTaskEnvironment(ExecutorTaskData* data) {
 }
 
 void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label) {

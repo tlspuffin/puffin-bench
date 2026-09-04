@@ -51,6 +51,7 @@ executes — not at task-creation time.
 | `executor_data_` | `ExecutorTaskData*` | Per-task executor state (e.g. cgroup path, `LocalTaskData`) |
 | `root_steps_` | `list<Step*>` | Entry points (no dependencies) |
 | `args_` | `unordered_map` | Global key/value parameters, merged with the JSON `args` block |
+| `argsToUpdate_` | `unordered_map` | Pending args queued by `PATCH /api/task/<id>/args`, merged into `args_` by `Task::ApplyPendingArgs()` (guarded by `argsMutex_`) — see "Task Args" below |
 | `configurations_` | `StepConfigurations` | Named step configuration profiles with defaults |
 | `state_` | `Task::State` | `Pending`, `Running`, `Done`, `Cancelled` |
 | `publish_` | `Publish` | Result publication config (server, storage path, goal) |
@@ -77,19 +78,26 @@ Schedule::AddTask()
   v
 Schedule::ScheduleLoop()  [background thread]
   - Executor::FindRunnableSteps() selects ready steps that fit current resources
-  - first time a task's root step runs: Task::PrepareToRun()
-      -> Local::TaskPrepareToRun() (create per-task cgroup dir)
-      -> Task::CreateRunFolders()  (run_root_path_, logs_path_, outputs_path_, artefacts_path_)
-      -> state_ = Task::State::Running
+  - step->Execute() -> task_->Execute(step, uniqueStep = (step->next_ == step))
+      - if uniqueStep: Task::ApplyPendingArgs() (apply any args queued via
+        PATCH /api/task/<id>/args before this attempt starts, see "Task Args" below)
+      - first time this task runs (state_ == Task::State::Pending): Task::PrepareToRun()
+          -> Local::TaskPrepareToRun() (create per-task cgroup dir)
+          -> Task::CreateRunFolders()  (run_root_path_, logs_path_, outputs_path_, artefacts_path_)
+          -> Task::SaveGlobalParameters(args_, env_path_)  (seed THEJOB_ENV_PATH)
+          -> state_ = Task::State::Running
+      - executor_->Execute(*step)
   - each step goes through its own state machine (see below)
   |
   v
 Step::TaskLastStep() true for the step that completes the task
   -> Task::FinalizeAndArchive(savePath)
+       - if the task never left Pending (e.g. cancelled before its first step ran):
+         Task::DeleteRunFolders() and return early, skipping everything below
        - moves artefacts/ and logs/ into <exportPath|exportCanceledPath>/<id>/
        - writes <exportPath>/<id>.json (task snapshot)
        - Local::TaskFinalize() reads the per-task flag file into Task::flag_
-       - removes run_root_path_, functions_path_, files_path_
+       - Task::DeleteRunFolders() (removes run_root_path_, functions_path_, files_path_)
        - returns an ArchiveJob describing what to zip
   -> Archiver::AddJob() (async .zip creation + optional publish, see below)
   -> TasksManager::TaskEnded() (task and all its Step objects are deleted)
@@ -100,6 +108,28 @@ immediately — it does not itself touch any Step. It is called under `Schedule:
 (from `Schedule::CancelTask()` or from `Schedule::LimitRessourcesUsages()` on resource pressure).
 The schedule loop, on its next iteration (also under `lockThread_`), scans `steps_` and kills or
 cancels every step of a task with `request_cancel_` set — see the Execution Flow section.
+
+On a cancelled task, `Step::TaskLastStep()` for a step with dependents (`dependencies_` non-empty)
+no longer resolves purely from its own retry/rank ring: it defers to
+`Task::AllOtherStepsProcessedAfterCancel(step)`, which scans **every** step of the task (`Task::steps_`,
+not just this step's ring) and only reports true once every other non-pending step has been fully
+processed (`Step::WasProcessed()` — `end_processed_` set). This avoids finalizing/archiving the task
+while a sibling branch of the DAG is still mid-run.
+
+### Task Args (`PATCH /api/task/<id>/args`)
+
+`Task::UpdateArgs(newArgs)` (called from `TasksManager::TaskUpdateArgs()`, itself from
+`Schedule::TaskUpdateArgs()` behind the `PATCH /api/task/<id>/args` route — see
+[api.md](api.md)) merges `newArgs` into `Task::argsToUpdate_` under `Task::argsMutex_`; it does
+**not** touch `Task::args_` synchronously. `Task::ApplyPendingArgs()` — called from
+`Task::Execute()` right before, and from `Step::EndOfRun()` right after, the task's next unique
+step — drains `argsToUpdate_` into `args_`:
+- Task still `Pending`: merged directly into `args_` in memory (picked up by `PrepareToRun()`'s
+  `SaveGlobalParameters()` call later).
+- Task `Running`: `Executor::SyncTaskEnvironment()`, reload `args_` from `THEJOB_ENV_PATH`
+  (`Task::LoadGlobalParameters()`), merge, `Task::SaveGlobalParameters()` back to
+  `THEJOB_ENV_PATH`, `Executor::UpdateTaskEnvironment()` (both hooks are no-ops for `Local`; see
+  [executor.md](executor.md)).
 
 ### Task JSON persistence
 
@@ -334,12 +364,14 @@ lockThread_ held:  scan steps_ for request_cancel_ -> KillAndMarkCancel()/MarkCa
 ```
 
 `ManageEndOfStep(step)`:
-1. Append the step's JSON to `task->steps_file_` and to the shared `steps_done.json` log.
-2. Remove it from `stepsRunning_` and `steps_`.
-3. If the task was not cancelled: for each downstream step in `dependencies_`, remove this step
+1. `step->EndOfRun()`: if this is the step's last/only attempt (`next_ == step`),
+   `Task::ApplyPendingArgs()` first (see "Task Args" above); then `GatherFilesToLocal()` (no-op in
+   the current `Local` executor — see executor.md).
+2. Append the step's JSON to `task->steps_file_` and to the shared `steps_done.json` log.
+3. Remove it from `stepsRunning_` and `steps_`.
+4. If the task was not cancelled: for each downstream step in `dependencies_`, remove this step
    from that downstream step's `depend_from_`; if now empty, splice the downstream step back into
    `steps_` (becomes eligible for `IsReady()`).
-4. `step->GatherFilesToLocal()` (no-op in the current `Local` executor — see executor.md).
 5. If `step->TaskLastStep()`: `Task::FinalizeAndArchive()` → `Archiver::AddJob()` (if any sources
    were produced) → `users_.Add(task, false)` → `TasksManager::TaskEnded(task)` (deletes the Task
    and every Step in its DAG).

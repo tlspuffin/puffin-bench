@@ -23,10 +23,10 @@ Source of truth: `src/scheduler/schedule/executor/executor.hxx/.cxx`,
 ```cpp
 class Executor {
 public:
-  static Executor* Build(ns_Executor::Config* config, uint16_t cachePort, ns_System::Linux& os);
+  static Executor* Build(ns_Executor::Config* config, uint16_t serverPort, ns_System::Linux& os);
 
   virtual bool TaskPrepareToRun(ns_Schedule::Task* task) = 0;
-  virtual bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data) = 0;
+  virtual bool TaskFinalize(ExecutorTaskData* data, ns_Schedule::Task* task) = 0;
 
   virtual std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps) = 0;
   virtual void Execute(ns_Schedule::Step& step) = 0;
@@ -46,8 +46,18 @@ public:
       std::vector<ExecutorData*> stepsData) const = 0;                                 // (cores_load, memory_load)
   virtual void UpdateStepStats(ExecutorData* data) const = 0;
   virtual void ToJSON(rapidjson::Value& root, rapidjson::MemoryPoolAllocator<>& alloc) const = 0;
+
+  virtual void SyncTaskEnvironment(ExecutorTaskData* data) const = 0;
+  virtual void UpdateTaskEnvironment(ExecutorTaskData* data) = 0;
 };
 ```
+
+`SyncTaskEnvironment`/`UpdateTaskEnvironment` are hooks called by `Task::ApplyPendingArgs()` around
+rewriting `THEJOB_ENV_PATH` for a `Running` task (see [api.md](api.md)'s "Update Task Args"):
+`SyncTaskEnvironment` before reading it back, `UpdateTaskEnvironment` after writing the merged
+result. Both are currently empty no-ops in `Local` — for a purely local process, the file on disk
+*is* the environment already; they exist for a future executor where the task's environment lives
+elsewhere (e.g. on a remote host) and would need an explicit pull/push.
 
 Every method that mutates process state (`Execute`, `CheckFinishedSteps`, `Shutdown`) is called
 by `Schedule::ScheduleLoop()` **without** `Schedule::lockThread_` held — fork/exec, waitpid and
@@ -228,30 +238,35 @@ launcher file path, and the literal `"---"` sentinel). Notable variables: `THEJO
 `THEJOB_FUNCTIONS_PATH`, `THEJOB_ENV_PATH`, `THEJOB_USER_FILES_PATH`, `THEJOB_OUT_PATH`,
 `THEJOB_ARTEFACTS_FILE`, `THEJOB_ARTEFACTS_PATH`, `THEJOB_TOOLS_PATH`, `THEJOB_CORES`,
 `THEJOB_ENTRYPOINT`, `THEJOB_PARAMETERS_PATH`, `THEJOB_STDOUT_PATH`, `THEJOB_STDERR_PATH`,
-`THEJOB_CACHE_PORT`, `THEJOB_USER_STATE_FILE`, `THEJOB_FLAG_FILE`, `THEJOB_DONE_FILE`,
+`THEJOB_SERVER_PORT`, `THEJOB_USER_STATE_FILE`, `THEJOB_FLAG_FILE`, `THEJOB_DONE_FILE`,
 `THEJOB_MONITOR_PARAMETERS_PATH` (if the step has a monitor), `THEJOB_STEP_GROUP_ID` (if grouped).
 
 ### `executor.sh` / `functions.sh` (`scripts/executor.sh`, `scripts/functions.sh`)
 
 `executor.sh` runs as `bash -l`, validates every required `THEJOB_*` variable is present, sources
-`functions.sh` (which itself calls `SetupEnv` at the bottom — evaluates the task-level config file,
-the persisted task env (`THEJOB_ENV_PATH`), and the step parameters file into shell variables),
-then:
+`functions.sh` (which itself calls `SetupEnv` at the bottom — evaluates the task-level config file
+and the step parameters file, and loads the persisted task env (`THEJOB_ENV_PATH`) into
+`THEJOB_GLBPARMS`/shell variables via `LoadGlobalParam`, see below), then:
 
 ```bash
 ${THEJOB_ENTRYPOINT} "$@"          # or ENTRYPOINT__Shutdown if THEJOB_SHUTDOWN=1
 THEJOB_RETVAL=$?
 StopMonitor                        # wait for/collect the background monitor loop, if any
-[[ "$THEJOB_UNIQ_STEP" == 1 ]] && echo "$THEJOB_GLBPARMS" > "$THEJOB_ENV_PATH"   # persist AddGlobalParam()
+if [[ "$THEJOB_UNIQ_STEP" == 1 ]] && [[ -n "$THEJOB_GLBPARMS_MODIFIED" ]]; then
+  SaveGlobalParam "$THEJOB_ENV_PATH" || THEJOB_RETVAL=1   # persist AddGlobalParam(), atomically; failure fails the step
+fi
 echo "$THEJOB_RETVAL" > "$THEJOB_DONE_FILE.tmp" && mv ... "$THEJOB_DONE_FILE"    # atomic sentinel
 exit "$THEJOB_RETVAL"
 ```
 
 `functions.sh` provides the step-script API: `QueryCache`/`SetCache` (talk to the cache HTTP
-server on `THEJOB_CACHE_PORT`), `AddGlobalParam` (persist a variable across steps via
-`THEJOB_ENV_PATH`), `CreateArtefact` (append a JSON line to `THEJOB_ARTEFACTS_FILE`, later consumed
-by `Local::SaveArtefacts()`), `Flag` (atomically write the task-level flag file), and
-`StartMonitor`/`StopMonitor` (spawn/reap the background monitor loop that periodically calls the
+server on `THEJOB_SERVER_PORT`), `AddGlobalParam` (persist a variable across steps via
+`THEJOB_ENV_PATH`; internally backed by the `THEJOB_GLBPARMS` associative array, saved/loaded by
+`SaveGlobalParam`/`LoadGlobalParam`, one `KEY=value` line per entry — see
+[step-script-reference.md](step-script-reference.md)), `CreateArtefact` (append a JSON line to
+`THEJOB_ARTEFACTS_FILE`, later consumed by `Local::SaveArtefacts()`), `Flag` (atomically write the
+task-level flag file), and `StartMonitor`/`StopMonitor` (spawn/reap the background monitor loop
+that periodically calls the
 step's `monitor.entry_point` function and atomically publishes its output to the monitor file
 watched by the inotify Monitor thread — see [threading-synchronization.md](threading-synchronization.md)).
 

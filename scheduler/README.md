@@ -35,7 +35,8 @@ Built for Linux environments, it provides precise control over task execution, r
 | POST | `/api/task/new` | Submit a new task (multipart: flow JSON + script) |
 | GET | `/api/tasks/running` | Snapshot of all tasks and steps |
 | GET | `/api/task/<id>/...` | Step output, final state, artefacts |
-| PATCH | `/api/task/<id>/<priority>` | Update a task's scheduling priority |
+| PATCH | `/api/task/<id>/priority/<priority>` | Update a task's scheduling priority |
+| PATCH | `/api/task/<id>/args` | Update a task's arguments (`args[KEY]=value` form fields) |
 | DELETE | `/api/task/<id>` | Cancel a task |
 | DELETE | `/api/task/<id>/step/<stepUUID>` | Cancel a single step (`stepUUID` is the step's globally-unique `uuid_`, not its per-task `step_id_`) |
 | GET/PUT | `/api/cache/<id>` | Store or retrieve a cached file |

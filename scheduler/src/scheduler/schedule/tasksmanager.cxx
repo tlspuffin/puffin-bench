@@ -207,7 +207,7 @@ ns_Schedule::TasksManager::LoadStatus(rapidjson::Value const& tasksmanager,
 
 std::string ns_Schedule::TasksManager::GetTaskState(uint64_t taskID) {
   std::lock_guard<std::mutex> lock(lock_);
-  for(Task const* task: tasks_) {
+  for(Task* task: tasks_) {
     if (task->id_ == taskID) {
       rapidjson::Document doc;
       doc.SetObject();
@@ -220,6 +220,18 @@ std::string ns_Schedule::TasksManager::GetTaskState(uint64_t taskID) {
     }
   }
   return "";
+}
+
+bool ns_Schedule::TasksManager::TaskUpdateArgs(uint64_t taskID, 
+    std::unordered_map<std::string, std::string>& newArgs) {
+  std::lock_guard<std::mutex> lock(lock_);
+  for(Task* task: tasks_) {
+    if (task->id_ == taskID) {
+      task->UpdateArgs(newArgs);
+      return true;
+    }
+  }
+  return false;
 }
 
 void ns_Schedule::TasksManager::DeleteTaskInternal(ns_Schedule::Task* task) {

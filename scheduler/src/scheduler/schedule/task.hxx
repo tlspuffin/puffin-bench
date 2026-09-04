@@ -102,26 +102,38 @@ public:
 
   void Cancel(std::string const& source);
 
+  void Execute(ns_Schedule::Step* step, bool uniqueStep);
   bool PrepareToRun();
 
   struct ArchiveJob FinalizeAndArchive(std::filesystem::path const& savePath);
 
   void ToJSON(rapidjson::Value& out, 
       rapidjson::Document::AllocatorType& alloc, 
-      ns_Schedule::Step const* step) const;
+      ns_Schedule::Step const* step);
 
   struct ns_Schedule::SRessourcesSummary UpdateStats(std::vector<ns_Schedule::Step*> steps);
 
   rapidjson::Document FlagJSON() const;
 
+  bool AllOtherStepsProcessedAfterCancel(ns_Schedule::Step* step) const;
+
+  void UpdateArgs(std::unordered_map<std::string, std::string>& newArgs);
+  void ApplyPendingArgs();
+
 private:
   bool CreateRunFolders();
+  bool DeleteRunFolders();
 
   void CreateStepsFromJson(rapidjson::Value const& configJSON);
 
   void Destroy();
 
+  bool IsPending() const;
+
   std::list<ns_Schedule::Step*> steps_;
+
+  std::mutex argsMutex_;
+  std::unordered_map<std::string, std::string> argsToUpdate_;
 
   static std::unordered_map<std::string, std::string> 
   LoadGlobalParameters(std::filesystem::path const& file);
@@ -140,6 +152,10 @@ inline rapidjson::Document Task::FlagJSON() const  {
     flagDoc.Parse("{}");
   }
   return flagDoc;
+}
+
+inline bool Task::IsPending() const {
+  return executor_data_ == nullptr;
 }
 
 };

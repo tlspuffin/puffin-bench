@@ -602,7 +602,7 @@ export class TaskCard {
 
     try {
       let response = await fetch(
-          `http://${window.location.host}/api/task/${taskID}/${newPriority}`,
+          `http://${window.location.host}/api/task/${taskID}/priority/${newPriority}`,
           { method: 'PATCH' }
       );
       let data = { success: false };

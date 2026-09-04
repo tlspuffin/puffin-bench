@@ -35,7 +35,7 @@
 bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
-    ns_System::Linux& os, uint16_t cachePort) 
+    ns_System::Linux& os, uint16_t serverPort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
       threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
       monitor_(config.monitorsPath_), archiver_(), os_(os), users_(users)
@@ -43,7 +43,7 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::Users
   static int installHandler = InstallSigUSRHandler();
 
   for (auto const& executorConfig : config.executors_) {
-    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, cachePort, os_);
+    ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, serverPort, os_);
     executors_.insert(std::make_pair<>(executor->Name(), executor));
   }
 
@@ -236,6 +236,16 @@ bool ns_Schedule::Schedule::TaskUpdatePriority(uint64_t taskID, int64_t newPrior
   return true;
 }
 
+bool ns_Schedule::Schedule::TaskUpdateArgs(uint64_t taskID, 
+    std::unordered_map<std::string, std::string>& newArgs) {
+  std::lock_guard<std::mutex> lock(lockThread_);
+  if (!tasksManager_.TaskUpdateArgs(taskID, newArgs)) {
+    return false;
+  }
+  SaveStatus(false);
+  return true;
+}
+
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {
   auto const& executorIT = executors_.find(name);
   if (executorIT == executors_.end()) {
@@ -346,32 +356,32 @@ void ns_Schedule::Schedule::GetOutput(
   }
 }
 
-bool ns_Schedule::Schedule::GetTaskData(std::string const& task_id, 
+bool ns_Schedule::Schedule::GetTaskData(std::string const& taskID, 
     std::string& fileStateJSON, std::string& fileArtefacts) {
-  if (GetTaskFinalData(task_id, fileStateJSON, fileArtefacts)) {
+  if (GetTaskFinalData(taskID, fileStateJSON, fileArtefacts)) {
     return true;
   }
-  fileStateJSON = tasksManager_.GetTaskState(stoull(task_id));
+  fileStateJSON = tasksManager_.GetTaskState(stoull(taskID));
   return !fileStateJSON.empty();
 }
 
-bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& task_id, 
+bool ns_Schedule::Schedule::GetTaskFinalData(std::string const& taskID, 
     std::string& fileStateJSON, std::string& fileArtefacts) const {
-  fileStateJSON = config_.exportPath_ / (task_id + ".json");
-  fileArtefacts = config_.exportPath_ / (task_id + ".zip");
+  fileStateJSON = config_.exportPath_ / (taskID + ".json");
+  fileArtefacts = config_.exportPath_ / (taskID + ".zip");
   bool artefactFound = std::filesystem::exists(fileArtefacts);
   if (!artefactFound) {
-    fileArtefacts = config_.exportPath_ / (task_id + ".tgz");
+    fileArtefacts = config_.exportPath_ / (taskID + ".tgz");
     artefactFound = std::filesystem::exists(fileArtefacts);
   }
   if (std::filesystem::exists(fileStateJSON) && artefactFound) {
     return true;
   }
-  fileStateJSON = config_.exportCanceledPath_ / (task_id + ".json");
-  fileArtefacts = config_.exportCanceledPath_ / (task_id + ".zip");
+  fileStateJSON = config_.exportCanceledPath_ / (taskID + ".json");
+  fileArtefacts = config_.exportCanceledPath_ / (taskID + ".zip");
   artefactFound = std::filesystem::exists(fileArtefacts);
   if (!artefactFound) {
-    fileArtefacts = config_.exportCanceledPath_ / (task_id + ".tgz");
+    fileArtefacts = config_.exportCanceledPath_ / (taskID + ".tgz");
     artefactFound = std::filesystem::exists(fileArtefacts);
   }
   if (std::filesystem::exists(fileStateJSON) && artefactFound) {
@@ -520,6 +530,9 @@ inline bool ns_Schedule::Schedule::ProcessDelayedCleanup(
 void ns_Schedule::Schedule::ManageEndOfStep(
     ns_Schedule::Step* step, std::ofstream& stepsDoneFile) {
   DEBUG_STEP_MSG("Step removed", step);
+
+  step->EndOfRun();
+
   AppendStepToFinishLog(step->task_->steps_file_, *step);
   AppendStepToFinishLog(stepsDoneFile, *step);
 
@@ -540,7 +553,6 @@ void ns_Schedule::Schedule::ManageEndOfStep(
     }
   }
   steps_.remove(step);
-  step->GatherFilesToLocal();
 
   if (step->TaskLastStep()) {
     uint64_t task_id = step->TaskID();

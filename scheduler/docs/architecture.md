@@ -84,7 +84,7 @@ main()
        OSAPI_       = Linux(15s interval, {"run": runPath_, "export": exportPath_})
        cacheAPI_    = CacheAPI(configCache)
        usersAPI_    = UsersAPI(configSchedule)
-       scheduleAPI_ = ScheduleAPI(configSchedule, usersAPI_, OSAPI_, cachePort)
+       scheduleAPI_ = ScheduleAPI(configSchedule, usersAPI_, OSAPI_, serverPort)
          → constructs Schedule, which:
              - builds one Executor per entry in schedule.executors_ (only "local"
                by default)
@@ -132,7 +132,8 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 | GET | `/files/*` | `RequestHandlerFiles` |
 | POST | `/api/task/new` | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/<id>` | `RequestHandlerCachePut` |
-| PATCH | `/api/task/<id>/<priority>` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/task/<id>/priority/<priority>` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/task/<id>/args` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/<id>` | `RequestHandlerTaskCancel` |
 | DELETE | `/api/task/<id>/step/<uuid>` | `RequestHandlerTaskCancelStep` |
 | OPTIONS | any path | `RequestHandlerOptions` |
@@ -243,4 +244,5 @@ All dependencies below (except OpenSSL and the `zip`/`xxd` command-line tools) a
 | Content-addressed cache | Steps can skip recompilation by ID; `computeMD5` is accepted on `Put` but not currently implemented (no MD5 is ever computed or checked); `Cache::Put` is non-blocking (enqueues and returns — the background `CacheLoop()` thread does the actual copy) |
 | State written to `tasksmanager.json` | Allows external tools (dashboard, scripts) to read state without hitting the API — the board's `GET /api/tasks/running` handler literally streams this file back |
 | Cancelled tasks archived separately | `<exportPath>/Canceled/` keeps cancelled tasks distinct from completed runs |
-| Task priority is mutable at runtime | `PATCH /api/task/<id>/<priority>` re-splices a task's pending steps within the shared `steps_` queue, which is kept sorted by descending `Task::priority_` |
+| Task priority is mutable at runtime | `PATCH /api/task/<id>/priority/<priority>` re-splices a task's pending steps within the shared `steps_` queue, which is kept sorted by descending `Task::priority_` |
+| Task args are mutable at runtime | `PATCH /api/task/<id>/args` queues new key/values in `Task::argsToUpdate_`; they're merged into `Task::args_` (and `THEJOB_ENV_PATH` if the task is `Running`) by `Task::ApplyPendingArgs()`, called around the task's next unique step rather than synchronously from the HTTP thread |

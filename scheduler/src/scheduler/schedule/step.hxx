@@ -79,6 +79,8 @@ public:
   bool IsTimedOut() const;
   bool IsOSKilled() const;
 
+  bool WasProcessed() const;
+
   std::chrono::time_point<std::chrono::system_clock> StartTime() const;
   std::chrono::milliseconds RunTime() const;
 
@@ -108,6 +110,8 @@ public:
   std::string GID() const;
 
   void UpdateStats();
+
+  void EndOfRun();
 
   ns_Schedule::Task* task_;
   std::string name_;
@@ -204,6 +208,10 @@ inline bool Step::IsTimedOut() const {
   return (timeout_ > 0) && (elapsed.count() >= timeout_);
 }
 
+inline bool Step::WasProcessed() const {
+  return end_processed_;
+}
+
 inline bool Step::IsOSKilled() const {
   return (state_ == State::Done) && (exit_code_ == Step::exitCode_Killed_);
 }
@@ -289,10 +297,7 @@ inline bool Step::TaskCancelled() {
 }
 
 inline void Step::Execute() {
-  if (TaskFirstStep()) {
-    task_->PrepareToRun();
-  }
-  task_->executor_->Execute(*this);
+  task_->Execute(this, next_ == this);
 }
 
 inline void Step::Shutdown() {
@@ -330,6 +335,13 @@ inline std::string Step::GID() const {
   return std::to_string(group_id_ - 1) + '-' +
     std::to_string(rank_id_) + '-' +
     std::to_string(attempt_id_);
+}
+
+inline void Step::EndOfRun() {
+  if (next_ == this) {
+    task_->ApplyPendingArgs();
+  }
+  GatherFilesToLocal();
 }
 
 };

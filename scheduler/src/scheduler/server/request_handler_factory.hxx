@@ -42,7 +42,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   static auto regexTaskGetState = std::regex(R"(/api/task/(\d+)/state$)");
   static auto regexTaskCancel = std::regex(R"(/api/task/(\d+))");
   static auto regexTaskCancelStep = std::regex(R"(/api/task/(\d+)/step/(\d+))");
-  static auto regexTaskUpdatePriority = std::regex(R"(/api/task/(\d+)/(-?\d+))");
+  static auto regexTaskUpdatePriority = std::regex(R"(/api/task/(\d+)/priority/(-?\d+))");
+  static auto regexTaskUpdateArgs = std::regex(R"(/api/task/(\d+)/args$)");
   static auto regexUsersList = std::regex(R"(/api/users$)");
   static auto regexUserJobsTypeList = std::regex(R"(/api/user/([a-zA-Z0-9_-]+)/job_types$)");
   static auto regexUserTasksList = std::regex(R"(/api/user/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)/tasks$)");
@@ -88,6 +89,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       std::smatch matches;
       if (std::regex_match(uri, matches, regexTaskUpdatePriority)) {
         requestHandler = new RequestHandlerTaskUpdatePriority(matches[1].str(), matches[2].str());
+      } else if (std::regex_match(uri, matches, regexTaskUpdateArgs)) {
+        requestHandler = new RequestHandlerTaskUpdateArgs(matches[1].str());
       }
     } else if (method == "DELETE") {
       std::smatch matches;

@@ -51,6 +51,7 @@ REQUESTHANDLER(TaskOutputs, std::string const, std::string const,
 REQUESTHANDLER(TaskCancel, std::string const);
 REQUESTHANDLER(TaskCancelStep, std::string const, std::string const);
 REQUESTHANDLER(TaskUpdatePriority, std::string const, std::string const);
+REQUESTHANDLER(TaskUpdateArgs, std::string const);
 REQUESTHANDLER(TaskGetArtefacts, std::string const);
 REQUESTHANDLER(TaskGetState, bool, std::string const);
 REQUESTHANDLER(UsersList);

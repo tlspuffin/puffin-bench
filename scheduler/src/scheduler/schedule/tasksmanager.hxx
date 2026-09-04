@@ -36,6 +36,9 @@ public:
 
   std::string GetTaskState(uint64_t taskID);
 
+  bool TaskUpdateArgs(uint64_t taskID, 
+    std::unordered_map<std::string, std::string>& newArgs);
+
 private:
   ns_Schedule::Config const& config_;
   std::mutex lock_;

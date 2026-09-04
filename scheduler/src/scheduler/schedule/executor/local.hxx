@@ -68,14 +68,14 @@ public:
 
 class Local : public Executor {
 public:
-  Local(std::string const& name, ns_Executor::LocalConfig const& config, uint16_t cachePort, 
+  Local(std::string const& name, ns_Executor::LocalConfig const& config, uint16_t serverPort, 
       ns_System::Linux& os);
   ~Local();
 
   bool CanRun(ns_Schedule::Step* step) const;
 
   bool TaskPrepareToRun(ns_Schedule::Task* task);
-  bool TaskFinalize(ns_Schedule::Task* task, ExecutorTaskData* data);
+  bool TaskFinalize(ExecutorTaskData* data, ns_Schedule::Task* task);
 
   std::list<ns_Schedule::Step*> FindRunnableSteps(std::list<ns_Schedule::Step*> const& steps);
   void EstimatedStepsStartTime(std::list<ns_Schedule::Step*> const& steps) const;
@@ -96,6 +96,9 @@ public:
   void UpdateStepStats(ExecutorData* data) const;
   void ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const;
 
+  void SyncTaskEnvironment(ExecutorTaskData* data) const;
+  void UpdateTaskEnvironment(ExecutorTaskData* data);
+
 private:
   ns_Executor::LocalConfig const& config_;
   ns_System::Linux& os_;
@@ -103,7 +106,7 @@ private:
   uint64_t nbCoresMax_;
   std::vector<bool> coresFree_;
   uint64_t nbChild_;
-  uint16_t cachePort_;
+  uint16_t serverPort_;
   std::filesystem::path cgroupRoot_;
   int32_t cgroupRootCapabilities_;
   std::string cgroupRootCapabilitiesString_;

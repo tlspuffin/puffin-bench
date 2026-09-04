@@ -40,7 +40,7 @@ std::vector<pid_t> ns_System::ProcessMonitor::GetPidsBySid(pid_t sid) {
     }
     std::string after_comm = line.substr(comm_end + 2);
 
-    LOGD << "Linux process checking " << std::string(entry->d_name) << " : " << after_comm << Log::Flags::End;
+    //LOGD << "Linux process checking " << std::string(entry->d_name) << " : " << after_comm << Log::Flags::End;
 
     int field_count = 0;
     pid_t psid = 0;

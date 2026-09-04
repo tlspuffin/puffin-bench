@@ -22,7 +22,7 @@ Known weaknesses and planned improvements. Items are independent unless noted. N
 
 ## Authentication and authorization
 
-**Current:** The REST API has no authentication mechanism — confirmed no `Authorization`/API-key/HMAC check anywhere in `server/`. Any process with network access can submit tasks, cancel jobs, change priority, or read output. CORS is wide open (`Access-Control-Allow-Origin: *`).
+**Current:** The REST API has no authentication mechanism — confirmed no `Authorization`/API-key/HMAC check anywhere in `server/`. Any process with network access can submit tasks, cancel jobs, change priority or args, or read output. CORS is wide open (`Access-Control-Allow-Origin: *`).
 
 **Improvement:** Add at minimum a shared-secret header check or mTLS, advisable for any non-local deployment.
 
