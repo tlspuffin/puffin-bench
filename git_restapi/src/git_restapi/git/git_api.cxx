@@ -19,8 +19,9 @@ ns_GIT::GitAPI::GitAPI(Config const config, std::string const& name,
   char buffer[1024]{0};
   std::string outputStr;
   std::string repoPath = directory_ / "repo";
-  std::string commandLine = "git -C \"" + (directory_ / "repo").string() + 
-      "\" fetch --all >/dev/null 2>&1 || git clone --filter=blob:none " + 
+  std::string commandLine = "export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=echo; "
+      "git -C \"" + (directory_ / "repo").string() +
+      "\" fetch --all >/dev/null 2>&1 || git clone --filter=blob:none " +
       url + " \"" + repoPath + "\" 2>&1 1>/dev/null";
   FILE* output = popen(commandLine.c_str(), "r");
   if (output == nullptr) {
