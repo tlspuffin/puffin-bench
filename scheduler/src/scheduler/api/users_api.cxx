@@ -63,7 +63,7 @@ bool ns_API::UsersAPI::Add(ns_Schedule::Task* task, bool running) {
   value.RemoveMember("publish_link");
   value.AddMember("publish_link", rapidjson::Value(task->publish_link_.c_str(), alloc_), alloc_);
   value.RemoveMember("flag");
-  value.AddMember("flag", rapidjson::Value(task->FlagJSON(), alloc_), alloc_);
+  value.AddMember("flag", task->FlagJSON(alloc_), alloc_);
   value.RemoveMember("end_timestamp");
   value.AddMember("end_timestamp", task->estimatedEndTime_, alloc_);
   return SaveNoLock();

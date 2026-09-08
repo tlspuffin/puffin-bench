@@ -1,5 +1,6 @@
 import { TaskCard } from './taskcard.js';
 import { Clipboard } from './clipboard.js';
+import * as Launchers from './launchers/launchers.js';
 
 const ui = {
   users: document.getElementById('container-users'),
@@ -7,7 +8,7 @@ const ui = {
   tasks: document.getElementById('container-tasks'),
 }
 
-const taskCard = new TaskCard({ onRefresh: () => {} });
+const taskCard = new TaskCard({ onRefresh: () => {}, launchers: Launchers.launchers });
 
 const currentSelection = {
   name: null,

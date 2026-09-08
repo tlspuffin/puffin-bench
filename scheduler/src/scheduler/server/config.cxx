@@ -5,6 +5,7 @@
 #include "embeded/scheduler/html/board/logsmanager_js.h"
 #include "embeded/scheduler/html/board/terminal_js.h"
 #include "embeded/scheduler/html/board/clipboard_js.h"
+#include "embeded/scheduler/html/board/dropmenu_js.h"
 #include "embeded/scheduler/html/board/board_html.h"
 #include "embeded/scheduler/html/board/board_css.h"
 #include "embeded/scheduler/html/board/board_js.h"
@@ -83,6 +84,7 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       std::tuple{ "board/logsmanager.js", LogsManager_JS_data, LogsManager_JS_size },
       std::tuple{ "board/terminal.js", Terminal_JS_data, Terminal_JS_size },
       std::tuple{ "board/clipboard.js", Clipboard_JS_data, Clipboard_JS_size },
+      std::tuple{ "board/dropmenu.js", Dropmenu_JS_data, Dropmenu_JS_size },
       std::tuple{ "board/board.html", Board_HTML_data, Board_HTML_size },
       std::tuple{ "board/board.css", Board_CSS_data, Board_CSS_size },
       std::tuple{ "board/board.js", Board_JS_data, Board_JS_size },

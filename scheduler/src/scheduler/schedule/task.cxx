@@ -37,7 +37,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
     request_cancel_(false), cancel_source_(), publish_(), 
     md5_(std::move(md5)), state_(Task::State::Pending), publish_link_(), 
-    flag_(), apiURL_(apiURL), priority_(0), estimatedEndTime_(0), argsToUpdate_()
+    flag_(), apiURL_(apiURL), priority_(0), estimatedEndTime_(0), launcher_(), 
+    argsToUpdate_()
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
@@ -90,6 +91,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   }
 
   priority_ = GetOrDefault<int64_t>(configJSON, "priority", priority_);
+
+  launcher_ = ParseJSONObject(configJSON, "launcher", false);
 
   CreateStepsFromJson(configJSON);
 }
@@ -238,6 +241,8 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     priority_ = Get<int64_t>(config, "priority");
 
     estimatedEndTime_ = Get<int64_t>(config, "estimated_end_time");
+
+    launcher_ = Get<std::string>(config, "launcher");
 
     if ((config.HasMember("argsToUpdate")) && (config["argsToUpdate"].IsArray())) {
       rapidjson::Value const& argsArray = config["argsToUpdate"];
@@ -479,13 +484,15 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
 
   out.AddMember("state", rapidjson::Value(StateEnumToString(state_).c_str(), alloc), alloc);
   out.AddMember("publish_link", rapidjson::Value(publish_link_.c_str(), alloc), alloc);
-  out.AddMember("flag", rapidjson::Value(FlagJSON(), alloc), alloc);
+  out.AddMember("flag", FlagJSON(alloc), alloc);
 
   out.AddMember("api_url", rapidjson::Value(apiURL_.c_str(), alloc), alloc);
 
   out.AddMember("priority", priority_, alloc);
 
   out.AddMember("estimated_end_time", estimatedEndTime_, alloc);
+
+  out.AddMember("launcher", StringToJSON(alloc, launcher_), alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {

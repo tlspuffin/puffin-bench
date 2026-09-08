@@ -8,7 +8,7 @@ document.head.appendChild(link);
 const mods = await Promise.all(config.projects.map(p => import(`./${p}/joblauncher.js`)));
 export const launchers = mods.map((m, i) => {
   const instance = new m.JobLauncher();
-  return { label: config.projects[i], open: () => instance.open() };
+  return { label: config.projects[i], open: (args) => instance.open(args) };
 });
 
 const menu = document.createElement('div');
@@ -48,9 +48,12 @@ function ShowLauncherMenu(event) {
   }), 0);
 }
 
+export function BuildUI() {
+  nextTaskBt.id = 'new-task';
+  nextTaskBt.classList.add('new-task');
+  nextTaskBt.innerText = '+';
+  nextTaskBt.onclick = ShowLauncherMenu;
+  document.body.appendChild(nextTaskBt);
+}
+
 const nextTaskBt = document.createElement('button');
-nextTaskBt.id = 'new-task';
-nextTaskBt.classList.add('new-task');
-nextTaskBt.innerText = '+';
-nextTaskBt.onclick = ShowLauncherMenu;
-document.body.appendChild(nextTaskBt);

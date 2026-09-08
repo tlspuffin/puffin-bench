@@ -6,6 +6,7 @@ export class TaskCard {
 
   // Options
   #onRefresh;
+  #launchers;
 
   /**
    * @param {object}   options
@@ -13,6 +14,44 @@ export class TaskCard {
    */
   constructor(options = {}) {
     this.#onRefresh = options.onRefresh ?? (() => {});
+    this.#launchers = options.launchers ??  [];
+
+    DropMenu.CreateStyle({
+      label: `
+        ._dm_Label {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 26px;
+          height: 26px;
+          border-radius: 6px;
+          color: #aaa;
+          font-weight: bold;
+          user-select: none;
+          cursor: pointer;
+          transition: background 0.2s, color 0.2s;
+        }
+        ._dm_Label:hover {
+          background: rgba(255,255,255,0.08);
+          color: #fff;
+        }`,
+      actions: `
+        ._dm_Actions {
+          width: max-content;
+          position: absolute;
+          right: 0px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          z-index: 9999;
+          background: #2d2d2d;
+          border: 1px solid #404040;
+          border-radius: 10px;
+          padding: 10px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+          gap: 8px;
+        }`
+    });
   }
 
   // ── Public ───────────────────────────────────────────────────
@@ -31,10 +70,10 @@ export class TaskCard {
     steps.forEach(byId => byId.forEach(attempts =>
       attempts.forEach(s => { if (s.state === 'Running' || s.state === 'Pending') activeCount++; })
     ));
-    const displayDropMenu = (activeCount > 0) && (!task.request_cancel);
+    const taskRunning = (activeCount > 0) && (!task.request_cancel);
 
     const actions = [];
-    if (displayDropMenu) {
+    if (taskRunning) {
       actions.push(this.#CreatePriorityUI(task));
 
       const cancelButton = document.createElement('button');
@@ -49,13 +88,27 @@ export class TaskCard {
       actions.push(cancelButton);
     }
 
+    if (task?.launcher?.project) {
+      const restartButton = document.createElement('button');
+      restartButton.className = 'card-task-restart-btn';
+      restartButton.textContent = 'New task ...';
+      restartButton.onclick = (event) => {
+        const launcherEntry = 
+            this.#launchers.find(launcher => launcher.label === task.launcher.project);
+        if (launcherEntry) {
+          launcherEntry.open(task.launcher?.custom ?? null);
+        }
+      };
+      actions.push(restartButton);
+    }
+
+    const dropmenu = (actions.length > 0) ? 
+      (new DropMenu({label: '...', actions: actions})).Get() : document.createElement('div');
+
     let username = '';
     if (task?.user && (task.user != '')) {
       username = task.user;
     }
-
-    const dropmenu = displayDropMenu ? 
-      (new DropMenu({label: '...', actions: actions})).Get() : document.createElement('div');
 
     const divCardHeader = document.createElement('div');
     divCardHeader.id = 'card-task-header';
@@ -536,6 +589,7 @@ export class TaskCard {
     }
 
     const label = document.createElement('div');
+    label.className = 'card-priority-label';
     label.innerText = 'priority'
     div.appendChild(label);
 
@@ -563,6 +617,7 @@ export class TaskCard {
     div.appendChild(input);
 
     const button = document.createElement('button');
+    button.className = 'card-priority-set-btn';
     button.innerText = 'Set'
     div.appendChild(button);
 

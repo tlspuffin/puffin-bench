@@ -7,11 +7,7 @@ export class DropMenu {
   static #lastLabel = null;
 
   constructor({ label, actions }) {
-    if (DropMenu.#style === null) {
-      DropMenu.#CreateStyle();
-      document.head.appendChild(DropMenu.#style);
-      document.addEventListener('click', DropMenu.#ClickDocument);
-    }
+    DropMenu.CreateStyle();
     this.#ui = document.createElement('div');
     this.#ui.className = '_dm_Root';
     const labelDiv = document.createElement('div');
@@ -44,19 +40,22 @@ export class DropMenu {
     DropMenu.#widgets.delete(this);
   }
 
-  static #CreateStyle() {
-    DropMenu.#style = document.createElement('style');
-    DropMenu.#style.innerHTML = `
-      ._dm_Hide {
-        display: none !important
-      }
+  static CreateStyle({root, label, actions } = {}) {
+    if (DropMenu.#style !== null) {
+      return;
+    }
+    const rootStyle = root ?? `
       ._dm_Root {
         position: relative;
       }
+    `;
+    const labelStyle = label ?? `
       ._dm_Label {
         user-select: none;
         cursor: pointer;
       }
+    `;
+    const actionsStyle = actions ?? `
       ._dm_Actions {
         width: max-content;
         position: absolute;
@@ -71,6 +70,17 @@ export class DropMenu {
         z-index: 9999;
       }
     `;
+    DropMenu.#style = document.createElement('style');
+    DropMenu.#style.innerHTML = `
+      ._dm_Hide {
+        display: none !important
+      }
+      ${rootStyle}
+      ${labelStyle}
+      ${actionsStyle}
+    `;
+    document.head.appendChild(DropMenu.#style);
+    document.addEventListener('click', DropMenu.#ClickDocument);
   }
 
   #ClickActionDiv(event) {
