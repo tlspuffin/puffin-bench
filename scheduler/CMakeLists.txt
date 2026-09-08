@@ -143,6 +143,7 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh" "${CMAKE_
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/logsmanager.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/logsmanager_js.h" LogsManager_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/terminal.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/terminal_js.h" Terminal_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/clipboard.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/clipboard_js.h" Clipboard_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/dropmenu.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/dropmenu_js.h" Dropmenu_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.html" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_html.h" Board_HTML)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_css.h" Board_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_js.h" Board_JS)
@@ -173,6 +174,7 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/archiver.cxx
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/scripts/executor_sh.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/scripts/functions_sh.h
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/logsmanager_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/terminal_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/clipboard_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/dropmenu_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h 

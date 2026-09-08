@@ -78,6 +78,8 @@ public:
 
   uint64_t estimatedEndTime_;
 
+  std::string launcher_;
+
   std::mutex metadata_index_lock_;
 
   Task(uint64_t id, std::string const& name, 
@@ -113,7 +115,7 @@ public:
 
   struct ns_Schedule::SRessourcesSummary UpdateStats(std::vector<ns_Schedule::Step*> steps);
 
-  rapidjson::Document FlagJSON() const;
+  rapidjson::Value FlagJSON(rapidjson::Document::AllocatorType& alloc) const;
 
   bool AllOtherStepsProcessedAfterCancel(ns_Schedule::Step* step) const;
 
@@ -130,6 +132,8 @@ private:
 
   bool IsPending() const;
 
+  rapidjson::Value StringToJSON(rapidjson::Document::AllocatorType& alloc, std::string const& data) const;
+
   std::list<ns_Schedule::Step*> steps_;
 
   std::mutex argsMutex_;
@@ -145,13 +149,17 @@ private:
   static State StateStringToEnum(std::string const& state);
 };
 
-inline rapidjson::Document Task::FlagJSON() const  {
-  rapidjson::Document flagDoc;
-  flagDoc.Parse((flag_.empty() ? "{}" : flag_).c_str());
-  if (flagDoc.HasParseError()) {
-    flagDoc.Parse("{}");
+inline rapidjson::Value Task::FlagJSON(rapidjson::Document::AllocatorType& alloc) const {
+  return StringToJSON(alloc, flag_);
+}
+
+inline rapidjson::Value Task::StringToJSON(rapidjson::Document::AllocatorType& alloc, std::string const& data) const  {
+  rapidjson::Document doc;
+  doc.Parse((data.empty() ? "{}" : data).c_str());
+  if (doc.HasParseError()) {
+    doc.Parse("{}");
   }
-  return flagDoc;
+  return rapidjson::Value(doc, alloc);
 }
 
 inline bool Task::IsPending() const {

@@ -1,5 +1,6 @@
 import { TaskCard } from './taskcard.js';
 import { Clipboard } from './clipboard.js';
+import * as Launchers from './launchers/launchers.js';
 
 const ui = {
   users: document.getElementById('container-users'),
@@ -7,7 +8,7 @@ const ui = {
   tasks: document.getElementById('container-tasks'),
 }
 
-const taskCard = new TaskCard({ onRefresh: () => {} });
+const taskCard = new TaskCard({ onRefresh: () => {}, launchers: Launchers.launchers });
 
 const currentSelection = {
   name: null,
@@ -139,7 +140,11 @@ function BuildTimesLine(tasks) {
   });
 }
 
-async function SelectUsers(name, jobType) {
+function SelectUserAllUsers(jobType) {
+
+}
+
+async function SelectUser(name, jobType) {
   const results = {
     running: [],
     done: [],
@@ -149,8 +154,6 @@ async function SelectUsers(name, jobType) {
     min: 0,
     max: 0,
   }
-
-  DisableUI();
 
   try {
     const response = await fetch(`http://${window.location.host}/api/user/${name}/${jobType}/tasks`);
@@ -176,15 +179,23 @@ async function SelectUsers(name, jobType) {
       }
     }
   } catch (e) {
-    console.error(`Error in SelectUsers (0): ${e}`);
+    console.error(`Error in SelectUser: ${e}`);
   }
+
+  return results;
+}
+
+async function DisplaySelectUser(name, jobType) {
+  DisableUI();
+
+  const results = await name !== Array.isArray(name) ? SelectUser(name, jobType) : SelectUserAllUsers(jobType);
 
   try {
     currentSelection.name = name;
     currentSelection.jobType = jobType;
     BuildTimesLine(results);
   } catch (e) {
-    console.error(`Error in SelectUsers (1): ${e}`);
+    console.error(`Error in DisplaySelectUser: ${e}`);
   }
 
   EnableUI();
@@ -196,14 +207,14 @@ function BuildUserSelection(user, userData) {
 
   const userNameDiv = document.createElement('span');
   userNameDiv.className = 'user-name';
-  userNameDiv.innerText = `${user}:`;
+  userNameDiv.innerText = Array.isArray(user) ? '\u200BAll\u200B:' :  `${user}:`;
   userDiv.appendChild(userNameDiv);
 
   userData.jobs_type.forEach(jobType => {
       const userSelection = document.createElement('button');
       userSelection.className = 'user-selection';
       userSelection.innerText = jobType;
-      userSelection.onclick = SelectUsers.bind(null, user, jobType);
+      userSelection.onclick = DisplaySelectUser.bind(null, user, jobType);
       userDiv.appendChild(userSelection);
   });
   return userDiv;
@@ -253,10 +264,13 @@ async function BuildUsersMenu() {
     ui.users.innerHTML = '';
     ui.timesline.innerHTML = '';
     ui.tasks.innerHTML = '';
-    let users = await ListUsers();
-    for(let user in users) {
+    let jobsType = new Set();
+    const users = await ListUsers();
+    for(const user in users) {
+      jobsType = jobsType.union(new Set(users[user]?.jobs_type))
       ui.users.appendChild(BuildUserSelection(user, users[user]));
     }
+    ui.users.appendChild(BuildUserSelection(/*'\u200BAll\u200B'*/Object.keys(users), { jobs_type: jobsType }));
   } catch(e) {
     console.error(`Error in BuildUsersMenu: ${e}`);
   }
@@ -266,7 +280,7 @@ async function BuildUsersMenu() {
 async function Refresh() {
   await BuildUsersMenu();
   if ((currentSelection.name !== null) && (currentSelection.jobType != null)) {
-    await SelectUsers(currentSelection.name, currentSelection.jobType);
+    await DisplaySelectUser(currentSelection.name, currentSelection.jobType);
     if (currentSelection.task !== null) {
       await SelectTask(currentSelection.task);
     }
@@ -276,7 +290,7 @@ async function Refresh() {
 function UpdateSortIndexTimesLine(event) {
   currentSelection.timesLineIndex = event?.target?.value ?? 'id';
   if (currentSelection.name !== null && currentSelection.jobType !== null) {
-    SelectUsers(currentSelection.name, currentSelection.jobType);
+    DisplaySelectUser(currentSelection.name, currentSelection.jobType);
   }
 }
 

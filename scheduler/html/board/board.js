@@ -1,5 +1,5 @@
 import { TaskCard } from './taskcard.js';
-import './launchers/launchers.js';
+import * as Launchers from './launchers/launchers.js';
 
 let taskCard;
 
@@ -169,11 +169,12 @@ function Main() {
       document.getElementById('custom_header').innerHTML = data;
     });
 
-  taskCard = new TaskCard({ onRefresh: RefreshBoard });
+  taskCard = new TaskCard({ onRefresh: RefreshBoard, launchers: Launchers.launchers });
 
   document.getElementById('refresh-button').onclick = RefreshBoard;
 
   RefreshBoard();
 }
 
+Launchers.BuildUI();
 Main();
