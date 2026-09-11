@@ -252,13 +252,44 @@ Resolution order (`Schedule::GetOutput()`):
 
 ---
 
-### Cancel a Task
+### Cancel or Delete a Task
 
 ```
 DELETE /api/task/<taskID>
 ```
 
-Calls `Schedule::CancelTask(taskID, "rest api request")`, which finds the first step belonging to the task, calls `Task::Cancel()` (sets `cancel_source_`, `state_ = Cancelled`, `request_cancel_ = true`), and persists state. The scheduler loop stops dispatching new steps for the task and kills the currently running step on the next iteration.
+One route, two behaviours, selected by whether the task is still live. `ScheduleAPI::CancelOrDeleteTask()` evaluates `Schedule::CancelTask(taskID, "rest api request") || Schedule::DeleteTaksDone(taskID)`: `CancelTask` returns `true` only when a step of that task is present in `steps_`, so a live task is cancelled and an archived one is deleted. There is no way to delete a task that is still running — cancel it first, then delete it once archiving has completed.
+
+**Cancel path (task still live).** Finds the first step belonging to the task, calls `Task::Cancel()` (sets `cancel_source_`, `state_ = Cancelled`, `request_cancel_ = true`), and persists state. The scheduler loop stops dispatching new steps for the task and kills the currently running step on the next iteration.
+
+**Delete path (task already archived).** `Schedule::DeleteTaksDone()` permanently removes the task's stored results. It is irreversible and there is no confirmation step server-side.
+
+1. Locates the archive by trying `<id>.zip` then `<id>.tgz`, in `exportPath_` then `exportCanceledPath_`. The probe uses `is_symlink()` before `exists()`, so a published task whose archive is a symlink is found even if the symlink is broken. The task JSON is then taken as `<id>.json` next to the archive found; if it is missing, the request fails.
+2. Reads `<id>.json` and resolves the publisher from its `task.publish` object via `Publish::ReadJSON()` — by publisher **name** against the *current* `config.json`, not against the configuration in force when the task was archived.
+3. If the task was published (its archive is a symlink) and a `publish_link` is present, calls `Publish::DeleteResults()` — see below. A server error aborts the whole request before anything is deleted.
+4. Deletes the published files first (resolved through `read_symlink()`), then, for each one actually removed, its local symlink. Pairing is per file: if one remote deletion fails, its local symlink is kept so the remote file stays reachable and nothing is orphaned.
+5. Removes the task's entry from `users.json` (`UsersAPI::DeleteTask()`) only if every deletion succeeded.
+
+A task that was never published has no remote side: steps 3 and 4 collapse to deleting the two local files directly.
+
+**`Publish::DeleteResults()` — publish-server contract.** Sends `DELETE` to `base_url + notify_endpoint` (the same endpoint as the publication notification, distinguished by method) with a multipart form:
+
+| Field | Value |
+|---|---|
+| `link` | the task's `publish_link` with `base_url` stripped, e.g. `/files/tlspuffin#1789081004154` |
+| `task_id` | decimal task ID |
+
+The link is sent in the **body**, not in the request URI: a URI fragment (`#…`) is never transmitted to a server (RFC 3986 §3.5), so the task identifier would be lost in the request line.
+
+The response is mapped to a three-way decision:
+
+| Response | Meaning | Scheduler behaviour |
+|---|---|---|
+| `2xx` | the server deleted the files | deletes only the local symlinks |
+| `404` | the server does not know this task | resolves the symlinks and deletes the published files itself |
+| any other status, or no response | error | aborts, deletes nothing, returns failure |
+
+`DeleteResults()` also returns "not handled" (and the scheduler does the work itself) when the publisher has no `base_url` or no `notify_endpoint`, or when `publish_link` does not start with the configured `base_url` — which happens when a publisher's URL changed after the task was archived.
 
 **Response `200 OK`:**
 ```json
@@ -267,8 +298,10 @@ Calls `Schedule::CancelTask(taskID, "rest api request")`, which finds the first 
 
 **Response `200 OK` on failure** (status code is not changed by the handler in the error path, only internally by the API call before throwing — actual observed body):
 ```json
-{ "success": false, "error": "task cancel failed" }
+{ "success": false, "error": "task cancel/delete failed" }
 ```
+
+A single `success: false` covers every failure mode — unknown task, task still being archived, filesystem error, publish-server error. The server log carries the distinction; see `docs/roadmap.md` for the known limitations of this path.
 
 ---
 
@@ -545,7 +578,7 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | PUT | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/(\d+)/priority/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
 | PATCH | `/api/task/(\d+)/args$` | `RequestHandlerTaskUpdateArgs` |
-| DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancel` |
+| DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/(\d+)/step/(\d+)` | `RequestHandlerTaskCancelStep` |
 | OPTIONS | any URI (dispatched on method alone, no URI match) | `RequestHandlerOptions` |
 

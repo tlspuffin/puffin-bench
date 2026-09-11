@@ -5,6 +5,7 @@
 #include "../../utils/variables.hxx"
 #include "../../utils/file_compressed.hxx"
 #include "../../utils/logs.hxx"
+#include "../../utils/rapidjson.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -244,6 +245,126 @@ bool ns_Schedule::Schedule::TaskUpdateArgs(uint64_t taskID,
   }
   SaveStatus(false);
   return true;
+}
+
+bool ns_Schedule::Schedule::DeleteTaksDone(uint64_t taskID) {
+  std::string taskIDStr = std::to_string(taskID);
+  bool isSymLink = false;
+  std::filesystem::path artefact;
+  for(auto const& name: { 
+      config_.exportPath_ / (taskIDStr + ".zip"), 
+      config_.exportCanceledPath_ / (taskIDStr + ".zip"), 
+      config_.exportPath_ / (taskIDStr + ".tgz"), 
+      config_.exportCanceledPath_ / (taskIDStr + ".tgz") }) {
+
+    std::error_code ec;
+    if (std::filesystem::is_symlink(name, ec)) {
+      artefact = name;
+      isSymLink = true;
+      break;
+    } else if (std::filesystem::exists(name, ec)) {
+      artefact = name;
+      break;
+    }
+  }
+  if (artefact.empty()) {
+    LOGW << "Error deleting task " << taskIDStr << ", artefact not found" << Log::Flags::End;
+    return false;
+  }
+
+  std::string json = artefact.parent_path() / (taskIDStr + ".json");
+  std::error_code ec;
+  if (!std::filesystem::exists(json, ec)) {
+    LOGW << "Error deleting task " << taskIDStr << ", json not found" << Log::Flags::End;
+    return false;
+  }
+
+  int remoteDelete = 0;
+  try {
+    rapidjson::Document doc;
+    if (!ReadJSONFile(json, doc)) {
+      return false;
+    }
+    auto const& itTask = doc.FindMember("task");
+    if ((itTask == doc.MemberEnd()) || (!itTask->value.IsObject())) {
+      return false;
+    }
+    auto const& task = itTask->value;
+    auto const& itTaskPublish = task.FindMember("publish");
+    if ((itTaskPublish == task.MemberEnd()) || (!itTaskPublish->value.IsObject())) {
+      return false;
+    }
+    auto const& itTaskPublishLink = task.FindMember("publish_link");
+    std::string publishLink = ((itTaskPublishLink != task.MemberEnd()) && (itTaskPublishLink->value.IsString())) ?
+        itTaskPublishLink->value.GetString() : users_.GetPublishLink(taskID);
+    if (!publishLink.empty()) {
+      Publish publish;
+      publish.ReadJSON(config_.publishers_, itTaskPublish->value);
+      remoteDelete = publish.DeleteResults(taskID, publishLink);
+      if (remoteDelete >= 2) {
+        LOGW << "Error deleting task " << taskIDStr << ", publish server error" << Log::Flags::End;
+        return false;
+      }
+    }
+  } catch (std::exception const& e) {
+    LOGW << "Error deleting task " << taskIDStr << ": " << e.what() << Log::Flags::End;
+    return false;
+  }
+
+  std::vector<std::string> toDeleteLocal = { artefact, json };
+  std::vector<std::string> toDeleteRemote;
+  if (isSymLink && (remoteDelete == 0)) {
+    for (std::string const& file: toDeleteLocal) {
+      std::filesystem::path remoteFile;
+      bool status = std::filesystem::exists(file, ec);
+      if (status && (!ec)) {
+        remoteFile = std::filesystem::read_symlink(file, ec);
+        if (ec) {
+          LOGW << "Error deleting task " << taskIDStr << ": " << 
+              " unable to read link " << file << Log::Flags::End;
+          return false;
+        }
+      }
+      toDeleteRemote.emplace_back(remoteFile);
+    }
+  }
+  bool success = true;
+  std::vector<size_t> deletedRemote;
+  for(size_t i=0; i<toDeleteRemote.size(); ++i) {
+    if (toDeleteRemote[i].empty()) {
+      deletedRemote.push_back(i);
+      continue;
+    }
+    std::filesystem::remove(toDeleteRemote[i], ec);
+    if (!ec) {
+      deletedRemote.push_back(i);
+    } else {
+      success = false;
+    }
+  }
+  if (toDeleteRemote.empty()) {
+    for (std::string const& file: toDeleteLocal) {
+      std::filesystem::remove(file, ec);
+      if (ec) {
+        LOGW << "Error deleting task " << taskIDStr << ": delete fail on " << 
+            file << Log::Flags::End;
+        success = false;
+      }
+    }
+  } else {
+    for(size_t i=0; i<deletedRemote.size(); ++i) {
+      std::filesystem::remove(toDeleteLocal[deletedRemote[i]], ec);
+      if (ec) {
+        LOGW << "Error deleting task " << taskIDStr << ": delete fail on " << 
+            toDeleteLocal[deletedRemote[i]] << Log::Flags::End;
+        success = false;
+      }
+    }
+  }
+  if (success) {
+    users_.DeleteTask(taskID);
+  }
+  return success;
 }
 
 ns_Executor::Executor* ns_Schedule::Schedule::GetExecutor(std::string const& name) const {

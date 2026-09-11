@@ -37,6 +37,7 @@ public:
   bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
   bool TaskUpdateArgs(uint64_t taskID, 
       std::unordered_map<std::string, std::string>& newArgs);
+  bool DeleteTaksDone(uint64_t taskID);
 
   ns_Executor::Executor* GetExecutor(std::string const& name) const;
   void GetOutput(

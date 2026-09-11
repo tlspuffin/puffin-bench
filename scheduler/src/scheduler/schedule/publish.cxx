@@ -4,9 +4,7 @@
 #include <memory>
 #include <iostream>
 #include <fstream>
-#include <Poco/URI.h>
 #include <Poco/Net/HTMLForm.h>
-#include <Poco/Net/HTTPClientSession.h>
 #include <Poco/Net/HTTPSClientSession.h>
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Net/HTTPResponse.h>
@@ -52,7 +50,7 @@ void ns_Schedule::Publish::ToJSON(rapidjson::Value& node,
     rapidjson::Document::AllocatorType& alloc) const {
   node.AddMember("base_url", rapidjson::Value(baseURL_.c_str(), alloc), alloc);
   node.AddMember("notify_endpoint", rapidjson::Value(notifyEndpoint_.c_str(), alloc), alloc);
-  node.AddMember("viewEndpoint_", rapidjson::Value(viewEndpoint_.c_str(), alloc), alloc);
+  node.AddMember("view_endpoint", rapidjson::Value(viewEndpoint_.c_str(), alloc), alloc);
   node.AddMember("check_server_certificat", checkServerCertificat_, alloc);
   node.AddMember("root_storage", rapidjson::Value(rootStorage_.c_str(), alloc), alloc);
   node.AddMember("storage", rapidjson::Value(storage_.c_str(), alloc), alloc);
@@ -110,25 +108,78 @@ void ns_Schedule::Publish::PublishResults(
   }
 }
 
+int ns_Schedule::Publish::DeleteResults(uint64_t taskID, std::string link) const {
+  if (baseURL_.empty() || notifyEndpoint_.empty()) {
+    return 0;
+  }
+  if (link.find(baseURL_) != 0) {
+    LOGW << "Publish remove: no remote file for task " << taskID << Log::Flags::End;
+    return 0;
+  }
+
+  try {
+    Poco::URI uri(baseURL_ + notifyEndpoint_);
+    std::unique_ptr<Poco::Net::HTTPClientSession> session = CreateSession(uri);
+
+    std::string path = uri.getPath().empty() ? "/" : uri.getPath();
+    Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_DELETE, path);
+
+    Poco::Net::HTMLForm form(Poco::Net::HTMLForm::ENCODING_MULTIPART);
+    form.set("link", link.substr(baseURL_.length()));
+    form.set("task_id", std::to_string(taskID));
+    form.prepareSubmit(request);
+
+    LOGD << "Sending remove request to " << path << " for task " << taskID << Log::Flags::End;
+    std::ostream& requestStream = session->sendRequest(request);
+    form.write(requestStream);
+    requestStream.flush();
+
+    Poco::Net::HTTPResponse response;
+    std::istream& responseStream = session->receiveResponse(response);
+    std::string responseBody;
+    Poco::StreamCopier::copyToString(responseStream, responseBody);
+
+    int const status = response.getStatus();
+    if (status == Poco::Net::HTTPResponse::HTTP_NOT_FOUND) {
+      LOGI << "Publish server does not handle task " << taskID <<
+          ", removing files locally" << Log::Flags::End;
+      return 0;
+    }
+    if ((status < 200) || (status >= 300)) {
+      LOGE << "Publish remove failed for task " << taskID << ", server returned " <<
+          status << " : " << responseBody << Log::Flags::End;
+      return 2;
+    }
+    LOGI << "Publish server removed the files of task " << taskID << Log::Flags::End;
+    return 1;
+  } catch (Poco::Exception const& e) {
+    LOGE << "Publish remove failed for task " << taskID << " : " <<
+        e.displayText() << Log::Flags::End;
+    return 2;
+  }
+}
+
+std::unique_ptr<Poco::Net::HTTPClientSession> ns_Schedule::Publish::CreateSession(Poco::URI const& uri) const {
+  std::unique_ptr<Poco::Net::HTTPClientSession> session;
+  if (uri.getScheme() == "https") {
+    Poco::Net::Context::Ptr context = new Poco::Net::Context(
+        Poco::Net::Context::CLIENT_USE, "", "", "",
+        checkServerCertificat_ ? Poco::Net::Context::VERIFY_STRICT : Poco::Net::Context::VERIFY_NONE);
+    session = std::make_unique<Poco::Net::HTTPSClientSession>(
+            uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 443, context);
+  } else {
+    session = std::make_unique<Poco::Net::HTTPClientSession>(
+        uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 80);
+  }
+  session->setTimeout(Poco::Timespan(30, 0));
+  return session;
+}
+
 void ns_Schedule::Publish::PublishToServer(std::vector<std::string> const& files, 
     std::string const& archivePath) {
   try {
     Poco::URI uri(baseURL_ + notifyEndpoint_);
-    std::unique_ptr<Poco::Net::HTTPClientSession> session;
-    if (uri.getScheme() == "https") {
-      Poco::Net::Context::Ptr context = new Poco::Net::Context(
-          Poco::Net::Context::CLIENT_USE,
-          "", "", "",
-          checkServerCertificat_ ? Poco::Net::Context::VERIFY_STRICT : Poco::Net::Context::VERIFY_NONE);
-      std::unique_ptr<Poco::Net::HTTPSClientSession> httpsSession = 
-          std::make_unique<Poco::Net::HTTPSClientSession>(
-              uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 443, context);
-      session = std::move(httpsSession);
-    } else {
-      session = std::make_unique<Poco::Net::HTTPClientSession>(
-          uri.getHost(), uri.getPort() != 0 ? uri.getPort() : 80);
-    }
-    session->setTimeout(Poco::Timespan(30, 0));
+    std::unique_ptr<Poco::Net::HTTPClientSession> session = CreateSession(uri);
 
     std::string path = uri.getPath().empty() ? "/" : uri.getPath();
     Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_POST, path);

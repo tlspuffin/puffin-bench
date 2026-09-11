@@ -134,7 +134,7 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 | PUT | `/api/cache/<id>` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/<id>/priority/<priority>` | `RequestHandlerTaskUpdatePriority` |
 | PATCH | `/api/task/<id>/args` | `RequestHandlerTaskUpdateArgs` |
-| DELETE | `/api/task/<id>` | `RequestHandlerTaskCancel` |
+| DELETE | `/api/task/<id>` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/<id>/step/<uuid>` | `RequestHandlerTaskCancelStep` |
 | OPTIONS | any path | `RequestHandlerOptions` |
 
