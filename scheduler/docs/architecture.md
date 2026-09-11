@@ -170,7 +170,7 @@ The board is accessible at `GET /files/board/board.html`.
 | `logsmanager.js` | Log chunk fetching/streaming helpers (offset-based) used by the log modal |
 | `clipboard.js` | Small "copy to clipboard" helper |
 | `task.html` / `task.js` / `task.css` | Single-task detail view |
-| `history.html` / `history.js` / `history.css` | Task history view |
+| `history.html` / `history.js` / `history.css` | Task history view: browses archived tasks per user and job type (`GET /api/user/<u>/job_types`, `GET /api/user/<u>/<t>/tasks`), renders a timeline sortable on start time (`id`) or end time (`end_timestamp`), and loads the selected task through `GET /api/task/<id>/final_state`. An extra **All** entry in the user menu aggregates every user client-side — one request per user × job\_type pair, ten in flight at a time — optionally filtered on a single job type; in that mode each card also shows which user and job type it came from. See `roadmap.md` for the scaling limit this pattern carries |
 
 Drift note: an earlier revision of this documentation set referenced `html/board/joblauncher.js` and `board/launchers/tlspuffin/jobsconfig.json` as if a single fixed job launcher shipped with the scheduler. That was never accurate for this codebase: the launcher is a generic per-project plugin loader (`launchers/launchers.js` + `launchers/<project>/joblauncher.js`), and no `jobs_config.json`/`jobsconfig.json` file exists anywhere in this repository. See `docs/board-job-launcher.md` for the actual mechanism.
 

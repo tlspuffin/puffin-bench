@@ -142,13 +142,9 @@ h1 {
 }
 
 .timesline-content {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   width: calc(100% - 32px);
   margin-bottom: 4px;
   cursor: pointer;
-  padding: 15px;
   background-color: var(--flag-color, #353535);
   color: white;
   border: 1px solid #404040;
@@ -157,16 +153,30 @@ h1 {
   transition: background 0.2s;
 }
 
-.timesline-content > span:first-child {
+.timesline-content:hover {
+  background: #404040;
+}
+
+.timesline-content.state-done      { --accent-color: #4CAF50; }
+.timesline-content.state-cancelled { --accent-color: red;     }
+
+.timesline-content-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px;
+}
+
+.timesline-content-main > span:first-child {
   flex: 0 0 6em;
   white-space: nowrap;
 }
 
-.timesline-content > span:nth-child(2) {
+.timesline-content-main > span:nth-child(2) {
   flex: 0 0 auto;
 }
 
-.timesline-content > span:nth-child(3) {
+.timesline-content-main > span:nth-child(3) {
   flex: 1 1 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -174,17 +184,19 @@ h1 {
   text-align: left;
 }
 
-.timesline-content > button:last-child {
+.timesline-content-main > button:last-child {
   flex: 0 0 auto;
   margin-left: auto;
 }
 
-.timesline-content:hover {
-  background: #404040;
+.timesline-content-details {
+  display: flex;
+  justify-content: flex-end;
+  align-items: end;
+  padding: 0 15px 10px;
+  font-size: 0.8em;
+  color: #bbb
 }
-
-.timesline-content.state-done      { --accent-color: #4CAF50; }
-.timesline-content.state-cancelled { --accent-color: red;     }
 
 .timesline-content-circle {
   background: var(--accent-color, #404040);
