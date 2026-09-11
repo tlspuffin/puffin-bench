@@ -24,7 +24,42 @@ Known weaknesses and planned improvements. Items are independent unless noted. N
 
 **Current:** The REST API has no authentication mechanism — confirmed no `Authorization`/API-key/HMAC check anywhere in `server/`. Any process with network access can submit tasks, cancel jobs, change priority or args, or read output. CORS is wide open (`Access-Control-Allow-Origin: *`).
 
-**Improvement:** Add at minimum a shared-secret header check or mTLS, advisable for any non-local deployment.
+Since `DELETE /api/task/<id>` also deletes an archived task's results (see "Task deletion" below), the API now exposes an **irreversible** operation with no caller identity: anyone who can reach the port can destroy any user's stored results, including the copies held on the publisher's storage. The task's `user` field is not an identity either — it is free text taken from the multipart form at task creation (`request_handler.cxx`, `form.get("user", "anonymous")`) and never verified.
+
+**Improvement:** Add at minimum a shared-secret header check or mTLS, advisable for any non-local deployment. `RequestHandlerFactory::createRequestHandler()` is the single dispatch point every route passes through before its handler is constructed, so one check there covers the whole API. Ownership enforcement on destructive routes (compare the caller against the `user` recorded in `<id>.json`) requires a real identity first and is a separate step.
+
+---
+
+## Task deletion — a task being archived is indistinguishable from an unknown one
+
+**Current:** `Schedule::ManageEndOfStep()` queues the archive job, records the task in `users.json` (`users_.Add(task, false)`), then destroys the in-memory `Task` — all before the background `Archiver` thread has produced `<id>.zip`. During that window the task is listed in the dashboard's history but has no archive on disk, so `Schedule::DeleteTaksDone()` finds nothing and fails with `artefact not found`, the same answer it gives for a task ID that never existed. The window lasts as long as the archive job takes (queue depth × zip time), and the API's single `success: false` cannot distinguish the two cases either.
+
+The same gap hides archive *failures*: if `Archiver::ProcessJob()` fails, `<id>.json` is left with no `<id>.zip` and nothing ever revisits it. Such a task stays listed, cannot be deleted (the lookup requires an archive), and nothing in the codebase enumerates `exportPath_` to find these leftovers.
+
+**Improvement:** Have `Archiver` keep a small drainable structure of finished jobs (task ID + success/failure, the task's `user`/`job_type` are already in `ArchiveJob::variables_`), protected by its existing mutex and consumed by `Schedule`'s loop with a swap-under-lock, as `TasksManager::DeleteTasks()` already does. `Schedule` then writes an explicit status into `users.json` — archiving / archived / archive failed — since it is the only component that writes that file today, which avoids coupling `Archiver` to `UsersAPI`. The delete path can then refuse an in-progress task explicitly and allow cleanup of a failed one. A crash between a job finishing and the next drain would leave a status stuck at "archiving"; a reconciliation pass at startup, checking such entries against the filesystem the way `UsersAPI::UserTasks()` already self-heals missing ones, closes that without adding durability machinery.
+
+---
+
+## Task deletion — remaining limitations
+
+**Current:** `Schedule::DeleteTaksDone()` deletes published files before their local symlinks, and pairs them per file so that a failed remote deletion keeps its symlink — nothing is silently orphaned. The residual gaps:
+
+- **A partial failure is sound but not replayable.** If one of the two files (archive, JSON) is deleted and the other's remote deletion failed, no data is lost and no orphan is created, but the function requires *both* `<id>.zip`/`.tgz` and `<id>.json` at entry, so a retry exits on `artefact not found` or `json not found`. The leftover then needs manual cleanup.
+- **An unreadable `<id>.json` blocks deletion even with nothing remote.** The publisher is resolved from `task.publish` in that file, so a truncated, hand-edited, or older archived JSON fails the request — including for a task that was never published and therefore has no remote side to protect. Checking `is_symlink()` on both files first would let a purely local task be deleted without the JSON.
+- **No synchronisation with the archiver thread.** `DeleteTaksDone()` runs on the HTTP thread without `lockThread_` (it touches neither `steps_` nor `tasks_`). A delete landing while `Publish::PublishResults()` is moving files can interleave with it — `PublishResults` moves the archive and creates its symlink before doing the same for the JSON, and it ignores the return value of `MoveFileAndCreateSymLink()` (`publish.cxx`), so a half-published task is possible. The window is narrow and the worst case is one orphaned JSON on the publisher's storage.
+- **The failure mode is a single boolean.** `success: false` covers unknown task, in-progress archiving, filesystem error and publish-server error alike; only the server log tells them apart. This matches the rest of the API (`CancelTask`, `CancelStep`), so it is a consistency choice rather than an oversight.
+
+**Improvement:** The first two are small and independent — carry the lookup result into the retry path, and fall back to a filesystem-only decision when the JSON cannot be read. The third needs the delete path to coordinate with the archiver, which the drainable-status work above would make possible. The fourth only becomes worth changing if the API adopts finer status codes generally.
+
+---
+
+## Task deletion — the publish server's `DELETE` endpoint does not exist yet
+
+**Current:** `Publish::DeleteResults()` sends `DELETE` to `base_url + notify_endpoint` with `link` and `task_id` as multipart fields (see `docs/api.md`). Nothing implements the receiving side — that server is outside this repository. Until it does, the behaviour of deleting a *published* task depends entirely on what it returns for an unhandled method on that route: a `404` is read as "not handled" and the scheduler deletes the published files itself (deletion works), while a `405` or a 5xx is read as an error and **every deletion of a published task is refused**.
+
+Two details will matter when implementing it: the endpoint must resolve a task from its view link (`/files/${PACKAGE}#${TASK_ID}`) or from `task_id`, not from the storage paths it received at publication time; and some HTTP frameworks discard the body of a `DELETE` request, in which case the fallback is a dedicated `delete_endpoint` in the publisher configuration carrying the same form over `POST`.
+
+**Improvement:** Implement the endpoint, then confirm the mapping end to end. If the publisher is expected to keep its own index, returning `2xx` (it deletes) is preferable to `404` (the scheduler reaches into its storage tree), since only the former keeps that index consistent.
 
 ---
 

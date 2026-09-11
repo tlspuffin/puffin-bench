@@ -29,7 +29,7 @@ public:
     std::string const& taskID, uint64_t stepUUID, std::string const& stepID, 
     struct FileExtractedText& data);
   bool CancelStep(uint64_t taskID, uint64_t stepID);
-  bool CancelTask(uint64_t taskID);
+  bool CancelOrDeleteTask(uint64_t taskID);
   bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
   bool TaskUpdateArgs(uint64_t taskID, std::unordered_map<std::string, std::string>& newArgs);
   bool GetTaskData(std::string const& taskID, std::string& fileStateJSON, std::string& fileArtefacts);
@@ -48,8 +48,8 @@ inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
   return schedule_.CancelStep(taskID, stepUUID);
 }
 
-inline bool ScheduleAPI::CancelTask(uint64_t taskID) {
-  return schedule_.CancelTask(taskID, "rest api request");
+inline bool ScheduleAPI::CancelOrDeleteTask(uint64_t taskID) {
+  return schedule_.CancelTask(taskID, "rest api request") || schedule_.DeleteTaksDone(taskID);
 }
 
 inline bool ScheduleAPI::TaskUpdatePriority(uint64_t taskID, int64_t newPriority) {

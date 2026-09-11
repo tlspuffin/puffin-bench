@@ -31,9 +31,30 @@ async function DeleteTask(task) {
   if (!confirm(`Delete experiment results of task ${task.id}:\n\t${task.name}`)) {
     return;
   }
+  let requireUIUpdate = false;
   DisableUI();
+  try {
+    const response = await fetch(
+        `http://${window.location.host}/api/task/${task.id}`,
+        { method: 'DELETE' }
+    );
+    const json = await response.json();
+    requireUIUpdate = json?.success;
+    if (!requireUIUpdate) {
+      alert(`Unable to delete task ${json?.error ?? 'unknown error'}`);
+    }
+  } catch(e) {
+    console.error(`Unable to delete ${task.id}: ${e.message}`);
+  }
   EnableUI();
-  alert('Not yet implemented');
+
+  if (requireUIUpdate) {
+    if (currentSelection.task?.id === task.id) {
+      currentSelection.task = null;
+      ui.tasks.innerHTML = '';
+    }
+    await SelectUsers(currentSelection.name, currentSelection.jobType);
+  }
 }
 
 function CreateErrorMessage(message) {
@@ -58,7 +79,7 @@ async function SelectTask(task) {
     }
     currentSelection.task = task;
   } catch (e) {
-    console.error(`Unable to load ${task.id}: ${e.message()}`);
+    console.error(`Unable to load ${task.id}: ${e.message}`);
   }
   EnableUI();
 }
@@ -131,9 +152,10 @@ function BuildTimesLine(tasks) {
   let lastTS = null;
 
   tasks.history.forEach((task) => {
-    let currentTS = new Date(task.id).toDateString();
+    const date = task?.[currentSelection.timesLineIndex] ?? task.id;
+    let currentTS = new Date(date).toDateString();
     if ((lastTS == null) || (lastTS !== currentTS)) {
-      ui.timesline.appendChild(CreateTimelinesDateSeparator(task.id));
+      ui.timesline.appendChild(CreateTimelinesDateSeparator(date));
       lastTS = currentTS;
     }
     ui.timesline.appendChild(CreateTimelinesCard(task));
@@ -224,7 +246,7 @@ async function ListUsersJobsType(users) {
             };
           }
         } catch(e) {
-          console.error(`Server error while retrieving user ${user}: e.message()`);
+          console.error(`Server error while retrieving user ${user}: ${e.message}`);
         }
     })());
     if (promises.length >= 10) {

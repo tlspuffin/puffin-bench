@@ -48,7 +48,7 @@ REQUESTHANDLER(TaskNew);
 REQUESTHANDLER(TasksRunning);
 REQUESTHANDLER(TaskOutputs, std::string const, std::string const, 
     std::string const, std::string const, std::string const , std::string const);
-REQUESTHANDLER(TaskCancel, std::string const);
+REQUESTHANDLER(TaskCancelOrDelete, std::string const);
 REQUESTHANDLER(TaskCancelStep, std::string const, std::string const);
 REQUESTHANDLER(TaskUpdatePriority, std::string const, std::string const);
 REQUESTHANDLER(TaskUpdateArgs, std::string const);

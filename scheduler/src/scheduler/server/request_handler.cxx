@@ -249,7 +249,7 @@ void ns_Server::RequestHandlerTaskOutputs::handleRequest(Poco::Net::HTTPServerRe
   out->flush();
 }
 
-void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerRequest& request,
+void ns_Server::RequestHandlerTaskCancelOrDelete::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   if (ManageCORS(request, response)) {
     return;
@@ -264,9 +264,9 @@ void ns_Server::RequestHandlerTaskCancel::handleRequest(Poco::Net::HTTPServerReq
   try {
     uint64_t taskID = std::stoull(std::get<0>(args_));
 
-    if (!apis_->scheduleAPI_.CancelTask(taskID)) {
+    if (!apis_->scheduleAPI_.CancelOrDeleteTask(taskID)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
-      throw std::runtime_error("task cancel failed");
+      throw std::runtime_error("task cancel/delete failed");
     }
     out = &(response.send());
     *out << R"({"success": true})";
