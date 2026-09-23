@@ -332,7 +332,9 @@ bool ns_Analyze::Generate_Perf_ZST(std::filesystem::path const& inFile,
   }
 
   try {
-    CompressTARZSTD(currentTmpDir, zstFile, true, 4 * 1024 * 1024, 10);
+    if (!CompressTARZSTD(currentTmpDir, zstFile, true, 4 * 1024 * 1024, 10)) {
+      throw std::runtime_error("Unable to generate " + zstFile.string() + " in " + currentTmpDir.string());
+    }
   } catch (std::exception const& e) {
     std::cerr << "Compression failed: " << e.what() << std::endl;
     std::filesystem::remove(zstFile);

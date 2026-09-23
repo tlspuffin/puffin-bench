@@ -11,6 +11,8 @@ public:
   ZSTDCompress(std::string const& outFile, unsigned int maxFrameSize, int compressionLevel =3);
   ~ZSTDCompress();
 
+  bool Close();
+
 private:
   ZSTD_seekable_CStream* zc_;
   FILE* fout_;
@@ -19,5 +21,5 @@ private:
   ZSTD_outBuffer outbuf_;
 };
 
-void CompressTARZSTD(std::string const& srcDir, std::string const& outFile, bool relativePath, unsigned int maxFrameSize, int compressionLevel =3);
+bool CompressTARZSTD(std::string const& srcDir, std::string const& outFile, bool relativePath, unsigned int maxFrameSize, int compressionLevel =3);
 

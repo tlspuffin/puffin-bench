@@ -182,47 +182,89 @@ bool ns_Publish::Index::HaveIndexed(std::string const& srcFile) {
   return false;
 }
 
-bool ns_Publish::Index::Remove(std::filesystem::path const& rootDataPath, 
-    std::string const& key, bool deleteSourceFiles) {
+bool ns_Publish::Index::RemoveKey(std::string const& key, std::vector<std::string>& srcFiles) {
   std::lock_guard lock(lock_);
   auto it = entries_.find(key);
   if (it == entries_.end()) {
-    return true;
+    return false;
   }
-  if (deleteSourceFiles) {
-    std::filesystem::path cacheFile = path_ / it->first;
-    //LOGE << "Delete " << cacheFile << Log::Flags::End;
-    std::error_code ec;
-    if ((!std::filesystem::remove(cacheFile, ec)) || ec) {
-      LOGW << "Error, unable to delete " << cacheFile << Log::Flags::End;
-    }
-    for(auto& [_, infos]: it->second) {
-      DeleteFilesWithPrefix((rootDataPath / infos.srcFiles).replace_extension("."));
-    }
+
+  std::filesystem::path cacheFile = path_ / it->first;
+  LOGD << "Delete " << cacheFile << Log::Flags::End;
+  std::error_code ec;
+  std::filesystem::remove(cacheFile, ec);
+  if (ec) {
+    LOGW << "Error, unable to delete " << cacheFile << Log::Flags::End;
+    return false;
   }
+  
+  for(auto const& [_, infos]: it->second) {
+    srcFiles.push_back(infos.srcFiles);
+  }
+
   entries_.erase(it);
   return true;
 }
 
-bool ns_Publish::Index::Delete(std::filesystem::path const& dataDirectory) {
+bool ns_Publish::Index::Clear(std::filesystem::path const& dataDirectory) {
   std::lock_guard lock(lock_);
-  bool succes = true;
-  std::error_code ec;
+  bool success = true;
   for(auto it = entries_.begin(); it !=  entries_.end(); ) {
-    std::string const& cacheFile = it->first;
-    if (!IsSubDir(dataDirectory, cacheFile)) {
-      ++it;
-      continue;
+    bool doDelete = false;
+    for (auto const& [_, infos]: it->second) {
+      if (IsSubDir(dataDirectory, infos.srcFiles)) {
+        doDelete = true;
+        break;
+      }
     }
-    std::filesystem::remove(path_ / cacheFile, ec);
-    if (ec) {
-      succes = false;
-      LOGE << "Unable to remove cache file " << cacheFile << 
-          ": " << ec.message() << ". Fix issues and retry regenCache" << Log::Flags::End;
+    if (doDelete) {
+      std::filesystem::path cacheFile = path_ / it->first;
+      LOGD << "Delete " << cacheFile << Log::Flags::End;
+      std::error_code ec;
+      std::filesystem::remove(cacheFile, ec);
+      if (!ec) {
+        it = entries_.erase(it);
+        continue;
+      } else {
+        success = false;
+        LOGW << "Error, unable to delete " << cacheFile << Log::Flags::End;
+      }
     }
-    it = entries_.erase(it);
+    ++it;
   }
-  return succes;
+  return success;
+}
+
+bool ns_Publish::Index::ClearOrphelins(std::filesystem::path const& dataDirectory, std::filesystem::path const& rootPath, 
+    uint64_t& nbDelete) {
+  nbDelete = 0;
+  bool success = true;
+  std::lock_guard lock(lock_);
+  for(auto it = entries_.begin(); it !=  entries_.end(); ) {
+    bool doDelete = false;
+    for (auto const& [_, infos]: it->second) {
+      if (IsSubDir(dataDirectory, infos.srcFiles) && (!std::filesystem::exists(rootPath / infos.srcFiles))) {
+        doDelete = true;
+        break;
+      }
+    }
+    if (doDelete) {
+      std::filesystem::path cacheFile = path_ / it->first;
+      LOGD << "Delete " << cacheFile << Log::Flags::End;
+      std::error_code ec;
+      std::filesystem::remove(cacheFile, ec);
+      if (!ec) {
+        ++nbDelete;
+        it = entries_.erase(it);
+        continue;
+      } else {
+        success = false;
+        LOGW << "Error, unable to delete " << cacheFile << Log::Flags::End;
+      }
+    }
+    ++it;
+  }
+  return success;
 }
 
 std::vector<std::string> ns_Publish::Index::List() {
@@ -232,4 +274,15 @@ std::vector<std::string> ns_Publish::Index::List() {
     result.push_back(commitID);
   }
   return result;
+}
+
+std::pair<std::string, std::string> ns_Publish::Index::FindByTaskID(uint64_t taskID) {
+  std::shared_lock lock(lock_);
+  for(auto const& [cacheFile, entries]: entries_) {
+    auto const it = entries.find(taskID);
+    if (it != entries.end()) {
+      return {it->second.srcFiles, cacheFile};
+    }
+  }
+  return {};
 }

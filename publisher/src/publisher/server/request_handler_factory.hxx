@@ -31,8 +31,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
 
   static std::regex reProjectListData(R"(/api/project/([a-zA-Z0-9_-]+)/data$)");
   static std::regex reProjectListCampaigns(R"(/api/project/([a-zA-Z0-9_-]+)/campaigns$)");
-  static std::regex reProjectRegenrateCache(R"(/api/project/([a-zA-Z0-9_-]+)/regenerate_cache(?:\?directory=([a-zA-Z0-9_./-]+))?$)");
-  static std::regex reProjectDeleteData(R"(/api/project/([a-zA-Z0-9_-]+)/data/([a-zA-Z0-9_./-]+)$)");
+  static std::regex reProjectRegenrateCache(R"(/api/project/([a-zA-Z0-9_-]+)/regenerate_cache(?:\?directory=([a-zA-Z0-9_@./-]+))?$)");
+  static std::regex reProjectDeleteData(R"(/api/project/([a-zA-Z0-9_-]+)/data/([a-zA-Z0-9_@./-]+)$)");
 
   RequestHandler* requestHandler = nullptr;
   std::string uri = request.getURI();
@@ -65,7 +65,9 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       requestHandler = new RequestHandlerFiles(apis_.publishAPI_.HTMLStorage(), uri);
     }
   } else if (method == Poco::Net::HTTPRequest::HTTP_DELETE) {
-    if (std::regex_match(uri, matches, reProjectDeleteData)) {
+    if ((uri == "/api/notify") || (uri.find("/api/notify?") == 0)) {
+      requestHandler = new RequestHandlerProjectDeleteTask();
+    } else if (std::regex_match(uri, matches, reProjectDeleteData)) {
       requestHandler = new RequestHandlerProjectDeleteData(matches[1].str(), matches[2].str());
     }
   }

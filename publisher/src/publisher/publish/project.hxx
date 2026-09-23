@@ -24,6 +24,8 @@ public:
       ListCampaigns();
 
   bool DeleteData(std::string const& cacheFile);
+  bool HasTask(uint64_t taskID);
+  bool DeleteTask(uint64_t taskID);
 
 private:
   Index index_;
@@ -31,5 +33,9 @@ private:
   bool ScanRules(std::filesystem::path const& rulesPath);
   std::unordered_set<std::string> filesInError_;
 };
+
+inline bool Project::HasTask(uint64_t taskID) {
+  return !(index_.FindByTaskID(taskID).first.empty());
+}
 
 };

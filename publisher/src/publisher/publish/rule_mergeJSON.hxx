@@ -16,8 +16,7 @@ public:
       rapidjson::Value const& parameters);
 
   bool Apply(std::string const& file, std::filesystem::path const& outPath, 
-      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged, 
-      bool generateArtefact);
+      uint64_t& timestamp, std::string& outFile, std::unordered_set<std::string>& libsManaged);
 
 private:
 

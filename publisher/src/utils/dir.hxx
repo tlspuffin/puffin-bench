@@ -24,3 +24,11 @@ inline bool IsSubDir(std::filesystem::path const& parentDir,
       *parentIt == *subDirIt; ++parentIt, ++ subDirIt);
   return parentIt == parentDirNormalized.end();
 }
+
+inline bool NormalizeSubPath(std::filesystem::path& path) {
+  path = path.lexically_normal();
+  if (path.is_absolute()) {
+    return false;
+  }
+  return path.empty() || (*path.begin() != "..");
+}

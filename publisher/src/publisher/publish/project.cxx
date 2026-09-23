@@ -1,6 +1,7 @@
 #include "project.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/dir.hxx"
 #include <unordered_set>
 
 ns_Publish::Project::Project(std::string const& projectName, std::string const& projectPath) 
@@ -30,12 +31,26 @@ ns_Publish::Project::Project(std::string const& projectName, std::string const& 
 }
 
 bool ns_Publish::Project::ScanStorage(bool regenCache, std::filesystem::path directory) {
-  if (!directory.is_relative()) {
+  if (!NormalizeSubPath(directory)) {
+    LOGE << "Invalid scan directory " << directory << Log::Flags::End;
     return false;
   }
+
   try {
+    bool forceSave = false;
     if (regenCache) {
-      index_.Delete(directory);
+      if (!index_.Clear(directory)) {
+        LOGE << "Cache purge failed for " << directory << 
+            ", aborting regeneration. Fix issues and retry" << Log::Flags::End;
+        return false;
+      }
+    } else {
+      uint64_t nbDelete = 0;
+      if (!index_.ClearOrphelins(directory, path, nbDelete)) {
+        LOGW << "Orphan reconciliation incomplete for " << 
+            (directory.empty() ? path : path / directory) << Log::Flags::End;
+      }
+      forceSave = nbDelete != 0;
     }
     int processedCount = 0;
     LOGI << "Scan " << path << Log::Flags::End;
@@ -57,7 +72,11 @@ bool ns_Publish::Project::ScanStorage(bool regenCache, std::filesystem::path dir
       }
 
       if (filesInError_.find(file) != filesInError_.end()) {
-        continue;
+        if (regenCache) {
+          filesInError_.erase(file);
+        } else {
+          continue;
+        }
       }
 
       std::string projectRelativeStr = file.lexically_relative(path);
@@ -72,7 +91,7 @@ bool ns_Publish::Project::ScanStorage(bool regenCache, std::filesystem::path dir
           uint64_t timestamp = 0;
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged, !regenCache)) {
+          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged)) {
             index_.Add(outFile, timestamp, projectRelativeStr, libsManaged);
             ++processedCount;
           } else {
@@ -82,7 +101,7 @@ bool ns_Publish::Project::ScanStorage(bool regenCache, std::filesystem::path dir
         }
       }
     }
-    if (processedCount > 0 || regenCache) {
+    if ((processedCount > 0) || regenCache || forceSave) {
       index_.Save(outputPath / ".index.json");
       LOGI << "Processed and indexed " << processedCount << " files" << Log::Flags::End;
     }
@@ -110,7 +129,7 @@ bool ns_Publish::Project::ScanFiles(std::vector<std::filesystem::path> const& fi
           uint64_t timestamp = 0;
           std::string outFile;
           std::unordered_set<std::string> libsManaged;
-          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged, true)) {
+          if (rule->Apply(file, outputPath, timestamp, outFile, libsManaged)) {
             index_.Add(outFile, timestamp, projectRelativeStr, libsManaged);
             ++processedCount;
           } else {
@@ -176,9 +195,31 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std:
 }
 
 bool ns_Publish::Project::DeleteData(std::string const& cacheFile) {
-  bool success = index_.Remove(path, cacheFile, true);
+  std::vector<std::string> srcFiles;
+  if (!index_.RemoveKey(cacheFile, srcFiles)) {
+    return false;
+  }
+  for(std::string const& file: srcFiles) {
+    if (!DeleteFilesWithPrefix((path / file).replace_extension("."))) {
+      LOGE << "Unable to find " << path / file << Log::Flags::End;
+    }
+  }
   index_.Save(outputPath / ".index.json");
-  return success;
+  return true;
+}
+
+bool ns_Publish::Project::DeleteTask(uint64_t taskID) {
+  auto const [srcFile, cacheFile] = index_.FindByTaskID(taskID);
+  if (srcFile.empty()) {
+    return true;
+  }
+  std::filesystem::path const directory = std::filesystem::path(srcFile).parent_path();
+
+  if (!DeleteFilesWithPrefix((path / srcFile).replace_extension("."))) {
+    LOGE << "Unable to delete " << path / srcFile << " and siblings" << Log::Flags::End;
+    return false;
+  }
+  return ScanStorage(false, directory);
 }
 
 bool ns_Publish::Project::ScanRules(std::filesystem::path const& rulesPath) {

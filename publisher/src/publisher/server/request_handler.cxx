@@ -219,6 +219,46 @@ void ns_Server::RequestHandlerProjectRegenerateCache::handleRequest(Poco::Net::H
   out->flush();
 }
 
+void ns_Server::RequestHandlerProjectDeleteTask::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
+  response.setContentType("application/json");
+  uint64_t taskID = 0;
+  bool haveTaskID = false;
+  try {
+    Poco::URI const uri(request.getURI());
+    for (auto const& [name, value]: uri.getQueryParameters()) {
+      if (name == "task_id") {
+        taskID = std::stoull(value);
+        haveTaskID = true;
+        break;
+      }
+    }
+  } catch (std::exception const&) {
+    haveTaskID = false;
+  }
+
+  if (!haveTaskID) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+    response.send() << R"({"success": false, "error": "missing or invalid task_id"})";
+    return;
+  }
+
+  switch (apis_->publishAPI_.DeleteResults(taskID)) {
+    case 0:
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send() << R"({"success": false, "error": ")" << taskID << R"( is not published here"})";
+      return;
+    case 1:
+      response.send() << R"({"success": true, "info": ")" << taskID << R"( accepted for removal"})";
+      return;
+  }
+  response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+  response.send() << R"({"success": false, "error": "unable to remove task )" << taskID << R"("})";
+}
 
 void ns_Server::RequestHandlerProjectDeleteData::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {

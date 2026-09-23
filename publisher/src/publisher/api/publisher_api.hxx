@@ -23,6 +23,7 @@ public:
 
   bool RegenerateDataCache(std::string const& projectName, std::string const& directory);
   bool DeleteData(std::string const& projectName, std::string const& cacheFile);
+  int DeleteResults(uint64_t taskID);
 
 private:
   ns_Publish::Config const& config_;
@@ -68,5 +69,8 @@ inline bool PublishAPI::DeleteData(std::string const& projectName, std::string c
   return publish_.DeleteData(projectName, cacheFile);
 }
 
+inline int PublishAPI::DeleteResults(uint64_t taskID) {
+  return publish_.DeleteResults(taskID);
+}
 
 };
