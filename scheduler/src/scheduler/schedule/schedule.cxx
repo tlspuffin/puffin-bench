@@ -6,6 +6,7 @@
 #include "../../utils/file_compressed.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
+#include "../../utils/dir.hxx"
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -294,17 +295,12 @@ bool ns_Schedule::Schedule::DeleteTaksDone(uint64_t taskID) {
     if ((itTaskPublish == task.MemberEnd()) || (!itTaskPublish->value.IsObject())) {
       return false;
     }
-    auto const& itTaskPublishLink = task.FindMember("publish_link");
-    std::string publishLink = ((itTaskPublishLink != task.MemberEnd()) && (itTaskPublishLink->value.IsString())) ?
-        itTaskPublishLink->value.GetString() : users_.GetPublishLink(taskID);
-    if (!publishLink.empty()) {
-      Publish publish;
-      publish.ReadJSON(config_.publishers_, itTaskPublish->value);
-      remoteDelete = publish.DeleteResults(taskID, publishLink);
-      if (remoteDelete >= 2) {
-        LOGW << "Error deleting task " << taskIDStr << ", publish server error" << Log::Flags::End;
-        return false;
-      }
+    Publish publish;
+    publish.ReadJSON(config_.publishers_, itTaskPublish->value, false);
+    remoteDelete = publish.DeleteResults(taskID);
+    if (remoteDelete >= 2) {
+      LOGW << "Error deleting task " << taskIDStr << ", publish server error" << Log::Flags::End;
+      return false;
     }
   } catch (std::exception const& e) {
     LOGW << "Error deleting task " << taskIDStr << ": " << e.what() << Log::Flags::End;
@@ -352,6 +348,16 @@ bool ns_Schedule::Schedule::DeleteTaksDone(uint64_t taskID) {
       }
     }
   } else {
+    if (!toDeleteRemote[0].empty()) {
+      std::filesystem::path prefix =
+          std::filesystem::path(toDeleteRemote[0]).replace_extension(".");
+      if (!DeleteFilesWithPrefix(prefix)) {
+        LOGW << "Error deleting task " << taskIDStr <<
+            ": unable to delete the files generated from " << toDeleteRemote[0] <<
+            Log::Flags::End;
+        success = false;
+      }
+    }
     for(size_t i=0; i<deletedRemote.size(); ++i) {
       std::filesystem::remove(toDeleteLocal[deletedRemote[i]], ec);
       if (ec) {

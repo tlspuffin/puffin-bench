@@ -149,6 +149,23 @@ CreateArtefact() {
   jq -c -n "${jq_args[@]}" "$jq_expr" >> "${THEJOB_ARTEFACTS_FILE}"
 }
 
+CancelTask() {
+  local reason="${1:-cancelled by step}"
+  echo "CancelTask: ${reason}"
+  echo "CancelTask: ${reason}" >&2
+  local response
+  response=$(curl -s -X DELETE --data-urlencode "source=step ${THEJOB_STEP_ID}: ${reason}" \
+      "http://localhost:${THEJOB_SERVER_PORT}/api/task/${THEJOB_TASK_ID}") || {
+    echo "CancelTask: unable to reach scheduler" >&2
+    return 1
+  }
+  echo "${response}" | grep -q '"success": *true' || {
+    echo "CancelTask: scheduler refused: ${response}" >&2
+    return 1
+  }
+  return 0
+}
+
 EndDirectChild() {
   local pid=$1;
   if [ -z "${pid}" ]; then

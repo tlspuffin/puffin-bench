@@ -16,33 +16,54 @@ ns_Schedule::Publish::Publish()
 
 ns_Schedule::Publish::Publish(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
     rapidjson::Value const& config) : Publish() {
-  ReadJSON(publishersConfig, config);
+  ReadJSON(publishersConfig, config, true);
 }
 
 void ns_Schedule::Publish::ReadJSON(std::unordered_map<std::string, PublisherConfig> const& publishersConfig, 
-    rapidjson::Value const& config) {
+    rapidjson::Value const& config, bool extractFromConfig) {
+  baseURL_.clear();
+  notifyEndpoint_.clear();
+  viewEndpoint_.clear();
+  rootStorage_.clear();
+  storage_.clear();
+  checkServerCertificat_ = false;
+
   if (!config.IsObject()) {
     throw std::runtime_error("publish config should be an object");
   }
 
   goal_ = GetOrDefault<std::string>(config, "goal", "");
 
-  std::string const server = GetOrDefault<std::string>(config, "server", "");
   checkServerCertificat_ = 
       GetOrDefault<bool>(config, "check_server_certificat", false);
-  storage_  = std::filesystem::weakly_canonical(
-      GetOrDefault<std::string>(config, "storage", ""));
-  rootStorage_.clear();
+  storage_ = GetOrDefault<std::string>(config, "storage", "");
 
-  auto const& itConfig = publishersConfig.find(server);
-  if (itConfig != publishersConfig.end()) {
-    baseURL_ = itConfig->second.baseURL_;
-    notifyEndpoint_ = itConfig->second.notifyEndpoint_;
-    viewEndpoint_ = itConfig->second.viewEndpoint_;
-    checkServerCertificat_ = itConfig->second.checkServerCertificat_;
-    //storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
-    //storage_ = storage_;
-    rootStorage_ = itConfig->second.storage_;
+  if (!extractFromConfig) {
+    try {
+      baseURL_ = Get<std::string>(config, "base_url");
+      notifyEndpoint_ = Get<std::string>(config, "notify_endpoint");
+      viewEndpoint_ = Get<std::string>(config, "view_endpoint");
+      rootStorage_ = GetPath(config, "root_storage");
+    } catch(...) {
+      extractFromConfig = true;
+      baseURL_.clear();
+      notifyEndpoint_.clear();
+      viewEndpoint_.clear();
+      rootStorage_.clear();
+    }
+  }
+  if (extractFromConfig) {
+    std::string const server = GetOrDefault<std::string>(config, "server", "");
+    auto const& itConfig = publishersConfig.find(server);
+    if (itConfig != publishersConfig.end()) {
+      baseURL_ = itConfig->second.baseURL_;
+      notifyEndpoint_ = itConfig->second.notifyEndpoint_;
+      viewEndpoint_ = itConfig->second.viewEndpoint_;
+      checkServerCertificat_ = itConfig->second.checkServerCertificat_;
+      //storage_ = ResolveVariables(storage_, { {"PUBLISHER_STORAGE", itConfig->second.storage_} });
+      //storage_ = storage_;
+      rootStorage_ = itConfig->second.storage_;
+    }
   }
 }
 
@@ -108,30 +129,22 @@ void ns_Schedule::Publish::PublishResults(
   }
 }
 
-int ns_Schedule::Publish::DeleteResults(uint64_t taskID, std::string link) const {
+int ns_Schedule::Publish::DeleteResults(uint64_t taskID) const {
   if (baseURL_.empty() || notifyEndpoint_.empty()) {
-    return 0;
-  }
-  if (link.find(baseURL_) != 0) {
-    LOGW << "Publish remove: no remote file for task " << taskID << Log::Flags::End;
     return 0;
   }
 
   try {
     Poco::URI uri(baseURL_ + notifyEndpoint_);
+    uri.addQueryParameter("task_id", std::to_string(taskID));
     std::unique_ptr<Poco::Net::HTTPClientSession> session = CreateSession(uri);
 
-    std::string path = uri.getPath().empty() ? "/" : uri.getPath();
+    std::string path = uri.getPath().empty() ? ("/?" + uri.getRawQuery()) : uri.getPathAndQuery();
     Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_DELETE, path);
-
-    Poco::Net::HTMLForm form(Poco::Net::HTMLForm::ENCODING_MULTIPART);
-    form.set("link", link.substr(baseURL_.length()));
-    form.set("task_id", std::to_string(taskID));
-    form.prepareSubmit(request);
+    request.setContentLength(0);
 
     LOGD << "Sending remove request to " << path << " for task " << taskID << Log::Flags::End;
     std::ostream& requestStream = session->sendRequest(request);
-    form.write(requestStream);
     requestStream.flush();
 
     Poco::Net::HTTPResponse response;

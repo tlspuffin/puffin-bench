@@ -264,7 +264,11 @@ void ns_Server::RequestHandlerTaskCancelOrDelete::handleRequest(Poco::Net::HTTPS
   try {
     uint64_t taskID = std::stoull(std::get<0>(args_));
 
-    if (!apis_->scheduleAPI_.CancelOrDeleteTask(taskID)) {
+    Poco::Net::HTMLForm form;
+    form.read(request.stream());
+    std::string source = form.get("source", "rest api request");
+
+    if (!apis_->scheduleAPI_.CancelOrDeleteTask(taskID, source)) {
       response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
       throw std::runtime_error("task cancel/delete failed");
     }

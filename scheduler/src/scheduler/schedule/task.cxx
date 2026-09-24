@@ -84,7 +84,7 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   }
 
   if (publisherConfiguration != nullptr) {
-    publish_.ReadJSON(publishersConfig, *publisherConfiguration);
+    publish_.ReadJSON(publishersConfig, *publisherConfiguration, true);
   }
   if (configurations != nullptr) {
     configurations_.ReadFromTaskJSON(*configurations);
@@ -221,7 +221,7 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
     cancel_source_ = Get<std::string>(config, "cancel_source");
 
     if (config.HasMember("publish")) {
-      publish_.ReadJSON(publishersConfig, config["publish"]);
+      publish_.ReadJSON(publishersConfig, config["publish"], false);
     }
 
     rapidjson::Value::ConstObject md5Object = Get<rapidjson::Value::ConstObject>(config, "md5");
