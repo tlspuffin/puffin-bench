@@ -1,3 +1,4 @@
+import { Help, helpTexts } from './help.js';
 import { TaskCard } from './taskcard.js';
 import { Clipboard } from './clipboard.js';
 import * as Launchers from './launchers/launchers.js';
@@ -93,6 +94,7 @@ function CreateTimelinesCard(task) {
 
   const root = document.createElement('div');
   root.className = 'timesline-content';
+  root.dataset.help = 'history.card';
   root.onclick = (event) => {
       event.stopPropagation();
       SelectTask(task);
@@ -112,6 +114,7 @@ function CreateTimelinesCard(task) {
   const publishLink = task?.publish_link;
   if (publishLink) {
     publishSpan.textContent = '🗂️';
+    publishSpan.dataset.help = 'task.publishlink';
     publishSpan.onclick = (event) => {
       event.stopPropagation();
       Clipboard.Set(publishLink);
@@ -130,6 +133,7 @@ function CreateTimelinesCard(task) {
   }
 
   const deleteButton = document.createElement('button');
+  deleteButton.dataset.help = 'history.delete';
   deleteButton.innerText = '💣👾';
   deleteButton.onclick = (event) => {
       event.stopPropagation();
@@ -295,6 +299,7 @@ function BuildUserSelection(user, userData) {
   userData.jobs_type.forEach(jobType => {
       const userSelection = document.createElement('button');
       userSelection.className = 'user-selection';
+      userSelection.dataset.help = (user == null) ? 'history.alljobtype' : 'history.jobtype';
       userSelection.innerText = jobType;
       userSelection.onclick = DisplaySelectedUser.bind(null, user, jobType);
       userDiv.appendChild(userSelection);
@@ -302,6 +307,7 @@ function BuildUserSelection(user, userData) {
   if (user == null) {
     const userSelection = document.createElement('button');
     userSelection.className = 'user-selection';
+    userSelection.dataset.help = 'history.all';
     userSelection.innerText = 'All';
     userSelection.onclick = DisplaySelectedUser.bind(null, null, null);
     userDiv.appendChild(userSelection);
@@ -387,6 +393,7 @@ function UpdateSortIndexTimesLine(event) {
 }
 
 function Main() {
+  new Help({ ...helpTexts, ...Launchers.helpTexts }, {}, 'help-panel', 'help-button');
   const sortIndexSelect = document.getElementById('sortIndex-select');
   currentSelection.timesLineIndex = sortIndexSelect?.value ?? 'id';
   sortIndexSelect.onchange = UpdateSortIndexTimesLine;

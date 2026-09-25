@@ -19,6 +19,7 @@
 #include "embeded/scheduler/html/board/history_html.h"
 #include "embeded/scheduler/html/board/history_css.h"
 #include "embeded/scheduler/html/board/history_js.h"
+#include "embeded/scheduler/html/board/help_js.h"
 
 #include <fstream>
 #include <tuple>
@@ -98,6 +99,7 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       std::tuple{ "board/history.html", History_HTML_data, History_HTML_size },
       std::tuple{ "board/history.css", History_CSS_data, History_CSS_size },
       std::tuple{ "board/history.js", History_JS_data, History_JS_size },
+      std::tuple{ "board/help.js", Help_JS_data, Help_JS_size },
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(html_ / file);

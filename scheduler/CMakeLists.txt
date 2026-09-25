@@ -157,6 +157,7 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.js" "${CMAKE_SO
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.html" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_html.h" History_HTML)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h" History_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h" History_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/help.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h" Help_JS)
 
 set(SCHEDULER_SRC 
   src/scheduler/config.cxx 
@@ -180,6 +181,7 @@ set(SCHEDULER_SRC
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h 
   ${GENERATED_VERSION_C}
 )
 

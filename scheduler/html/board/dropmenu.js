@@ -6,7 +6,7 @@ export class DropMenu {
   static #lastLabelEvent = null;
   static #lastLabel = null;
 
-  constructor({ label, actions }) {
+  constructor({ label, actions, helpKey }) {
     DropMenu.CreateStyle();
     this.#ui = document.createElement('div');
     this.#ui.className = '_dm_Root';
@@ -14,6 +14,9 @@ export class DropMenu {
     labelDiv.innerText = label;
     labelDiv.onclick = this.#Click.bind(this);
     labelDiv.className = '_dm_Label';
+    if (helpKey) {
+      labelDiv.dataset.help = helpKey;
+    }
     this.#ui.appendChild(labelDiv);
     this.#actionsDiv = document.createElement('div');
     this.#actionsDiv.className = '_dm_Actions';
@@ -67,7 +70,7 @@ export class DropMenu {
         flex-direction: column;
         gap: 4px;
         align-items: center;
-        z-index: 9999;
+        z-index: 2000;
       }
     `;
     DropMenu.#style = document.createElement('style');

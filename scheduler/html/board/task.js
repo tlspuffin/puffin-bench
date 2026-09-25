@@ -1,3 +1,4 @@
+import { Help, helpTexts } from './help.js';
 import { TaskCard } from './taskcard.js';
 import * as Launchers from './launchers/launchers.js';
 
@@ -71,6 +72,8 @@ async function Refresh() {
 }
 
 function Main() {
+  new Help({ ...helpTexts, ...Launchers.helpTexts });
+
   const id = GetQueryParam('id');
   dataUrl = id ? `/api/task/${id}/state` : GetQueryParam('data');
 

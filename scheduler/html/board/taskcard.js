@@ -43,7 +43,7 @@ export class TaskCard {
           display: flex;
           flex-direction: column;
           align-items: center;
-          z-index: 9999;
+          z-index: 8000;
           background: #2d2d2d;
           border: 1px solid #404040;
           border-radius: 10px;
@@ -78,6 +78,7 @@ export class TaskCard {
 
       const cancelButton = document.createElement('button');
       cancelButton.classList.add('card-attempt-cancel-btn');
+      cancelButton.dataset.help = 'task.cancel';
       cancelButton.textContent = 'Cancel';
       cancelButton.onclick = async () => {
           if (!confirm(`Cancel task "${task.name || task.id}" ?`)) {
@@ -91,6 +92,7 @@ export class TaskCard {
     if (task?.launcher?.project) {
       const restartButton = document.createElement('button');
       restartButton.className = 'card-task-restart-btn';
+      restartButton.dataset.help = 'task.launchagain';
       restartButton.textContent = 'New task ...';
       restartButton.onclick = (event) => {
         const launcherEntry = 
@@ -103,7 +105,7 @@ export class TaskCard {
     }
 
     const dropmenu = (actions.length > 0) ? 
-      (new DropMenu({label: '...', actions: actions})).Get() : document.createElement('div');
+      (new DropMenu({label: '...', actions: actions, helpKey: 'task.menu'})).Get() : document.createElement('div');
 
     let username = '';
     if (task?.user && (task.user != '')) {
@@ -219,7 +221,8 @@ export class TaskCard {
 
       const divStepNameHeader = document.createElement('div');
       divStepNameHeader.classList.add('card-step-main-name');
-      divStepNameHeader.style.cursor = 'default';
+      divStepNameHeader.style.cursor = 'pointer';
+      divStepNameHeader.dataset.help = 'step.toggle';
 
       const divStepName = document.createElement('div');
       divStepName.classList = 'card-attempt-header';
@@ -248,6 +251,7 @@ export class TaskCard {
       }
       if (estimateStartTime > 0) {
         const est = document.createElement('div');
+        est.dataset.help = 'step.estimate';
         est.innerText = new Date(estimateStartTime).toLocaleString();
         divStepName.appendChild(est);
       }
@@ -402,11 +406,13 @@ export class TaskCard {
     if (step.state === 'Pending') {
       const estimateStartTime = ((step.estimated_start_time !== undefined) && (step.estimated_start_time > 0)) ? 
           new Date(step.estimated_start_time).toLocaleString() : 'N/A';
-      details.appendChild(this.#CreateCardLine(
+      const estimateStartTimeLine = this.#CreateCardLine(
           null, 'attempt-detail-item',
           ['attempt-detail-value-state', 'attempt-detail-value-state'],
           ['Pending', estimateStartTime]
-      ));
+      );
+      estimateStartTimeLine.dataset.help = 'step.estimate';
+      details.appendChild(estimateStartTimeLine);
     } else {
       const info = document.createElement('div');
       info.classList.add('card-attempt-details-info');
@@ -419,10 +425,12 @@ export class TaskCard {
           ['attempt-detail-label', 'attempt-detail-value'],
           ['Duration', this.#Duration(step)]));
       if (step.state !== 'Running' || step.request_cancel || taskCancelRequested) {
-        info.appendChild(this.#CreateCardLine(
+        const exitLine = this.#CreateCardLine(
             null, 'attempt-detail-item',
             ['attempt-detail-label', 'attempt-detail-value'],
-            ['Exit Code', this.#ExitCodeLabel(step)]));
+            ['Exit Code', this.#ExitCodeLabel(step)]);
+        exitLine.dataset.help = 'step.exitcode';
+        info.appendChild(exitLine);
       }
       // CPU cores and load — only when running
       if (step.state === 'Running') {
@@ -434,11 +442,13 @@ export class TaskCard {
             chip.textContent = core;
             coresList.appendChild(chip);
         });
-        info.appendChild(this.#CreateCardLine(
+        const coresLine = this.#CreateCardLine(
             null, 'attempt-detail-item',
             ['attempt-detail-label', 'attempt-detail-value'],
             ['Cores', coresList]
-        ));
+        );
+        coresLine.dataset.help = 'step.cores';
+        info.appendChild(coresLine);
         let loadMemory = '';
         let loadCores  = '';
         if (step.executor_data?.os_load) {
@@ -447,11 +457,13 @@ export class TaskCard {
               / step.executor_data.os_load.cores.length;
           loadCores = 'CPU:' + cpuLoad + ' %';
         }
-        info.appendChild(this.#CreateCardLine(
+        const loadLine = this.#CreateCardLine(
             null, 'attempt-detail-item',
             ['attempt-detail-label', 'attempt-detail-value', 'attempt-detail-value'],
             ['Load', loadMemory, loadCores]
-        ));
+        );
+        loadLine.dataset.help = 'step.load';
+        info.appendChild(loadLine);
       }
       details.appendChild(info);
 
@@ -465,6 +477,7 @@ export class TaskCard {
 
       const logsButton = document.createElement('button');
       logsButton.classList.add('card-attempt-logs-btn');
+      logsButton.dataset.help = 'step.logs';
       logsButton.textContent = 'Logs';
       logsButton.onclick = () => { logsManager.Open(step, taskName); };
 
@@ -473,6 +486,7 @@ export class TaskCard {
       if (step.state === 'Running' && !step.request_cancel && !taskCancelRequested) {
         const cancelButton = document.createElement('button');
         cancelButton.classList.add('card-attempt-cancel-btn');
+        cancelButton.dataset.help = 'step.cancel';
         cancelButton.textContent = 'Cancel';
         cancelButton.onclick = async () => {
             if (!confirm(`Cancel step "${step.name}" ?`)) {
@@ -588,6 +602,8 @@ export class TaskCard {
       return div;
     }
 
+    div.dataset.help = 'task.priority';
+
     const label = document.createElement('div');
     label.className = 'card-priority-label';
     label.innerText = 'priority'
@@ -702,10 +718,11 @@ export class TaskCard {
     const link = document.createElement('p');
     link.classList = 'card-run-path-details';
     link.innerText = '🔗';
-    link.title = `${window.location.origin}/files/board/task.html?id=${id}`;
+    link.dataset.help = 'task.quicklink';
+    link.dataset.url = `${window.location.origin}/files/board/task.html?id=${id}`;
     link.onclick = async (event) => {
       event.stopPropagation();
-      Clipboard.Set(event.currentTarget.title);
+      Clipboard.Set(event.currentTarget.dataset.url);
     }
     return link;
   }
@@ -714,11 +731,12 @@ export class TaskCard {
     const link = document.createElement('p');
     link.classList = 'card-run-path-details';
     link.innerText = '🗂️';
-    link.title = publishLink;
+    link.dataset.help = 'task.publishlink';
+    link.dataset.url = publishLink;
     link.onclick = (event) => {
       event.stopPropagation();
-      Clipboard.Set(event.currentTarget.title);
-      window.open(event.currentTarget.title, '_blank');
+      Clipboard.Set(event.currentTarget.dataset.url);
+      window.open(event.currentTarget.dataset.url, '_blank');
     }
     return link;
   }
@@ -730,10 +748,11 @@ export class TaskCard {
     const link = document.createElement('p');
     link.classList = 'card-run-path-details';
     link.innerText = '📋';
-    link.title = step?.executor_data?.run_path;
+    link.dataset.help = 'task.steprunpath';
+    link.dataset.url = step?.executor_data?.run_path ?? '';
     link.onclick = async (event) => {
       event.stopPropagation();
-      Clipboard.Set(event.currentTarget.title);
+      Clipboard.Set(event.currentTarget.dataset.url);
     }
     return link;
   }
