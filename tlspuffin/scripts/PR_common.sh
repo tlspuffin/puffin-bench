@@ -673,7 +673,17 @@ Init () {
     patch "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch"
 
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
-  LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  # first cargo call of the task: it may install the Rust toolchain of the commit; serialized between tasks
+  # (concurrent rustup installs into the same home leave broken toolchains, e.g. without cargo)
+  if ! command -v flock > /dev/null; then
+    CancelTask "flock is required on the scheduler host (package util-linux)"
+    return 1
+  fi
+  LIBAFL_VER=$( flock "${HOME:-/tmp}/.puffin-bench-rustup.lock" nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  if [ -z "${LIBAFL_VER}" ]; then
+    CancelTask "Unable to get the LibAFL version (cargo pkgid libafl failed, see Init output)"
+    return 1
+  fi
   AddGlobalParam LIBAFL_VERSION "${LIBAFL_VER}"
   echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
   AFL_CORES_GRAMMAR=$?
