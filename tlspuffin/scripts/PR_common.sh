@@ -325,7 +325,10 @@ ExperimentSetupForCargo() {
     DetectAsan "./target/release/${PACKAGE}" "${ref_esfc_features}" "${vendor}" asanInfo || asanInfo='null';
   fi
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ) }";
+  local vendorSources='null';
+  [ -s ./.vendor_sources.json ] && vendorSources=$( < ./.vendor_sources.json );
+
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"vendor_sources\": ${vendorSources} }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -685,6 +688,53 @@ ExperimentCrashStats() {
   ref_crashstats="{ \"client_restarts\": ${restarts}, \"asan_reports\": ${asan}, \"files\": ${#files[@]}, \"threshold\": ${CRASH_WARN_RESTARTS}, \"warning\": ${warning} }";
 }
 
+# Sources of the vendor libraries built for the experiment (./vendor/<name>), as a JSON array in the referenced
+# variable: repository, requested ref and the commit it resolves to. Fork branches (e.g. tlspuffin/libressl
+# fuzz-v3.3.3) move, so the same tlspuffin commit can be built from different sources over time.
+#   puffin-build: vendor/<name>/.vendor_config, [sources] repo + branch|commit (or url + hash for archives)
+#   older mk_vendor: vendor/<name>/mk_vendor.conf, FETCH_ARG:URL= / FETCH_ARG:REF=
+# A branch or tag is resolved with git ls-remote right after the build (commit null when that fails).
+DetectVendorSources() {
+  if [ -z "$1" ]; then
+    echo "Missing reference parameter for vendor sources";
+    return 1;
+  fi
+  local -n ref_sources=$1;
+  ref_sources='';
+  local dir;
+  for dir in ./vendor/*/; do
+    dir="${dir%/}";
+    local repo='' ref='';
+    if [ -r "${dir}/.vendor_config" ]; then
+      repo=$( awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && ($1 == "repo" || $1 == "url") { gsub(/"/, "", $2); print $2 }' "${dir}/.vendor_config" | head -1 );
+      ref=$( awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && ($1 == "branch" || $1 == "commit" || $1 == "hash") { gsub(/"/, "", $2); print $2 }' "${dir}/.vendor_config" | head -1 );
+      # url sources (archives): the hash is recorded as the ref, nothing to resolve
+      if grep -q '^url = ' "${dir}/.vendor_config"; then
+        ref_sources+="${ref_sources:+, }{ \"name\": \"$( basename "${dir}" )\", \"url\": \"${repo}\", \"hash\": \"${ref}\", \"commit\": null }";
+        continue;
+      fi
+    elif [ -r "${dir}/mk_vendor.conf" ]; then
+      repo=$( sed -n 's/^FETCH_ARG:URL=//p' "${dir}/mk_vendor.conf" | head -1 );
+      ref=$( sed -n 's/^FETCH_ARG:REF=//p' "${dir}/mk_vendor.conf" | head -1 );
+    fi
+    [ -n "${repo}" ] || continue;
+    local commit='';
+    if [[ "${ref}" =~ ^[0-9a-f]{40}$ ]]; then
+      commit="${ref}";
+    else
+      local -a patterns=( HEAD );
+      [ -n "${ref}" ] && patterns=( "refs/heads/${ref}" "refs/tags/${ref}" "refs/tags/${ref}^{}" );
+      local remote;
+      remote=$( timeout 60 git ls-remote "${repo}" "${patterns[@]}" 2> /dev/null );
+      # a peeled tag (^{}) gives the commit of an annotated tag
+      commit=$( grep -F '^{}' <<< "${remote}" | cut -f1 | head -1 );
+      [ -n "${commit}" ] || commit=$( cut -f1 <<< "${remote}" | head -1 );
+    fi
+    ref_sources+="${ref_sources:+, }{ \"name\": \"$( basename "${dir}" )\", \"repo\": \"${repo}\", \"ref\": \"${ref}\", \"commit\": $( [ -n "${commit}" ] && echo "\"${commit}\"" || echo null ) }";
+  done
+  ref_sources="[${ref_sources}]";
+}
+
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
@@ -1021,6 +1071,10 @@ ForcedBuild() {
   DetectAsan "./target/release/${PACKAGE}" "${features}" "${vendor}" asanInfo || return 1;
   echo "ASAN: ${asanInfo}";
   echo "${asanInfo}" > ./.asan_info.json;
+  local vendorSources='';
+  DetectVendorSources vendorSources || return 1;
+  echo "Vendor sources: ${vendorSources}";
+  echo "${vendorSources}" > ./.vendor_sources.json;
   return 0;
 }
 
