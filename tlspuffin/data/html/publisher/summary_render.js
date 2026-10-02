@@ -90,6 +90,18 @@ function GetCrashWarningIcon(status) {
   return `<span class="warn-icon warn-crashes" title="${EscapeAttribute(`Fuzzing clients crashed and restarted again and again (executions not comparable):\n${title}`)}">💥⚠️</span>`;
 }
 
+// Sources of the vendor libraries (cli.vendor_sources, see DetectVendorSources): fork branches move over time
+function GetVendorSources(cli) {
+  const sources = (typeof cli === 'object') ? cli?.vendor_sources : undefined;
+  if (!Array.isArray(sources) || sources.length === 0) return '';
+  const items = sources.map(src => {
+    const at = src.commit ? src.commit.substring(0, 9) : (src.hash ? 'archive' : 'unresolved');
+    const title = `${src.repo ?? src.url} ${src.ref ?? src.hash ?? ''} → ${src.commit ?? 'not resolved'}`;
+    return `<span title="${EscapeAttribute(title)}">${EscapeAttribute(src.name)}: ${EscapeAttribute(src.ref && src.ref !== src.commit ? `${src.ref}@` : '')}${EscapeAttribute(at)}</span>`;
+  });
+  return `sources: ${items.join(', ')}<br>`;
+}
+
 function EscapeAttribute(text) {
   return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -502,6 +514,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         libItem2Header.className = 'lib-item-header';
         libItem2Header.innerHTML = `
             ${status.cli?.features ? `features: ${status.cli?.features}<br>` : ''}
+            ${GetVendorSources(status.cli)}
             ${status.cli?.flags ? `flags: ${status.cli?.flags}` : ''}
         `
         libItemsHeader.appendChild(libItem2Header);
