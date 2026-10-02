@@ -633,14 +633,56 @@ ExperimentSaveLogStats() {
   local experiment_base="$1";
   local logStats='';
   ExperimentLogStats "${experiment_base}" logStats || return 1;
+  local crashStats='';
+  ExperimentCrashStats "${experiment_base}" crashStats && logStats="${logStats% \}}, \"crashes\": ${crashStats} }";
   echo "${logStats}" > "${THEJOB_OUT_PATH}/logs-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
   echo "${logStats}" >> "${THEJOB_USER_STATE_FILE}";
 }
 
-# Saved by the experiment step before the launch, for ExperimentEnd: the start time and fuzzing cores of the run
-# (read by ExperimentLogStats).
+# Saved by the experiment step before the launch, for ExperimentEnd: where the step writes its stderr (read by
+# ExperimentCrashStats: with LibAFL launchers that do not redirect the clients' stderr, their crash reports end up
+# there), and the start time and fuzzing cores of the run (read by ExperimentLogStats).
 ExperimentSaveLaunchInfo() {
+  echo "${THEJOB_STDERR_PATH:-}" > ./.experiment_stderr_path
   echo "$( date +%s ) ${THEJOB_NB_CORES:-1}" > ./.experiment_launch
+}
+
+# Fuzzing clients that crashed and were restarted during an experiment, as a JSON record in the referenced
+# variable: "Spawning next client (id N)" with N > 0 (each client is spawned once with id 0) and AddressSanitizer
+# reports, counted in every place the clients' output goes depending on the commit (log/puffin_main_broker_std*.log,
+# tlspuffin.out, the stderr of the experiment step). A crash storm (e.g. a harness bug hit by most inputs) makes the
+# executions of the run meaningless. Warns above CRASH_WARN_RESTARTS (task argument, default 100). Only at
+# ExperimentEnd: the files can reach hundreds of MB.
+ExperimentCrashStats() {
+  local experiment_base="$1";
+  if [ -z "$2" ]; then
+    echo "Missing reference parameter for crash stats";
+    return 1;
+  fi
+  local -n ref_crashstats=$2;
+
+  [[ ${CRASH_WARN_RESTARTS:-} =~ ^[0-9]+$ ]] || CRASH_WARN_RESTARTS=100;
+
+  local -a files=();
+  local f;
+  for f in "${experiment_base}"/log/puffin_main_broker_std{out,err}.log "${experiment_base}"/{,log/}tlspuffin.out ./log/puffin_main_broker_std{out,err}.log; do
+    [ -n "${experiment_base}" ] || [[ "${f}" == ./* ]] || continue;
+    [ -f "${f}" ] && files+=( "${f}" );
+  done
+  if [ -r ./.experiment_stderr_path ]; then
+    f=$( < ./.experiment_stderr_path );
+    [ -n "${f}" ] && [ -f "${f}" ] && files+=( "${f}" );
+  fi
+
+  local restarts=0 asan=0;
+  if (( ${#files[@]} > 0 )); then
+    read -r restarts asan < <( LC_ALL=C awk '/Spawning next client \(id [1-9]/ { r++ } /^==[0-9]+==ERROR: AddressSanitizer/ { a++ }
+      END { print r + 0, a + 0 }' "${files[@]}" );
+  fi
+  local warning='null';
+  (( restarts > CRASH_WARN_RESTARTS )) &&
+      warning="\"${restarts} client restarts after a crash (${asan} ASAN reports, threshold ${CRASH_WARN_RESTARTS})\"";
+  ref_crashstats="{ \"client_restarts\": ${restarts}, \"asan_reports\": ${asan}, \"files\": ${#files[@]}, \"threshold\": ${CRASH_WARN_RESTARTS}, \"warning\": ${warning} }";
 }
 
 ExperimentEndCommon() {

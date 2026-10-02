@@ -83,6 +83,13 @@ function GetLogWarningIcon(status) {
   return `<span class="warn-icon warn-logs" title="${EscapeAttribute(`Large or verbose logs (may slow the fuzzer):\n${title}`)}">📜⚠️</span>`;
 }
 
+function GetCrashWarningIcon(status) {
+  const warnings = status?.crash_warning ?? [];
+  if (warnings.length === 0) return '';
+  const title = warnings.map(item => `run ${item.id}: ${item.warning}`).join('\n');
+  return `<span class="warn-icon warn-crashes" title="${EscapeAttribute(`Fuzzing clients crashed and restarted again and again (executions not comparable):\n${title}`)}">💥⚠️</span>`;
+}
+
 function EscapeAttribute(text) {
   return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -485,7 +492,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         <span class="lib-icon">${icon}</span>
         <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
         ${GetAsanBadge(status?.cli)}
-        <span class="lib-name">${libNameLabel} ${warningIcon} ${GetLogWarningIcon(status)}</span>
+        <span class="lib-name">${libNameLabel} ${warningIcon} ${GetLogWarningIcon(status)} ${GetCrashWarningIcon(status)}</span>
         <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
       `;
       libItemsHeader.appendChild(libItem1Header);
