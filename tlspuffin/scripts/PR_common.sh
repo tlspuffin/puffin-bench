@@ -538,6 +538,71 @@ DetectAsan() {
   ref_asan="{ \"requested\": ${requested}, \"instrumented\": ${instrumented}, \"runtime\": \"${runtime}\", \"asan_report_refs\": ${reports}, \"method\": \"readelf+ldd\" }";
 }
 
+# Size of a rolled log file: every tlspuffin log config rolls its files at 10 MB
+LOG_ROLL_SIZE_BYTES=$(( 10 * 1024 * 1024 ))
+
+# Log volume of an experiment, as a JSON record in the referenced variable.
+# Rotation bounds the size on disk, so the volume written is estimated: live files plus one
+# rolling size per compressed archive. Non-empty debug/trace/terms logs (and "puffin.N.gz", the
+# debug archives of the modular-logging config) mean logging below INFO was active.
+# Warns above LOG_WARN_MB (task argument, default 50: about 10x the logs of a 70 min run of dev) or when verbose logs are present.
+ExperimentLogStats() {
+  local experiment_base="$1";
+  shift;
+  if [ -z "$1" ]; then
+    echo "Missing reference parameter for log stats";
+    return 1;
+  fi
+  local -n ref_logstats=$1;
+  shift;
+
+  [[ ${LOG_WARN_MB:-} =~ ^[0-9]+$ ]] || LOG_WARN_MB=50;
+
+  local -a dirs=( ./log );
+  [ -n "${experiment_base}" ] && dirs+=( "${experiment_base}/log" );
+
+  local bytes=0 estimated=0 files=0 rolled=0 verbose='';
+  local file name size;
+  while IFS= read -r -d '' file; do
+    name=$( basename "${file}" );
+    [[ "${name}" == stats.json* ]] && continue;
+    size=$( stat --format=%s "${file}" ) || continue;
+    (( ++files, bytes += size ));
+    if [[ "${name}" == *.gz ]]; then
+      (( ++rolled, estimated += (size > LOG_ROLL_SIZE_BYTES ? size : LOG_ROLL_SIZE_BYTES) ));
+    else
+      (( estimated += size ));
+      [[ "${name}" =~ ^log[0-9]+$ ]] && (( ++rolled ));
+    fi
+    if (( size > 0 )) && [[ "${name}" =~ ^(debug|trace|terms|puffin)(\.[0-9]+)?\.(log|gz)$ ]]; then
+      verbose+="${verbose:+, }\"${file#./}\"";
+    fi
+  done < <(
+    find "${dirs[@]}" -maxdepth 1 -type f -print0 2>/dev/null;
+    [ -n "${experiment_base}" ] &&
+        find "${experiment_base}" -maxdepth 1 -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null;
+    find . -maxdepth 1 -type f -regex './log[0-9]+' -print0 2>/dev/null
+  )
+
+  local mega=$(( 1024 * 1024 ));
+  local estimatedMB=$(( (estimated + mega - 1) / mega ));
+  local warning='';
+  (( estimatedMB > LOG_WARN_MB )) && warning="~${estimatedMB} MB of logs (threshold ${LOG_WARN_MB} MB)";
+  [ -n "${verbose}" ] && warning+="${warning:+; }logging below INFO (${verbose//\"/})";
+  [ -n "${warning}" ] && warning="\"${warning}\"" || warning='null';
+
+  ref_logstats="{ \"estimated_mb\": ${estimatedMB}, \"disk_bytes\": ${bytes}, \"files\": ${files}, \"rolled\": ${rolled}, \"verbose_files\": [${verbose}], \"threshold_mb\": ${LOG_WARN_MB}, \"warning\": ${warning} }";
+}
+
+# Save the log stats of the current attempt next to its summary (read by *_summary_run.js)
+ExperimentSaveLogStats() {
+  local experiment_base="$1";
+  local logStats='';
+  ExperimentLogStats "${experiment_base}" logStats || return 1;
+  echo "${logStats}" > "${THEJOB_OUT_PATH}/logs-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
+  echo "${logStats}" >> "${THEJOB_USER_STATE_FILE}";
+}
+
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
@@ -924,6 +989,13 @@ MonitorExperiment() {
       [[ "${asanInfo}" == *'"instrumented": true'* ]] && asanState="✓ ($( sed -n 's/.*"runtime": "\([^"]*\)".*/\1/p' <<< "${asanInfo}" ) runtime)";
       [[ "${asanInfo}" == *'"instrumented": false'* ]] && asanState='✗ (not instrumented)';
       echo "  ASAN: ${asanState}" >> ${outfile}
+    fi
+
+    local logStats='';
+    if ExperimentLogStats "$exp" logStats; then
+      local logMB=$( sed -n 's/.*"estimated_mb": \([0-9]*\).*/\1/p' <<< "${logStats}" )
+      local logWarning=$( sed -n 's/.*"warning": "\([^"]*\)".*/\1/p' <<< "${logStats}" )
+      echo "  Logs: ~${logMB} MB${logWarning:+ ⚠️ ${logWarning}}" >> ${outfile}
     fi
 
     if ! ${old_tlspuffin}; then

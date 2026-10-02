@@ -102,6 +102,7 @@ ExperimentEnd() {
   local experiment_base='';
   local objective_count=0;
   ExperimentReport experimentUUID experiment_base objective_count || return 1;
+  ExperimentSaveLogStats "${experiment_base}";
 
   local errorFile="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-log/error.log"
   local errorFilePresent='false';

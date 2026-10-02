@@ -49,6 +49,7 @@ function BuildSummary(result, artefactsPath, outPath) {
                 (json?.clients?.some((item => (item?.tEnd?.objective_size !== undefined) && (item.tEnd.objective_size > 0)))))) {
               libResult.flag_objective = true;
             }
+            Utils.AttachLogStats(libResult, json, library, parseInt(file), outPath);
             libResult.data.push(json);
           } else {
             readJSONError.id = parseInt(file);

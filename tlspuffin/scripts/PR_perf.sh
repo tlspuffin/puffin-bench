@@ -35,6 +35,7 @@ ExperimentEnd() {
   local experiment_base='';
   local objective_count=0;
   ExperimentReport experimentUUID experiment_base objective_count || return 1;
+  ExperimentSaveLogStats "${experiment_base}";
   local outFile="${THEJOB_OUT_PATH}/summary-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json"
   local statsJSON;
   if [ ! -s task.json ]; then
