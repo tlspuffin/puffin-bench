@@ -232,6 +232,8 @@ function BuildDataSet(source, json) {
         success: 0, 
         cli: libraries[library]?.cli ?? 'N/A', 
         trust_objective: libraries[library]?.trust_objective ?? 0,
+        // set by the summary scripts when an attempt kept objectives (perf and vuln)
+        flag_objective: libraries[library]?.flag_objective === true,
         // log volume records (see ExperimentLogStats), absent for results older than the feature
         log_warning: libraries[library].data
             .filter(attempt => attempt?.logs?.warning)
