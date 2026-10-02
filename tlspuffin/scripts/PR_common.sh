@@ -1276,6 +1276,7 @@ MonitorExperiment() {
         while read -r objective_time objective_name; do
           echo "        $(( (now - ${objective_time%.*}) / 60 )) min ago: ${objective_name}" >> ${outfile}
         done
+        echo "        (live, grouped by bug: page objectives/live-${THEJOB_TASK_ID}.html of the publisher, http://$( hostname -f 2> /dev/null || hostname ):10083/html/objectives/live-${THEJOB_TASK_ID}.html; at the end of the run: 🐞 on the dashboard)" >> ${outfile}
       else
         echo "    No objective yet ✓" >> ${outfile}
       fi

@@ -122,6 +122,30 @@ function ObjectivesPanel(objectives) {
   return panel;
 }
 
+// Page written by scripts/tools/objectives_report.sh, served by the publisher
+function ObjectivesPageURL(taskID) {
+  return `/html/objectives/${encodeURIComponent(taskID)}.html`;
+}
+
+async function AddObjectivesPageLink(element, taskID) {
+  if (!element) return;
+  try {
+    const response = await fetch(ObjectivesPageURL(taskID), { method: 'HEAD' });
+    if (!response.ok) return;
+  } catch (error) {
+    return;
+  }
+  const link = document.createElement('a');
+  link.className = 'lib-objectives';
+  link.href = ObjectivesPageURL(taskID);
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.title = 'Objectives of this task, grouped by bug';
+  link.textContent = '🐞 objectives';
+  link.addEventListener('click', (event) => event.stopPropagation());
+  element.appendChild(link);
+}
+
 function GetCrashWarningIcon(status) {
   const warnings = status?.crash_warning ?? [];
   if (warnings.length === 0) return '';
@@ -548,6 +572,11 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
       `;
       libItemsHeader.appendChild(libItem1Header);
+      // results without replayed objectives (older script): link to the page of objectives_report.sh when it exists
+      const libTaskID = typeData.index?.files?.[typeData.index?.references?.libraries?.[libName]]?.task_id;
+      if (!status?.objectives && (warnUser.length > 0) && libTaskID) {
+        AddObjectivesPageLink(libItem1Header.querySelector('.lib-name'), libTaskID);
+      }
       const objectivesButton = libItem1Header.querySelector('.lib-objectives');
       if (objectivesButton !== null) {
         const panel = ObjectivesPanel(status.objectives);
