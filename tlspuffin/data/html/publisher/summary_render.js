@@ -58,6 +58,25 @@ function GetLibIcon(success, total) {
   return '⛔';
 }
 
+// ASAN status of the binary (cli.asan, see DetectAsan); results older than the detection only
+// tell whether ASAN was requested in the features/vendor, which is shown as unverified.
+function GetAsanBadge(cli) {
+  const asan = (typeof cli === 'object') ? cli?.asan : undefined;
+  if (asan?.instrumented === true) {
+    return `<span class="lib-asan asan-on" title="ASAN active (${EscapeAttribute(asan.runtime)} runtime, ${asan.asan_report_refs} instrumented checks)">ASAN✓</span>`;
+  }
+  if (asan?.instrumented === false) {
+    return `<span class="lib-asan asan-off" title="Built without ASAN${asan.requested ? ' although it was requested' : ''}">ASAN✗</span>`;
+  }
+  const requested = (typeof cli === 'object') &&
+      ((`,${cli?.features ?? ''},`.includes(',asan,')) || (cli?.vendor ?? '').includes('-asan'));
+  return `<span class="lib-asan asan-unknown" title="ASAN not verified (older result); ${requested ? 'requested' : 'not requested'} in features/vendor">ASAN?</span>`;
+}
+
+function EscapeAttribute(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function GetWarningIcon(warnUser) {
   if (!warnUser || !Array.isArray(warnUser) || warnUser.length === 0) return '';
 
@@ -455,6 +474,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
       libItem1Header.innerHTML = `
         <span class="lib-icon">${icon}</span>
         <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
+        ${GetAsanBadge(status?.cli)}
         <span class="lib-name">${libNameLabel} ${warningIcon}</span>
         <span class="lib-stats">${successCount}/${totalRuns}</span>
       `;
