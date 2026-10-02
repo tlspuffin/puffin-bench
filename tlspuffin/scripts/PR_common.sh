@@ -538,6 +538,111 @@ DetectAsan() {
   ref_asan="{ \"requested\": ${requested}, \"instrumented\": ${instrumented}, \"runtime\": \"${runtime}\", \"asan_report_refs\": ${reports}, \"method\": \"readelf+ldd\" }";
 }
 
+# Size of a rolled log file: every tlspuffin log config rolls its files at 10 MB
+LOG_ROLL_SIZE_BYTES=$(( 10 * 1024 * 1024 ))
+
+# Log volume of an experiment, as a JSON record in the referenced variable.
+# Rotation bounds the size on disk, so the volume written is estimated: live files plus one
+# rolling size per compressed archive. Non-empty debug/trace/terms logs (and "puffin.N.gz", the
+# debug archives of the modular-logging config) mean logging below INFO was active.
+# The broker's monitor log (stats_puffin_main_broker.log* and its rotations ./log<N>, the periodic
+# client statistics of tlspuffin's StatsMonitor) grows with the run time and the number of clients,
+# not with the log level: recorded separately ("monitor_mb"), not counted in the estimate.
+# The volume is compared per hour of run and per fuzzing core (start and cores saved by ExperimentSaveLaunchInfo,
+# end = last write of a counted log), so that runs of any length and width are judged alike: warns above
+# LOG_WARN_MB_PER_CORE_HOUR (task argument, default 15, i.e. 50 MB for a 70 min run on 3 cores, about 10x dev),
+# or above LOG_WARN_MB MB in total when that task argument is given, or when verbose logs are present.
+ExperimentLogStats() {
+  local experiment_base="$1";
+  shift;
+  if [ -z "$1" ]; then
+    echo "Missing reference parameter for log stats";
+    return 1;
+  fi
+  local -n ref_logstats=$1;
+  shift;
+
+  [[ ${LOG_WARN_MB_PER_CORE_HOUR:-} =~ ^[0-9]+$ ]] || LOG_WARN_MB_PER_CORE_HOUR=15;
+  local warnTotalMB='';
+  [[ ${LOG_WARN_MB:-} =~ ^[0-9]+$ ]] && warnTotalMB="${LOG_WARN_MB}";
+
+  # start of the run and its fuzzing cores
+  local start='' cores='';
+  [ -r ./.experiment_launch ] && read -r start cores < ./.experiment_launch;
+  [[ ${start} =~ ^[0-9]+$ ]] || start=$( stat --format=%Y "${experiment_base}/README.md" 2> /dev/null );
+  [[ ${cores} =~ ^[0-9]+$ ]] && (( cores > 0 )) || cores="${THEJOB_NB_CORES:-1}";
+  [[ ${cores} =~ ^[0-9]+$ ]] && (( cores > 0 )) || cores=1;
+
+  local -a dirs=( ./log );
+  [ -n "${experiment_base}" ] && dirs+=( "${experiment_base}/log" );
+
+  local bytes=0 estimated=0 files=0 rolled=0 verbose='' monitor=0 end=0;
+  local file name size rollSize mtime;
+  while IFS= read -r -d '' file; do
+    name=$( basename "${file}" );
+    [[ "${name}" == stats.json* ]] && continue;
+    size=$( stat --format=%s "${file}" ) || continue;
+    rollSize=$(( size > LOG_ROLL_SIZE_BYTES ? size : LOG_ROLL_SIZE_BYTES ));
+    # the broker's log and its rotations (./log0 … ./log19, 100 MB each, "log{}" roller of tlspuffin's log.rs)
+    if [[ "${name}" == stats_puffin_main_broker.log* ]] || [[ "${file}" =~ ^\./log[0-9]+$ ]]; then
+      [[ "${name}" == *.gz ]] && (( monitor += rollSize )) || (( monitor += size ));
+      continue;
+    fi
+    (( ++files, bytes += size ));
+    mtime=$( stat --format=%Y "${file}" ) && (( mtime > end )) && end=${mtime};
+    if [[ "${name}" == *.gz ]]; then
+      (( ++rolled, estimated += rollSize ));
+    else
+      (( estimated += size ));
+    fi
+    if (( size > 0 )) && [[ "${name}" =~ ^(debug|trace|terms|puffin)(\.[0-9]+)?\.(log|gz)$ ]]; then
+      verbose+="${verbose:+, }\"${file#./}\"";
+    fi
+  done < <(
+    find "${dirs[@]}" -maxdepth 1 -type f -print0 2>/dev/null;
+    [ -n "${experiment_base}" ] &&
+        find "${experiment_base}" -maxdepth 1 -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null;
+    find . -maxdepth 1 -type f -regex './log[0-9]+' -print0 2>/dev/null
+  )
+
+  local mega=$(( 1024 * 1024 ));
+  local estimatedMB=$(( (estimated + mega - 1) / mega ));
+  local monitorMB=$(( (monitor + mega - 1) / mega ));
+  # MB per hour per core, in tenths
+  (( end > 0 )) || end=$( date +%s );
+  local minutes=1 rate10;
+  [[ ${start} =~ ^[0-9]+$ ]] && (( end > start )) && minutes=$(( (end - start + 59) / 60 ));
+  rate10=$(( estimated * 600 / (mega * minutes * cores) ));
+  local rate="$(( rate10 / 10 )).$(( rate10 % 10 ))";
+  local warning='';
+  if [ -n "${warnTotalMB}" ]; then
+    (( estimatedMB > warnTotalMB )) && warning="~${estimatedMB} MB of logs (threshold ${warnTotalMB} MB)";
+  else
+    # not before 10 min of run: the first minutes (startup) are not representative
+    (( minutes >= 10 && rate10 > LOG_WARN_MB_PER_CORE_HOUR * 10 )) &&
+        warning="~${estimatedMB} MB of logs, ${rate} MB per hour per core (threshold ${LOG_WARN_MB_PER_CORE_HOUR})";
+  fi
+  [ -n "${verbose}" ] && warning+="${warning:+; }logging below INFO (${verbose//\"/})";
+  [ -n "${warning}" ] && warning="\"${warning}\"" || warning='null';
+
+  ref_logstats="{ \"estimated_mb\": ${estimatedMB}, \"disk_bytes\": ${bytes}, \"files\": ${files}, \"rolled\": ${rolled}, \"verbose_files\": [${verbose}], \"monitor_mb\": ${monitorMB}, \"minutes\": ${minutes}, \"cores\": ${cores}, \"mb_per_core_hour\": ${rate}, \"threshold_mb_per_core_hour\": ${LOG_WARN_MB_PER_CORE_HOUR}, \"threshold_mb\": ${warnTotalMB:-null}, \"warning\": ${warning} }";
+}
+
+# Save the log stats of the current attempt next to its summary (read by *_summary_run.js)
+ExperimentSaveLogStats() {
+  local experiment_base="$1";
+  local logStats='';
+  ExperimentLogStats "${experiment_base}" logStats || return 1;
+  echo "${logStats}" > "${THEJOB_OUT_PATH}/logs-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
+  echo "${logStats}" >> "${THEJOB_USER_STATE_FILE}";
+}
+
+# Saved by the experiment step before the launch, for ExperimentEnd: the start time and fuzzing cores of the run
+# (read by ExperimentLogStats).
+ExperimentSaveLaunchInfo() {
+  echo "$( date +%s ) ${THEJOB_NB_CORES:-1}" > ./.experiment_launch
+}
+
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
@@ -593,6 +698,7 @@ ExperimentRun() {
   CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
+  ExperimentSaveLaunchInfo
   $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
 
@@ -660,6 +766,7 @@ ExperimentRunWithCargo() {
   [ -n "${features}" ] && featuresCLI="--features=${features}";
   echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
   echo "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI}" > .currentcmd
+  ExperimentSaveLaunchInfo
   $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
@@ -924,6 +1031,14 @@ MonitorExperiment() {
       [[ "${asanInfo}" == *'"instrumented": true'* ]] && asanState="✓ ($( sed -n 's/.*"runtime": "\([^"]*\)".*/\1/p' <<< "${asanInfo}" ) runtime)";
       [[ "${asanInfo}" == *'"instrumented": false'* ]] && asanState='✗ (not instrumented)';
       echo "  ASAN: ${asanState}" >> ${outfile}
+    fi
+
+    local logStats='';
+    if ExperimentLogStats "$exp" logStats; then
+      local logMB=$( sed -n 's/.*"estimated_mb": \([0-9]*\).*/\1/p' <<< "${logStats}" )
+      local logRate=$( sed -n 's/.*"mb_per_core_hour": \([0-9.]*\).*/\1/p' <<< "${logStats}" )
+      local logWarning=$( sed -n 's/.*"warning": "\([^"]*\)".*/\1/p' <<< "${logStats}" )
+      echo "  Logs: ~${logMB} MB${logRate:+ (${logRate} MB per hour per core)}${logWarning:+ ⚠️ ${logWarning}}" >> ${outfile}
     fi
 
     if ! ${old_tlspuffin}; then
