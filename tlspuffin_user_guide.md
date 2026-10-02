@@ -122,6 +122,8 @@ Init
  └─ Clone tlspuffin at COMMIT_ID, https-ify submodules, update them
  └─ Init/patch nix-shell (faketime for commits ≤ 8b29ce76d, WolfSSL timeout patch if needed)
  └─ Detect LibAFL version (sets AFL_CORES_GRAMMAR for cores > 0.15.3)
+ └─ Evaluate the compat rules (fuzzer flags, reference client_log_config.yml, log levels and build fixes
+    patched in the sources), see "Compat Rules" in tlspuffin/docs/tlspuffin-job-scripts.md
 
 [parallel branch per library/configuration]
  ForcedBuild

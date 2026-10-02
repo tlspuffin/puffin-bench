@@ -304,7 +304,7 @@ ExperimentSetupForCargo() {
     fi
   fi
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"compat\": $( CompatAppliedJSON ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -526,9 +526,12 @@ ExperimentRun() {
 
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
+  CompatApplyFlags extra_flags;
+
   local binary="";
   local last_core=0;
   ExperimentSetup binary last_core "${features}" || return 1;
+  CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
   nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
@@ -587,8 +590,11 @@ ExperimentRunWithCargo() {
 
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
+  CompatApplyFlags extra_flags;
+
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
+  CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
   local featuresCLI='';
@@ -671,6 +677,16 @@ Init () {
     ! grep -q MyTimeoutCallBack "tlspuffin/harness/wolfssl/src/put.c" &&
     patch --dry-run "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch" &&
     patch "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch"
+
+  local compatApplied='';
+  CompatEvaluate "${THEJOB_OUT_PATH}/repo" "${COMMIT_ID}" compatApplied "${THEJOB_OUT_PATH}/compat.json" || {
+    CancelTask "Compat rules do not match commit ${COMMIT_ID}, see step output"
+    return 1
+  }
+  CreateArtefact "${THEJOB_OUT_PATH}/compat.json" "compat.json" "commit_id:${COMMIT_ID}"
+  AddGlobalParam COMPAT_APPLIED "${compatApplied}"
+  COMPAT_APPLIED="${compatApplied}"
+  CompatPrepare "${THEJOB_OUT_PATH}/repo" || return 1;
 
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
   # first cargo call of the task: it may install the Rust toolchain of the commit; serialized between tasks
@@ -772,7 +788,9 @@ ForcedBuild() {
 
   rm -rf ./experiments
   echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" || return 1
+  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" > ./.fuzzer_help.txt || return 1
+  cat ./.fuzzer_help.txt
+  CompatVerifyHelp ./.fuzzer_help.txt || return 1;
 }
 
 Clean() {

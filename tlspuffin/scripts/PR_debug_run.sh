@@ -28,6 +28,7 @@ echo "THEJOB_OUT_PATH= ${THEJOB_OUT_PATH}";
 echo "COMMIT_ID= ${COMMIT_ID}";
 
 source "${BASE_PATH}/PR_common.sh"
+source "${BASE_PATH}/PR_compat.sh"
 source "${BASE_PATH}/PR_perf.sh"
 source "${SERVER_PATH}/scripts/functions.sh"
 
