@@ -1,5 +1,18 @@
 #### HELPER START ####
 
+# Command prefix running the fuzzer without ASLR (inherited across fork/exec; setarch execs the command, so a
+# background PID stays the fuzzer's): ASAN runtimes of LLVM < 18, used by older tlspuffin commits, crash at
+# random at startup when the kernel uses more than 28 bits of mmap randomization (recent kernels: 32).
+# Empty when setarch is unavailable or with COMPAT_DISABLE=no_aslr (or "all"), which runs the fuzzer with ASLR as
+# before, e.g. to reproduce older results.
+NoAslrPrefix() {
+  CompatIsDisabled no_aslr && return 0;
+  local arch;
+  arch=$( uname -m );
+  setarch "${arch}" -R true > /dev/null 2>&1 && echo "setarch ${arch} -R";
+  return 0;
+}
+
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
@@ -226,7 +239,7 @@ ExperimentSetup() {
     cp "${THEJOB_USER_FILES_PATH}/shell.nix" . || return 1;
   fi
 
-  nix-shell --run "\"${ref_binary}\" seed" || return 1;
+  $( NoAslrPrefix ) nix-shell --run "\"${ref_binary}\" seed" || return 1;
 
   rm -rf ./experiments
 
@@ -312,7 +325,7 @@ ExperimentSetupForCargo() {
     DetectAsan "./target/release/${PACKAGE}" "${ref_esfc_features}" "${vendor}" asanInfo || asanInfo='null';
   fi
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"compat\": $( CompatAppliedJSON ) }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -580,7 +593,7 @@ ExperimentRun() {
   CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
-  nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
@@ -647,7 +660,7 @@ ExperimentRunWithCargo() {
   [ -n "${features}" ] && featuresCLI="--features=${features}";
   echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
   echo "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI}" > .currentcmd
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -751,6 +764,12 @@ Init () {
   AFL_CORES_GRAMMAR=$?
   AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"
 
+  # ASAN runtimes of LLVM < 18 crash at random at startup with more than 28 bits of mmap randomization
+  # (the value is only readable by root: no warning when it cannot be read)
+  local rndBits=$( cat /proc/sys/vm/mmap_rnd_bits 2> /dev/null || echo 0 );
+  (( rndBits <= 28 )) ||
+      echo "WARNING: vm.mmap_rnd_bits=${rndBits} > 28: ASAN fuzzers built with LLVM < 18 may crash at startup (AddressSanitizer:DEADLYSIGNAL); set it to 28 on this host" >&2;
+
   return 0;
 }
 
@@ -840,11 +859,11 @@ ForcedBuild() {
 
   rm -rf ./seeds
   echo "nix-shell --run \"cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed\""
-  nix-shell --run "cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+  $( NoAslrPrefix ) nix-shell --run "cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   rm -rf ./experiments
   echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" > ./.fuzzer_help.txt || return 1
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" > ./.fuzzer_help.txt || return 1
   cat ./.fuzzer_help.txt
   CompatVerifyHelp ./.fuzzer_help.txt || return 1;
 

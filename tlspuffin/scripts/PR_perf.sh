@@ -57,7 +57,7 @@ ExperimentEnd() {
   while IFS= read -r -d '' obj; do
     echo "=== ${obj} ===";
     printf -v obj '%q' "$obj"
-    nix-shell --run "${cmd} -- execute ${obj}" </dev/null
+    $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${obj}" </dev/null
   done < <( 
     find "${experiment_base}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\0' |
     sort -z -n |
