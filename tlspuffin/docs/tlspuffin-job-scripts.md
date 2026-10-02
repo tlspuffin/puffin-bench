@@ -103,11 +103,12 @@ Ranges ending with `open` are not fixed on `dev` yet (tlspuffin/tlspuffin#544 fo
 
 At `e13983d` bit-level mutations became opt-in (`--with-bit`; `--wo-bit` is then only an option of `execute`), and experiment clients stopped reading `client_log_config.yml`, hence the exclusive range ends.
 
-Rules can be disabled with the task argument `COMPAT_DISABLE` (comma separated rule ids, or `all`), e.g. for an A/B comparison. `scripts/tests/compat_selftest.sh <tlspuffin clone>` checks that every probe matches its declared range on the `dev` history (the clone must not be shallow).
+Rules can be disabled with the task argument `COMPAT_DISABLE` (comma separated rule ids, or `all`), e.g. for an A/B comparison; `no_aslr` also runs the fuzzer with ASLR (see Recorded Experiment Conditions), and `all` includes it. `scripts/tests/compat_selftest.sh <tlspuffin clone>` checks that every probe matches its declared range on the `dev` history (the clone must not be shallow).
 
 ## Recorded Experiment Conditions
 
 - **ASAN** — `DetectAsan` checks the binary built by `ForcedBuild`: instrumented code (references to `__asan_report_*`) and ASAN runtime (`ldd`, or `__asan_init` defined). The result is saved in `.asan_info.json` and recorded as `"asan": {requested, instrumented, runtime, asan_report_refs}` in `cli-<step>.json`; the dashboard shows ASAN✓/ASAN✗ (ASAN? for older results). `readelf` and `ldd` must be available on the scheduler host, otherwise `instrumented` is `null`. The "Running with shared ASAN support" message of tlspuffin cannot be used: it is logged before tlspuffin sets up its logger.
+- **ASLR** — the fuzzer (experiments, `seed`, `help`, objective replays) is started through `setarch <arch> -R` (`NoAslrPrefix`), which disables address randomization for it and its children: ASAN runtimes of LLVM < 18, used by older tlspuffin commits, crash at random at startup (`AddressSanitizer:DEADLYSIGNAL`, "nested bug in the same thread") when the kernel uses more than 28 bits of mmap randomization, as recent kernels do. Recorded as `"aslr": false` in `cli-<step>.json` (`true` when `setarch` is unavailable, or with the task argument `COMPAT_DISABLE=no_aslr` or `all`, which runs the fuzzer with ASLR as before, e.g. to reproduce older results). `setup_root.sh` additionally sets `vm.mmap_rnd_bits = 28` on the test machine.
 
 ## Monitoring: Hang Detection
 
