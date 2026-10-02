@@ -76,6 +76,13 @@ function GetAsanBadge(cli) {
   return `<span class="lib-asan asan-unknown" title="ASAN not verified (older result); ${requested ? 'requested' : 'not requested'} in features/vendor">ASAN?</span>`;
 }
 
+// Compat rules not applied although the commit is in their declared range (cli.compat_warning, see CompatEvaluate)
+function GetCompatWarningIcon(cli) {
+  const warning = (typeof cli === 'object') ? cli?.compat_warning : null;
+  if (!warning) return '';
+  return `<span class="warn-icon warn-compat" title="${EscapeAttribute(`Compat rules: ${warning}`)}">⚖️⚠️</span>`;
+}
+
 function GetLogWarningIcon(status) {
   const warnings = status?.log_warning ?? [];
   if (warnings.length === 0) return '';
@@ -504,7 +511,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         <span class="lib-icon">${icon}</span>
         <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
         ${GetAsanBadge(status?.cli)}
-        <span class="lib-name">${libNameLabel} ${warningIcon} ${GetLogWarningIcon(status)} ${GetCrashWarningIcon(status)}</span>
+        <span class="lib-name">${libNameLabel} ${warningIcon} ${GetCompatWarningIcon(status?.cli)} ${GetLogWarningIcon(status)} ${GetCrashWarningIcon(status)}</span>
         <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
       `;
       libItemsHeader.appendChild(libItem1Header);

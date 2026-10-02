@@ -78,6 +78,8 @@ for t in "${TASKS[@]}"; do
   echo "### task ${t}  $( jq -r '.task.name // ""' "${J}" )  state=$( jq -r '.task.state // "?"' "${J}" )  ${J#${E}/}"
   echo "  commit ${commit:-?}  LIBAFL_VERSION=${libafl:-<empty>}  AFL_CORES_GRAMMAR=$( Arg "${J}" AFL_CORES_GRAMMAR )"
   echo "  COMPAT_APPLIED=${applied:-<none>}${disable:+  COMPAT_DISABLE=${disable}}"
+  warning=$( Arg "${J}" COMPAT_WARNING )
+  [ -n "${warning}" ] && echo "  WARNING  COMPAT_WARNING=${warning}"
   echo "  steps: $( jq -r '[.task.steps[] | "\(.name):\(.state)"] | group_by(.) | map("\(.[0])x\(length)") | join(" ")' "${J}" )"
 
   exp=$( ExpectedRules "${commit}" )
