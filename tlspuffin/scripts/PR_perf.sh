@@ -46,25 +46,7 @@ ExperimentEnd() {
     echo '{ "error": "stats.json not found" }' > "${outFile}"
   fi
   (( objective_count > 0 )) || return 0;
-
-  [ ! -r .currentcmd ] && 
-      echo -e '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\nCan not run test on objectives found, missing .currentcmd\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' && 
-      return 0;
-  echo "================================";
-  echo "Running test on objectives found";
-  echo "================================";
-
-  local cmd=$(< .currentcmd )
-  while IFS= read -r -d '' obj; do
-    echo "=== ${obj} ===";
-    printf -v obj '%q' "$obj"
-    $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${obj}" </dev/null
-  done < <( 
-    find "${experiment_base}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\0' |
-    sort -z -n |
-    head -z -n 100 |
-    cut -z -d ' ' -f 2-
-  )
+  ExperimentReplayObjectives "${experiment_base}" 100 120;
 
   return 0;
 }

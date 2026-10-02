@@ -90,6 +90,62 @@ function GetLogWarningIcon(status) {
   return `<span class="warn-icon warn-logs" title="${EscapeAttribute(`Large or verbose logs (may slow the fuzzer):\n${title}`)}">📜⚠️</span>`;
 }
 
+// Button shown when objectives were found and replayed: opens the list of distinct bugs (see ObjectivesPanel)
+function GetObjectivesButton(status) {
+  const objectives = status?.objectives;
+  if (!objectives || !(objectives.total > 0)) return '';
+  const distinct = objectives.distinct ?? objectives.groups?.length ?? 0;
+  return `<button type="button" class="lib-objectives" title="Show the objectives, grouped by bug">🐞 ${objectives.total} (${distinct} distinct)</button>`;
+}
+
+function ObjectivesPanel(objectives) {
+  const panel = document.createElement('div');
+  panel.className = 'lib-objectives-panel';
+  panel.hidden = true;
+  const groups = objectives.groups ?? [];
+  const shown = groups.length < (objectives.distinct ?? groups.length) ? ` (${groups.length} largest shown)` : '';
+  const header = `<div class="lib-objectives-info">${objectives.total} objective(s) found, ${objectives.replayed} replayed, `
+      + `${objectives.distinct ?? groups.length} distinct${shown}. Full reports and traces: artefacts `
+      + `<code>&lt;library&gt;/&lt;run&gt;-objective-reports</code> and <code>-objective</code>.</div>`;
+  const rows = groups.map(group => {
+    const frames = (group.frames ?? []).map(EscapeAttribute).join(' &lt; ') || '—';
+    const attempts = (group.attempts ?? []).join(', ');
+    return `<details class="lib-objective">
+        <summary><b>${group.count} ×</b> <span class="objective-type objective-${EscapeAttribute(group.type)}">${EscapeAttribute(group.type)}</span>
+          <span class="objective-frames">${frames}</span>
+          <span class="objective-runs">runs ${EscapeAttribute(attempts)}</span></summary>
+        <div class="objective-trace">first: run ${EscapeAttribute(group.first_attempt)}, ${EscapeAttribute(group.first_trace)}.trace</div>
+        <pre>${EscapeAttribute(group.excerpt ?? '')}</pre>
+      </details>`;
+  }).join('');
+  panel.innerHTML = header + rows;
+  return panel;
+}
+
+// Page written by scripts/tools/objectives_report.sh, served by the publisher
+function ObjectivesPageURL(taskID) {
+  return `/html/objectives/${encodeURIComponent(taskID)}.html`;
+}
+
+async function AddObjectivesPageLink(element, taskID) {
+  if (!element) return;
+  try {
+    const response = await fetch(ObjectivesPageURL(taskID), { method: 'HEAD' });
+    if (!response.ok) return;
+  } catch (error) {
+    return;
+  }
+  const link = document.createElement('a');
+  link.className = 'lib-objectives';
+  link.href = ObjectivesPageURL(taskID);
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.title = 'Objectives of this task, grouped by bug';
+  link.textContent = '🐞 objectives';
+  link.addEventListener('click', (event) => event.stopPropagation());
+  element.appendChild(link);
+}
+
 function GetCrashWarningIcon(status) {
   const warnings = status?.crash_warning ?? [];
   if (warnings.length === 0) return '';
@@ -512,9 +568,24 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
         ${GetAsanBadge(status?.cli)}
         <span class="lib-name">${libNameLabel} ${warningIcon} ${GetCompatWarningIcon(status?.cli)} ${GetLogWarningIcon(status)} ${GetCrashWarningIcon(status)}</span>
+        ${GetObjectivesButton(status)}
         <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
       `;
       libItemsHeader.appendChild(libItem1Header);
+      // results without replayed objectives (older script): link to the page of objectives_report.sh when it exists
+      const libTaskID = typeData.index?.files?.[typeData.index?.references?.libraries?.[libName]]?.task_id;
+      if (!status?.objectives && (warnUser.length > 0) && libTaskID) {
+        AddObjectivesPageLink(libItem1Header.querySelector('.lib-name'), libTaskID);
+      }
+      const objectivesButton = libItem1Header.querySelector('.lib-objectives');
+      if (objectivesButton !== null) {
+        const panel = ObjectivesPanel(status.objectives);
+        objectivesButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          panel.hidden = !panel.hidden;
+        });
+        libItemsHeader.appendChild(panel);
+      }
 
       if (status.cli) {
         const libItem2Header = document.createElement('div');

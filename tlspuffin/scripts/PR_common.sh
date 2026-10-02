@@ -608,6 +608,108 @@ ExperimentSaveLogStats() {
   echo "${logStats}" >> "${THEJOB_USER_STATE_FILE}";
 }
 
+# Signature of an objective replay output (stdin): "<type>\t<frame1 < frame2 < frame3>\t<SUMMARY line>\t<line of
+# the report start>". Type: the AddressSanitizer error (heap-buffer-overflow, SEGV, ...), "panic",
+# "replay-error" when the fuzzer could not run, or "no-crash" when the replay did not reproduce; frames: first
+# functions of the first stack outside the sanitizer runtime and the libc memory functions (<module>+<offset>
+# when the stack is not symbolized).
+ObjectiveSignature() {
+  awk '
+    function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor)/ ||
+                               f ~ /^(mem(cpy|move|set|cmp)|str(len|cpy|ncpy|cmp|ncmp|cat)|bcmp)$/) }
+    type == "" && match($0, /ERROR: AddressSanitizer: [A-Za-z_-]+/) {
+      type = substr($0, RSTART + 25, RLENGTH - 25); start = NR; next }
+    type == "" && panic == "" && /panicked at / { panic = $0; sub(/.*panicked at /, "", panic); sub(/:$/, "", panic) }
+    type != "" && !done && /^ *#[0-9]+ 0x[0-9a-f]+ in / {
+      f = $0; sub(/^ *#[0-9]+ 0x[0-9a-f]+ in /, "", f); sub(/ .*/, "", f);
+      if (!skip(f) && n < 3) frames[++n] = f; seen = 1; next }
+    # unsymbolized frame "#N 0x... (/path/module+0xoffset)": module and offset, outside the sanitizer runtime
+    type != "" && !done && /^ *#[0-9]+ 0x[0-9a-f]+ +\(/ {
+      f = $0; sub(/^[^(]*\(/, "", f); sub(/\).*/, "", f); sub(/.*\//, "", f);
+      if (f !~ /^libclang_rt\.|^libasan/ && n < 3) frames[++n] = f; seen = 1; next }
+    type != "" && seen && /^ *$/ { done = 1 }
+    type != "" && summary == "" && /^SUMMARY: AddressSanitizer:/ { summary = $0 }
+    /error while loading shared libraries|binary not found:|^error: could not compile/ { replayerr = $0 }
+    END {
+      if (type != "") { s = ""; for (i = 1; i <= n; i++) s = s (i > 1 ? " < " : "") frames[i];
+                        printf "%s\t%s\t%s\t%d\n", type, s, summary, start }
+      else if (panic != "") printf "panic\t%s\t\t0\n", panic
+      else if (replayerr != "") printf "replay-error\t\t%s\t0\n", replayerr
+      else printf "no-crash\t\t\t0\n" }'
+}
+
+# Replay the objectives of an experiment (oldest first, at most $2) with the fuzzer command of .currentcmd,
+# save one report per trace in <experiment>/objective-reports and group them by signature into
+# ${THEJOB_OUT_PATH}/objectives-<step>-<attempt>.json (attached to the attempts by the summary scripts).
+#   $1 experiment directory, $2 maximum number of replays, $3 timeout of a replay (seconds)
+ExperimentReplayObjectives() {
+  local experiment_base="$1";
+  local maxReplays="${2:-100}";
+  local replayTimeout="${3:-120}";
+  local objectiveDir="${experiment_base}/objective";
+  local reportDir="${experiment_base}/objective-reports";
+  local outFile="${THEJOB_OUT_PATH}/objectives-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
+  local total;
+  total=$( find "${objectiveDir}" -maxdepth 1 -type f -name '*.trace' ! -name '.*' 2> /dev/null | wc -l );
+  (( total > 0 )) || return 0;
+  if [ ! -r .currentcmd ]; then
+    echo -e '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\nCan not run test on objectives found, missing .currentcmd\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!';
+    echo "{ \"total\": ${total}, \"replayed\": 0, \"error\": \"missing .currentcmd\", \"groups\": [] }" > "${outFile}";
+    return 0;
+  fi
+  echo "================================";
+  echo "Running test on objectives found";
+  echo "================================";
+  mkdir -p "${reportDir}" || return 1;
+
+  local cmd=$( < .currentcmd );
+  local tsv="${reportDir}/.signatures.tsv";
+  : > "${tsv}";
+  local obj;
+  while IFS= read -r -d '' obj; do
+    local name=$( basename "${obj}" .trace );
+    local report="${reportDir}/${name}.txt";
+    echo "=== ${obj} ===";
+    local quoted;
+    printf -v quoted '%q' "${obj}";
+    timeout -k 10 "${replayTimeout}" $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${quoted}" < /dev/null > "${report}" 2>&1;
+    echo "exit status: $?" >> "${report}";
+    cat "${report}";
+    local found=$( date -r "${obj}" +%s );
+    printf '%s\t%s\t%s\n' "${name}" "${found}" "$( ObjectiveSignature < "${report}" )" >> "${tsv}";
+  done < <(
+    find "${objectiveDir}" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\0' |
+    sort -z -n |
+    head -z -n "${maxReplays}" |
+    cut -z -d ' ' -f 2-
+  )
+
+  # groups: one per signature, largest first, with the first lines of the report of their oldest trace
+  local groups;
+  groups=$( jq -R -s --arg dir "${reportDir}" '
+    split("\n") | map(select(length > 0) | split("\t")
+      | { trace: .[0], found: (.[1] | tonumber), type: .[2], frames: .[3], summary: .[4], start: (.[5] | tonumber) })
+    | group_by(.type + "|" + .frames)
+    | map(sort_by(.found) | { type: .[0].type, frames: (.[0].frames | if . == "" then [] else split(" < ") end),
+          summary: .[0].summary, count: length, first_trace: .[0].trace, first_found: .[0].found,
+          last_found: (map(.found) | max), traces: (map(.trace) | .[:20]), start: .[0].start })
+    | sort_by(-.count)' "${tsv}" ) || groups='[]';
+  local excerpts='[]';
+  local i;
+  for (( i = 0; i < $( jq 'length' <<< "${groups}" ); i++ )); do
+    local trace=$( jq -r ".[${i}].first_trace" <<< "${groups}" );
+    local start=$( jq -r ".[${i}].start" <<< "${groups}" );
+    (( start > 0 )) || start=1;
+    excerpts=$( jq --arg e "$( tail -n "+${start}" "${reportDir}/${trace}.txt" | head -n 40 | cut -c1-300 )" '. + [$e]' <<< "${excerpts}" );
+  done
+  jq -n --argjson total "${total}" --argjson groups "${groups}" --argjson excerpts "${excerpts}" --argjson max "${maxReplays}" '
+    { total: $total, replayed: ([$groups[].count] | add // 0), max_replays: $max,
+      groups: [ $groups | to_entries[] | .value + { excerpt: $excerpts[.key] } | del(.start) ] }' > "${outFile}" || return 1;
+  CreateArtefact "${reportDir}" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-objective-reports" "commit_id:${COMMIT_ID}";
+  echo "Objectives: $( jq -r '"\(.total) found, \(.replayed) replayed, \(.groups | length) distinct: " + ([.groups[] | "\(.count) × \(.type) \(.frames | join(" < "))"] | join("; "))' "${outFile}" )";
+  return 0;
+}
+
 # Where the experiment step writes its stderr (read by ExperimentCrashStats in ExperimentEnd): with LibAFL
 # launchers that do not redirect the clients' stderr, their crash reports end up there.
 ExperimentSaveStderrPath() {
@@ -1169,6 +1271,12 @@ MonitorExperiment() {
         local now=$(date +%s)
         local last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
         echo "    ==> 🎉 Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> ${outfile}
+        # newest objectives; they are replayed and grouped by bug at the end of the run (ExperimentReplayObjectives)
+        find "$objective_dir" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %f\n' | sort -nr | head -n 5 |
+        while read -r objective_time objective_name; do
+          echo "        $(( (now - ${objective_time%.*}) / 60 )) min ago: ${objective_name}" >> ${outfile}
+        done
+        echo "        (live, grouped by bug: page objectives/live-${THEJOB_TASK_ID}.html of the publisher, http://$( hostname -f 2> /dev/null || hostname ):10083/html/objectives/live-${THEJOB_TASK_ID}.html; at the end of the run: 🐞 on the dashboard)" >> ${outfile}
       else
         echo "    No objective yet ✓" >> ${outfile}
       fi
