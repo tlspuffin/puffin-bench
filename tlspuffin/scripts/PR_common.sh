@@ -304,7 +304,14 @@ ExperimentSetupForCargo() {
     fi
   fi
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"compat\": $( CompatAppliedJSON ) }";
+  local asanInfo='';
+  if [ -s ./.asan_info.json ]; then
+    asanInfo=$( < ./.asan_info.json );
+  else
+    DetectAsan "./target/release/${PACKAGE}" "${ref_esfc_features}" "${vendor}" asanInfo || asanInfo='null';
+  fi
+
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"compat\": $( CompatAppliedJSON ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -477,6 +484,44 @@ ExperimentReport() {
   else
     echo "{\"objective_error\": \"Directory ${objective_dir} not found\"}" >> "${THEJOB_USER_STATE_FILE}"
   fi
+}
+
+# ASAN status of a built binary, as a JSON record in the referenced variable.
+# Checked on the binary itself (the "Running with shared ASAN support" message of tlspuffin is
+# logged before its logger is set up, so it never reaches the logs):
+#   - instrumented code: references to __asan_report_* (the C library under test was built with ASAN)
+#   - runtime: shared (ldd lists libclang_rt.asan / libasan) or static (__asan_init defined)
+# instrumented is null when the tools are missing or the binary is not found.
+DetectAsan() {
+  local binary="$1";
+  local features="$2";
+  local vendor="$3";
+  if [ -z "$4" ]; then
+    echo "Missing reference parameter for asan info";
+    return 1;
+  fi
+  local -n ref_asan=$4;
+
+  local requested=false;
+  [[ ",${features}," == *",asan,"* || "${vendor}" == *-asan* ]] && requested=true;
+
+  local instrumented=null;
+  local runtime='unknown';
+  local reports=0;
+  if [ -x "${binary}" ] && command -v readelf > /dev/null && command -v ldd > /dev/null; then
+    local symbols=$( readelf -Ws "${binary}" 2>/dev/null );
+    reports=$( grep -c '__asan_report_' <<< "${symbols}" );
+    if ldd "${binary}" 2>/dev/null | grep -q -E 'libclang_rt\.asan|libasan'; then
+      runtime='shared';
+    elif awk '$8 == "__asan_init" && $7 != "UND" { found = 1 } END { exit !found }' <<< "${symbols}"; then
+      runtime='static';
+    else
+      runtime='none';
+    fi
+    (( reports > 0 )) && [ "${runtime}" != 'none' ] && instrumented=true || instrumented=false;
+  fi
+
+  ref_asan="{ \"requested\": ${requested}, \"instrumented\": ${instrumented}, \"runtime\": \"${runtime}\", \"asan_report_refs\": ${reports}, \"method\": \"readelf+ldd\" }";
 }
 
 ExperimentEndCommon() {
@@ -791,6 +836,13 @@ ForcedBuild() {
   nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" > ./.fuzzer_help.txt || return 1
   cat ./.fuzzer_help.txt
   CompatVerifyHelp ./.fuzzer_help.txt || return 1;
+
+  # kept in the working directory shared with the experiment step (recorded in cli-<step>.json)
+  local asanInfo='';
+  DetectAsan "./target/release/${PACKAGE}" "${features}" "${vendor}" asanInfo || return 1;
+  echo "ASAN: ${asanInfo}";
+  echo "${asanInfo}" > ./.asan_info.json;
+  return 0;
 }
 
 Clean() {
@@ -836,6 +888,14 @@ MonitorExperiment() {
     fi
     echo -e "\n  Time since last stats.json update: ${elapsed}s" >> ${outfile}
 
+    if [ -s ./.asan_info.json ]; then
+      local asanInfo=$( < ./.asan_info.json );
+      local asanState='? (not verified)';
+      [[ "${asanInfo}" == *'"instrumented": true'* ]] && asanState="✓ ($( sed -n 's/.*"runtime": "\([^"]*\)".*/\1/p' <<< "${asanInfo}" ) runtime)";
+      [[ "${asanInfo}" == *'"instrumented": false'* ]] && asanState='✗ (not instrumented)';
+      echo "  ASAN: ${asanState}" >> ${outfile}
+    fi
+
     if ! ${old_tlspuffin}; then
       # Default PUT info from log
       local log_file="$exp/log/stats_puffin_main_broker.log"
@@ -846,7 +906,7 @@ MonitorExperiment() {
         else
           if [ -f "$README" ]; then
             default_put=$(head -n 100 "$README" | grep "Default PUT:" | cut -d' ' -f2-)
-            echo "  ${default_put} (asan?)" >> ${outfile}
+            echo "  ${default_put}" >> ${outfile}
           else
             echo "   Could not find default PUT in README or ./log/stats_puffin_main_broker.log" >> ${outfile}
           fi

@@ -104,6 +104,10 @@ At `e13983d` bit-level mutations became opt-in (`--with-bit`; `--wo-bit` is then
 
 Rules can be disabled with the task argument `COMPAT_DISABLE` (comma separated rule ids, or `all`), e.g. for an A/B comparison. `scripts/tests/compat_selftest.sh <tlspuffin clone>` checks that every probe matches its declared range on the `dev` history (the clone must not be shallow).
 
+## Recorded Experiment Conditions
+
+- **ASAN** — `DetectAsan` checks the binary built by `ForcedBuild`: instrumented code (references to `__asan_report_*`) and ASAN runtime (`ldd`, or `__asan_init` defined). The result is saved in `.asan_info.json` and recorded as `"asan": {requested, instrumented, runtime, asan_report_refs}` in `cli-<step>.json`; the dashboard shows ASAN✓/ASAN✗ (ASAN? for older results). `readelf` and `ldd` must be available on the scheduler host, otherwise `instrumented` is `null`. The "Running with shared ASAN support" message of tlspuffin cannot be used: it is logged before tlspuffin sets up its logger.
+
 ## Monitoring: Hang Detection
 
 `ExperimentCheckAllThreadsRunning` (in `PR_common.sh`) runs once a minute during `ExperimentCheckRun` and implements two independent kill paths:
