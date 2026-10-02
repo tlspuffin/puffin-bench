@@ -79,7 +79,7 @@ The last case only works cleanly on a single, unadorned `<name><version>` token 
 
 ## Compat Rules: Comparable Results Across the tlspuffin History
 
-Some tlspuffin commits have defaults that bias benchmark results. `PR_compat.sh` holds rules that neutralize them, so that every commit is measured under the same conditions.
+Some tlspuffin commits have defaults that bias benchmark results. `PR_compat.sh` holds rules that neutralize them, so that every commit is measured under the same conditions. Source patches are declared in `COMPAT_PATCH` (`<file>|<text of the lines>|<from>|<to>`, literal strings) and applied by `CompatPrepare` at `Init`.
 
 Each rule has a **probe** run on the checked-out sources, which decides whether the rule applies (side-branch commits are therefore handled too), and a **declared range** `[start, end)` of `dev` commits, which documents the intent. `Init` evaluates every rule (`CompatEvaluate`) and cancels the task when a commit inside a declared range does not match the probe, instead of running a biased experiment. The result is saved as the `compat.json` artefact, published as the `COMPAT_APPLIED` global param, and recorded as `"compat"` in `cli-<step>.json` (hence in `summary.json`).
 
@@ -88,6 +88,15 @@ Each rule has a **probe** run on the checked-out sources, which decides whether 
 | `wo_bit` | `[47c97cd, e13983d)` | top-level `--wo-bit` ("Disable bit-level mutations") in `puffin/src/cli.rs`, no `--with-bit` | bit-level mutations are on by default there: `--wo-bit` is added to the fuzzer flags (once; not with `--wo-dy`, which tlspuffin refuses together with it). `ForcedBuild` checks the option exists in the `help` output. |
 | `wo_trunc` | `[2ed7077aa, 24f7f10c2)` | top-level `--wo-trunc` ("Disable failed trace steps truncation"), no `--with-trunc` | truncation of failed trace steps is on by default there (opt-in `--with-trunc` from 24f7f10c2): `--wo-trunc` is added to the fuzzer flags (once), checked in the `help` output like `--wo-bit`. |
 | `log_config` | `[60b3f31, e13983d)` | fuzzing clients load `client_log_config.yml` (`load_fuzzing_client()` without `set_experiment_fuzzing_client`) | that config logs at DEBUG level on every execution; it is replaced by the one of `e13983d` (same as current `dev`: nothing below INFO), extracted at `Init` and checked against its blob hash. |
+| `reseed_warn` | `[2f38bf22a, d1f510dcb)` | the default PUT factory logs `[RNG] reseed failed (…)` with `log::warn!` (`puffin/src/put_registry.rs`) and the tcp PUT has no override of its own | a WARN line is logged on every execution (≈ 8 MB / 150 s in both `info.log` and `warn.log`); at `Init` the line is patched to `log::debug!`, as on dev (where the tcp PUT logs it at DEBUG). |
+| `codec_warn` | `[2f38bf22a, open)` | `FnError::Codec` evaluation failures logged with `log::warn!` and the whole term (`puffin/src/algebra/term.rs`) | thousands per minute (mutated key shares that do not parse: ~22 MB of logs in 150 s); patched to `log::debug!` at `Init`. |
+| `wolfssl_reseed_warn` | `[29e90ea78, open)` | `log::warn!` reseed failure in `crates/wolfssl-sys/src/lib.rs` | logged before every execution of the wolfSSL Rust PUT; patched to `log::debug!` at `Init`. |
+| `wolfssl_reseed_error` | `[2a0619f4a, a914ff56a)` | `error!("[determinism_reseed] Not yet implemented.")` in `tlspuffin/src/wolfssl/mod.rs` | the wolfSSL PUT factory logs an ERROR before every execution (~1.1 M lines, ~100 MB per 70 min run); both `[determinism_…]` lines are patched to `log::debug!` at `Init`. |
+| `openssl_descriptor_info` | `[207ecfde6, e13983d)` | `_log(PUFFIN.info,` before `"descriptor %u version: %s type: %s"` in `tlspuffin/harness/openssl/src/put.c` | the OpenSSL C harness logs every agent creation at INFO (~200,000 lines, ~20 MB per 70 min run); lowered to debug as from `e13983d` (patch with a line offset). |
+| `wolfssl_descriptor_info` | `[15e32f804, e13983d)` | same in `tlspuffin/harness/wolfssl/src/put.c` (client and server) | same for the wolfSSL C harness. |
+| `boringssl_clear_info` | `[8d799887b, open)` | `log::info!("BoringSSL PUT does not support clearing mode")` in `tlspuffin/src/rust_put/boringssl/mod.rs` | logged for every PUT the BoringSSL Rust harness creates (~140,000 lines per 70 min run); patched to `log::debug!`. Still on dev, where benchmarks use the BoringSSL C harness. |
+
+Ranges ending with `open` are not fixed on `dev` yet (tlspuffin/tlspuffin#544 for `codec_warn` and `wolfssl_reseed_warn`): the probe alone decides, and the end commit is to be set once the fix is merged.
 
 At `e13983d` bit-level mutations became opt-in (`--with-bit`; `--wo-bit` is then only an option of `execute`), and experiment clients stopped reading `client_log_config.yml`, hence the exclusive range ends.
 
