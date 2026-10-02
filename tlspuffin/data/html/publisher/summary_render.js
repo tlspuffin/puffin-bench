@@ -61,6 +61,9 @@ function GetLibIcon(success, total) {
 // ASAN status of the binary (cli.asan, see DetectAsan); results older than the detection only
 // tell whether ASAN was requested in the features/vendor, which is shown as unverified.
 function GetAsanBadge(cli) {
+  if ((typeof cli === 'object') && cli?.unsupported) {
+    return `<span class="lib-asan asan-off" title="${EscapeAttribute(cli.unsupported)}">ASAN unsupported</span>`;
+  }
   const asan = (typeof cli === 'object') ? cli?.asan : undefined;
   if (asan?.instrumented === true) {
     return `<span class="lib-asan asan-on" title="ASAN active (${EscapeAttribute(asan.runtime)} runtime, ${asan.asan_report_refs} instrumented checks)">ASAN✓</span>`;
@@ -445,7 +448,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
       // Count success/fail if available
       const successCount = status?.success ?? '?';
       const totalRuns = status?.state.length ?? '?';
-      const icon = GetLibIcon(successCount, totalRuns);
+      const icon = status?.unsupported ? '⛔' : GetLibIcon(successCount, totalRuns);
 
       // Check for warning
       const warnUser = [];
@@ -476,7 +479,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
         ${GetAsanBadge(status?.cli)}
         <span class="lib-name">${libNameLabel} ${warningIcon}</span>
-        <span class="lib-stats">${successCount}/${totalRuns}</span>
+        <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
       `;
       libItemsHeader.appendChild(libItem1Header);
 

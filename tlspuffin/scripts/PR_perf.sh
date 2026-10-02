@@ -13,6 +13,7 @@ Experiment () {
 }
 
 ExperimentWithCargo () {
+  [ -r ./.unsupported ] && { echo "Skipped: $( < ./.unsupported )"; return 0; }
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
@@ -27,6 +28,7 @@ ExperimentWithCargo () {
 }
 
 ExperimentEnd() {
+  [ -r ./.unsupported ] && { echo "Skipped: $( < ./.unsupported )"; return 0; }
   ExperimentEndCommon || return 1;
 
   local experimentUUID=-1;

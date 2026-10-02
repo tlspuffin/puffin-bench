@@ -161,6 +161,7 @@ ComputeBuildRuntimeInfo() {
           }
     fi
   fi
+  CompatBuildRules "${package}" "${vendor}" "${refcputs}" ref_features || return 1;
   if [ -n "${required_features}" ]; then
     ref_features="${required_features},${ref_features}"
   fi
@@ -812,12 +813,22 @@ ForcedBuild() {
   [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
+  rm -f ./.unsupported
 
   local cputs=false
   ComputeBuildRuntimeInfo "${PACKAGE}" "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }
+
+  # the experiment cannot run as required: record it and skip the next steps of this attempt
+  if [ -n "${COMPAT_UNSUPPORTED}" ]; then
+    echo "${COMPAT_UNSUPPORTED}"
+    echo "${COMPAT_UNSUPPORTED}" > ./.unsupported
+    echo "{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${features}\", \"flags\": \"${extra_flags}\", \"unsupported\": \"${COMPAT_UNSUPPORTED}\", \"compat\": $( CompatAppliedJSON ) }" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json"
+    echo "{ \"unsupported\": \"${COMPAT_UNSUPPORTED}\" }" >> "${THEJOB_USER_STATE_FILE}"
+    return 0;
+  fi
   local featuresCLI='';
   [ -n "${features}" ] && featuresCLI="--features=${features}";
 
