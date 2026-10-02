@@ -108,6 +108,8 @@ ExperimentEnd() {
   local errorFilePresent='false';
   [ -r "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && errorFilePresent='true';
   
+  (( objective_count > 0 )) && ExperimentReplayObjectives "${experiment_base}" 10 120;
+
   local outFile="${THEJOB_OUT_PATH}/summary-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json"
   local statsJSON;
   if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then

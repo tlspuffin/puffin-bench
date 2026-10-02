@@ -1280,3 +1280,40 @@ header {
 .asan-unknown {
   color: #9e9e9e;
 }
+
+/* objectives replayed and grouped by bug */
+.lib-objectives {
+  font-size: 0.85em;
+  padding: 0 6px;
+  border: 1px solid #b33;
+  border-radius: 4px;
+  background: #fff3f3;
+  color: #900;
+  cursor: pointer;
+}
+.lib-objectives:hover { background: #ffe0e0; }
+a.lib-objectives { margin-left: 4px; text-decoration: none; }
+.lib-objectives-panel {
+  max-width: 70vw;
+  flex-basis: 100%;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border-left: 3px solid #b33;
+  background: #fffafa;
+  font-size: 0.85em;
+}
+.lib-objectives-info { margin-bottom: 4px; color: #555; }
+.lib-objective summary { cursor: pointer; }
+.lib-objective .objective-type { font-family: monospace; color: #900; }
+.lib-objective .objective-frames { font-family: monospace; }
+.lib-objective .objective-runs { color: #777; margin-left: 6px; }
+.lib-objective .objective-no-crash { color: #777; }
+.lib-objective .objective-trace { color: #555; margin: 2px 0; font-family: monospace; }
+.lib-objective pre {
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f6f6f6;
+  padding: 4px;
+}

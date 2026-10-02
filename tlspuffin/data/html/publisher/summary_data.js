@@ -242,7 +242,9 @@ function BuildDataSet(source, json) {
             .filter(attempt => attempt?.logs?.crashes?.warning)
             .map(attempt => ({ id: attempt.id, warning: attempt.logs.crashes.warning })),
         // set when the experiment could not run as required (e.g. LibreSSL without ASAN support)
-        unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported
+        unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported,
+        // objectives replayed and grouped by bug (see ExperimentReplayObjectives), absent for older results
+        objectives: libraries[library]?.objectives
       };
       libraries[library].data.forEach(attempt => {
         if (attempt?.error !== undefined) {
