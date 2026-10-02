@@ -7,8 +7,8 @@
 A step script is a single bash file containing one function per flow step. The tlspuffin one is assembled from three pieces at build time (`scripts/build.sh`, invoked by the `generate_tlspuffin_scripts` CMake target — see [build.md](build.md)):
 
 ```
-PR_common.sh  +  PR_perf.sh            →  PR_perf_full.sh
-PR_common.sh  +  PR_vulnerabilities.sh →  PR_vulnerabilities_full.sh
+PR_common.sh  +  PR_compat.sh  +  PR_perf.sh            →  PR_perf_full.sh
+PR_common.sh  +  PR_compat.sh  +  PR_vulnerabilities.sh →  PR_vulnerabilities_full.sh
 ```
 
 `PR_common.sh` is the shared library: helpers that don't correspond to a flow step by themselves (`ExperimentCheckAllThreadsRunning`, `ExperimentCheckRun`, `ExperimentSetup(ForCargo)`, `ExperimentPostLaunchSetup`, `ExperimentReport`, `MonitorExperiment`, ...) plus the four steps common to both flows: `Init`, `Build`, `ForcedBuild`, `Clean`/`CleanAllRepo`. `PR_perf.sh` and `PR_vulnerabilities.sh` each add the three flow-specific steps: `Experiment`(`WithCargo`), `ExperimentEnd`, `SummaryRun` — same names, different bodies (perf tracks throughput/objective-count over a fixed time budget; vuln stops the instant an objective/crash trace appears).
@@ -76,6 +76,22 @@ The last case only works cleanly on a single, unadorned `<name><version>` token 
 | **`ExperimentEnd`** | Kills the reserved port's holder process, calls `ExperimentReport` to read task state from the API (`$THEJOB_API_URL/task/$THEJOB_TASK_ID/state`) and count objective traces, then runs `qjs .../perf_experiment_end.js` or `.../vuln_experiment_end.js` against the raw `stats.json` to produce a normalized `summary-$THEJOB_STEP_ID-$THEJOB_STEP_ATTEMPT_ID.json` (see below). |
 | **`SummaryRun`** | Runs `qjs .../perf_summary_run.js` or `.../vuln_summary_run.js`, which walks `$THEJOB_ARTEFACTS_PATH` (one subdirectory per library, populated by the parallel branches above) and aggregates every per-attempt `summary-<library>-<attempt>.json` into one `summary.json`, archived as the task's `summary.json` artefact. This is the file the publisher's `.rules` pick up — see [architecture.md](architecture.md) and the root [README](../../README.md#publisher-projects). Perf's variant exits `0` if any library flagged an objective (crash) and `1` otherwise, which `PR_perf.sh` turns into a colored `Flag` on the task. |
 | **`Clean` / `CleanAllRepo`** | `Clean` removes the cloned repo working tree (`rm -rf "$THEJOB_OUT_PATH/repo"`). `CleanAllRepo` also does `ipcrm --all` first (SysV IPC segments left behind by a killed AFL/LibAFL process); its own `rm -rf "$THEJOB_OUT_PATH/repo*"` uses a quoted `*`, which the shell does not glob-expand — as written this removal only matches a literal `repo*`-named path, so in practice `CleanAllRepo` relies on `ipcrm` for its real effect. |
+
+## Compat Rules: Comparable Results Across the tlspuffin History
+
+Some tlspuffin commits have defaults that bias benchmark results. `PR_compat.sh` holds rules that neutralize them, so that every commit is measured under the same conditions.
+
+Each rule has a **probe** run on the checked-out sources, which decides whether the rule applies (side-branch commits are therefore handled too), and a **declared range** `[start, end)` of `dev` commits, which documents the intent. `Init` evaluates every rule (`CompatEvaluate`) and cancels the task when a commit inside a declared range does not match the probe, instead of running a biased experiment. The result is saved as the `compat.json` artefact, published as the `COMPAT_APPLIED` global param, and recorded as `"compat"` in `cli-<step>.json` (hence in `summary.json`).
+
+| Rule | Declared range | Probe | Action |
+|---|---|---|---|
+| `wo_bit` | `[47c97cd, e13983d)` | top-level `--wo-bit` ("Disable bit-level mutations") in `puffin/src/cli.rs`, no `--with-bit` | bit-level mutations are on by default there: `--wo-bit` is added to the fuzzer flags (once; not with `--wo-dy`, which tlspuffin refuses together with it). `ForcedBuild` checks the option exists in the `help` output. |
+| `wo_trunc` | `[2ed7077aa, 24f7f10c2)` | top-level `--wo-trunc` ("Disable failed trace steps truncation"), no `--with-trunc` | truncation of failed trace steps is on by default there (opt-in `--with-trunc` from 24f7f10c2): `--wo-trunc` is added to the fuzzer flags (once), checked in the `help` output like `--wo-bit`. |
+| `log_config` | `[60b3f31, e13983d)` | fuzzing clients load `client_log_config.yml` (`load_fuzzing_client()` without `set_experiment_fuzzing_client`) | that config logs at DEBUG level on every execution; it is replaced by the one of `e13983d` (same as current `dev`: nothing below INFO), extracted at `Init` and checked against its blob hash. |
+
+At `e13983d` bit-level mutations became opt-in (`--with-bit`; `--wo-bit` is then only an option of `execute`), and experiment clients stopped reading `client_log_config.yml`, hence the exclusive range ends.
+
+Rules can be disabled with the task argument `COMPAT_DISABLE` (comma separated rule ids, or `all`), e.g. for an A/B comparison. `scripts/tests/compat_selftest.sh <tlspuffin clone>` checks that every probe matches its declared range on the `dev` history (the clone must not be shallow).
 
 ## Monitoring: Hang Detection
 
