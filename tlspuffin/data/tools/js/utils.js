@@ -95,6 +95,10 @@ export function AttachLogStats(libResult, attempt, library, attemptID, outPath) 
   if (logs.warning) {
     libResult.log_warning = [...(libResult.log_warning ?? []), attemptID];
   }
+  // clients restarted after a crash (see ExperimentCrashStats)
+  if (logs.crashes?.warning) {
+    libResult.crash_warning = [...(libResult.crash_warning ?? []), attemptID];
+  }
 }
 
 function Utf8ByteLength(str) {

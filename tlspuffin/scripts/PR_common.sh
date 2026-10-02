@@ -599,8 +599,54 @@ ExperimentSaveLogStats() {
   local experiment_base="$1";
   local logStats='';
   ExperimentLogStats "${experiment_base}" logStats || return 1;
+  local crashStats='';
+  ExperimentCrashStats "${experiment_base}" crashStats && logStats="${logStats% \}}, \"crashes\": ${crashStats} }";
   echo "${logStats}" > "${THEJOB_OUT_PATH}/logs-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
   echo "${logStats}" >> "${THEJOB_USER_STATE_FILE}";
+}
+
+# Where the experiment step writes its stderr (read by ExperimentCrashStats in ExperimentEnd): with LibAFL
+# launchers that do not redirect the clients' stderr, their crash reports end up there.
+ExperimentSaveStderrPath() {
+  echo "${THEJOB_STDERR_PATH:-}" > ./.experiment_stderr_path
+}
+
+# Fuzzing clients that crashed and were restarted during an experiment, as a JSON record in the referenced
+# variable: "Spawning next client (id N)" with N > 0 (each client is spawned once with id 0) and AddressSanitizer
+# reports, counted in every place the clients' output goes depending on the commit (log/puffin_main_broker_std*.log,
+# tlspuffin.out, the stderr of the experiment step). A crash storm (e.g. a harness bug hit by most inputs) makes the
+# executions of the run meaningless. Warns above CRASH_WARN_RESTARTS (task argument, default 100). Only at
+# ExperimentEnd: the files can reach hundreds of MB.
+ExperimentCrashStats() {
+  local experiment_base="$1";
+  if [ -z "$2" ]; then
+    echo "Missing reference parameter for crash stats";
+    return 1;
+  fi
+  local -n ref_crashstats=$2;
+
+  [[ ${CRASH_WARN_RESTARTS:-} =~ ^[0-9]+$ ]] || CRASH_WARN_RESTARTS=100;
+
+  local -a files=();
+  local f;
+  for f in "${experiment_base}"/log/puffin_main_broker_std{out,err}.log "${experiment_base}"/{,log/}tlspuffin.out ./log/puffin_main_broker_std{out,err}.log; do
+    [ -n "${experiment_base}" ] || [[ "${f}" == ./* ]] || continue;
+    [ -f "${f}" ] && files+=( "${f}" );
+  done
+  if [ -r ./.experiment_stderr_path ]; then
+    f=$( < ./.experiment_stderr_path );
+    [ -n "${f}" ] && [ -f "${f}" ] && files+=( "${f}" );
+  fi
+
+  local restarts=0 asan=0;
+  if (( ${#files[@]} > 0 )); then
+    read -r restarts asan < <( LC_ALL=C awk '/Spawning next client \(id [1-9]/ { r++ } /^==[0-9]+==ERROR: AddressSanitizer/ { a++ }
+      END { print r + 0, a + 0 }' "${files[@]}" );
+  fi
+  local warning='null';
+  (( restarts > CRASH_WARN_RESTARTS )) &&
+      warning="\"${restarts} client restarts after a crash (${asan} ASAN reports, threshold ${CRASH_WARN_RESTARTS})\"";
+  ref_crashstats="{ \"client_restarts\": ${restarts}, \"asan_reports\": ${asan}, \"files\": ${#files[@]}, \"threshold\": ${CRASH_WARN_RESTARTS}, \"warning\": ${warning} }";
 }
 
 ExperimentEndCommon() {
@@ -658,6 +704,7 @@ ExperimentRun() {
   CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
+  ExperimentSaveStderrPath
   $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
 
@@ -725,6 +772,7 @@ ExperimentRunWithCargo() {
   [ -n "${features}" ] && featuresCLI="--features=${features}";
   echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
   echo "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI}" > .currentcmd
+  ExperimentSaveStderrPath
   $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
