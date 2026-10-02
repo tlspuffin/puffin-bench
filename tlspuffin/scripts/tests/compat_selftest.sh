@@ -53,6 +53,32 @@ Check wo_trunc    2ed7077aa2a3b937dcbb18d5fc80797bc43f0337 true
 Check wo_trunc    a768e78f3                                true
 Check wo_trunc    24f7f10c2425fafcddd5a6358d147e5d49487a08 false
 Check wo_trunc    2ed7077aa2a3b937dcbb18d5fc80797bc43f0337^1 false
+Check reseed_warn 2f38bf22aee802509663609fa4ca84b8634e5574 true
+Check reseed_warn e866693e0 true
+Check reseed_warn d1f510dcbd4423914fe49966285c58fe7901efee false
+Check reseed_warn 60b3f3185edd8dc6515c578e6321bf7a6f00fc2b false
+Check codec_warn  2f38bf22aee802509663609fa4ca84b8634e5574 true
+Check codec_warn  2f38bf22aee802509663609fa4ca84b8634e5574^1 false
+Check codec_warn  origin/dev                               true
+Check wolfssl_reseed_warn 29e90ea7816e582d84fd3928156b84b033808549 true
+Check wolfssl_reseed_warn 29e90ea7816e582d84fd3928156b84b033808549^1 false
+Check wolfssl_reseed_warn origin/dev                       true
+Check codec_warn  origin/pr/quiet-eval-errors       false
+Check wolfssl_reseed_warn origin/pr/quiet-eval-errors false
+Check wolfssl_reseed_error 2a0619f4ad4324cd264c76ead7e5ca208212d8c1 true
+Check wolfssl_reseed_error 1957fba63754933fa99a2ed26d2acee1d8cc9ab1 true
+Check wolfssl_reseed_error a914ff56a8e11acb158b7ebaa1afc007d28a1d5d false
+Check wolfssl_reseed_error 2a0619f4ad4324cd264c76ead7e5ca208212d8c1^1 false
+Check openssl_descriptor_info 207ecfde6c81380b90b1c52e31c0aec547b896ae true
+Check openssl_descriptor_info 2f38bf22aee802509663609fa4ca84b8634e5574 true
+Check openssl_descriptor_info e13983d6a6e186cde04fffeb12914f06b4ff9b68 false
+Check openssl_descriptor_info origin/dev false
+Check wolfssl_descriptor_info 15e32f80427ed753744b36d5e3c588ad4a85ce72 true
+Check wolfssl_descriptor_info 2f38bf22aee802509663609fa4ca84b8634e5574 true
+Check wolfssl_descriptor_info e13983d6a6e186cde04fffeb12914f06b4ff9b68 false
+Check boringssl_clear_info 8d799887b891b0fa7f8ae34f3b5152a4757bb4cb true
+Check boringssl_clear_info 2f38bf22aee802509663609fa4ca84b8634e5574 true
+Check boringssl_clear_info 8d799887b891b0fa7f8ae34f3b5152a4757bb4cb^1 false
 
 # the reference log config must be the pinned blob
 blob=$( git -C "${COMPAT_REPO}" rev-parse "${COMPAT_LOG_CONFIG_REF}:client_log_config.yml" );

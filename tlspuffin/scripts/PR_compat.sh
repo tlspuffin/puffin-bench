@@ -12,7 +12,7 @@
 #
 # A rule can be disabled with the task argument COMPAT_DISABLE (comma separated ids, or "all").
 
-COMPAT_RULES=( wo_bit wo_trunc log_config )
+COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info )
 
 declare -A COMPAT_RANGE=(
   # bit-level mutations enabled by default (opt-out --wo-bit); opt-in --with-bit from e13983d
@@ -21,6 +21,36 @@ declare -A COMPAT_RANGE=(
   [wo_trunc]="2ed7077aa2a3b937dcbb18d5fc80797bc43f0337 24f7f10c2425fafcddd5a6358d147e5d49487a08"
   # fuzzing clients load a debug-level client_log_config.yml; experiments ignore it from e13983d
   [log_config]="60b3f3185edd8dc6515c578e6321bf7a6f00fc2b e13983d6a6e186cde04fffeb12914f06b4ff9b68"
+  # the default PUT factory logs a WARN on every execution for the tcp PUT; debug again from d1f510dcb
+  [reseed_warn]="2f38bf22aee802509663609fa4ca84b8634e5574 d1f510dcbd4423914fe49966285c58fe7901efee"
+  # evaluation failures FnError::Codec (e.g. unparsable mutated key shares) logged at WARN with the whole
+  # term, thousands of times per minute; open until the tlspuffin fix (pr/quiet-eval-errors) is merged
+  [codec_warn]="2f38bf22aee802509663609fa4ca84b8634e5574 -"
+  # reseed failure of the wolfSSL Rust PUT logged at WARN before every execution; open, same fix
+  [wolfssl_reseed_warn]="29e90ea7816e582d84fd3928156b84b033808549 -"
+  # the wolfSSL PUT factory logs an ERROR for its unimplemented reseed before every execution (~100 MB per
+  # 70 min run); the reseed is no longer exposed from a914ff56a
+  [wolfssl_reseed_error]="2a0619f4ad4324cd264c76ead7e5ca208212d8c1 a914ff56a8e11acb158b7ebaa1afc007d28a1d5d"
+  # the C harnesses log every agent creation ("descriptor N version: ... type: ...") at INFO, ~200,000 lines per
+  # 70 min run; DEBUG from e13983d
+  [openssl_descriptor_info]="207ecfde6c81380b90b1c52e31c0aec547b896ae e13983d6a6e186cde04fffeb12914f06b4ff9b68"
+  [wolfssl_descriptor_info]="15e32f80427ed753744b36d5e3c588ad4a85ce72 e13983d6a6e186cde04fffeb12914f06b4ff9b68"
+  # the BoringSSL Rust PUT logs "does not support clearing mode" at INFO for every PUT it creates (~140,000 lines
+  # per 70 min run); open (also on dev, where benchmarks use the BoringSSL C harness)
+  [boringssl_clear_info]="8d799887b891b0fa7f8ae34f3b5152a4757bb4cb -"
+)
+
+# source lines patched by the rules at Init: "<file>|<text of the lines>|<from>|<to>[|<offset>]" (literal strings;
+# for every line containing the text, the line <offset> lines away (default 0: the same line) gets its first <from>
+# replaced by <to>; the patched lines must then be gone)
+declare -A COMPAT_PATCH=(
+  [reseed_warn]='puffin/src/put_registry.rs|log::warn!("[RNG] reseed failed ({}): not supported"|log::warn!|log::debug!'
+  [codec_warn]='puffin/src/algebra/term.rs|log::warn!("[evaluate_config_wrap]  FnError::Codec Error on|log::warn!|log::debug!'
+  [wolfssl_reseed_warn]='crates/wolfssl-sys/src/lib.rs|log::warn!("[RNG] reseed failed: not implemented for wolfssl")|log::warn!|log::debug!'
+  [wolfssl_reseed_error]='tlspuffin/src/wolfssl/mod.rs|error!("[determinism_|error!(|log::debug!('
+  [openssl_descriptor_info]='tlspuffin/harness/openssl/src/put.c|"descriptor %u version: %s type: %s",|_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
+  [wolfssl_descriptor_info]='tlspuffin/harness/wolfssl/src/put.c|"descriptor %u version: %s type: |_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
+  [boringssl_clear_info]='tlspuffin/src/rust_put/boringssl/mod.rs|log::info!("BoringSSL PUT does not support clearing mode")|log::info!|log::debug!'
 )
 
 # fuzzer flags added by the rules
@@ -64,6 +94,51 @@ CompatProbe_log_config() {
   setup=$( CompatCat "puffin/src/fuzzer/libafl_setup.rs" ) || return 1;
   grep -qF 'load_fuzzing_client()' <<< "${setup}" &&
       ! grep -qF 'set_experiment_fuzzing_client' <<< "${setup}"
+}
+
+# Does the source contain the lines patched by rule $1 (COMPAT_PATCH)?
+CompatHasPatchLine() {
+  local file text rest;
+  IFS='|' read -r file text rest <<< "${COMPAT_PATCH[$1]}";
+  CompatCat "${file}" | grep -qF "${text}"
+}
+
+CompatProbe_reseed_warn() {
+  # the default PUT factory warns; from d1f510dcb the tcp PUT has its own debug message
+  CompatHasPatchLine reseed_warn && ! CompatCat "tlspuffin/src/tcp/mod.rs" | grep -qF 'reseed failed'
+}
+
+CompatProbe_codec_warn() {
+  CompatHasPatchLine codec_warn
+}
+
+CompatProbe_wolfssl_reseed_warn() {
+  CompatHasPatchLine wolfssl_reseed_warn
+}
+
+CompatProbe_wolfssl_reseed_error() {
+  CompatCat "tlspuffin/src/wolfssl/mod.rs" | grep -qF 'error!("[determinism_reseed] Not yet implemented.")'
+}
+
+# Do all the lines containing the text of rule $1 (COMPAT_PATCH) have <from> on the line <offset> lines away?
+CompatHasOffsetLine() {
+  local file text from to offset;
+  IFS='|' read -r file text from to offset <<< "${COMPAT_PATCH[$1]}";
+  CompatCat "${file}" | awk -v text="${text}" -v from="${from}" -v off="${offset:-0}" '
+    { line[NR] = $0 } index($0, text) { hits[++n] = NR }
+    END { if (n == 0) exit 1; for (i = 1; i <= n; i++) if (index(line[hits[i] + off], from) == 0) exit 1; exit 0 }'
+}
+
+CompatProbe_openssl_descriptor_info() {
+  CompatHasOffsetLine openssl_descriptor_info
+}
+
+CompatProbe_wolfssl_descriptor_info() {
+  CompatHasOffsetLine wolfssl_descriptor_info
+}
+
+CompatProbe_boringssl_clear_info() {
+  CompatHasPatchLine boringssl_clear_info
 }
 
 # Is commit $2 in the declared range of rule $1? (start is ancestor, end is not)
@@ -139,6 +214,7 @@ CompatAppliedJSON() {
 
 # Init: prepare what the applied rules need later on (the sources are then copied by the build steps).
 #   log_config: extract the reference client_log_config.yml into ${THEJOB_OUT_PATH}/compat/
+#   rules of COMPAT_PATCH: patch their source lines (log level lowered to debug)
 CompatPrepare() {
   local repo="$1";
   if CompatIsApplied log_config; then
@@ -151,6 +227,32 @@ CompatPrepare() {
     git -C "${repo}" show "${COMPAT_LOG_CONFIG_REF}:client_log_config.yml" > "${THEJOB_OUT_PATH}/compat/client_log_config.yml" || return 1;
     echo "Compat rule log_config: reference client_log_config.yml saved";
   fi
+  local id;
+  for id in "${!COMPAT_PATCH[@]}"; do
+    CompatIsApplied "${id}" || continue;
+    local path text from to offset;
+    IFS='|' read -r path text from to offset <<< "${COMPAT_PATCH[${id}]}";
+    offset="${offset:-0}";
+    local file="${repo}/${path}";
+    # literal strings for sed
+    from=$( printf '%s' "${from}" | sed 's/[][\\.*^$/]/\\&/g' );
+    to=$( printf '%s' "${to}" | sed 's/[\\/&]/\\&/g' );
+    local line;
+    for line in $( grep -nF "${text}" "${file}" | cut -d: -f1 ); do
+      sed -i "$(( line + offset ))s/${from}/${to}/" "${file}" || return 1;
+    done
+    local unpatched=false;
+    if (( offset == 0 )); then
+      grep -qF "${text}" "${file}" && unpatched=true;
+    else
+      COMPAT_GIT_REV='' COMPAT_REPO="${repo}" CompatHasOffsetLine "${id}" && unpatched=true;
+    fi
+    if ${unpatched}; then
+      echo "Compat rule ${id}: failed to patch ${file}";
+      return 1;
+    fi
+    echo "Compat rule ${id}: ${file} patched";
+  done
   return 0;
 }
 
