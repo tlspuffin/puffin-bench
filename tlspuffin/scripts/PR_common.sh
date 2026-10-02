@@ -328,7 +328,7 @@ ExperimentSetupForCargo() {
   local vendorSources='null';
   [ -s ./.vendor_sources.json ] && vendorSources=$( < ./.vendor_sources.json );
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"vendor_sources\": ${vendorSources} }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources} }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -901,10 +901,13 @@ Init () {
     patch "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch"
 
   local compatApplied='';
-  CompatEvaluate "${THEJOB_OUT_PATH}/repo" "${COMMIT_ID}" compatApplied "${THEJOB_OUT_PATH}/compat.json" || {
-    CancelTask "Compat rules do not match commit ${COMMIT_ID}, see step output"
-    return 1
-  }
+  CompatEvaluate "${THEJOB_OUT_PATH}/repo" "${COMMIT_ID}" compatApplied "${THEJOB_OUT_PATH}/compat.json" || return 1;
+  # commit inside a declared range without the bias (e.g. a commit of the tlspuffin PR that removed it):
+  # run with the probe's decision, warning shown on the scheduler board (task argument) and on the dashboard
+  if [ -n "${COMPAT_MISMATCH}" ]; then
+    COMPAT_WARNING="commit in the declared range of ${COMPAT_MISMATCH} but the probe does not match: rule(s) not applied, check the results"
+    AddGlobalParam COMPAT_WARNING "${COMPAT_WARNING}"
+  fi
   CreateArtefact "${THEJOB_OUT_PATH}/compat.json" "compat.json" "commit_id:${COMMIT_ID}"
   AddGlobalParam COMPAT_APPLIED "${compatApplied}"
   COMPAT_APPLIED="${compatApplied}"
@@ -1007,7 +1010,7 @@ ForcedBuild() {
   if [ -n "${COMPAT_UNSUPPORTED}" ]; then
     echo "${COMPAT_UNSUPPORTED}"
     echo "${COMPAT_UNSUPPORTED}" > ./.unsupported
-    echo "{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${features}\", \"flags\": \"${extra_flags}\", \"unsupported\": \"${COMPAT_UNSUPPORTED}\", \"compat\": $( CompatAppliedJSON ) }" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json"
+    echo "{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${features}\", \"flags\": \"${extra_flags}\", \"unsupported\": \"${COMPAT_UNSUPPORTED}\", \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ) }" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json"
     echo "{ \"unsupported\": \"${COMPAT_UNSUPPORTED}\" }" >> "${THEJOB_USER_STATE_FILE}"
     return 0;
   fi
