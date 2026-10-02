@@ -5,9 +5,11 @@
 # Each rule has:
 #   - a probe, CompatProbe_<id>, run against the checked-out sources: it decides whether the
 #     rule applies (so side-branch commits outside the declared range are handled too);
-#   - a declared range [start, end) in COMPAT_RANGE: documents the intent, is used by the
-#     self-test (tests/compat_selftest.sh), and makes the task fail when a commit inside the
-#     range does not match the probe (never run an unfair experiment silently).
+#   - a declared range [start, end) in COMPAT_RANGE: documents the intent and is used by the
+#     self-test (tests/compat_selftest.sh). A commit inside the range that does not match the probe
+#     (e.g. a commit of the tlspuffin pull request that removed the bias) is still run with the probe's
+#     decision, with a warning shown on the scheduler board and on the dashboard (COMPAT_WARNING):
+#     never an unfair experiment silently, and no experiment refused that older job scripts ran.
 #     An end "-" means the range is still open (not fixed on dev yet): only the probe decides.
 #
 # A rule can be disabled with the task argument COMPAT_DISABLE (comma separated ids, or "all").
@@ -187,7 +189,8 @@ CompatIsDisabled() {
 # Evaluate every rule for a commit.
 #   $1 repository path, $2 commit, $3 reference to the output list of applied rule ids,
 #   $4 (optional) JSON output file.
-# Returns 1 when a commit of a declared range does not match the probe of its rule.
+# Sets COMPAT_MISMATCH to the ids of the rules whose declared range contains the commit while their probe
+# does not match (the probe decides; the mismatch is reported as a warning).
 CompatEvaluate() {
   local COMPAT_REPO="$1";
   local commit="$2";
@@ -195,7 +198,7 @@ CompatEvaluate() {
   local jsonFile="$4";
 
   ref_applied='';
-  local status=0;
+  COMPAT_MISMATCH='';
   local json='';
   local id;
   for id in "${COMPAT_RULES[@]}"; do
@@ -207,27 +210,34 @@ CompatEvaluate() {
     CompatInDeclaredRange "${id}" "${commit}" && inRange=true;
     CompatIsDisabled "${id}" && disabled=true;
     local rangeEnd=( ${COMPAT_RANGE[${id}]} );
+    local mismatch=false;
     if ${inRange} && ! ${probe} && [ "${rangeEnd[1]}" != "-" ]; then
-      echo "Compat rule ${id}: commit ${commit} is in the declared range but does not match the probe" >&2;
-      status=1;
+      echo "WARNING: compat rule ${id}: commit ${commit} is in the declared range but does not match the probe: not applied" >&2;
+      mismatch=true;
+      COMPAT_MISMATCH+="${COMPAT_MISMATCH:+,}${id}";
     fi
     if ${probe} && ! ${disabled}; then
       applied=true;
       ref_applied+="${ref_applied:+,}${id}";
     fi
     echo "Compat rule ${id}: probe=${probe} in_range=${inRange} disabled=${disabled} applied=${applied}";
-    json+="${json:+, }\"${id}\": { \"probe\": ${probe}, \"in_range\": ${inRange}, \"disabled\": ${disabled}, \"applied\": ${applied} }";
+    json+="${json:+, }\"${id}\": { \"probe\": ${probe}, \"in_range\": ${inRange}, \"disabled\": ${disabled}, \"applied\": ${applied}, \"mismatch\": ${mismatch} }";
   done
 
   if [ -n "${jsonFile}" ]; then
     echo "{ \"version\": 1, \"commit\": \"${commit}\", \"rules\": { ${json} } }" > "${jsonFile}";
   fi
-  return ${status};
+  return 0;
 }
 
 CompatIsApplied() {
   local id="$1";
   [[ ",${COMPAT_APPLIED:-}," == *",${id},"* ]]
+}
+
+# Warning of the task (COMPAT_WARNING, set by Init) as a JSON string or null (recorded in cli-<step>.json)
+CompatWarningJSON() {
+  [ -n "${COMPAT_WARNING:-}" ] && echo "\"${COMPAT_WARNING//\"/\'}\"" || echo null;
 }
 
 # Applied rules as a JSON array (recorded in cli-<step>.json)
