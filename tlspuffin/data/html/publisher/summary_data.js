@@ -231,7 +231,9 @@ function BuildDataSet(source, json) {
         state: [], 
         success: 0, 
         cli: libraries[library]?.cli ?? 'N/A', 
-        trust_objective: libraries[library]?.trust_objective ?? 0
+        trust_objective: libraries[library]?.trust_objective ?? 0,
+        // set when the experiment could not run as required (e.g. LibreSSL without ASAN support)
+        unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported
       };
       libraries[library].data.forEach(attempt => {
         if (attempt?.error !== undefined) {

@@ -317,6 +317,37 @@ CompatApplyFiles() {
   return 0;
 }
 
+# Build rule, called by ComputeBuildRuntimeInfo (so the build and the experiment use the same features):
+# perf experiments of LibreSSL must run with ASAN.
+#   $1 package, $2 vendor, $3 cputs (true|false), $4 reference to the features.
+# The Rust harness gets the "asan" feature if missing. Sets COMPAT_UNSUPPORTED (and returns 0) when
+# ASAN is impossible: C vendor preset without ASAN, or libressl-src without ASAN support (before cd649d6bf).
+CompatBuildRules() {
+  local package="$1";
+  local vendor="$2";
+  local cputs="$3";
+  local -n ref_cbr_features=$4;
+
+  COMPAT_UNSUPPORTED='';
+  [ "${TYPE:-}" == "perf" ] && [ "${package}" == "tlspuffin" ] || return 0;
+  [[ "${vendor}" == libressl:* || ",${ref_cbr_features}," =~ ,libressl[0-9]*, ]] || return 0;
+  CompatIsDisabled libressl_asan && return 0;
+
+  if ${cputs}; then
+    [[ "${vendor}" == *-asan ]] ||
+        COMPAT_UNSUPPORTED="LibreSSL: ASAN unsupported (vendor ${vendor} is not an -asan preset)";
+    return 0;
+  fi
+  if [[ ",${ref_cbr_features}," != *,asan,* ]]; then
+    ref_cbr_features="${ref_cbr_features:+${ref_cbr_features},}asan";
+    echo "Compat rule libressl_asan: asan feature added";
+  fi
+  if grep -qF 'ASAN not yet supported' "${THEJOB_OUT_PATH}/repo/crates/libressl-src/src/lib.rs" 2>/dev/null; then
+    COMPAT_UNSUPPORTED="LibreSSL: ASAN unsupported (libressl-src cannot build with ASAN at this commit)";
+  fi
+  return 0;
+}
+
 # After the build, on the output of "<fuzzer> help": the flags added by the rules must exist.
 CompatVerifyHelp() {
   local helpFile="$1";
