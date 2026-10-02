@@ -83,6 +83,20 @@ export function ReadJSON(file, errorObj ={ errno: 0 }) {
   }
 }
 
+// Attach the log volume record of an attempt (logs-<library>-<attempt>.json, written by
+// ExperimentSaveLogStats) and collect the attempts with a log warning at the library level.
+export function AttachLogStats(libResult, attempt, library, attemptID, outPath) {
+  const logs = ReadJSON(`${outPath}/logs-${library}-${attemptID}.json`, {});
+  if (logs === null) {
+    return;
+  }
+  attempt.logs = logs;
+  libResult.log_max_mb = Math.max(libResult.log_max_mb ?? 0, logs.estimated_mb ?? 0);
+  if (logs.warning) {
+    libResult.log_warning = [...(libResult.log_warning ?? []), attemptID];
+  }
+}
+
 function Utf8ByteLength(str) {
   let bytes = 0;
   for (let i = 0; i < str.length; i++) {

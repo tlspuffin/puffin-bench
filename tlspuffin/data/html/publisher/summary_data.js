@@ -232,6 +232,11 @@ function BuildDataSet(source, json) {
         success: 0, 
         cli: libraries[library]?.cli ?? 'N/A', 
         trust_objective: libraries[library]?.trust_objective ?? 0,
+        // log volume records (see ExperimentLogStats), absent for results older than the feature
+        log_warning: libraries[library].data
+            .filter(attempt => attempt?.logs?.warning)
+            .map(attempt => ({ id: attempt.id, warning: attempt.logs.warning })),
+        log_max_mb: Math.max(0, ...libraries[library].data.map(attempt => attempt?.logs?.estimated_mb ?? 0)),
         // set when the experiment could not run as required (e.g. LibreSSL without ASAN support)
         unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported
       };
