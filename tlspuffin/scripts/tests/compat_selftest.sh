@@ -79,6 +79,10 @@ Check wolfssl_descriptor_info e13983d6a6e186cde04fffeb12914f06b4ff9b68 false
 Check boringssl_clear_info 8d799887b891b0fa7f8ae34f3b5152a4757bb4cb true
 Check boringssl_clear_info 2f38bf22aee802509663609fa4ca84b8634e5574 true
 Check boringssl_clear_info 8d799887b891b0fa7f8ae34f3b5152a4757bb4cb^1 false
+Check toml_cli_locked c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b true
+Check toml_cli_locked 1957fba63754933fa99a2ed26d2acee1d8cc9ab1 true
+Check toml_cli_locked 5586c58b12a7bee021d3ae9df242df89ebefae0f false
+Check toml_cli_locked c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b^1 false
 
 # the reference log config must be the pinned blob
 blob=$( git -C "${COMPAT_REPO}" rev-parse "${COMPAT_LOG_CONFIG_REF}:client_log_config.yml" );

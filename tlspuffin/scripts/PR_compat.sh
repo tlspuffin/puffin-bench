@@ -12,7 +12,7 @@
 #
 # A rule can be disabled with the task argument COMPAT_DISABLE (comma separated ids, or "all").
 
-COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info )
+COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info toml_cli_locked )
 
 declare -A COMPAT_RANGE=(
   # bit-level mutations enabled by default (opt-out --wo-bit); opt-in --with-bit from e13983d
@@ -38,6 +38,15 @@ declare -A COMPAT_RANGE=(
   # the BoringSSL Rust PUT logs "does not support clearing mode" at INFO for every PUT it creates (~140,000 lines
   # per 70 min run); open (also on dev, where benchmarks use the BoringSSL C harness)
   [boringssl_clear_info]="8d799887b891b0fa7f8ae34f3b5152a4757bb4cb -"
+  # build fix: mk_vendor installs toml-cli with the commit's toolchain and without --locked: its newest
+  # dependencies need a newer rustc, and its locked ones (proc-macro2 1.0.47) do not build on the commit's
+  # nightly, so the C vendor libraries (e.g. OpenSSL) fail to build; installed with --locked by the stable
+  # toolchain instead, installed first (rustup < 1.28, as in the nix shell, does not install a toolchain
+  # named by "+stable"; serialized with the other toolchain installs), and found in ~/.cargo/bin even when it
+  # is not in the PATH; mk_vendor is also run by the build scripts of the -src crates (e.g. openssl-src-111), where
+  # cargo sets RUSTC to the commit's rustc, which "cargo install" would use: the variables cargo gives to build
+  # scripts are cleared for the install; mk_vendor rewritten from 5586c58b1
+  [toml_cli_locked]="c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b 5586c58b12a7bee021d3ae9df242df89ebefae0f"
 )
 
 # source lines patched by the rules at Init: "<file>|<text of the lines>|<from>|<to>[|<offset>]" (literal strings;
@@ -51,6 +60,7 @@ declare -A COMPAT_PATCH=(
   [openssl_descriptor_info]='tlspuffin/harness/openssl/src/put.c|"descriptor %u version: %s type: %s",|_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
   [wolfssl_descriptor_info]='tlspuffin/harness/wolfssl/src/put.c|"descriptor %u version: %s type: |_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
   [boringssl_clear_info]='tlspuffin/src/rust_put/boringssl/mod.rs|log::info!("BoringSSL PUT does not support clearing mode")|log::info!|log::debug!'
+  [toml_cli_locked]='tools/mk_vendor|cargo install toml-cli --version "0.2.3"|cargo install toml-cli --version "0.2.3"|PATH="${PATH}:${CARGO_HOME:-${HOME}/.cargo}/bin"; if ! command -v toml > /dev/null; then flock "${HOME:-/tmp}/.puffin-bench-rustup.lock" env -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u RUSTDOC -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET -u RUSTUP_TOOLCHAIN sh -c "rustup toolchain install stable --profile minimal && cargo +stable install toml-cli --locked --version 0.2.3"; fi'
 )
 
 # fuzzer flags added by the rules
@@ -141,6 +151,10 @@ CompatProbe_boringssl_clear_info() {
   CompatHasPatchLine boringssl_clear_info
 }
 
+CompatProbe_toml_cli_locked() {
+  CompatHasPatchLine toml_cli_locked
+}
+
 # Is commit $2 in the declared range of rule $1? (start is ancestor, end is not)
 CompatInDeclaredRange() {
   local id="$1";
@@ -214,7 +228,7 @@ CompatAppliedJSON() {
 
 # Init: prepare what the applied rules need later on (the sources are then copied by the build steps).
 #   log_config: extract the reference client_log_config.yml into ${THEJOB_OUT_PATH}/compat/
-#   rules of COMPAT_PATCH: patch their source lines (log level lowered to debug)
+#   rules of COMPAT_PATCH: patch their source lines (log level lowered to debug, toml-cli install --locked)
 CompatPrepare() {
   local repo="$1";
   if CompatIsApplied log_config; then
