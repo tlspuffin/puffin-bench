@@ -214,7 +214,9 @@ if [ -d "$( dirname "${HEADER}" )" ] && { [ ! -s "${HEADER}" ] || grep -qF "${MA
   {
     echo "${MARK}";
     if (( nbLive > 0 )); then
-      echo "<a href=\"../objectives/live.html\" target=\"_blank\" style=\"display:inline-block;margin:4px 8px;padding:4px 10px;border-radius:6px;background:#5a3e1b;color:#fff;text-decoration:none\" title=\"Objectives of the running tasks, replayed and grouped by bug\">🐞 Live objectives (${nbLive} task(s))</a>";
+      # placed before the board buttons (the header is in their flex container), styled like them
+      echo "<style>#custom_header{order:-1}#custom_header a.refresh-button{display:inline-block;text-decoration:none}</style>";
+      echo "<a class=\"refresh-button\" href=\"../objectives/live.html\" target=\"_blank\" rel=\"noopener\" title=\"Objectives of the running tasks, replayed and grouped by bug (new tab)\">🐞 Live objectives (${nbLive} task(s))</a>";
     fi
   } > "${HEADER}.tmp" && mv "${HEADER}.tmp" "${HEADER}";
 fi
