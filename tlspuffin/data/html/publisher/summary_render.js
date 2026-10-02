@@ -58,6 +58,61 @@ function GetLibIcon(success, total) {
   return '⛔';
 }
 
+// ASAN status of the binary (cli.asan, see DetectAsan); results older than the detection only
+// tell whether ASAN was requested in the features/vendor, which is shown as unverified.
+function GetAsanBadge(cli) {
+  if ((typeof cli === 'object') && cli?.unsupported) {
+    return `<span class="lib-asan asan-off" title="${EscapeAttribute(cli.unsupported)}">ASAN unsupported</span>`;
+  }
+  const asan = (typeof cli === 'object') ? cli?.asan : undefined;
+  if (asan?.instrumented === true) {
+    return `<span class="lib-asan asan-on" title="ASAN active (${EscapeAttribute(asan.runtime)} runtime, ${asan.asan_report_refs} instrumented checks)">ASAN✓</span>`;
+  }
+  if (asan?.instrumented === false) {
+    return `<span class="lib-asan asan-off" title="Built without ASAN${asan.requested ? ' although it was requested' : ''}">ASAN✗</span>`;
+  }
+  const requested = (typeof cli === 'object') &&
+      ((`,${cli?.features ?? ''},`.includes(',asan,')) || (cli?.vendor ?? '').includes('-asan'));
+  return `<span class="lib-asan asan-unknown" title="ASAN not verified (older result); ${requested ? 'requested' : 'not requested'} in features/vendor">ASAN?</span>`;
+}
+
+// Compat rules not applied although the commit is in their declared range (cli.compat_warning, see CompatEvaluate)
+function GetCompatWarningIcon(cli) {
+  const warning = (typeof cli === 'object') ? cli?.compat_warning : null;
+  if (!warning) return '';
+  return `<span class="warn-icon warn-compat" title="${EscapeAttribute(`Compat rules: ${warning}`)}">⚖️⚠️</span>`;
+}
+
+function GetLogWarningIcon(status) {
+  const warnings = status?.log_warning ?? [];
+  if (warnings.length === 0) return '';
+  const title = warnings.map(item => `run ${item.id}: ${item.warning}`).join('\n');
+  return `<span class="warn-icon warn-logs" title="${EscapeAttribute(`Large or verbose logs (may slow the fuzzer):\n${title}`)}">📜⚠️</span>`;
+}
+
+function GetCrashWarningIcon(status) {
+  const warnings = status?.crash_warning ?? [];
+  if (warnings.length === 0) return '';
+  const title = warnings.map(item => `run ${item.id}: ${item.warning}`).join('\n');
+  return `<span class="warn-icon warn-crashes" title="${EscapeAttribute(`Fuzzing clients crashed and restarted again and again (executions not comparable):\n${title}`)}">💥⚠️</span>`;
+}
+
+// Sources of the vendor libraries (cli.vendor_sources, see DetectVendorSources): fork branches move over time
+function GetVendorSources(cli) {
+  const sources = (typeof cli === 'object') ? cli?.vendor_sources : undefined;
+  if (!Array.isArray(sources) || sources.length === 0) return '';
+  const items = sources.map(src => {
+    const at = src.commit ? src.commit.substring(0, 9) : (src.hash ? 'archive' : 'unresolved');
+    const title = `${src.repo ?? src.url} ${src.ref ?? src.hash ?? ''} → ${src.commit ?? 'not resolved'}`;
+    return `<span title="${EscapeAttribute(title)}">${EscapeAttribute(src.name)}: ${EscapeAttribute(src.ref && src.ref !== src.commit ? `${src.ref}@` : '')}${EscapeAttribute(at)}</span>`;
+  });
+  return `sources: ${items.join(', ')}<br>`;
+}
+
+function EscapeAttribute(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function GetWarningIcon(warnUser) {
   if (!warnUser || !Array.isArray(warnUser) || warnUser.length === 0) return '';
 
@@ -426,7 +481,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
       // Count success/fail if available
       const successCount = status?.success ?? '?';
       const totalRuns = status?.state.length ?? '?';
-      const icon = GetLibIcon(successCount, totalRuns);
+      const icon = status?.unsupported ? '⛔' : GetLibIcon(successCount, totalRuns);
 
       // Check for warning
       const warnUser = [];
@@ -455,8 +510,9 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
       libItem1Header.innerHTML = `
         <span class="lib-icon">${icon}</span>
         <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
-        <span class="lib-name">${libNameLabel} ${warningIcon}</span>
-        <span class="lib-stats">${successCount}/${totalRuns}</span>
+        ${GetAsanBadge(status?.cli)}
+        <span class="lib-name">${libNameLabel} ${warningIcon} ${GetCompatWarningIcon(status?.cli)} ${GetLogWarningIcon(status)} ${GetCrashWarningIcon(status)}</span>
+        <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
       `;
       libItemsHeader.appendChild(libItem1Header);
 
@@ -465,6 +521,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         libItem2Header.className = 'lib-item-header';
         libItem2Header.innerHTML = `
             ${status.cli?.features ? `features: ${status.cli?.features}<br>` : ''}
+            ${GetVendorSources(status.cli)}
             ${status.cli?.flags ? `flags: ${status.cli?.flags}` : ''}
         `
         libItemsHeader.appendChild(libItem2Header);

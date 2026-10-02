@@ -13,6 +13,7 @@ Experiment () {
 }
 
 ExperimentWithCargo () {
+  [ -r ./.unsupported ] && { echo "Skipped: $( < ./.unsupported )"; return 0; }
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
   local stats="";
@@ -27,12 +28,14 @@ ExperimentWithCargo () {
 }
 
 ExperimentEnd() {
+  [ -r ./.unsupported ] && { echo "Skipped: $( < ./.unsupported )"; return 0; }
   ExperimentEndCommon || return 1;
 
   local experimentUUID=-1;
   local experiment_base='';
   local objective_count=0;
   ExperimentReport experimentUUID experiment_base objective_count || return 1;
+  ExperimentSaveLogStats "${experiment_base}";
   local outFile="${THEJOB_OUT_PATH}/summary-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json"
   local statsJSON;
   if [ ! -s task.json ]; then
@@ -55,7 +58,7 @@ ExperimentEnd() {
   while IFS= read -r -d '' obj; do
     echo "=== ${obj} ===";
     printf -v obj '%q' "$obj"
-    nix-shell --run "${cmd} -- execute ${obj}" </dev/null
+    $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${obj}" </dev/null
   done < <( 
     find "${experiment_base}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\0' |
     sort -z -n |

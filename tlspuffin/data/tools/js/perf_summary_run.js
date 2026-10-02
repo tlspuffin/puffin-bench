@@ -49,6 +49,7 @@ function BuildSummary(result, artefactsPath, outPath) {
                 (json?.clients?.some((item => (item?.tEnd?.objective_size !== undefined) && (item.tEnd.objective_size > 0)))))) {
               libResult.flag_objective = true;
             }
+            Utils.AttachLogStats(libResult, json, library, parseInt(file), outPath);
             libResult.data.push(json);
           } else {
             readJSONError.id = parseInt(file);
@@ -58,6 +59,24 @@ function BuildSummary(result, artefactsPath, outPath) {
       });
       result.libraries[library] = libResult;
   }));
+  // libraries whose experiment could not run as required (see CompatBuildRules): no attempt, only cli-<library>.json
+  const [outContent, outErrno] = os.readdir(outPath);
+  if (outErrno == 0) {
+    outContent.forEach((file) => {
+        const match = /^cli-(.+)\.json$/.exec(file);
+        if ((match === null) || (result.libraries[match[1]] !== undefined)) return;
+        const cli = Utils.ReadJSON(`${outPath}/${file}`, {});
+        if (cli?.unsupported === undefined) return;
+        result.libraries[match[1]] = {
+          name: match[1],
+          cli,
+          trust_objective: 1,
+          data: [],
+          flag_objective: false,
+          unsupported: cli.unsupported
+        };
+    });
+  }
   result.flag_objective = Object.keys(result.libraries).some((library) => result.libraries[library].flag_objective)
 
   return result;
