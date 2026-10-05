@@ -197,7 +197,7 @@ If `cores_.size()` or `nbCores` exceeds the number of cores actually present on 
 The web dashboard's job-launcher UI is not driven by a server-side config key — it is a set of files the operator drops under the `html` root after `Config::Validate()` has created the empty extension directories:
 
 - `<html>/board/launchers/` — per-project launcher modules (see `docs/board-job-launcher.md`)
-- `<html>/board/custom/` — optional `header.html` fetched by `board.js` to inject a custom header fragment
+- `<html>/board/custom/` — optional `header.html` fetched by `board.js` to inject a custom header fragment, and optional `task_links.json` fetched by `history.js` for extra buttons on the history cards
 - `<html>/jobsscripts/` — served at `/files/jobsscripts/...`; where flow JSON / step scripts / extra files referenced by a launcher module typically live
 
 None of these are populated by the server itself and none are part of the embedded-resource extraction described in `docs/build.md`. See `docs/board-job-launcher.md` for the full mechanism and file formats.

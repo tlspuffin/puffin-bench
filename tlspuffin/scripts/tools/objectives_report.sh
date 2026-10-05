@@ -6,6 +6,8 @@
 # For tasks run before the objective reports existed: their replays went to the step stdout (trace names) and
 # stderr (reports), so reports cannot be matched to their trace; the groups count reports.
 #
+# The scheduler's history page gets a 🐞 button on the card of every task with a page (board/custom/task_links.json).
+#
 # Usage: bash objectives_report.sh <task id> [<task id> ...]
 #        bash objectives_report.sh --all     tasks with objectives whose page is missing or outdated (cron job)
 #   PB_ROOT        install root (default /srv/puffin-bench)
@@ -128,10 +130,32 @@ AllTasks() {
   done
 }
 
+# 🐞 button on the cards of the scheduler's history page (its optional board/custom/task_links.json): one per
+# task whose page lists objectives and whose export still exists. Rewritten on every call; a file whose entries
+# were not written by this script is left alone.
+TaskLinks() {
+  local links="${PB_ROOT}/data/html/board/custom/task_links.json";
+  [ -d "$( dirname "${links}" )" ] || return 0;
+  if [ -s "${links}" ] && ! jq -e 'all(.[][]; .source == "objectives_report")' "${links}" > /dev/null 2>&1; then
+    echo "${links}: not written by this script, left alone" >&2;
+    return 0;
+  fi
+  local f id;
+  for f in "${OUT}"/[0-9]*.json; do
+    [ -e "${f}" ] || continue;
+    id=$( basename "${f}" .json );
+    [[ "${id}" =~ ^[0-9]+$ ]] && [ -f "${OUT}/${id}.html" ] && [ -n "$( TaskFile "${id}" )" ] || continue;
+    jq -c --arg id "${id}" 'select((.runs | length) > 0)
+        | { ($id): [{ label: "🐞", url: "../objectives/\($id).html", source: "objectives_report",
+                     title: "Objectives of this task, grouped by bug: \([.runs[].reports] | add // 0) report(s), \([.runs[].groups | length] | add // 0) group(s) (new tab)" }] }' "${f}";
+  done | jq -s 'add // {}' > "${links}.tmp" && mv "${links}.tmp" "${links}";
+}
+
 [ "${1:-}" == "--render" ] && { Render "$2" "$3"; exit $?; }
 (( $# > 0 )) || { echo "Usage: $0 <task id> ... | --all" >&2; exit 1; }
 tasks=( "$@" );
 [ "$1" == "--all" ] && tasks=( $( AllTasks ) );
 status=0;
 for t in "${tasks[@]}"; do Report "${t}" || status=1; done
+TaskLinks || status=1;
 exit ${status}
