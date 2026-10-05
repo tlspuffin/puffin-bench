@@ -97,6 +97,19 @@ function GetCrashWarningIcon(status) {
   return `<span class="warn-icon warn-crashes" title="${EscapeAttribute(`Fuzzing clients crashed and restarted again and again (executions not comparable):\n${title}`)}">💥⚠️</span>`;
 }
 
+// What was built: cli.build (see BuildDescription in PR_common.sh), or the same text derived from the other cli
+// fields for older results. The step arguments give both a vendor preset and fallback features.
+function GetBuildDescription(cli) {
+  if ((typeof cli !== 'object') || (cli === null)) return '';
+  if (cli.build) return cli.build;
+  const preset = (cli.vendor ?? '').split(':').pop();
+  if (cli.cputs === true) return `C harness, ${preset}`;
+  if (cli.cputs !== false) return '';
+  const name = cli.library?.name;
+  const built = (name && (name !== 'NA')) ? `${name}${cli.library?.version ?? ''}` : `features ${cli.features ?? ''}`;
+  return `Rust harness, ${built}` + (preset ? ` (vendor ${preset} not available at this commit)` : '');
+}
+
 // Sources of the vendor libraries (cli.vendor_sources, see DetectVendorSources): fork branches move over time
 function GetVendorSources(cli) {
   const sources = (typeof cli === 'object') ? cli?.vendor_sources : undefined;
@@ -509,7 +522,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
       libItem1Header.className = 'lib-item-header';
       libItem1Header.innerHTML = `
         <span class="lib-icon">${icon}</span>
-        <span class="lib-harnesskind">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
+        <span class="lib-harnesskind" title="${EscapeAttribute(GetBuildDescription(status?.cli))}">${status?.cli?.cputs === true ? '⚙C' : status?.cli?.cputs === false ? '🦀' : '❓'}</span>
         ${GetAsanBadge(status?.cli)}
         <span class="lib-name">${libNameLabel} ${warningIcon} ${GetCompatWarningIcon(status?.cli)} ${GetLogWarningIcon(status)} ${GetCrashWarningIcon(status)}</span>
         <span class="lib-stats">${status?.unsupported ? 'not run' : `${successCount}/${totalRuns}`}</span>
@@ -520,6 +533,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
         const libItem2Header = document.createElement('div');
         libItem2Header.className = 'lib-item-header';
         libItem2Header.innerHTML = `
+            ${GetBuildDescription(status.cli) ? `build: ${EscapeAttribute(GetBuildDescription(status.cli))}<br>` : ''}
             ${status.cli?.features ? `features: ${status.cli?.features}<br>` : ''}
             ${GetVendorSources(status.cli)}
             ${status.cli?.flags ? `flags: ${status.cli?.flags}` : ''}

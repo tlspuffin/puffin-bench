@@ -130,6 +130,23 @@ FindFile() {
   return 1
 }
 
+# What an experiment built, in words: the step arguments give both a vendor preset (C harness, used when the
+# commit has that preset and the cputs feature) and features (Rust harness, the fallback), so the arguments alone
+# do not tell which library version ran. Usage: BuildDescription <cputs> <vendor> <features> <library> <version>
+# e.g. "C harness, wolfssl580-asan" or "Rust harness, wolfssl540 (vendor wolfssl580-asan not available at this commit)".
+# Mirrored for older results (no "build" in cli-<library>.json) by summary_render.js and objectives_report.sh.
+BuildDescription() {
+  local cputs="$1" vendor="$2" features="$3" library="$4" version="$5";
+  if [ "${cputs}" == true ]; then
+    echo "C harness, ${vendor#*:}";
+    return 0;
+  fi
+  local desc="Rust harness, features ${features}";
+  [ -n "${library}" ] && [ "${library}" != 'NA' ] && desc="Rust harness, ${library}${version}";
+  [ -n "${vendor}" ] && desc+=" (vendor ${vendor#*:} not available at this commit)";
+  echo "${desc}";
+}
+
 ComputeBuildRuntimeInfo() {
   if [ -z "$1" ]; then
     echo "Missing package parameter"
@@ -328,7 +345,12 @@ ExperimentSetupForCargo() {
   local vendorSources='null';
   [ -s ./.vendor_sources.json ] && vendorSources=$( < ./.vendor_sources.json );
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources} }";
+  local build;
+  build=$( BuildDescription "${cputs}" "${vendor}" "${ref_esfc_features}" "${library}" "${library_version}" );
+  echo "${build}" > ./.build_info;
+  echo "Build: ${build}";
+
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources} }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -1124,6 +1146,7 @@ MonitorExperiment() {
     fi
     echo -e "\n  Time since last stats.json update: ${elapsed}s" >> ${outfile}
 
+    [ -s ./.build_info ] && echo "  Build: $( < ./.build_info )" >> ${outfile}
     if [ -s ./.asan_info.json ]; then
       local asanInfo=$( < ./.asan_info.json );
       local asanState='? (not verified)';
