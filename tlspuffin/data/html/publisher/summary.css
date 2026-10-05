@@ -1292,6 +1292,10 @@ header {
   cursor: pointer;
 }
 .lib-objectives:hover { background: #ffe0e0; }
+/* objectives found, but no replay confirmed a bug */
+.lib-objectives.unconfirmed { border-color: #d97a00; background: #fff6e8; color: #a35a00; }
+.lib-objectives.unconfirmed:hover { background: #ffe9c7; }
+.lib-objectives-panel.unconfirmed { border-left-color: #d97a00; background: #fffbf3; }
 a.lib-objectives { margin-left: 4px; text-decoration: none; }
 .lib-objectives-panel {
   max-width: 70vw;

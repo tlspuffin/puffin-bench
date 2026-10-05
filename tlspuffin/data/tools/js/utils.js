@@ -104,6 +104,8 @@ export function AttachLogStats(libResult, attempt, library, attemptID, outPath) 
 // Objectives replayed at the end of an attempt (objectives-<library>-<attempt>.json, see ExperimentReplayObjectives):
 // the attempt keeps the counts, the library merges the groups (same bug type and top frames) of its attempts.
 const MAX_OBJECTIVE_GROUPS = 20;
+// replays that confirm a bug (crash, security violation, panic); "no-crash" and "replay-error" do not
+const UNCONFIRMED_OBJECTIVE_TYPES = ['no-crash', 'replay-error'];
 export function AttachObjectives(libResult, attempt, library, attemptID, outPath) {
   const objectives = ReadJSON(`${outPath}/objectives-${library}-${attemptID}.json`, {});
   if ((objectives === null) || !Array.isArray(objectives.groups)) {
@@ -134,6 +136,8 @@ export function AttachObjectives(libResult, attempt, library, attemptID, outPath
   });
   merged.allGroups.sort((a, b) => b.count - a.count);
   merged.distinct = merged.allGroups.length;
+  merged.confirmed = merged.allGroups.filter(item => !UNCONFIRMED_OBJECTIVE_TYPES.includes(item.type))
+                                     .reduce((sum, item) => sum + item.count, 0);
   merged.groups = merged.allGroups.slice(0, MAX_OBJECTIVE_GROUPS);
   libResult.objectives = merged;
 }

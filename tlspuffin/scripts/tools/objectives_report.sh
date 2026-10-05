@@ -113,12 +113,15 @@ Render() {
     + "body{font-family:sans-serif;margin:16px;color:#222}h2{margin:18px 0 4px}.run{margin:6px 0 2px;color:#555}"
     + ".type{font-family:monospace;color:#900}.frames{font-family:monospace}summary{cursor:pointer}"
     + "pre{max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-all;background:#f5f5f5;padding:6px}"
-    + ".none{color:#777}</style></head><body>"
+    + ".none{color:#777}.unconfirmed{color:#a35a00;background:#fff6e8;border-left:3px solid #d97a00;padding:4px 8px}</style></head><body>"
     + "<h1>Objectives of task \(.task | esc)</h1><div>\(.name | esc) — commit <code>\(.commit | esc)</code>"
     + (if .task_url then " — <a href=\"\(.task_url | esc)\" target=\"_blank\">task on the scheduler board</a>" else "" end) + "</div>"
     + "<p class=\"none\">Groups: AddressSanitizer errors (memory corruptions), security-violation (the security oracle flagged a claim violation, e.g. Authentication bypass: no crash), panic, replay-error (the replay could not run or timed out), no-crash (not reproduced by the replay).</p>"
     + (if .live then "<p class=\"none\">Task running: objectives replayed every few minutes on core 0, outside the fuzzing cores. Last update: \(.updated | esc). Reload for newer results.</p>" else "" end)
-    + (if (.runs | length) == 0 then "<p class=\"none\">No objective found.</p>" else "" end)
+    + (if (.runs | length) == 0 then "<p class=\"none\">No objective found.</p>"
+       elif ([.runs[].groups[] | select(.type != "no-crash" and .type != "replay-error")] | length) == 0
+       then "<p class=\"unconfirmed\">Objectives were found, but no replay confirmed a bug: not reproduced (no-crash), or the replay timed out or could not run (replay-error).</p>"
+       else "" end)
     + ([.runs | group_by(.library)[] |
         "<h2>\(.[0].library | esc)</h2>"
         + (((.[0].cli | build_of) // .[0].put) as $build
@@ -168,8 +171,13 @@ TaskLinks() {
     id=$( basename "${f}" .json );
     [[ "${id}" =~ ^[0-9]+$ ]] && [ -f "${OUT}/${id}.html" ] && [ -n "$( TaskFile "${id}" )" ] || continue;
     jq -c --arg id "${id}" 'select((.runs | length) > 0)
+        | ([.runs[].groups[] | select(.type != "no-crash" and .type != "replay-error") | .count] | add // 0) as $confirmed
         | { ($id): [{ label: "🐞", url: "../objectives/\($id).html", source: "objectives_report",
-                     title: "Objectives of this task, grouped by bug: \([.runs[].reports] | add // 0) report(s), \([.runs[].groups | length] | add // 0) group(s) (new tab)" }] }' "${f}";
+                     level: (if $confirmed > 0 then null else "warning" end),
+                     title: (if $confirmed > 0
+                             then "Objectives of this task, grouped by bug: \([.runs[].reports] | add // 0) report(s), \([.runs[].groups | length] | add // 0) group(s), \($confirmed) confirmed (new tab)"
+                             else "Objectives were found but no replay confirmed a bug (not reproduced, timed out or could not run) (new tab)" end) }
+                   | with_entries(select(.value != null))] }' "${f}";
   done | jq -s 'add // {}' > "${links}.tmp" && mv "${links}.tmp" "${links}";
 }
 
