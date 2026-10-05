@@ -50,10 +50,12 @@ Report() {
     found=$( unzip -Z1 "${Z}" 2> /dev/null | grep -cE "^artefacts/${lib}/${attempt}-objective/[^.][^/]*\.trace$" );
     replayed=$( grep -cE '^=== .*\.trace ===$' "${tmp}/out" );
     (( found > 0 || replayed > 0 )) || continue;
-    # one block per report: AddressSanitizer errors and Rust panics, in stdout and stderr
+    # one block per report: AddressSanitizer errors, security violations, Rust panics and replay errors (the fuzzer
+    # could not run, or the replay timed out), in stdout and stderr
     rm -f "${tmp}"/block.*;
     cat "${tmp}/out" "${tmp}/err" | awk -v dir="${tmp}" '
-      /==[0-9]+==ERROR: AddressSanitizer: / || /panicked at / { n++ }
+      /==[0-9]+==ERROR: AddressSanitizer: / || /security violation occurred\. msg: / || /SecurityClaim\("/ || /panicked at / ||
+        /error while loading shared libraries|binary not found:|^error: could not compile|^exit status: (124|137)$/ { n++ }
       n > 0 { print > (dir "/block." n) }'
     : > "${tmp}/sig.tsv";
     local b;
@@ -114,6 +116,7 @@ Render() {
     + ".none{color:#777}</style></head><body>"
     + "<h1>Objectives of task \(.task | esc)</h1><div>\(.name | esc) — commit <code>\(.commit | esc)</code>"
     + (if .task_url then " — <a href=\"\(.task_url | esc)\" target=\"_blank\">task on the scheduler board</a>" else "" end) + "</div>"
+    + "<p class=\"none\">Groups: AddressSanitizer errors (memory corruptions), security-violation (the security oracle flagged a claim violation, e.g. Authentication bypass: no crash), panic, replay-error (the replay could not run or timed out), no-crash (not reproduced by the replay).</p>"
     + (if .live then "<p class=\"none\">Task running: objectives replayed every few minutes on core 0, outside the fuzzing cores. Last update: \(.updated | esc). Reload for newer results.</p>" else "" end)
     + (if (.runs | length) == 0 then "<p class=\"none\">No objective found.</p>" else "" end)
     + ([.runs | group_by(.library)[] |
@@ -123,8 +126,8 @@ Render() {
              + (if .[0].asan == true then "✓" elif .[0].asan == false then "✗ (not instrumented)" else "?" end) + "</div>"
            else "" end)
         + ([.[] |
-            "<div class=\"run\">run \(.attempt): \(.found) objective(s), \(.replayed) replayed, \(.reports) crash report(s)"
-            + (if .replayed > .reports then ", \(.replayed - .reports) replay(s) without crash" else "" end) + "</div>"
+            "<div class=\"run\">run \(.attempt): \(.found) objective(s), \(.replayed) replayed, \(.reports) report(s)"
+            + (if .replayed > .reports then ", \(.replayed - .reports) replay(s) without crash or violation" else "" end) + "</div>"
             + ([.groups[] |
                 "<details><summary><b>\(.count) ×</b> <span class=\"type\">\(.type | esc)</span> "
                 + "<span class=\"frames\">\((.frames | join(" < ")) | esc)</span></summary><pre>\(.excerpt | esc)</pre></details>"

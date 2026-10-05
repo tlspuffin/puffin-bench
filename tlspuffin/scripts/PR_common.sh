@@ -665,10 +665,11 @@ ExperimentSaveLogStats() {
 }
 
 # Signature of an objective replay output (stdin): "<type>\t<frame1 < frame2 < frame3>\t<SUMMARY line>\t<line of
-# the report start>". Type: the AddressSanitizer error (heap-buffer-overflow, SEGV, ...), "panic",
-# "replay-error" when the fuzzer could not run, or "no-crash" when the replay did not reproduce; frames: first
-# functions of the first stack outside the sanitizer runtime and the libc memory functions (<module>+<offset>
-# when the stack is not symbolized).
+# the report start>". Type: the AddressSanitizer error (heap-buffer-overflow, SEGV, ...), "security-violation"
+# when the security oracle of the trace execution flags a claim violation (frames: its message, e.g.
+# "Authentication bypass"; such objectives do not crash), "panic", "replay-error" when the fuzzer could not run or
+# the replay timed out, or "no-crash" when the replay did not reproduce; frames: first functions of the first stack outside the
+# sanitizer runtime and the libc memory functions (<module>+<offset> when the stack is not symbolized).
 ObjectiveSignature() {
   awk '
     function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor)/ ||
@@ -676,6 +677,12 @@ ObjectiveSignature() {
     type == "" && match($0, /ERROR: AddressSanitizer: [A-Za-z_-]+/) {
       type = substr($0, RSTART + 25, RLENGTH - 25); start = NR; next }
     type == "" && panic == "" && /panicked at / { panic = $0; sub(/.*panicked at /, "", panic); sub(/:$/, "", panic) }
+    # security oracle (claims): "error because a security violation occurred. msg: <msg>" logged by the forked
+    # execution, or "Failed to execute trace <path>: SecurityClaim(\"<msg>\")" on older commits
+    type == "" && violation == "" && match($0, /security violation occurred\. msg: .*/) {
+      violation = substr($0, RSTART + 34); vline = $0; vstart = NR }
+    type == "" && violation == "" && match($0, /SecurityClaim\("[^"]*"\)/) {
+      violation = substr($0, RSTART + 15, RLENGTH - 17); vline = $0; vstart = NR }
     type != "" && !done && /^ *#[0-9]+ 0x[0-9a-f]+ in / {
       f = $0; sub(/^ *#[0-9]+ 0x[0-9a-f]+ in /, "", f); sub(/ .*/, "", f);
       if (!skip(f) && n < 3) frames[++n] = f; seen = 1; next }
@@ -686,9 +693,12 @@ ObjectiveSignature() {
     type != "" && seen && /^ *$/ { done = 1 }
     type != "" && summary == "" && /^SUMMARY: AddressSanitizer:/ { summary = $0 }
     /error while loading shared libraries|binary not found:|^error: could not compile/ { replayerr = $0 }
+    # killed by timeout (124, or 137 after -k): the objective was not replayed, which is not "no-crash"
+    replayerr == "" && /^exit status: (124|137)$/ { replayerr = "replay timed out (" $0 ")" }
     END {
       if (type != "") { s = ""; for (i = 1; i <= n; i++) s = s (i > 1 ? " < " : "") frames[i];
                         printf "%s\t%s\t%s\t%d\n", type, s, summary, start }
+      else if (violation != "") { sub(/[ \r]+$/, "", violation); gsub(/\t/, " ", vline); printf "security-violation\t%s\t%s\t%d\n", violation, vline, vstart }
       else if (panic != "") printf "panic\t%s\t\t0\n", panic
       else if (replayerr != "") printf "replay-error\t\t%s\t0\n", replayerr
       else printf "no-crash\t\t\t0\n" }'
@@ -728,7 +738,8 @@ ExperimentReplayObjectives() {
     echo "=== ${obj} ===";
     local quoted;
     printf -v quoted '%q' "${obj}";
-    timeout -k 10 "${replayTimeout}" $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${quoted}" < /dev/null > "${report}" 2>&1;
+    # RUST_LOG=info: the security oracle reports a claim violation at INFO level (see ObjectiveSignature)
+    RUST_LOG=info timeout -k 10 "${replayTimeout}" $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${quoted}" < /dev/null > "${report}" 2>&1;
     echo "exit status: $?" >> "${report}";
     cat "${report}";
     local found=$( date -r "${obj}" +%s );
