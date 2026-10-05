@@ -12,7 +12,7 @@
 #
 # A rule can be disabled with the task argument COMPAT_DISABLE (comma separated ids, or "all").
 
-COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info toml_cli_locked )
+COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info toml_cli_locked stats_monitor_heartbeat )
 
 declare -A COMPAT_RANGE=(
   # bit-level mutations enabled by default (opt-out --wo-bit); opt-in --with-bit from e13983d
@@ -47,11 +47,16 @@ declare -A COMPAT_RANGE=(
   # cargo sets RUSTC to the commit's rustc, which "cargo install" would use: the variables cargo gives to build
   # scripts are cleared for the install; mk_vendor rewritten from 5586c58b1
   [toml_cli_locked]="c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b 5586c58b12a7bee021d3ae9df242df89ebefae0f"
+  # crash fix: after 30 s without client message, the LibAFL 0.15 broker sends a heartbeat from ClientId(0), which
+  # is not a client; StatsMonitor::display then fails to find its stats and the broker aborts ("An error occurred in
+  # broker timeout", KeyNotFound ClientId(0)), killing the run (10/20 runs of dcf9ff4e7). From 2f06dfef8 (#486)
+  # the sender is registered first; here the heartbeat is ignored, as in the tlspuffin fix (pr/monitor-heartbeat)
+  [stats_monitor_heartbeat]="92251a29515c05733832c67fe637a7bd54b84055 2f06dfef8b0a530e058d489ffee0179be10a3f7a"
 )
 
 # source lines patched by the rules at Init: "<file>|<text of the lines>|<from>|<to>[|<offset>]" (literal strings;
 # for every line containing the text, the line <offset> lines away (default 0: the same line) gets its first <from>
-# replaced by <to>; the patched lines must then be gone)
+# replaced by <to>; every line still containing the text must then contain <to>)
 declare -A COMPAT_PATCH=(
   [reseed_warn]='puffin/src/put_registry.rs|log::warn!("[RNG] reseed failed ({}): not supported"|log::warn!|log::debug!'
   [codec_warn]='puffin/src/algebra/term.rs|log::warn!("[evaluate_config_wrap]  FnError::Codec Error on|log::warn!|log::debug!'
@@ -60,6 +65,7 @@ declare -A COMPAT_PATCH=(
   [openssl_descriptor_info]='tlspuffin/harness/openssl/src/put.c|"descriptor %u version: %s type: %s",|_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
   [wolfssl_descriptor_info]='tlspuffin/harness/wolfssl/src/put.c|"descriptor %u version: %s type: |_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
   [boringssl_clear_info]='tlspuffin/src/rust_put/boringssl/mod.rs|log::info!("BoringSSL PUT does not support clearing mode")|log::info!|log::debug!'
+  [stats_monitor_heartbeat]='puffin/src/fuzzer/stats_monitor.rs|let global_stats = self.global(client_stats_manager);|let global_stats = |if client_stats_manager.get(sender_id).is_err() { return Ok(()); } let global_stats = '
   [toml_cli_locked]='tools/mk_vendor|cargo install toml-cli --version "0.2.3"|cargo install toml-cli --version "0.2.3"|PATH="${PATH}:${CARGO_HOME:-${HOME}/.cargo}/bin"; if ! command -v toml > /dev/null; then flock "${HOME:-/tmp}/.puffin-bench-rustup.lock" env -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u RUSTDOC -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET -u RUSTUP_TOOLCHAIN sh -c "rustup toolchain install stable --profile minimal && cargo +stable install toml-cli --locked --version 0.2.3"; fi'
 )
 
@@ -155,6 +161,14 @@ CompatProbe_toml_cli_locked() {
   CompatHasPatchLine toml_cli_locked
 }
 
+CompatProbe_stats_monitor_heartbeat() {
+  local monitor;
+  monitor=$( CompatCat "puffin/src/fuzzer/stats_monitor.rs" ) || return 1;
+  CompatHasPatchLine stats_monitor_heartbeat &&
+      ! grep -qF 'client_stats_insert(sender_id)' <<< "${monitor}" &&
+      ! grep -qF 'client_stats_manager.get(sender_id).is_err()' <<< "${monitor}"
+}
+
 # Is commit $2 in the declared range of rule $1? (start is ancestor, end is not)
 CompatInDeclaredRange() {
   local id="$1";
@@ -248,6 +262,7 @@ CompatPrepare() {
     IFS='|' read -r path text from to offset <<< "${COMPAT_PATCH[${id}]}";
     offset="${offset:-0}";
     local file="${repo}/${path}";
+    local toText="${to}";
     # literal strings for sed
     from=$( printf '%s' "${from}" | sed 's/[][\\.*^$/]/\\&/g' );
     to=$( printf '%s' "${to}" | sed 's/[\\/&]/\\&/g' );
@@ -257,7 +272,8 @@ CompatPrepare() {
     done
     local unpatched=false;
     if (( offset == 0 )); then
-      grep -qF "${text}" "${file}" && unpatched=true;
+      # every line still containing the text must now contain <to>
+      grep -F "${text}" "${file}" | grep -qvF "${toText}" && unpatched=true;
     else
       COMPAT_GIT_REV='' COMPAT_REPO="${repo}" CompatHasOffsetLine "${id}" && unpatched=true;
     fi

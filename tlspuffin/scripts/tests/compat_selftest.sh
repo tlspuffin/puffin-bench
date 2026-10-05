@@ -83,6 +83,11 @@ Check toml_cli_locked c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b true
 Check toml_cli_locked 1957fba63754933fa99a2ed26d2acee1d8cc9ab1 true
 Check toml_cli_locked 5586c58b12a7bee021d3ae9df242df89ebefae0f false
 Check toml_cli_locked c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b^1 false
+Check stats_monitor_heartbeat 92251a29515c05733832c67fe637a7bd54b84055 true
+Check stats_monitor_heartbeat dcf9ff4e7caffbd35d6b83cfef6bac5b7f7efdc3 true
+Check stats_monitor_heartbeat 2f06dfef8b0a530e058d489ffee0179be10a3f7a false
+Check stats_monitor_heartbeat 92251a29515c05733832c67fe637a7bd54b84055^1 false
+Check stats_monitor_heartbeat origin/dev false
 
 # the reference log config must be the pinned blob
 blob=$( git -C "${COMPAT_REPO}" rev-parse "${COMPAT_LOG_CONFIG_REF}:client_log_config.yml" );
