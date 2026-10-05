@@ -167,17 +167,14 @@ for taskDir in "${RUNS}"/[0-9]*; do
       groups=$( jq --argjson i "${i}" --arg e "$( tail -n "+${from}" "${taskState}/${key}-${first}.txt" 2> /dev/null | head -n 40 | cut -c1-300 )" \
           '.[$i].excerpt = ("first: " + .[$i].first_trace + ".trace\n" + $e) | del(.[$i].start)' <<< "${groups}" );
     done
-    # library under test, harness and ASAN, as recorded for the experiment (ExperimentSetupForCargo)
+    # build (harness and library version) and ASAN, as recorded for the experiment (ExperimentSetupForCargo)
     cli=$( cat "${taskDir}/output/cli-${library}.json" 2> /dev/null );
     jq -e . <<< "${cli}" > /dev/null 2>&1 || cli='{}';
     runs=$( jq --arg lib "${library}" --argjson a "${attempt:-0}" --argjson found "${found}" --argjson g "${groups}" \
         --argjson cli "${cli}" \
         '. + [{ library: $lib, attempt: $a, found: $found, replayed: ([$g[].count] | add // 0),
                 reports: ([$g[] | select(.type != "no-crash") | .count] | add // 0), groups: $g,
-                put: ($cli | if .library then "\(.library.name) \(.library.version), "
-                        + (if .cputs then "C harness (vendor \(.vendor))" else "Rust harness (features \(.features))" end)
-                      else null end),
-                asan: $cli.asan.instrumented }]' <<< "${runs}" );
+                cli: ($cli | {build, cputs, vendor, features, library}), asan: $cli.asan.instrumented }]' <<< "${runs}" );
   done
   [ "$( jq length <<< "${runs}" )" -gt 0 ] || continue;
   IFS=$'\t' read -r commit name <<< "$( TaskInfo "${taskJSON}" )";

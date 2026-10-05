@@ -10,6 +10,8 @@
 #
 # Usage: bash objectives_report.sh <task id> [<task id> ...]
 #        bash objectives_report.sh --all     tasks with objectives whose page is missing or outdated (cron job)
+# Each page gives, per library, what was built (harness and library version, see BuildDescription in PR_common.sh)
+# and whether ASAN was active.
 #   PB_ROOT        install root (default /srv/puffin-bench)
 #   PB_PUBLIC_URL  base URL of the publisher (default http://<host>:10083)
 
@@ -71,9 +73,15 @@ Report() {
       local blk; blk=$( jq -r ".[${i}].block" <<< "${groups}" );
       groups=$( jq --argjson i "${i}" --arg e "$( head -n 40 "${tmp}/block.${blk}" | cut -c1-300 )" '.[$i].excerpt = $e | del(.[$i].block)' <<< "${groups}" );
     done
+    # build and ASAN of the library, from the record of the experiment step (first line of its user run state)
+    local cli;
+    cli=$( jq -c --arg lib "${lib}" 'first(.task.steps[] | select(.id == $lib) | .user_run_state // "" | split("\n")[]
+        | (try fromjson catch null) | select(type == "object" and has("cputs"))) // {}' "${J}" 2> /dev/null ) || cli='{}';
+    [ -n "${cli}" ] || cli='{}';
     libs=$( jq --arg lib "${lib}" --argjson a "${attempt}" --argjson found "${found}" --argjson replayed "${replayed}" \
-        --argjson groups "${groups}" '. + [{ library: $lib, attempt: $a, found: $found, replayed: $replayed,
-          reports: ([$groups[].count] | add // 0), groups: $groups }]' <<< "${libs}" );
+        --argjson groups "${groups}" --argjson cli "${cli}" '. + [{ library: $lib, attempt: $a, found: $found, replayed: $replayed,
+          reports: ([$groups[].count] | add // 0), groups: $groups,
+          cli: ($cli | {build, cputs, vendor, features, library}), asan: $cli.asan.instrumented }]' <<< "${libs}" );
   done < <( jq -r '.task.steps[] | select(.name == "ExperimentEnd")
       | [.id, .attempt_id, (.executor_data.launcher_file // "" | sub(".*/"; "") | sub("-launcher$"; ""))] | @tsv' "${J}" | sort -k1,1 -k2,2n )
   rm -rf "${tmp}";
@@ -85,10 +93,19 @@ Report() {
   echo "  ${URL}/html/objectives/${task}.html";
 }
 
-# Render <json> <html>: page of the objectives of a task ({task, commit, name, live?, updated?, runs: [...]})
+# Render <json> <html>: page of the objectives of a task ({task, commit, name, live?, updated?, runs: [...]}).
+# Each run may carry cli ({build, cputs, vendor, features, library} of cli-<library>.json) and asan.
 Render() {
   jq -r '
     def esc: tostring | @html;
+    # what was built (BuildDescription in PR_common.sh), derived for records without "build"
+    def build_of: if . == null then null elif .build then .build
+      else ((.vendor // "") | split(":") | last) as $preset
+      | if .cputs == true then "C harness, \($preset)"
+        elif .cputs == false then "Rust harness, "
+          + (if (.library.name // "NA") != "NA" then "\(.library.name)\(.library.version // "")" else "features \(.features // "")" end)
+          + (if $preset != "" then " (vendor \($preset) not available at this commit)" else "" end)
+        else null end end;
     "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">"
     + "<title>Objectives \(.task)</title><style>"
     + "body{font-family:sans-serif;margin:16px;color:#222}h2{margin:18px 0 4px}.run{margin:6px 0 2px;color:#555}"
@@ -101,7 +118,8 @@ Render() {
     + (if (.runs | length) == 0 then "<p class=\"none\">No objective found.</p>" else "" end)
     + ([.runs | group_by(.library)[] |
         "<h2>\(.[0].library | esc)</h2>"
-        + (if .[0].put then "<div class=\"run\">\(.[0].put | esc) — ASAN "
+        + (((.[0].cli | build_of) // .[0].put) as $build
+          | if $build then "<div class=\"run\">\($build | esc) — ASAN "
              + (if .[0].asan == true then "✓" elif .[0].asan == false then "✗ (not instrumented)" else "?" end) + "</div>"
            else "" end)
         + ([.[] |
@@ -116,7 +134,8 @@ Render() {
     + "</body></html>"' "$1" > "$2.tmp" && mv "$2.tmp" "$2";
 }
 
-# --all: every exported task with objective traces whose page is missing or older than its export (for a cron job)
+# --all: every exported task with objective traces whose page is missing or older than its export or than this
+# script (for a cron job: an update of the page format rewrites every page once)
 AllTasks() {
   local J id;
   find -L "${PB_ROOT}/data/exports" "${PB_ROOT}/data/exports/Canceled" -maxdepth 1 -name '*.json' 2> /dev/null |
@@ -124,7 +143,7 @@ AllTasks() {
   while read -r J; do
     id=$( basename "${J}" .json );
     [ -f "${J%.json}.zip" ] || continue;
-    [ "${OUT}/${id}.html" -nt "${J}" ] && continue;
+    [ "${OUT}/${id}.html" -nt "${J}" ] && [ "${OUT}/${id}.html" -nt "${BASH_SOURCE[0]}" ] && continue;
     unzip -Z1 "${J%.json}.zip" 2> /dev/null | grep -qE '^artefacts/[^/]+/[0-9]+-objective/[^.][^/]*\.trace$' || continue;
     echo "${id}";
   done
