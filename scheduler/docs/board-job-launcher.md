@@ -40,7 +40,7 @@ To add a job launcher for a project `myproj`, based strictly on what `launchers.
 3. Whatever flow JSON / step script / auxiliary files the launcher needs, serve them from `<html>/jobsscripts/` (created empty by `Config::Validate()`, reachable at `GET /files/jobsscripts/...`) or embed them directly in the plugin module.
 4. Since none of these files are part of the embedded-resource set (`docs/build.md`), nothing here is touched by `--force-install` — you own the files once you drop them under `<html>/board/launchers/`.
 
-This mirrors the other declared extension point, `<html>/board/custom/header.html`, which `board.js` fetches (`fetch('custom/header.html')`) to inject a custom header fragment into `#custom_header` — also not shipped, also silently a no-op (fetch failure is swallowed) if absent.
+This mirrors the other declared extension point, `<html>/board/custom/header.html`, which `board.js` fetches (`fetch('custom/header.html')`) to inject a custom header fragment into `#custom_header` — also not shipped, also silently a no-op (fetch failure is swallowed) if absent. The history page has a third one, `<html>/board/custom/task_links.json`: per task id, buttons added to that task's card (`label`, `url` relative to the history page, `title`), opened in a new tab; absent means none.
 
 ## Flow JSON Shape (for reference)
 

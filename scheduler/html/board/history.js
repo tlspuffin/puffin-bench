@@ -20,7 +20,8 @@ const currentSelection = {
 }
 
 const global = {
-  usersInfo: null
+  usersInfo: null,
+  taskLinks: {}
 }
 
 function DisableUI() {
@@ -127,6 +128,20 @@ function CreateTimelinesCard(task) {
   const nameSpan = document.createElement('span');
   nameSpan.textContent = task.name;
   div.appendChild(nameSpan);
+
+  for (const link of global.taskLinks[task.id] ?? []) {
+    const linkButton = document.createElement('button');
+    linkButton.type = 'button';
+    linkButton.className = 'timesline-task-link';
+    linkButton.textContent = link.label;
+    linkButton.title = link.title ?? '';
+    linkButton.setAttribute('aria-label', link.title || link.label);
+    linkButton.onclick = (event) => {
+      event.stopPropagation();
+      window.open(new URL(link.url, window.location.href), '_blank', 'noopener');
+    }
+    div.appendChild(linkButton);
+  }
 
   const flagColor = task?.flag?.color;
   if (flagColor) {
@@ -354,13 +369,24 @@ async function ListUsers() {
   return [];
 }
 
+// Optional extension point (like custom/header.html on the board): custom/task_links.json maps a task id to
+// buttons shown on its card, [{ "label": "…", "url": "…" (relative to this page), "title": "…" }]. Absent = none.
+async function LoadTaskLinks() {
+  try {
+    const response = await fetch('custom/task_links.json', { cache: 'no-store' });
+    global.taskLinks = response.ok ? await response.json() : {};
+  } catch (e) {
+    global.taskLinks = {};
+  }
+}
+
 async function BuildUsersMenu() {
   DisableUI();
   try {
     ui.users.innerHTML = '';
     ui.timesline.innerHTML = '';
     ui.tasks.innerHTML = '';
-    global.usersInfo = await ListUsers();
+    [global.usersInfo] = await Promise.all([ListUsers(), LoadTaskLinks()]);
     let jobsType = new Set();
     for(let user in global.usersInfo) {
       if (!global.usersInfo[user]?.jobs_type?.length) {
