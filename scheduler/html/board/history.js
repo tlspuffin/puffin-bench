@@ -11,9 +11,10 @@ const ui = {
   tasks: document.getElementById('container-tasks'),
 }
 
+// Opens on "All" (every user, every job type): null user and job type
 const currentSelection = {
-  name: undefined,
-  jobType: undefined,
+  name: null,
+  jobType: null,
   task: null,
   timesLineIndex: 'id'
 }

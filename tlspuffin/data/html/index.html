@@ -87,8 +87,8 @@
 
         const hostname = window.location.hostname;
         const services = [
-          { url: `http://${hostname}:${SCHEDULER_PORT}/files/board/board.html`, label: '🗓️ Scheduler' },
-          { url: '#', label: '🗂️ Experiment results', default: null, service: { name: 'publisher', default: 'tlspuffin' } },
+          { url: `http://${hostname}:${SCHEDULER_PORT}/files/board/board.html`, label: '🗓️ Scheduler', default: null },
+          { url: '#', label: '🗂️ Experiment results', service: { name: 'publisher', default: 'tlspuffin' } },
           { url: '#', label: '🔬 Experiment analyzer', service: { name: 'comparator', default: 'tlspuffin' } },
           { url: `http://${hostname}:${SCHEDULER_PORT}/files/board/history.html`, label: '📰 Experiments log' },
         ];
