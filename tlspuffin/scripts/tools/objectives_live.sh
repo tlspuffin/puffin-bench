@@ -73,7 +73,7 @@ Replay() {
   if [ -r "${dir}/shell.nix" ] && command -v nix-shell > /dev/null; then
     ( cd "${work}" &&
       timeout -k 5 "${tNix}" ${noAslr} nix-shell "${dir}/shell.nix" \
-        --run "export ASAN_OPTIONS='${asan}'; command -v llvm-symbolizer > /dev/null && export ASAN_SYMBOLIZER_PATH=\$( command -v llvm-symbolizer ); exec '${bin}' execute '${trace}'" ) \
+        --run "export ASAN_OPTIONS='${asan}' RUST_LOG=info; command -v llvm-symbolizer > /dev/null && export ASAN_SYMBOLIZER_PATH=\$( command -v llvm-symbolizer ); exec '${bin}' execute '${trace}'" ) \
         < /dev/null > "${report}" 2>&1;
     status=$?;
   fi
@@ -81,7 +81,7 @@ Replay() {
   if [ ! -s "${report}" ] || grep -qE '^error: |error while loading shared libraries' "${report}"; then
     local symbolizer; symbolizer=$( Symbolizer );
     ( cd "${work}" &&
-      env ASAN_OPTIONS="${asan}" ${symbolizer:+ASAN_SYMBOLIZER_PATH="${symbolizer}"} \
+      env ASAN_OPTIONS="${asan}" RUST_LOG=info ${symbolizer:+ASAN_SYMBOLIZER_PATH="${symbolizer}"} \
         timeout -k 5 "${tDirect}" ${noAslr} "${bin}" execute "${trace}" ) < /dev/null > "${report}" 2>&1;
     status=$?;
   fi
