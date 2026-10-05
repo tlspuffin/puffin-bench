@@ -91,11 +91,26 @@ function GetLogWarningIcon(status) {
 }
 
 // Button shown when objectives were found and replayed: opens the list of distinct bugs (see ObjectivesPanel)
+// Replays that confirmed a bug (crash, security violation, panic): objectives.confirmed, or counted from the groups
+// shown for results summarized before that field
+function ConfirmedObjectives(objectives) {
+  if (Number.isInteger(objectives?.confirmed)) return objectives.confirmed;
+  return (objectives?.groups ?? []).filter(group => !['no-crash', 'replay-error'].includes(group.type))
+                                   .reduce((sum, group) => sum + (group.count ?? 0), 0);
+}
+
+// 🐞 button: red when a replay confirmed a bug, orange when objectives were found but none was confirmed (not
+// reproduced, or the replay timed out or could not run)
 function GetObjectivesButton(status) {
   const objectives = status?.objectives;
   if (!objectives || !(objectives.total > 0)) return '';
   const distinct = objectives.distinct ?? objectives.groups?.length ?? 0;
-  return `<button type="button" class="lib-objectives" title="Show the objectives, grouped by bug">🐞 ${objectives.total} (${distinct} distinct)</button>`;
+  const confirmed = ConfirmedObjectives(objectives);
+  const title = confirmed > 0
+      ? `Show the objectives, grouped by bug (${confirmed} replay(s) confirmed a bug)`
+      : 'Objectives were found but no replay confirmed a bug (not reproduced, timed out or could not run): show them';
+  return `<button type="button" class="lib-objectives${confirmed > 0 ? '' : ' unconfirmed'}" title="${EscapeAttribute(title)}">`
+       + `🐞 ${objectives.total} (${distinct} distinct${confirmed > 0 ? '' : ', none confirmed'})</button>`;
 }
 
 function ObjectivesPanel(objectives) {
@@ -593,6 +608,7 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
       const objectivesButton = libItem1Header.querySelector('.lib-objectives');
       if (objectivesButton !== null) {
         const panel = ObjectivesPanel(status.objectives);
+        if (ConfirmedObjectives(status.objectives) === 0) panel.classList.add('unconfirmed');
         objectivesButton.addEventListener('click', (event) => {
           event.stopPropagation();
           panel.hidden = !panel.hidden;

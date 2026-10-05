@@ -214,12 +214,19 @@ HEADER="${PB_ROOT}/data/html/board/custom/header.html"
 MARK='<!-- written by objectives_live.sh -->'
 if [ -d "$( dirname "${HEADER}" )" ] && { [ ! -s "${HEADER}" ] || grep -qF "${MARK}" "${HEADER}"; }; then
   nbLive=$( ls "${OUT}"/live-[0-9]*.html 2> /dev/null | wc -l );
+  # orange when no replay of the running tasks confirmed a bug yet (no-crash, replay-error)
+  confirmed=$( cat "${OUT}"/live-[0-9]*.json 2> /dev/null |
+      jq -s '[.[].runs[].groups[] | select(.type != "no-crash" and .type != "replay-error") | .count] | add // 0' 2> /dev/null );
   {
     echo "${MARK}";
     if (( nbLive > 0 )); then
       # placed before the board buttons (the header is in their flex container), styled like them
       echo "<style>#custom_header{order:-1}#custom_header a.refresh-button{display:inline-block;text-decoration:none}</style>";
-      echo "<a class=\"refresh-button\" href=\"../objectives/live.html\" target=\"_blank\" rel=\"noopener\" title=\"Objectives of the running tasks, replayed and grouped by bug (new tab)\">🐞 Live objectives (${nbLive} task(s))</a>";
+      if (( ${confirmed:-0} > 0 )); then
+        echo "<a class=\"refresh-button\" href=\"../objectives/live.html\" target=\"_blank\" rel=\"noopener\" title=\"Objectives of the running tasks, replayed and grouped by bug: ${confirmed} replay(s) confirmed a bug (new tab)\">🐞 Live objectives (${nbLive} task(s))</a>";
+      else
+        echo "<a class=\"refresh-button\" style=\"border-color:#f08c00;color:#f08c00\" href=\"../objectives/live.html\" target=\"_blank\" rel=\"noopener\" title=\"Objectives found in the running tasks, but no replay confirmed a bug yet (new tab)\">🐞 Live objectives (${nbLive} task(s), none confirmed)</a>";
+      fi
     fi
   } > "${HEADER}.tmp" && mv "${HEADER}.tmp" "${HEADER}";
 fi

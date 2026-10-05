@@ -133,6 +133,7 @@ function CreateTimelinesCard(task) {
     const linkButton = document.createElement('button');
     linkButton.type = 'button';
     linkButton.className = 'timesline-task-link';
+    if (link.level === 'warning') linkButton.classList.add('timesline-task-link-warning');
     linkButton.textContent = link.label;
     linkButton.title = link.title ?? '';
     linkButton.setAttribute('aria-label', link.title || link.label);
@@ -370,7 +371,8 @@ async function ListUsers() {
 }
 
 // Optional extension point (like custom/header.html on the board): custom/task_links.json maps a task id to
-// buttons shown on its card, [{ "label": "…", "url": "…" (relative to this page), "title": "…" }]. Absent = none.
+// buttons shown on its card, [{ "label": "…", "url": "…" (relative to this page), "title": "…", "level": "warning"
+// (optional: orange instead of red) }]. Absent = none.
 async function LoadTaskLinks() {
   try {
     const response = await fetch('custom/task_links.json', { cache: 'no-store' });
