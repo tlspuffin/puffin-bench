@@ -29,6 +29,10 @@ export const launchers = mods.map((m, i) => {
 });
 ```
 
+`launchers.js` also exports `DescribeTask(task)`: if the project's `JobLauncher` has an optional `describeTask(task)` method (async, returning `{ title, commit }` HTML or `null`), the board, the task page and the history use it to show a task by more than its name — the launcher that started the task (`task.launcher.project`), or else the first one that answers. tlspuffin's launcher returns the commit line of the task (commit, PR, message; see `installer/docs/web-assets.md`); `title` replaces the task name, `commit` the value of its `COMMIT_ID` argument (shown without its label). Without the method, tasks show their name. `describeTask` may also return `args: { KEY: { bare, level: 'warning', label, hidden } }`: how the board shows each task argument on its one-line argument list (`bare`: the value without its key; `level: 'warning'`: on its own highlighted line).
+
+Likewise `DescribeMonitor(task, message)` (synchronous) uses an optional `describeMonitor(task, message)` of the launcher: it returns `{ summary, level, text, highlight, taskLink }` — `summary` the one-line HTML shown under a running attempt instead of its monitor message, `level` (`error`, `warning`, `success`) the color of its marker, `text` the message shown in full on click, `highlight` (`objective`, `error`) to make the attempt (and its square in the step header) stand out, and `taskLink` (`{ key, count, url, label, title, highlight }`) a button in the task's state strip: the links of the same `key` are merged over the attempts, their `count`s summed into the `{count}` of `label` (tlspuffin: `🎉 14 objectives · live ↗`, to the live objectives page). Without it, the board shows the first line of the message, and the whole message on click.
+
 Nothing else in `launchers.js` is job-type-, campaign-, or commit-picker-specific — all of that lives inside each project's own `joblauncher.js`, which this repository does not provide.
 
 ## The Plugin Contract (inferred, not shipped)

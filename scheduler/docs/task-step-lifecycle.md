@@ -367,7 +367,8 @@ lockThread_ held:  scan steps_ for request_cancel_ -> KillAndMarkCancel()/MarkCa
 1. `step->EndOfRun()`: if this is the step's last/only attempt (`next_ == step`),
    `Task::ApplyPendingArgs()` first (see "Task Args" above); then `GatherFilesToLocal()` (no-op in
    the current `Local` executor — see executor.md).
-2. Append the step's JSON to `task->steps_file_` and to the shared `steps_done.json` log.
+2. Append the step's JSON to `task->steps_file_` and to the shared `steps_done.json` log, and its
+   duration to `DurationHistory` (see "Estimated start and end times" below).
 3. Remove it from `stepsRunning_` and `steps_`.
 4. If the task was not cancelled: for each downstream step in `dependencies_`, remove this step
    from that downstream step's `depend_from_`; if now empty, splice the downstream step back into
@@ -458,3 +459,30 @@ disk from a previous run. The comment in the source (`"step group not managed by
 reload system"`) explains why: the reload path predates step groups and was never updated for
 them. On an abnormal shutdown, the JSON on disk is therefore historical record only — it is not
 read back on the next start.
+
+## Estimated start and end times
+
+`Executor::EstimatedStepsStartTime()` gives each pending step its `estimated_start_time` and each task its
+`estimated_end_time` (the board shows them), by placing the steps on the executor cores in priority order.
+It needs how long each step takes: `DurationHistory` (`schedule/duration_history.cxx`) learns it from
+the steps that finished.
+
+- A kind of step is its task `job_type`, its step name and its configuration id (`perf|ExperimentWithCargo|OpenSSL`).
+  The last 60 finished runs of each are kept with their commit and whether they timed out (Done, failed
+  or timed out; cancelled steps and launch errors are ignored), in `<exportPath>/step_durations.json`.
+  On the first start without that file, or with its older format, they are learned from `steps_done.json`.
+- Estimated duration of a step on commit C, capped by the step timeout:
+  1. the median of the last 5 runs on C (from 2 of them): the job scripts change over time, and a
+     commit's own runs say best how long it takes;
+  2. else the median of the last 15 runs that did not time out (a timeout mostly means "the expected bug
+     is not at that commit", not a typical duration);
+  3. else the median of the last 15 runs;
+  otherwise the timeout, or 10 minutes for a step without timeout.
+- A running step ends at its start plus the estimated duration. Past its estimate, it ends at its timeout
+  when this kind of step has timed out before (on C, or on any commit when C has no run), else a minute
+  from now.
+- A task ends with the estimated end of its last steps.
+
+Steps that stop early, like a vulnerability search that ends when it finds its objective, are therefore
+estimated from their real durations instead of their timeout.
+
