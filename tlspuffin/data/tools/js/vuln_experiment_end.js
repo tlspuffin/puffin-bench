@@ -75,12 +75,28 @@ function Main() {
     const stats_1 = Utils.GetLastStats(statsFile + '.1', stats.nb);
     if (stats.nb === 0) stats.nb = stats_1.nb;
     if (!Utils.IsClientArrayFull(stats.infos, stats.nb)) {
-      for (let i=0; i<(stats.nb+1); ++i) {
+      // every index IsClientArrayFull checks: 0 (global) and the clients 1..nb at index id + 1 (up to nb + 1); the loop
+      // stopped at nb, so a client found only in stats.json.1 (after the truncation of stats.json, e.g. a client that
+      // stopped reporting) was never taken and the run had no summary ("Error with stats.json")
+      for (let i=0; i<(stats.nb+2); ++i) {
         if (stats.infos[i] === undefined) stats.infos[i] = stats_1.infos[i]
       }
     }
   }
-  if ((stats.nb === 0) || (!Utils.IsClientArrayFull(stats.infos, stats.nb))) {
+  // clients that stopped reporting for good (e.g. killed by the bug the run found: CDOS) have no line left in stats.json
+  // and stats.json.1 once rotation dropped them: their last record is in stats.json.0, the first file of the run, which
+  // rotation keeps, else nowhere. The run keeps its summary (time to find and execs to find come from the global record
+  // and from the objective), with those clients listed (clients_lost) and their last record when there is one
+  const clientsLost = [];
+  if ((stats.nb > 0) && (stats.infos[0] !== undefined) && (!Utils.IsClientArrayFull(stats.infos, stats.nb))) {
+    const stats_0 = Utils.IsFile(statsFile + '.0') ? Utils.GetLastStats(statsFile + '.0', stats.nb) : { infos: [] };
+    for (let i=2; i<(stats.nb+2); ++i) {
+      if (stats.infos[i] !== undefined) continue;
+      clientsLost.push(i - 1);
+      if (stats_0.infos?.[i] !== undefined) stats.infos[i] = stats_0.infos[i];
+    }
+  }
+  if ((stats.nb === 0) || (stats.infos[0] === undefined)) {
     console.log(Utils.EndErrorMessage('Error with stats.json'));
     std.exit(1);
   }
@@ -88,7 +104,8 @@ function Main() {
   console.log(JSON.stringify({
     nb_cores:  taskInfo.nbCore,
     nb_clients: stats.nb,
-    execPerSec: stats.infos[0]?.exec_per_sec ?? 0
+    execPerSec: stats.infos[0]?.exec_per_sec ?? 0,
+    ...(clientsLost.length ? { clients_lost: clientsLost } : {})
   }));
 
   let beginStatsFile = statsFile + '.0';
@@ -109,7 +126,8 @@ function Main() {
     error_file_exist: errorFileExist,
     global: [], 
     clients: [], 
-    others: []
+    others: [],
+    ...(clientsLost.length ? { clients_lost: clientsLost } : {})
   };
   for(let i=0; i<stats.infos.length; ++i) {
     if (stats.infos[i] === undefined) {
@@ -150,8 +168,33 @@ function Main() {
   }
 
   const globalObjectiveSize = result.global[0]?.tEnd?.objective_size ?? 0;
-  result.state = ((result.state === "Done") && ((globalObjectiveSize > 0) || (nbObjectiveOnDisk > 0))) ? 
-      'success' : 'fail';
+  // job scripts since 2026-10-06 also give the targeted and not targeted objectives (a known CVE found besides the
+  // one the experiment looks for, PR_common.sh OBJECTIVES_NOT_TARGETED): success needs a targeted one
+  const targeted = Utils.IsNumeric(scriptArgs[8] ?? '') ? Number(scriptArgs[8]) : null;
+  const notTargeted = Utils.IsNumeric(scriptArgs[9] ?? '') ? Number(scriptArgs[9]) : 0;
+  if (targeted !== null) {
+    result.nb_objective_targeted = targeted;
+    result.nb_objective_not_targeted = notTargeted;
+  }
+  // time to find: when the fuzzer saved the first targeted objective (ms since the epoch, its name), from the start of
+  // the experiment's stats (as the durations of older results, which end at the last stats: up to a minute later)
+  const firstTargetedMs = Utils.IsNumeric(scriptArgs[10] ?? '') ? Number(scriptArgs[10]) : null;
+  // the expected bug of the configuration (vuln_targets.json): its CVE, and the objectives of another bug
+  if (Utils.IsString(scriptArgs[12] ?? null) && scriptArgs[12] !== '') {
+    result.expected_cve = scriptArgs[12];
+    result.nb_objective_unexpected = Utils.IsNumeric(scriptArgs[11] ?? '') ? Number(scriptArgs[11]) : 0;
+  }
+  const start = result.global[0]?.t0?.time?.secs_since_epoch;
+  if ((firstTargetedMs !== null) && (typeof start === 'number')) {
+    result.first_targeted_objective_ms = firstTargetedMs;
+    result.time_to_find_s = Math.max(0, firstTargetedMs / 1000 - start);
+    // execs to find: the total execs when the fuzzer saved that objective (not at the end of the run, which comes after
+    // the monitor saw it and the fuzzer stopped)
+    const execs = Utils.GlobalExecsAt([`${statsFile}.0`, `${statsFile}.1`, statsFile], firstTargetedMs);
+    if (execs !== null) result.execs_to_find = execs;
+  }
+  const found = (targeted !== null) ? (targeted > 0) : ((globalObjectiveSize > 0) || (nbObjectiveOnDisk > 0));
+  result.state = ((result.state === "Done") && found) ? 'success' : 'fail';
 
   const saveRetVal = Utils.SaveFile(outFile, JSON.stringify(result)+'\n');
   if (saveRetVal !== null) {
