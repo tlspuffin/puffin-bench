@@ -43,6 +43,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   static auto regexTaskCancelOrDelete = std::regex(R"(/api/task/(\d+))");
   static auto regexTaskCancelStep = std::regex(R"(/api/task/(\d+)/step/(\d+))");
   static auto regexTaskUpdatePriority = std::regex(R"(/api/task/(\d+)/priority/(-?\d+))");
+  // a temporary maximum of cores: /api/executor/<name>/max_cores/<max>/<duration in seconds> (max 0: the default now)
+  static auto regexExecutorMaxCores = std::regex(R"(/api/executor/([A-Za-z0-9_.-]+)/max_cores/(\d+)/(\d+))");
   static auto regexTaskUpdateArgs = std::regex(R"(/api/task/(\d+)/args$)");
   static auto regexUsersList = std::regex(R"(/api/users$)");
   static auto regexUserJobsTypeList = std::regex(R"(/api/user/([a-zA-Z0-9_-]+)/job_types$)");
@@ -65,6 +67,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         requestHandler = new RequestHandlerTaskGetState(false, matches[1].str());
       } else if (uri == "/api/tasks/running") {
         requestHandler = new RequestHandlerTasksRunning;
+      } else if (uri == "/api/health") {
+        requestHandler = new RequestHandlerHealth;
       } else if (std::regex_match(uri, matches, regexCacheGet)) {
         requestHandler = new RequestHandlerCacheGet(matches[1].str());
       } else if (std::regex_match(uri, matches, regexUsersList)) {
@@ -79,6 +83,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     } else if (method == "POST") {
       if (uri == "/api/task/new") {
         requestHandler = new RequestHandlerTaskNew;
+      } else if (uri == "/api/runs/cleanup") {
+        requestHandler = new RequestHandlerRunsCleanup;
       }
     } else if (method == "PUT") {
       std::smatch matches;
@@ -89,6 +95,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       std::smatch matches;
       if (std::regex_match(uri, matches, regexTaskUpdatePriority)) {
         requestHandler = new RequestHandlerTaskUpdatePriority(matches[1].str(), matches[2].str());
+      } else if (std::regex_match(uri, matches, regexExecutorMaxCores)) {
+        requestHandler = new RequestHandlerExecutorMaxCores(matches[1].str(), matches[2].str(), matches[3].str());
       } else if (std::regex_match(uri, matches, regexTaskUpdateArgs)) {
         requestHandler = new RequestHandlerTaskUpdateArgs(matches[1].str());
       }

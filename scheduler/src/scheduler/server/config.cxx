@@ -20,6 +20,10 @@
 #include "embeded/scheduler/html/board/history_css.h"
 #include "embeded/scheduler/html/board/history_js.h"
 #include "embeded/scheduler/html/board/help_js.h"
+#include "embeded/scheduler/html/board/hostlinks_js.h"
+#include "embeded/scheduler/html/board/tips_js.h"
+#include "embeded/scheduler/html/board/nav_js.h"
+#include "embeded/scheduler/html/board/navhelp_js.h"
 
 #include <fstream>
 #include <tuple>
@@ -29,6 +33,7 @@ static ns_Server::Config defaultConfig;
 ns_Server::Config::Config()
     : port_(10082), secure_(false), hostname_("localhost"), key_("security/site.key"), 
     cert_("security/site.pem"), CA_("security/CA.pem"), html_("html"), 
+    maxThreads_(64), maxQueued_(256), keepAliveTimeout_(5), maxKeepAliveRequests_(100),
     apiURL_(std::string(secure_ ? "https" : "http") + "://" + hostname_ + ":" + std::to_string(port_) + "/api")
 {}
 
@@ -51,6 +56,13 @@ void ns_Server::Config::Load(std::string const& name, rapidjson::Value& doc) {
 
   html_ = GetOrDefault<std::string>(*srv, "html", defaultConfig.html_);
 
+  maxThreads_ = GetOrDefault<uint16_t>(*srv, "max_threads", defaultConfig.maxThreads_);
+  maxQueued_ = GetOrDefault<uint16_t>(*srv, "max_queued", defaultConfig.maxQueued_);
+  keepAliveTimeout_ = GetOrDefault<uint16_t>(*srv, "keep_alive_timeout",
+      defaultConfig.keepAliveTimeout_);
+  maxKeepAliveRequests_ = GetOrDefault<uint16_t>(*srv, "max_keep_alive_requests",
+      defaultConfig.maxKeepAliveRequests_);
+
   apiURL_ = secure_ ? "https" : "http";
   apiURL_ += "://" + hostname_ + ":" + std::to_string(port_) + "/api";
 }
@@ -65,6 +77,10 @@ void ns_Server::Config::Save(std::string const& name, rapidjson::Value& doc,
   node.AddMember("CA", rapidjson::Value(CA_.c_str(), alloc), alloc);
   node.AddMember("port", port_, alloc);
   node.AddMember("html", rapidjson::Value(html_.c_str(), alloc), alloc);
+  node.AddMember("max_threads", maxThreads_, alloc);
+  node.AddMember("max_queued", maxQueued_, alloc);
+  node.AddMember("keep_alive_timeout", keepAliveTimeout_, alloc);
+  node.AddMember("max_keep_alive_requests", maxKeepAliveRequests_, alloc);
   doc.AddMember(rapidjson::Value(name.c_str(), alloc), node, alloc);
 }
 
@@ -100,6 +116,10 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       std::tuple{ "board/history.css", History_CSS_data, History_CSS_size },
       std::tuple{ "board/history.js", History_JS_data, History_JS_size },
       std::tuple{ "board/help.js", Help_JS_data, Help_JS_size },
+      std::tuple{ "board/hostlinks.js", HostLinks_JS_data, HostLinks_JS_size },
+      std::tuple{ "board/tips.js", Tips_JS_data, Tips_JS_size },
+      std::tuple{ "board/nav.js", Nav_JS_data, Nav_JS_size },
+      std::tuple{ "board/navhelp.js", NavHelp_JS_data, NavHelp_JS_size },
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(html_ / file);

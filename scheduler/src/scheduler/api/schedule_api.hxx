@@ -16,6 +16,8 @@ public:
       ns_System::Linux& os, uint16_t serverPort);
 
   std::string TaskManagerStateFile() const;
+  bool ProbeLock(uint32_t timeoutMs, uint64_t& waitedMs);
+  bool IsStopping() const;
   uint64_t AddTask(std::string const& name, 
       std::vector<uint8_t> const& flow, 
       std::vector<uint8_t> const & functions, 
@@ -31,6 +33,8 @@ public:
   bool CancelStep(uint64_t taskID, uint64_t stepID);
   bool CancelOrDeleteTask(uint64_t taskID, std::string const& source);
   bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
+  bool ExecutorSetMaxCores(std::string const& name, uint64_t maxCores, uint64_t durationSec, std::string& error);
+  std::vector<std::string> CleanupRunFolders();
   bool TaskUpdateArgs(uint64_t taskID, std::unordered_map<std::string, std::string>& newArgs);
   bool GetTaskData(std::string const& taskID, std::string& fileStateJSON, std::string& fileArtefacts);
   bool GetTaskFinalData(std::string const& taskID, std::string& fileStateJSON, std::string& fileArtefacts) const;
@@ -50,6 +54,15 @@ inline bool ScheduleAPI::CancelStep(uint64_t taskID, uint64_t stepUUID) {
 
 inline bool ScheduleAPI::CancelOrDeleteTask(uint64_t taskID, std::string const& source) {
   return schedule_.CancelTask(taskID, source) || schedule_.DeleteTaksDone(taskID);
+}
+
+inline std::vector<std::string> ScheduleAPI::CleanupRunFolders() {
+  return schedule_.CleanupRunFolders();
+}
+
+inline bool ScheduleAPI::ExecutorSetMaxCores(std::string const& name, uint64_t maxCores, uint64_t durationSec,
+    std::string& error) {
+  return schedule_.ExecutorSetMaxCores(name, maxCores, durationSec, error);
 }
 
 inline bool ScheduleAPI::TaskUpdatePriority(uint64_t taskID, int64_t newPriority) {
