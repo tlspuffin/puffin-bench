@@ -1,8 +1,7 @@
 import { Metrics } from './summary_metrics.js';
 import { Graph } from './summary_graph.js';
 import { manageGraphs } from './summary_managegraphs.js';
-import '../third-party/plotly/plotly-3.3.0.min.js';
-const Plotly = window.Plotly;
+import { Plotly } from './plotly_lazy.js';
 
 class GraphOverview {
   #config;
@@ -116,6 +115,38 @@ class GraphOverview {
 
     controls.appendChild(this.#subtypeCheckBox);
 
+    // the autoscale of every graph at once (each graph also has its own in its Plotly bar)
+    const autoscale = document.createElement('button');
+    autoscale.type = 'button';
+    autoscale.className = 'graph-overview-autoscale';
+    autoscale.textContent = '⤢ Autoscale all';
+    autoscale.title = 'Autoscale the axes of every graph (all the commits and values)';
+    autoscale.onclick = () => {
+      this.#graphContainer.querySelectorAll('.js-plotly-plot').forEach(graph =>
+          Plotly.relayout(graph, { 'xaxis.autorange': true, 'yaxis.autorange': true }));
+    };
+    controls.appendChild(autoscale);
+
+    // every graph of the overview in one PNG image, one below the other, as shown (zoom included)
+    const exportAll = document.createElement('button');
+    exportAll.type = 'button';
+    exportAll.className = 'graph-overview-autoscale graph-overview-export';
+    exportAll.textContent = '⬇️ Export all';
+    exportAll.title = 'Download every graph of the overview as one PNG image';
+    exportAll.onclick = async () => {
+      exportAll.disabled = true;
+      exportAll.textContent = '⏳ Exporting…';
+      try {
+        await this.#ExportAll();
+      } catch (error) {
+        alert(`Export failed: ${error.message}`);
+      } finally {
+        exportAll.disabled = false;
+        exportAll.textContent = '⬇️ Export all';
+      }
+    };
+    controls.appendChild(exportAll);
+
     body.appendChild(controls);
 
     this.#graphContainer = document.createElement('div');
@@ -126,6 +157,39 @@ class GraphOverview {
     this.#html.appendChild(content);
 
     this.#PopulateLibraryCheckboxes();
+  }
+
+  async #ExportAll() {
+    const graphs = [...this.#graphContainer.querySelectorAll('.js-plotly-plot')];
+    if (graphs.length === 0) throw new Error('no graph to export');
+    const scale = 2;
+    const images = await Promise.all(graphs.map(async graph => {
+      const width = Math.round(graph.getBoundingClientRect().width);
+      const height = Math.round(graph.getBoundingClientRect().height);
+      const url = await Plotly.toImage(graph, { format: 'png', width, height, scale });
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      return image;
+    }));
+    const margin = 10 * scale;
+    const width = Math.max(...images.map(image => image.width));
+    const height = images.reduce((sum, image) => sum + image.height + margin, margin);
+    const canvas = document.createElement('canvas');
+    canvas.width = width + 2 * margin;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#0b0b0b';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    let y = margin;
+    for (const image of images) {
+      context.drawImage(image, margin, y);
+      y += image.height + margin;
+    }
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = `${this.#project ?? 'results'}-overview-${this.#selectLib.value}-${new Date().toISOString().slice(0, 10)}.png`;
+    link.click();
   }
 
   Open(hideDetailsSelection =false, defaultType ="Perf") {
@@ -140,7 +204,7 @@ class GraphOverview {
 
     // Close modal on ESC key
     this.#saveDocKeyDown = document.onkeydown;
-    document.onkeydown = (event) => {if (event.key === 'Escape') { this.Close(); }};
+    document.onkeydown = (event) => {if (event.key === 'Escape') { event.preventDefault(); this.Close(); }};
   }
 
   Close() {
@@ -318,6 +382,7 @@ class GraphOverview {
     const ApplyColors = () => {
       Graph.ColorGraphXTicks(container, unusedCommitsList, '#e74c3c');
       Graph.StyleGraphXTicks(container, highlights, { fontWeight: 'bold' });
+      Graph.DecorateGraphXTicks(container);
     };
     Plotly.newPlot(containerId, traces, layout, config)
         .then(() => { ApplyColors(); container.on('plotly_afterplot', ApplyColors); });

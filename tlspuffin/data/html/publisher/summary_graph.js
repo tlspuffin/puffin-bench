@@ -1,6 +1,21 @@
 import { Metrics } from './summary_metrics.js'
+import { knownCommit, describeCommit, commitPlotlyLabel, commitTooltip, commitLineHTML } from '../common/commitinfo.js';
 
 export class Graph {
+  // colors of the dark pages (summary.css); axes keep their own settings, the theme only colors them
+  static darkTheme = {
+    plot_bgcolor: '#0f0f0f',
+    paper_bgcolor: '#0b0b0b',
+    font: { color: '#d0d0d0' },
+  };
+
+  static DarkAxes(layout) {
+    for (const axis of ['xaxis', 'yaxis']) {
+      layout[axis] = { gridcolor: '#262626', zerolinecolor: '#3a3a3a', linecolor: '#3a3a3a', ...layout[axis] };
+    }
+    return layout;
+  }
+
   static GenerateEmptyGraphData(type, library, metric, commits) {
     const layout = {
         title: {
@@ -9,13 +24,14 @@ export class Graph {
         },
         xaxis: {
             title: 'Commits (oldest → newest)',
-            tickangle: -75,
+            tickangle: -90,
             type: 'category',
             categoryorder: 'array',
             categoryarray: [...commits],
-            tickfont: { family: 'monospace' },
+            tickfont: { family: 'monospace', size: 10 },
+            automargin: true,
             tickvals: [...commits],
-            ticktext: commits.map(c => c.substring(0,14)),
+            ticktext: commits.map(c => Graph.TickLabel(c)),
             range: Metrics.ComputeXRange(commits.length),
         },
         yaxis: {
@@ -30,8 +46,7 @@ export class Graph {
             t: 80,
             b: 130
         },
-        plot_bgcolor: '#f8f9fa',
-        paper_bgcolor: 'white'
+        ...Graph.darkTheme
     };
 
     const config = {
@@ -42,7 +57,7 @@ export class Graph {
         dragmode: 'pan'
     };
 
-    return [ layout, config ];
+    return [ Graph.DarkAxes(layout), config ];
   }
 
   static AddGraphData(graphData, dataPoint) {
@@ -52,7 +67,7 @@ export class Graph {
     }
 
     const commitId = dataPoint.commit_id;
-    const tickLabel = (dataPoint.cputs ?? '') + ' ' + commitId.substring(0, 14);
+    const tickLabel = Graph.TickLabel(commitId, dataPoint.cputs);
 
     const idx = layout.xaxis.categoryarray.indexOf(commitId);
     if (idx !== -1) {
@@ -69,6 +84,32 @@ export class Graph {
     return [traces, layout];
   }
 
+  // Tick label of a commit: "<harness> <3 chars of the sha>·#<PR>·<mm/yy>" with links (see commitinfo.js);
+  // the raw label keeps the full commit id (in the commit link), which ColorGraphXTicks/StyleGraphXTicks look for
+  static TickLabel(commitId, prefix = '') {
+    // the harness as a letter: emoji are not rotated with the vertical labels (C harness, Rust harness, unknown)
+    prefix = { '⚙C': 'C', '🦀': '<span style="color:#f0883e">R</span>', '❓': '?' }[prefix] ?? prefix;
+    const desc = knownCommit(commitId);
+    if (desc) return commitPlotlyLabel(desc, prefix);
+    if (/^[0-9a-f]{40}$/i.test(commitId ?? '')) return commitPlotlyLabel(describeCommit({ id: commitId }), prefix);
+    return `${prefix ?? ''} ${String(commitId ?? '').substring(0, 14)}`;
+  }
+
+  // Hover of the tick labels (full commit id, PR, date, message); plotly redraws the ticks: call it on plotly_afterplot
+  // The commits without data in this graph are dimmed.
+  static DecorateGraphXTicks(container) {
+    const withData = new Set((container.data ?? []).flatMap(trace => trace.x ?? []));
+    container.querySelectorAll('.xaxislayer-above .xtick text').forEach(el => {
+        const raw = el.getAttribute('data-unformatted') ?? '';
+        const sha = /\/commit\/([0-9a-f]{40})/i.exec(raw)?.[1];
+        if (sha) el.style.opacity = withData.has(sha) ? '' : '0.5';
+        if (!sha || el.querySelector('title')) return;
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = commitTooltip(knownCommit(sha) ?? describeCommit({ id: sha }));
+        el.appendChild(title);
+    });
+  }
+
   static ColorGraphXTicks(container, commitIds, color) {
     const toColor = new Set(commitIds);
     const tickTexts = container.querySelectorAll('.xaxislayer-above .xtick text');
@@ -76,6 +117,7 @@ export class Graph {
         const raw = el.getAttribute('data-unformatted') ?? el.textContent;
         if ([...toColor].some(id => raw.includes(id.substring(0, 14)))) {
             el.style.fill = color;
+            el.querySelectorAll('a').forEach(link => { link.style.fill = color; });
         }
     });
   }
@@ -154,18 +196,14 @@ export class Graph {
         }*/
         line.appendChild(branch);
 
-        const code = document.createElement('code');
-        code.textContent = commit?.id?.substring(0, 14) ?? '?';
+        const id = document.createElement('span');
+        id.className = 'graph-commit-id';
         if (commit?.id) {
-          const id = document.createElement('a');
-          id.href = config.commit_url(project, commit.id);
-          id.target = '_blank';
-          id.rel = 'noopener noreferrer';
-          id.appendChild(code);
-          line.appendChild(id);
+          id.innerHTML = commitLineHTML(knownCommit(commit.id) ?? describeCommit(commit), { max: 50 });
         } else {
-          line.appendChild(code);
+          id.textContent = '?';
         }
+        line.appendChild(id);
     });
     return line;
   }
@@ -193,7 +231,7 @@ export class Graph {
     const unusedCommitsList = new Set([...otherIds]
         .filter(id => !metricIds.has(id))
         .map(element => { 
-            return (this.#metrics.HaveCommit(element)?.[library] ?? '') + ' ' + element.substring(0,14);
+            return element;
         })
     );
 
@@ -222,14 +260,14 @@ export class Graph {
         },
         xaxis: {
             title: 'Commits (oldest → newest)',
-            tickangle: -75,
+            tickangle: -90,
             type: 'category',
             categoryorder: 'array',
             categoryarray: commitsTimeline.map(c => c.id),
-            tickfont: { family: 'monospace' },
+            tickfont: { family: 'monospace', size: 10 },
+            automargin: true,
             tickvals: commitsTimeline.map(c => c.id),
-            ticktext: commitsTimeline.map(c => 
-                (this.#metrics.HaveCommit(c.id)?.[library] ?? '') + ' ' + c.id.substring(0,14)),
+            ticktext: commitsTimeline.map(c => Graph.TickLabel(c.id, this.#metrics.HaveCommit(c.id)?.[library])),
             range: Metrics.ComputeXRange(commitsTimeline.length),
         },
         yaxis: {
@@ -244,8 +282,7 @@ export class Graph {
             t: 80,
             b: 130
         },
-        plot_bgcolor: '#f8f9fa',
-        paper_bgcolor: 'white'
+        ...Graph.darkTheme
     };
 
     const config = {
@@ -256,7 +293,7 @@ export class Graph {
         dragmode: 'pan'
     };
 
-    return [ traces, layout, config, unusedCommitsList ];
+    return [ traces, Graph.DarkAxes(layout), config, unusedCommitsList ];
   }
 
   InsertComparaisonData(graphData, dataPoint, baseCommit) {
@@ -266,7 +303,7 @@ export class Graph {
     }
 
     const commitId = dataPoint.commit_id;
-    const tickLabel = (dataPoint.cputs ?? '') + ' ' + commitId.substring(0, 14);
+    const tickLabel = Graph.TickLabel(commitId, dataPoint.cputs);
 
     const categoryArray = layout.xaxis.categoryarray;
     const baseIdx = categoryArray.indexOf(baseCommit);

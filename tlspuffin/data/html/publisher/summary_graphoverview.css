@@ -118,6 +118,14 @@
   color: var(--color-text-light);
 }
 
+.graph-compare-commits {
+  flex-wrap: wrap;
+}
+
+.graph-compare-commits .graph-commit-id {
+  white-space: nowrap;
+}
+
 .graph-compare-commits a {
   color: inherit;
   text-decoration: none;
@@ -146,7 +154,7 @@
   border: 2px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
-  background: white;
+  background: var(--color-input);
   color: var(--color-text);
   cursor: pointer;
   transition: var(--transition);
@@ -237,7 +245,23 @@
 .graph-overview-lib-graph {
   height: 30vh;
   min-height: 320px;
-  background: white;
+  background: var(--color-input);
   border-radius: 6px;
   border: 1px solid var(--color-border);
 }
+
+.graph-overview-autoscale {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--color-border-strong, #333);
+  border-radius: 6px;
+  background: #181818;
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* the first of the two buttons goes right */
+.graph-overview-export { margin-left: 0; }
+
+.graph-overview-autoscale:hover { background: var(--color-hover, #1c2433); border-color: var(--color-primary); }

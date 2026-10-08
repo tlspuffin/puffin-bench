@@ -1,18 +1,23 @@
 import { urls as configURLS } from './summary_config.js'
 import { LoadCommits, LoadGitData, LoadGitLogs, LoadProjectData, UpdateCommitInfo } from './summary_data.js'
-import { RenderCommit, RenderCampaigns, ShowDetails, DownloadResults } from './summary_render.js'
+import { RenderCommit, RenderCampaigns, ShowDetails, DownloadResults, SetPullRequests } from './summary_render.js'
+import { registerCommits as RegisterCommits } from '../common/commitinfo.js'
 import { Metrics } from './summary_metrics.js';
 import { GraphMetrics } from './summary_graphmetrics.js';
 import { GraphOverview } from './summary_graphoverview.js';
 
 /*****************************************/
 
+// the git repository of a package: sshpuffin is built from the tlspuffin repository
+const REPOSITORY = { sshpuffin: 'tlspuffin' };
+const Repository = (project) => REPOSITORY[project] ?? project;
+
 const config = {
   urlData: (project) => `http://${window.location.host}/api/project/${project}/data`,
   urlDataFile: (project) => `http://${window.location.host}/files/${project}/.project`,
 
-  urlGit: (project) => `${configURLS.git_restapi}/api/git/history/${project}`,
-  urlGitLogs: (project) => `${configURLS.git_restapi}/api/git/logs/${project}`,
+  urlGit: (project) => `${configURLS.git_restapi}/api/git/history/${Repository(project)}`,
+  urlGitLogs: (project) => `${configURLS.git_restapi}/api/git/logs/${Repository(project)}`,
 
   taskInfoURL: `${configURLS.scheduler}/files/board/task.html`,
   artefactURL: (taskID) => `${configURLS.scheduler}/api/task/${taskID}/artefacts`,
@@ -46,7 +51,26 @@ var ui = {
 var metrics = [];
 var graphs = { metrics: [], overview: [] };
 var tabIndex = -1;
-var currentFilter = 'all';
+// the cards of a tab are built when it is first shown (a tab holds hundreds of commits, most without results:
+// building the four tabs before showing the first one took most of the load time); see RenderTab
+let tabRenderers = [];
+let tabRendered = [];
+
+function RenderTab(index) {
+  if ((index < 0) || tabRendered[index] || !tabRenderers[index]) return;
+  tabRendered[index] = true;
+  tabRenderers[index]();
+  ApplyOrder();
+}
+// status filter: 'all', 'with-results' (default: commits with at least one result) or 'status' (the statuses
+// chosen among the colored dots, several at a time)
+var statusFilter = { mode: 'with-results', statuses: new Set() };
+
+function StatusShown(status) {
+  if (statusFilter.mode === 'all') return true;
+  if (statusFilter.mode === 'with-results') return !!status && (status !== 'no run');
+  return statusFilter.statuses.has(status);
+}
 var selectedTypes = new Set(availableTypes);
 var campaigns = null;
 
@@ -126,7 +150,8 @@ function ApplyFiltersCampaigns() {
   let visibleCount = 0;
 
   commits.forEach(commit => {
-    const commitId = commit.dataset.commitId.toLowerCase();
+    // sha, PR numbers and message (see CommitSearchText)
+    const commitId = (commit.dataset.search ?? commit.dataset.commitId).toLowerCase();
     if (termCommit && !commitId.includes(termCommit)) {
       commit.classList.add('hidden');
       return;
@@ -169,7 +194,8 @@ function ApplyFilters() {
   const filterOpenOnly = document.getElementById('pr-state-toggle').classList.contains('active');
 
   commits.forEach(commit => {
-    const commitId = commit.dataset.commitId.toLowerCase();
+    // sha, PR numbers and message (see CommitSearchText)
+    const commitId = (commit.dataset.search ?? commit.dataset.commitId).toLowerCase();
     const statuses = JSON.parse(commit.dataset.statuses || '[]');
 
     // Check if commit has "no results" message (no sections at all)
@@ -211,14 +237,7 @@ function ApplyFilters() {
         pastille.style.display = 'none';
         return;
       }
-      const sectionStatus = statuses[idx];
-      if (currentFilter === 'all') {
-        pastille.style.display = '';
-      } else if (currentFilter === 'with-results') {
-        pastille.style.display = (sectionStatus && sectionStatus !== 'no run') ? '' : 'none';
-      } else {
-        pastille.style.display = (sectionStatus === currentFilter) ? '' : 'none';
-      }
+      pastille.style.display = StatusShown(statuses[idx]) ? '' : 'none';
     });
 
     const typeSections = commit.querySelectorAll('.type-section');
@@ -229,44 +248,20 @@ function ApplyFilters() {
         return;
       }
       const typeIdx = availableTypes.indexOf(type);
-      const sectionStatus = statuses[typeIdx];
-      if (currentFilter === 'all') {
-        section.style.display = '';
-      } else if (currentFilter === 'with-results') {
-        section.style.display = (sectionStatus && sectionStatus !== 'no run') ? '' : 'none';
-      } else {
-        section.style.display = (sectionStatus === currentFilter) ? '' : 'none';
-      }
+      section.style.display = StatusShown(statuses[typeIdx]) ? '' : 'none';
     });
 
     // STEP 2: Filter by status (among the candidates from step 1)
     let statusMatch = false;
 
     if (isEmptyCommit) {
-      // Empty commits match "all" and "no run"
-      statusMatch = (currentFilter === 'all' || currentFilter === 'no run');
-    } else if (currentFilter === 'all') {
-      statusMatch = true;
-    } else if (currentFilter === 'with-results') {
-      // At least one visible type must have actual results (not "no run")
-      let typeIdx = 0;
-      for (const type of availableTypes) {
-        if ((showAllCommits || selectedTypes.has(type)) && statuses[typeIdx] && statuses[typeIdx] !== 'no run') {
-          statusMatch = true;
-          break;
-        }
-        typeIdx++;
-      }
+      // commits without results: shown by "All" and by the ⚪ dot
+      statusMatch = (statusFilter.mode === 'all') ||
+          ((statusFilter.mode === 'status') && statusFilter.statuses.has('no run'));
     } else {
-      // At least one visible type must match the filter status (OR logic)
-      let typeIdx = 0;
-      for (const type of availableTypes) {
-        if ((showAllCommits || selectedTypes.has(type)) && statuses[typeIdx] === currentFilter) {
-          statusMatch = true;
-          break;
-        }
-        typeIdx++;
-      }
+      // at least one shown type with a shown status
+      statusMatch = availableTypes.some((type, typeIdx) =>
+          (showAllCommits || selectedTypes.has(type)) && StatusShown(statuses[typeIdx]));
     }
 
     const searchMatch = commitId.includes(searchTerm);
@@ -309,19 +304,20 @@ function UpdateCounter(visibleCount, statusCounts) {
   const counterDiv = document.getElementById('total-commits');
   if (!counterDiv) return;
 
-  const parts = [];
-  if (statusCounts.success > 0) parts.push(`Success: ${statusCounts.success}`);
-  if (statusCounts.mixed > 0) parts.push(`Mixed: ${statusCounts.mixed}`);
-  if (statusCounts.fail > 0) parts.push(`Fail: ${statusCounts.fail}`);
-  if (statusCounts['no run'] > 0) parts.push(`No run: ${statusCounts['no run']}`);
+  // compact: "214 commits · 🟢 120 🟡 30 🔴 4 ⚪ 60", the words in the hover
+  const icons = { success: '🟢', mixed: '🟡', fail: '🔴', 'no run': '⚪' };
+  const words = { success: 'success', mixed: 'mixed', fail: 'fail', 'no run': 'no run' };
+  const present = Object.keys(icons).filter(status => statusCounts[status] > 0);
 
   let label = 'commits';
   if (tabIndex == 4) {
     label = 'campaigns';
   }
 
-  const summary = parts.length > 0 ? parts.join(', ') : `No ${label}`;
-  counterDiv.textContent = `Displaying ${visibleCount} ${label}: ${summary}`;
+  counterDiv.textContent = `${visibleCount} ${label}` +
+      (present.length ? ' · ' + present.map(status => `${icons[status]} ${statusCounts[status]}`).join(' ') : '');
+  counterDiv.dataset.clickTip = `Displaying ${visibleCount} ${label}` +
+      (present.length ? ': ' + present.map(status => `${words[status]} ${statusCounts[status]}`).join(', ') : '');
 }
 
 
@@ -347,6 +343,7 @@ function SelectAllType(event) {
 /*****************************************/
 
 function ChangeTab(newTabIndex) {
+  RenderTab(newTabIndex);
   if ((newTabIndex != tabIndex) && (tabIndex != -1)) {
     ui.tabListsDiv[tabIndex].classList.remove('active');
     ui.commitsDiv[tabIndex].classList.add('hidden');
@@ -358,6 +355,8 @@ function ChangeTab(newTabIndex) {
 
     document.getElementById('refresh-btn').dataset.type = ui.refreshInfos[tabIndex].type;
     const infos = ui.refreshInfos[tabIndex]?.infos;
+    let title = ui.refreshInfos[tabIndex].type === 'gold'
+        ? 'Refresh this tab: fetches the pull requests from GitHub (costs API credits)' : 'Refresh this tab';
     if (infos) {
       const infosUI = document.getElementById('refresh-infos');
       const resetDate = new Date(infos.apiResetTS * 1000).toLocaleString([], {
@@ -365,12 +364,17 @@ function ChangeTab(newTabIndex) {
           hour: '2-digit', minute: '2-digit', hour12: false});
       infosUI.innerHTML = `🪙 ${infos.apiRemaining}credits<br>⏱ reset: ${resetDate}`;
       infosUI.classList.remove('hidden');
+      title += `\n🪙 ${infos.apiRemaining} credits left, reset ${resetDate}`;
     } else {
       document.getElementById('refresh-infos').classList.add('hidden');
     }
+    // the refresh button is the one of the top bar (nav.js)
+    window.dispatchEvent(new CustomEvent('pb-refresh-state',
+        { detail: { level: ui.refreshInfos[tabIndex].type, title } }));
   } else {
     document.getElementById('refresh-btn').dataset.type = '';
     document.getElementById('refresh-infos').classList.add('hidden');
+    window.dispatchEvent(new CustomEvent('pb-refresh-state', { detail: { level: '', title: '' } }));
   }
 
   if (tabIndex == 4) {
@@ -398,7 +402,12 @@ function ClickTab(event) {
 }
 
 function ScrollToTarget() {
-  const ref = document.getElementById(window.location.hash.slice(1));
+  let ref = document.getElementById(window.location.hash.slice(1));
+  if (!ref && window.location.hash.length > 1) {
+    // the card may be in a tab not built yet: build them all, then look again
+    tabRenderers.forEach((renderer, i) => RenderTab(i));
+    ref = document.getElementById(window.location.hash.slice(1));
+  }
   const pageIndex = ref?.closest('.page')?.dataset.index;
   if ((pageIndex === undefined) || (pageIndex === null)) {
     return;
@@ -430,6 +439,34 @@ function DisplayMetricsGraph() {
 
 /*****************************************/
 
+// Loading failed or there is nothing to show: say so in place of the spinner (a package without results, e.g.
+// sshpuffin, used to show "Loading..." for ever)
+function ShowLoadEnd(text) {
+  const divLoading = document.getElementById('loading');
+  divLoading.classList.add('ended');
+  divLoading.querySelector('h1').textContent = text;
+  EnableUI();
+}
+
+// Order of the commit rows: 'commit' (as listed: git order) or 'run' (latest run first, see RunDate); remembered
+let order = (() => { try { return localStorage.getItem('pb-results-order') || 'commit'; } catch (error) { return 'commit'; } })();
+
+function ApplyOrder() {
+  document.querySelectorAll('.order-toggle [data-order]').forEach(button => button.classList.toggle('active', button.dataset.order === order));
+  Array.from(ui.commitsDiv).forEach(div => {
+    const rows = [...div.querySelectorAll(':scope > .commit')];
+    rows.sort((a, b) => (order === 'run' ? (Number(b.dataset.run) || 0) - (Number(a.dataset.run) || 0) : 0)
+        || (Number(a.dataset.order) - Number(b.dataset.order)));
+    rows.forEach(row => div.appendChild(row));
+  });
+}
+
+document.querySelectorAll('.order-toggle [data-order]').forEach(button => button.addEventListener('click', () => {
+  order = button.dataset.order;
+  try { localStorage.setItem('pb-results-order', order); } catch (error) { /* a convenience only */ }
+  ApplyOrder();
+}));
+
 async function RefreshData(refreshGit) {
   DisableUI();
 
@@ -438,7 +475,8 @@ async function RefreshData(refreshGit) {
   const divFilters = document.getElementById('filters');
   divFilters.classList.add('hidden');
   const divLoading = document.getElementById('loading');
-  divLoading.classList.remove('hidden');
+  divLoading.classList.remove('hidden', 'ended');
+  divLoading.querySelector('h1').textContent = 'Loading...';
 
   ui.commitsDiv.forEach(div => {
       div.classList.add('hidden');
@@ -449,12 +487,18 @@ async function RefreshData(refreshGit) {
   const promiseProjectData = LoadProjectData(config, project);
   const [{ error: errorGit, data: dataGit }, { error: errorProject, data: dataProject }] = 
       await Promise.all([promiseGitData, promiseProjectData]);
+  if (!errorProject && (Object.keys(dataProject ?? {}).length === 0)) {
+    ShowLoadEnd(`No results for ${project} yet.`);
+    return;
+  }
   if (errorGit){
     console.log(dataGit);
+    ShowLoadEnd(`No results shown for ${project}: its commit history is not available (${dataGit}).`);
     return;
   }
   if (errorProject){
     console.log(dataProject);
+    ShowLoadEnd(`No results shown for ${project}: its results are not available (${dataProject}).`);
     return;
   }
 
@@ -526,55 +570,63 @@ async function RefreshData(refreshGit) {
         value.branch = variable.get(value.base)?.branch ?? '?';
   }});
 
+  // PR of each commit (merge, tip): see commitinfo.js
+  SetPullRequests(dataGit.PR);
+  RegisterCommits([...dataGit.commits, ...dataGit.PR, ...dataGit.branches, ...dataGit.users], dataGit.PR);
   metrics[0] = new Metrics(availableTypes, dataGit.commits);
   metrics[1] = new Metrics(availableTypes, dataGit.PR);
   metrics[2] = new Metrics(availableTypes, dataGit.branches);
   metrics[3] = new Metrics(availableTypes, dataGit.users);
 
-  dataGit.commits.forEach(element => {
+  tabRenderers = [];
+  tabRendered = [];
+  tabRenderers[0] = () => dataGit.commits.forEach(element => {
       // main line commits, no base to compare to
       RenderCommit(config, project, availableTypes, element, metrics, ui.commitsDiv[0], null);
   });
   graphs.metrics.push(new GraphMetrics(metrics[0]));
   graphs.overview.push(new GraphOverview(config, project, metrics[0]));
 
-  dataGit.PR.forEach(element => {
+  tabRenderers[1] = () => dataGit.PR.forEach(element => {
       RenderCommit(config, project, availableTypes, element, metrics, ui.commitsDiv[1], metrics[1]);
   });
   graphs.metrics.push(new GraphMetrics(metrics[1]));
   graphs.overview.push(new GraphOverview(config, project, metrics[1]));
   ui.refreshInfos[1]["infos"] = dataGit.PR_API_Infos;
 
-  dataGit.branches.forEach(element => {
+  tabRenderers[2] = () => dataGit.branches.forEach(element => {
       RenderCommit(config, project, availableTypes, element, metrics, ui.commitsDiv[2], metrics[2]);
   });
   graphs.metrics.push(new GraphMetrics(metrics[2]));
   graphs.overview.push(new GraphOverview(config, project, metrics[2]));
 
-  dataGit.users.forEach(element => {
+  tabRenderers[3] = () => dataGit.users.forEach(element => {
       RenderCommit(config, project, availableTypes, element, metrics, ui.commitsDiv[3], metrics[3]);
   });
   graphs.metrics.push(new GraphMetrics(metrics[3]));
   graphs.overview.push(new GraphOverview(config, project, metrics[3]));
 
   campaigns = [];
-  [dataGit.commits, dataGit.PR, dataGit.users].forEach(dataSrc => {
-      dataSrc.forEach(commit => {
-          let campaignList = commit?.infos?.get('Campaign');
-          if (!campaignList ) {
-            return;
-          }
-          RenderCampaigns(config, project, commit, metrics, ui.commitsDiv[4]);
-          campaigns.push(...campaignList.map(info => ({commitID: info.commit_id, user: info.user, campaignID: info.campaign_id})));
-      });
-  });
-  SetupCombobox('search-commit-campaign', 'dl-commit-campaign', [...new Set(campaigns.map(c => c.commitID))]);
-  SetupCombobox('search-user-campaign', 'dl-user-campaign', [...new Set(campaigns.map(c => c.user))]);
-  SetupCombobox('search-campaign-campaign', 'dl-campaign-campaign', [...new Set(campaigns.map(c => c.campaignID))]);
+  tabRenderers[4] = () => {
+    [dataGit.commits, dataGit.PR, dataGit.users].forEach(dataSrc => {
+        dataSrc.forEach(commit => {
+            let campaignList = commit?.infos?.get('Campaign');
+            if (!campaignList ) {
+              return;
+            }
+            RenderCampaigns(config, project, commit, metrics, ui.commitsDiv[4]);
+            campaigns.push(...campaignList.map(info => ({commitID: info.commit_id, user: info.user, campaignID: info.campaign_id})));
+        });
+    });
+    SetupCombobox('search-commit-campaign', 'dl-commit-campaign', [...new Set(campaigns.map(c => c.commitID))]);
+    SetupCombobox('search-user-campaign', 'dl-user-campaign', [...new Set(campaigns.map(c => c.user))]);
+    SetupCombobox('search-campaign-campaign', 'dl-campaign-campaign', [...new Set(campaigns.map(c => c.campaignID))]);
+  };
 
   if (tabIndex == -1) {
     ChangeTab(0);
   } else {
+    RenderTab(tabIndex);
     ApplyFilters();
     ui.commitsDiv[tabIndex].classList.remove('hidden');
   }
@@ -599,15 +651,26 @@ async function Main() {
     ApplyFilters();
   });
 
-  const filterButtons = document.querySelectorAll('.filter-btn');
+  // "All" and "📊 results" are exclusive; the colored dots can be combined (none left: back to "📊 results")
+  const filterButtons = [...document.querySelectorAll('.filter-btn')];
+  const ShowStatusFilter = () => filterButtons.forEach(b => b.classList.toggle('active',
+      (b.dataset.filter === statusFilter.mode) ||
+      ((statusFilter.mode === 'status') && statusFilter.statuses.has(b.dataset.filter))));
   filterButtons.forEach(btn => {
       btn.addEventListener('click', () => {
-          filterButtons.forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          currentFilter = btn.dataset.filter;
+          const filter = btn.dataset.filter;
+          if ((filter === 'all') || (filter === 'with-results')) {
+            statusFilter = { mode: filter, statuses: new Set() };
+          } else {
+            const statuses = statusFilter.mode === 'status' ? statusFilter.statuses : new Set();
+            statuses.has(filter) ? statuses.delete(filter) : statuses.add(filter);
+            statusFilter = statuses.size ? { mode: 'status', statuses } : { mode: 'with-results', statuses };
+          }
+          ShowStatusFilter();
           ApplyFilters();
       });
   });
+  ShowStatusFilter();
 
   const typeFiltersContainer = document.getElementById('type-filters');
   typeFiltersContainer.innerHTML = '';
@@ -703,6 +766,7 @@ async function Main() {
 
   window.ShowDetails = ShowDetails.bind(null, config);
   window.DownloadResults = DownloadResults.bind(null, config);
+  window.addEventListener('pb-refresh', (event) => { event.preventDefault(); window.BtnRefreshData(); });
   window.BtnRefreshData = () => {
     if ((tabIndex >= 0) && (tabIndex < ui.refreshInfos.length)) {
       RefreshData(ui.refreshInfos[tabIndex].parameter);
@@ -727,3 +791,12 @@ async function Main() {
 }
 
 Main();
+
+// Esc (top bar, board/nav.js): fold the unfolded 🐞 panels
+window.addEventListener('pb-escape', (event) => {
+  if ((event.detail?.layer !== 'panel') || event.defaultPrevented) return;
+  const open = document.querySelectorAll('tr.lib-panel-row:not([hidden])');
+  if (!open.length) return;
+  event.preventDefault();
+  open.forEach(row => { row.hidden = true; });
+});

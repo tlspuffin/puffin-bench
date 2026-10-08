@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,16 +9,12 @@
   <link rel="stylesheet" href="/html/publisher/summary_graphoverview.css">
 </head>
 <body>
+  <!-- one toolbar row: tabs, search, filters, counter, graphs and refresh (below the bench navigation bar) -->
   <header>
-    <div class="header-top hidden">
-      <div class="header-left">
-        <h1 id="header-title"></h1>
-        <div class="header-info">
-          <span id="total-commits"></span>
-        </div>
-      </div>
+    <div class="header-top toolbar hidden">
+      <h1 id="header-title"></h1>
 
-      <div class="header-middle">
+      <div class="header-middle seg">
         <div id="maindevTab" class="tab">Dev / Main</div>
         <div id="prTab" class="tab">PR</div>
         <div id="branchesTab" class="tab">Branches</div>
@@ -26,64 +22,68 @@
         <div id="campaignsTab" class="tab">Campaigns</div>
       </div>
 
+      <div id="filters" class="hidden">
+        <div class="filters" id="common-filters">
+          <span class="search-group">
+            <input type="text" id="search-input" placeholder="Search: sha, #PR, message, branch…" />
+            <button class="clear-search-btn" onclick="ClearSearch('search-input')" title="Clear search">✕</button>
+          </span>
+          <span class="filter-group">
+            <button class="filter-btn btn" data-filter="all" title="All commits, also those without results">All</button>
+            <button class="filter-btn btn" data-filter="with-results" title="Commits with results (default)">📊 results</button>
+            <button class="filter-btn btn" data-filter="success" title="Success (several dots can be combined)">🟢</button>
+            <button class="filter-btn btn" data-filter="mixed" title="Mixed (several dots can be combined)">🟡</button>
+            <button class="filter-btn btn" data-filter="fail" title="Fail (several dots can be combined)">🔴</button>
+            <button class="filter-btn btn" data-filter="no run" title="No run (several dots can be combined)">⚪</button>
+          </span>
+          <span class="sep"></span>
+          <span id="type-filters" class="type-filters" title="Result types shown"></span>
+          <span class="sep"></span>
+          <span class="order-toggle" id="order-toggle" title="Order of the commits: as listed by git (commit date), or the latest run first">
+            <button class="btn active" data-order="commit">commit date</button><button class="btn" data-order="run">run date</button>
+          </span>
+          <span id="filter-PR-state" class="hidden">
+            <button class="btn active" id="pr-state-toggle" title="Only the open PRs">Open</button>
+          </span>
+        </div>
+
+        <div class="filters-campaign hidden" id="campaigns-filters">
+          <div class="campaign-search-group">
+            <div class="combobox">
+              <input type="text" id="search-commit-campaign" placeholder="Search commit..." />
+              <ul class="combobox-list hidden" id="dl-commit-campaign"></ul>
+            </div>
+            <button class="clear-search-commit-campaign-btn" onclick="ClearSearch('search-commit-campaign')" title="Clear search">✕</button>
+            <div class="combobox">
+              <input type="text" id="search-user-campaign" placeholder="Search user..." autocomplete="off" />
+              <ul class="combobox-list hidden" id="dl-user-campaign"></ul>
+            </div>
+            <button class="clear-search-user-campaign-btn" onclick="ClearSearch('search-user-campaign')" title="Clear search">✕</button>
+            <div class="combobox">
+              <input type="text" id="search-campaign-campaign" placeholder="Search campaign..." />
+              <ul class="combobox-list hidden" id="dl-campaign-campaign"></ul>
+            </div>
+            <button class="clear-search-campaing-campaign-btn" onclick="ClearSearch('search-campaign-campaign')" title="Clear search">✕</button>
+          </div>
+          <span class="order-toggle" title="Order of the commits: as listed by git (commit date), or the latest run first">
+            <button class="btn active" data-order="commit">commit date</button><button class="btn" data-order="run">run date</button>
+          </span>
+        </div>
+      </div>
+
+      <span class="grow"></span>
+      <span id="total-commits" class="counter"></span>
+
       <div class="header-right">
-        <button class="refresh-btn" id="overview-graph-btn" onclick="DisplayOverviewGraph()">📊 Overview</button>
-        <button class="refresh-btn" id="metrics-graph-btn" onclick="DisplayMetricsGraph()">📊 Métriques</button>
-        <div class="refresh-btn-wrapper">
-          <button class="refresh-btn" id="refresh-btn" onclick="BtnRefreshData()">🔄 Refresh</button>
+        <button class="refresh-btn" id="overview-graph-btn" onclick="DisplayOverviewGraph()" title="📊 Overview&#10;shows: each metric of each library over the commits of the tab">📊 Overview</button>
+        <button class="refresh-btn" id="metrics-graph-btn" onclick="DisplayMetricsGraph()" title="📈 Metrics&#10;shows: one metric, chosen libraries, over the commits of the tab">📈 Metrics</button>
+        <!-- the refresh is the 🔄 of the top bar (nav.js); these keep the state it shows -->
+        <div class="refresh-btn-wrapper hidden">
+          <button class="refresh-btn" id="refresh-btn" onclick="BtnRefreshData()">🔄</button>
           <div id="refresh-infos" class="hidden"></div>
         </div>
       </div>
     </div>
-
-    <div id="filters" class="hidden">
-      <div class="filters" id="common-filters">
-        <div class="filter-group">
-          <label>Filter by status:</label>
-          <button class="filter-btn btn active" data-filter="all">All</button>
-          <button class="filter-btn btn" data-filter="with-results">📊 With results</button>
-          <button class="filter-btn btn" data-filter="success">🟢 Success</button>
-          <button class="filter-btn btn" data-filter="mixed">🟡 Mixed</button>
-          <button class="filter-btn btn" data-filter="fail">🔴 Fail</button>
-          <button class="filter-btn btn" data-filter="no run">⚪ No run</button>
-        </div>
-        <div class="filter-group filter-flex">
-          <div>
-            <label>Show types:</label>
-            <div id="type-filters" class="type-filters"></div>
-          </div>
-          <div id="filter-PR-state" class="hidden">
-            <label>PR State:</label>
-            <button class="btn active" id="pr-state-toggle">Open</button>
-          </div>
-        </div>
-        <div class="search-group">
-          <input type="text" id="search-input" placeholder="Search commit..." />
-          <button class="clear-search-btn" onclick="ClearSearch('search-input')" title="Clear search">🧹</button>
-        </div>
-      </div>
-
-      <div class="filters-campaign hidden" id="campaigns-filters">
-        <div class="campaign-search-group">
-          <div class="combobox">
-            <input type="text" id="search-commit-campaign" placeholder="Search commit..." />
-            <ul class="combobox-list hidden" id="dl-commit-campaign"></ul>
-          </div>
-          <button class="clear-search-commit-campaign-btn" onclick="ClearSearch('search-commit-campaign')" title="Clear search">🧹</button>
-          <div class="combobox">
-            <input type="text" id="search-user-campaign" placeholder="Search user..." autocomplete="off" />
-            <ul class="combobox-list hidden" id="dl-user-campaign"></ul>
-          </div>
-          <button class="clear-search-user-campaign-btn" onclick="ClearSearch('search-user-campaign')" title="Clear search">🧹</button>
-          <div class="combobox">
-            <input type="text" id="search-campaign-campaign" placeholder="Search campaign..." />
-            <ul class="combobox-list hidden" id="dl-campaign-campaign"></ul>
-          </div>
-          <button class="clear-search-campaing-campaign-btn" onclick="ClearSearch('search-campaign-campaign')" title="Clear search">🧹</button>
-        </div>
-      </div>
-    </div>
-
   </header>
 
   <div id="loading">
@@ -97,6 +97,75 @@
   <div id="usersCommits" class="page hidden"></div>
   <div id="campaignsCommits" class="page hidden"></div>
 
+  <template id="help-panel">
+<h2>What is shown</h2>
+<p>The results of the experiments, one card per commit of tlspuffin, newest first. A card has the commit line (short hash, PR, message; branch and date on the right) and one block per result type: <b>Perf</b> on the left, <b>Vuln</b> on the right (an empty slot when the commit has no run of that type), stacked on narrow screens.</p>
+
+<h2>Tabs and filters</h2>
+<ul>
+<li><b>Dev / Main</b>: commits of the main branches. <b>PR</b>: commits of pull requests (refreshing it costs GitHub API credits: the 🔄 of the top bar turns gold, its hover shows the credits left). <b>Branches</b>, <b>Others</b>: other branches, commits found nowhere else. <b>Campaigns</b>: long custom runs, searched by commit, user or campaign name.</li>
+<li>Search: the sha, the PR number (<code>#540</code>), the message, the branch. <b>📊 results</b> (default): commits with at least one result; <b>All</b>: also those without.</li>
+<li>🟢 success, 🟡 mixed, 🔴 fail, ⚪ no run: only the results with these statuses (several can be combined). Type chips (All, Perf, Vuln): the result types shown. <b>Open</b> (PR tab): open PRs only.</li>
+<li><b>commit date | run date</b>: the commits in git order, or those that ran last first (also on Campaigns: the latest end of a campaign run, else its launch).</li>
+</ul>
+
+<h2>A result block</h2>
+<ul>
+<li>Header: 🔗 link to the block · <code>run on 07/10 13:28 · bench 6fd↗</code>: when its runs ended and the puffin-bench version that produced them · 🔬 Analyze (Perf) · 📊 Details (the task) · ⬇️ Download (artefacts) · <b>🕘 N runs</b>: this commit was run N times; this block shows the latest; click to compare all of them (next section).</li>
+<li>One row per library (Perf) or configuration (Vuln): ✅ all runs succeeded / ⚠️ some did not / ⛔ none did, or not run (click it: in Vuln, it also names the runs that found the expected bug 🎯 but are not counted as succeeded, and why, e.g. a run ended by its timeout), then warnings (hover each icon) and the objectives (see below).</li>
+<li>Build: the harness (⚙C or 🦀 Rust; <b>hover it</b> for what was built: library preset and its commit, features, sources) and ASAN✓/✗; a blue <b>--</b> when extra fuzzer options were used (e.g. <code>--put-use-clear</code>, <code>--wo-bit</code>): hover it for the list.</li>
+<li>Runs: successful / total. Metrics: mean ± standard deviation. <b>Click a value</b>: all the values, range, median, mean. <b>Click a column header</b>: per-run values instead (the mean of each run's clients).</li>
+<li>Perf: coverage (% of the instrumented edges), corpus, execs (total of a run), duration. Vuln: <b>execs to find</b> (the total execs when the fuzzer saved the objective that ended the run; older runs: the execs when the run stopped, a little later) and <b>time to find</b> (from the start of the run to that objective).</li>
+<li>Failed runs: their metrics in a red row under the library.</li>
+</ul>
+
+<h2>Comparison with the previous commit: the % in the cells</h2>
+<p>Each block is compared with the <b>nearest git ancestor of the commit that has results of the same type</b> (its latest task too). The line under the header says which, in short: <code>vs dcf9ff4: 6 ▲ 2 ▼ · 2 ⚠ · 2 ⚙</code> (flagged improvements and regressions · libraries not comparable · settings that differ); <b>click it</b> for the details of each.</p>
+<ul>
+<li><b>The %</b> next to a value: the change of its mean from the ancestor to this commit, e.g. <code>+9.6%</code>. <b>Click it</b> for the details: both means, the p-value, the number of runs, the noise floor used and why it is or is not flagged.</li>
+<li><b>Coloured</b> = <b>flagged</b>: both conditions hold:
+  <ol>
+  <li>the runs of the two tasks are almost completely separated: two-sided <a href="https://en.wikipedia.org/wiki/Mann%E2%80%93Whitney_U_test" target="_blank" rel="noopener">Mann-Whitney U test ↗</a> on the runs (one value per run), <b>p ≤ 0.016</b>. The test compares the two sets of runs by their ranks, not their means, so one outlier run does not decide it and no normal distribution is assumed. U counts the pairs (ancestor's run, this commit's run) in the wrong order; p is the probability of an ordering at least that one-sided if both commits behaved the same: exact (the distribution of U) without ties, else the normal approximation with the tie and continuity corrections, as scipy. With 5 runs against 5, p can only be 0.008 (no pair out of order), 0.016 (one pair), 0.032 (two)…: the threshold means <b>at most one of the 25 pairs out of order</b>. With fewer runs (Vuln counts only the runs that found the bug) the smallest p is larger: 3 against 5 can never be flagged (at best 0.036);</li>
+  <li>the change is larger than the <b>noise floor</b>: the 95th percentile of the changes between two tasks of the <i>same</i> commit (same machine, build and settings), e.g. coverage 0.3–2.8 % depending on the library, corpus 4–6 %, execs 15–41 % depending on the machine (load), Vuln execs to find 98 %, time to find 131 %.</li>
+  </ol>
+  <span style="color:#3fb950;font-weight:700">Green</span>: better (Perf: more coverage, corpus or execs; Vuln: fewer execs or less time to find). <span style="color:#f85149;font-weight:700">Red</span>: worse. On the real same-commit pairs of three machines, this rule flags 0–4 % of the comparisons by chance. There is no correction for the number of comparisons (libraries × metrics): one isolated flag deserves a second look; a change seen on several metrics or libraries is more convincing. With 5 runs only large, consistent changes can be flagged.</li>
+<li><b>Faint</b> = not flagged: within the noise, or not separated enough for 5 runs. It is shown for information, not as a change.</li>
+<li><b>⚠</b> (after the % and the library): the two sides are <b>not comparable</b> for that library: another build (library version, harness, ASan), another Vuln monitor (since bf0392b a run ends on its target, before on any objective), or another machine load (the 1-minute load average per core of the machine differs by more than 0.25; compared only for runs from 2026-10-09 on, earlier ones recorded it wrongly). The change is still shown; its click says what differs.</li>
+<li><b>⚙</b> in the line (click): what else differs between the two tasks (job scripts, compat rules, timeout, cores, LibAFL): a change may come from the bench, not from tlspuffin.</li>
+<li>The noise floors and the p threshold are in <code>/html/publisher/regression_floors.json</code> (per machine, then per library, then default): edit it and reload, no deploy. The floors measured on this machine are in <code>/html/runs/regression_floors.measured.json</code> (a suggestion, never applied by itself).</li>
+</ul>
+
+<h2>Objectives: 🎯 and 🐞</h2>
+<ul>
+<li><b>VulnA</b> (a target declared for the preset in <code>vuln_targets.json</code>): <code>🎯 4/5 +1 failed · no replay +1 ⦸ ⚠ 2</code>
+  <ul>
+  <li><b>🎯 5/5</b>: runs that found the <b>expected bug</b> of the configuration (its CVE) <b>and succeeded</b> / runs. Found = the fuzzer recorded it (crash in the expected function, or the expected claim) or a replay reproduced it; succeeded = the run ended normally with its end-of-run summary (the runs of the statistics). <b>+1 failed</b>: runs that found it without succeeding (ended by their timeout, no end-of-run summary): not counted; the hover and the status icon of the row say why. Green when every run counts, amber otherwise, red when none. The same counts as the objectives report (its banner gives the conclusion of the task). A faint <b>· no replay</b>: in some of those runs no replay reproduced it, the fuzzer's log is the evidence (e.g. CDOS's crash, which depends on the fuzzer's in-process state); the hover says in how many. Each mark of the chip is one line of its hover.</li>
+  <li><b>+1 ⦸</b>: objectives of a known CVE that is <b>not the target</b> (CVE-2024-5814, which wolfSSL &lt; 5.7.2 has: set apart on those versions only; on any other library or version the claim is a bug, ⚠ unexpected). They no longer end the run; they are kept and reported.</li>
+  <li><b>⚠ 2</b>: objectives of an <b>unexpected</b> bug: neither the target nor a CVE set apart. A new finding, worth a look.</li>
+  <li>Click: the bugs of the configuration, as in its report (Bug A, B… linked to it).</li>
+  </ul></li>
+<li><b>❓ N</b> after the chip: N objectives of the library <b>without category</b>: no replay confirmed them and the fuzzer's log has no record of them (no log in the artefacts, or the record lost to log rotation), or a crash without location (a bug, but it cannot be compared with other tasks, so never 🚨). Click: how many for each reason. They could hide a bug.</li>
+<li><b>Other results</b> (Perf, VulnB, campaigns): <code>🐞 N (k)</code>: N objectives in k bugs; red when a replay confirmed a bug, orange when only the fuzzer recorded it. Click for the bugs.</li>
+<li>Every objective has a category from the fuzzer's own log (its crash, with the ASan error when the build has ASan, or its claim), replayed or not; an objective whose log line was lost to log rotation takes the verdict of an objective with the same input.</li>
+<li><b>Full report ↗</b>: all the objectives of the task, grouped by bug, with the replays, the fuzzer's logs and the traces to download.</li>
+<li><b>🚨🚨🚨</b> (pulsing, before the chip): a <b>new bug</b> for that configuration: a real bug (fuzzer record or replay), neither expected nor set apart. In a configuration with an expected bug (an alias: BUF, SKIP…): its signature (its claim, or the top function of its crash) no earlier task had there, whatever the job (VulnA, VulnB, Perf, campaigns). In a plain version (e.g. Perf's wolfSSL 5.8.0): it is none of the CVEs tlspuffin declares for that build (known minus fixed vulnerabilities of the build) whose signature <code>vuln_targets.json</code> gives (those are shown as 📋 known on the report); it stays new on every task until it is added there. Its report says <b>🚨 NEW BUG</b>.</li>
+<li>The expected bugs, the CVEs set apart and the bugs found so far: <a href="/html/publisher/bugs.html" target="_blank">🎯 Bugs reference ↗</a> (and the one file to edit, <code>vuln_targets.json</code>).</li>
+</ul>
+
+<h2>All the runs of a commit (🕘 N runs)</h2>
+<p>A rerun replaces a result here, but every task is kept: the 🕘 page lists them with the puffin-bench version of each, what changed between two of them and the significant differences, with charts.</p>
+
+<h2>Graphs</h2>
+<p><b>📊 Overview</b>: each metric of each library over the commits of the tab. <b>📈 Metrics</b>: one metric, chosen libraries, over the commits. Ticks: <code>C 4e4·#540·09/26</code>: harness (<b>C</b>, <b style="color:#f0883e">R</b> Rust), hash, PR, month/year; hover for the commit, click the hash or PR to open it.</p>
+
+<h2>Details: click or hover</h2>
+<p>The cursor says how: the <b>box cursor</b> (an arrow with a small box, e.g. on ⚙C, ASAN, the warning icons, the % and the values, <code>vs 1957fba…</code>) means a <b>click</b> opens a small window (Esc, a click elsewhere or a second click closes it); the <b>? cursor</b>, a link or a button: the details show on <b>hover</b> after half a second. Charts keep their hovers.</p>
+
+<h2>Keys</h2>
+<p><b>Cmd/Ctrl+R</b>: refresh · <b>Esc</b>: close a panel · <b>g</b> then <b>s/r/a/h</b>: Scheduler, Results, Analyzer, History · <b>?</b>: this help.</p>
+</template>
+
+  <script type="module" src="/html/board/nav.js"></script>
   <script type="module" src="/html/publisher/summary.js"></script>
 </body>
 </html>

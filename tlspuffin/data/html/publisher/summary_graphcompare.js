@@ -1,7 +1,6 @@
 import { Graph } from './summary_graph.js';
 import { manageGraphs } from './summary_managegraphs.js';
-import '../third-party/plotly/plotly-3.3.0.min.js';
-const Plotly = window.Plotly;
+import { Plotly } from './plotly_lazy.js';
 
 class GraphCompare {
   static #overviewMetrics = {
@@ -103,7 +102,7 @@ class GraphCompare {
 
     // Close modal on ESC key
     this.#saveDocKeyDown = document.onkeydown;
-    document.onkeydown = (event) => {if (event.key === 'Escape') { this.Close(); }};
+    document.onkeydown = (event) => {if (event.key === 'Escape') { event.preventDefault(); this.Close(); }};
   }
 
   Close() {
@@ -229,7 +228,10 @@ class GraphCompare {
     })
     layout.title.font.size = 14;
     layout.margin = { l: 50, r: 20, t: 40, b: 125 };
-    Plotly.newPlot(containerId, traces, layout, config);
+    Plotly.newPlot(containerId, traces, layout, config).then(() => {
+        Graph.DecorateGraphXTicks(container);
+        container.on('plotly_afterplot', () => Graph.DecorateGraphXTicks(container));
+    });
 
     manageGraphs.RegisterGraph(containerId);
   }
