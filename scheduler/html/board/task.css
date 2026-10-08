@@ -1,3 +1,59 @@
+/* Task page: header, actions, settings, steps grid; then the Scheduler's card of the task (every detail) */
+.task-page { --t-panel: #111; --t-card: #151515; --t-line: #262626; --t-muted: #8b8b8b; --t-link: #58a6ff; }
+.task-error { margin: 12px; padding: 8px 12px; border: 1px solid #f44336; border-radius: 8px; color: #f44336; }
+.task-wrap { max-width: 1400px; margin: 0 auto; padding: 10px 14px 30px; }
+.task-wrap h2 { font-size: 13px; color: #ddd; margin: 16px 0 6px; }
+.task-hint { color: var(--t-muted); font-size: 11.5px; font-weight: 400; }
+.mono { font-family: ui-monospace, Menlo, monospace; }
+
+.task-head { background: var(--t-panel); border: 1px solid var(--t-line); border-radius: 10px; padding: 12px 14px; }
+.task-head h1 { font-size: 17px; margin: 0 0 4px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.task-state { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; border: 1px solid #555; white-space: nowrap; }
+.task-state.done { background: #1f3a24; color: #7ee787; border-color: #3fb950; }
+.task-state.running { background: #10233f; color: #9cc9ff; border-color: #58a6ff; }
+.task-state.pending { background: #2a2208; color: #ffb74d; border-color: #f08c00; }
+.task-state.cancelled { background: #3a1414; color: #ff9b9b; border-color: #f44336; }
+.task-meta { color: var(--t-muted); font-size: 12px; }
+.task-meta b { color: #e8e8e8; font-weight: 600; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+.task-btn { padding: 5px 12px; border-radius: 7px; border: 1px solid #333; background: #1b1b1b; color: #e8e8e8; font-size: 12.5px;
+  cursor: pointer; text-decoration: none; font-family: inherit; }
+.task-btn:hover { border-color: var(--t-link); text-decoration: none; }
+.task-btn.primary { background: #1d2a52; border-color: #4b6bd6; color: #fff; font-weight: 700; }
+.task-btn.ghost { color: var(--t-muted); }
+.task-btn.danger { color: #ff9b9b; border-color: #a33; }
+a.task-btn:not([href]) { cursor: default; color: var(--t-muted); }
+.task-priority { margin: 0; }
+
+.task-settings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; background: var(--t-card);
+  border: 1px solid var(--t-line); border-radius: 10px; padding: 10px 14px; }
+.task-settings > div.wide { grid-column: 1 / -1; }
+.task-settings .label { display: block; color: var(--t-muted); font-size: 11px; }
+.task-settings .value { font-weight: 600; }
+.task-settings .chip, .task-settings .value .chip { display: inline-block; padding: 0 7px; margin: 1px 3px 1px 0; border-radius: 999px;
+  background: #1f1f1f; border: 1px solid #333; font-size: 11.5px; font-weight: 400; }
+@media (max-width: 900px) { .task-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.task-steps-scroll { overflow-x: auto; }
+.task-steps { width: 100%; border-collapse: collapse; background: var(--t-card); border: 1px solid var(--t-line); border-radius: 10px; }
+.task-steps th, .task-steps td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--t-line); vertical-align: top; }
+.task-steps thead th { color: var(--t-muted); font-weight: 600; font-size: 12px; }
+.task-steps tbody th { width: 150px; font-weight: 600; white-space: nowrap; }
+.att { display: inline-block; margin: 1px 3px 1px 0; padding: 1px 6px; border-radius: 5px; font-size: 11px; cursor: pointer;
+  font-family: inherit; border: 1px solid #333; background: #1b1b1b; color: #ddd; }
+.att:hover { filter: brightness(1.25); }
+.att.done { background: #16261a; border-color: #2ea04366; color: #b6e3be; }
+.att.running { background: #10233f; border-color: #58a6ff; color: #cfe3ff; }
+.att.pending { background: #1b1b1b; border-color: #444; color: var(--t-muted); }
+.att.timedout { background: #0f2a2b; border-color: #45d0d4; color: #a6eef0; }
+.att.cancelled, .att.failed { background: #2e1414; border-color: #f44336; color: #ff9b9b; }
+.att .obj { color: #1a1a1a; background: #ffb74d; border-radius: 4px; padding: 0 4px; font-size: 10.5px; }
+.att.highlight-objective { box-shadow: 0 0 0 1px #ffc400; }
+
+.task-classic { margin-top: 18px; }
+.task-classic > summary { cursor: pointer; font-size: 13px; color: #ddd; font-weight: 700; margin-bottom: 6px; }
+
+/* the Scheduler's card of the task (taskcard.js), unfolded */
 .container-running-steps {
   padding: 0px 0.5em;
 }
@@ -7,40 +63,23 @@
 .card-task-running {
   max-width: 100%;
   width: 100%;
-  padding-top: 0;
+  /* its state strip inside the card, not on its border */
+  padding-top: 10px;
 }
+.task-classic #container-running-steps { margin-top: 10px; }
 
 .card-task-running:hover {
   background: #2d2d2d;
 }
 
 #card-task-header {
-  position: sticky;
-  top: 0;
+  /* not sticky here: the page has its own header (state, times); sticky, it slid over the section title */
+  position: static;
   padding-top: 20px;
   background: #2d2d2d;
   border-radius: 15px 15px 0 0;
   border-bottom: 1px solid #555;
   z-index: 10;
-}
-
-.btn-download-artefacts {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  z-index: 100;
-  padding: 0.4rem 0.8rem;
-  background: #4CAF50;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  text-decoration: none;
-  font-size: 0.85rem;
-}
-
-.btn-download-artefacts:hover {
-  background: #388E3C;
 }
 
 #card-task-steps {
