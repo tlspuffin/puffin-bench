@@ -1,4 +1,7 @@
+#include "../duration_history.hxx"
 #include "local.hxx"
+#include <thread>
+#include <chrono>
 #include "../step.hxx"
 #include "../../../utils/logs.hxx"
 #include "../../../utils/rapidjson.hxx"
@@ -174,7 +177,7 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
 
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
     uint16_t serverPort, ns_System::Linux& os)
-    : Executor(name), config_(config), os_(os), nbCoresFree_(config_.nbCores_), 
+    : Executor(name), config_(config), os_(os), nbCoresUsed_(0), 
       nbCoresMax_(config_.nbCores_), coresFree_(config_.cores_), nbChild_(0), 
       serverPort_(serverPort), cgroupRoot_(config.cgroupPath_), 
       cgroupRootCapabilities_(0), cgroupDisableUpdateSliceUser_(false), 
@@ -207,15 +210,19 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     }
   }
 
-  if (nbCoresFree_ == 0) {
-    coresFree_ = config_.cores_;
-    for(size_t i=0; i<coresFree_.size(); ++i) {
-      if (coresFree_[i]) {
-        ++nbCoresFree_;
-      }
+  for (size_t i = 0; i < config_.cores_.size(); ++i) {
+    if (config_.cores_[i]) {
+      ++nbCoresLimit_;
     }
-    nbCoresMax_ = nbCoresFree_;
   }
+  if (nbCoresMax_ == 0) {
+    coresFree_ = config_.cores_;
+    nbCoresMax_ = nbCoresLimit_;
+  }
+  if (nbCoresMax_ > nbCoresLimit_) {
+    nbCoresMax_ = nbCoresLimit_;
+  }
+  nbCoresDefault_ = nbCoresMax_;
 
   memMinAllowed_ = double(os.Memory().Total()) * config_.memMinRatio_;
 }
@@ -233,7 +240,46 @@ ns_Executor::Local::~Local() {
 }
 
  bool ns_Executor::Local::CanRun(ns_Schedule::Step* step) const {
-  return step->nb_cores_ <= nbCoresMax_;
+  // what the executor can run at all: a temporary maximum only delays a step
+  return step->nb_cores_ <= std::max(nbCoresDefault_, nbCoresMax_);
+}
+
+bool ns_Executor::Local::SetMaxCores(uint64_t maxCores, uint64_t durationSec, std::string& error) {
+  std::lock_guard<std::mutex> lock(coresLock_);
+  if (maxCores == 0) {
+    nbCoresMax_ = nbCoresDefault_;
+    nbCoresUntilMs_ = 0;
+    LOGI << "Maximum of cores: back to the default " << nbCoresDefault_ << Log::Flags::End;
+    return true;
+  }
+  if (maxCores > nbCoresLimit_) {
+    error = "at most " + std::to_string(nbCoresLimit_) + " cores (the cores of the configuration)";
+    return false;
+  }
+  if ((durationSec == 0) || (durationSec > 7 * 24 * 3600)) {
+    error = "the duration must be between 1 second and 7 days";
+    return false;
+  }
+  nbCoresMax_ = maxCores;
+  nbCoresUntilMs_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count()) + durationSec * 1000;
+  LOGI << "Maximum of cores: " << maxCores << " for " << durationSec << " s (default " << nbCoresDefault_ << ", "
+       << nbCoresUsed_ << " in use)" << Log::Flags::End;
+  return true;
+}
+
+void ns_Executor::Local::CheckMaxCoresExpiry() {
+  std::lock_guard<std::mutex> lock(coresLock_);
+  if (nbCoresUntilMs_ == 0) {
+    return;
+  }
+  uint64_t const now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count());
+  if (now >= nbCoresUntilMs_) {
+    LOGI << "Maximum of cores: the temporary " << nbCoresMax_ << " ended, back to " << nbCoresDefault_ << Log::Flags::End;
+    nbCoresMax_ = nbCoresDefault_;
+    nbCoresUntilMs_ = 0;
+  }
 }
 
 bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
@@ -304,13 +350,15 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
   std::list<ns_Schedule::Step*> result;
 
   GatherStats();
+  // a temporary maximum of cores ends here (also when nothing waits)
+  CheckMaxCoresExpiry();
 
   if (steps.empty()) {
     return result;
   }
 
   uint64_t freeMemory = stats_.freeMemory;
-  uint64_t nbCoresFree = nbCoresFree_;
+  uint64_t nbCoresFree = FreeCores();
 
   if (stats_.cores > cpuMaxLoad_) {
   //if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
@@ -320,6 +368,12 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
     return result;
   }
   freeMemory -= memMinAllowed_;
+  // too little free disk on the run and export storage: running steps go on, new ones wait (a full disk makes the
+  // builds and the archives of the tasks fail)
+  diskBlocked_ = (config_.diskMinimumGB_ > 0) && (MinFreeDisk() < config_.diskMinimumGB_ * 1024 * 1024 * 1024);
+  if (diskBlocked_) {
+    return result;
+  }
 
   int64_t priority = (*steps.begin())->task_->priority_;
   bool stepSkiped = false;
@@ -376,8 +430,10 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
   for(uint64_t i=0; i<freeCores; ++i) {
     indexFreeCores[i] = i;
   }
-  uint64_t minTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+  uint64_t const nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()).count();
+  // the simulated time of the estimate: now, then the successive ends of busy cores (advance below)
+  uint64_t minTime = nowMs;
 
   std::unordered_set<ns_Schedule::Step*> stepsSet;
   std::list<ns_Schedule::Step*> currentSteps;
@@ -417,12 +473,8 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
           }
           return;
         }
-        uint64_t endTime = 
-            std::chrono::duration_cast<std::chrono::milliseconds>(step->StartTime().time_since_epoch()).count() + 
-            (step->timeout_ == 0 ? 600000 : (step->timeout_ * 1000));
-        if (endTime <= minTime) {
-          endTime = minTime + 600000;
-        }
+        // from the durations of the same step in past tasks (see DurationHistory)
+        uint64_t endTime = ns_Schedule::DurationHistory::Instance().EstimatedEnd(*step, nowMs);
         if (step->dependencies_.empty() && (step->task_->estimatedEndTime_ < endTime)) {
           step->task_->estimatedEndTime_ = endTime;
         }
@@ -455,26 +507,46 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
   if (currentSteps.empty()) {
     return;
   }
-  if (freeCores == 0) {
-    uint64_t min = std::numeric_limits<uint64_t>::max();
-    for(uint64_t i=0; i<nbCoresMax_; ++i) {
-      if ((cores[i] < min) && (cores[i] > minTime)) {
-        min = cores[i];
-        indexFreeCores[0] = i;
-        freeCores = 1;
-      } else if (cores[i] == min) {
-        indexFreeCores[freeCores] = i;
-        ++freeCores;
+  // Moves the simulated time to the next end of a busy core; every core busy until then or earlier is free. The
+  // former version only freed the cores ending exactly then: a step could then never fit, the next end became
+  // "infinite" and this loop spun for ever, holding the schedule lock (submissions hung, the stop never ended).
+  // Returns false when no core gets free later: nothing more can be estimated.
+  auto advance = [&]() -> bool {
+    uint64_t next = std::numeric_limits<uint64_t>::max();
+    for (uint64_t i = 0; i < nbCoresMax_; ++i) {
+      if ((cores[i] > minTime) && (cores[i] < next)) {
+        next = cores[i];
       }
     }
-    minTime = min;
+    if (next == std::numeric_limits<uint64_t>::max()) {
+      return false;
+    }
+    minTime = next;
+    freeCores = 0;
+    for (uint64_t i = 0; i < nbCoresMax_; ++i) {
+      if (cores[i] <= minTime) {
+        indexFreeCores[freeCores++] = i;
+      }
+    }
+    return true;
+  };
+  if ((freeCores == 0) && !advance()) {
+    return;
   }
+  // a guard against any other way of not progressing: the estimate is only informative
+  uint64_t iterations = 0;
+  uint64_t const maxIterations = 1000 + 100 * currentSteps.size() * (nbCoresMax_ + 1);
 
   auto stepStart = currentSteps.begin();
   int64_t priority = (*stepStart)->task_->priority_;
   bool skipped = false;
   auto stepIT = stepStart;
   while(true) {
+    if (++iterations > maxIterations) {
+      LOGW << "Estimated start times: stopped after " << iterations << " iterations (" << currentSteps.size() <<
+          " steps left)" << Log::Flags::End;
+      return;
+    }
     int64_t curPriority = priority;
     if (stepIT != currentSteps.end()) {
       ns_Schedule::Step& step = *(*stepIT);
@@ -484,21 +556,9 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       if (skipped) {
         stepIT = stepStart;
         skipped = false;
-
-        uint64_t oldFreeCores = freeCores;
-        uint64_t min = std::numeric_limits<uint64_t>::max();
-        for(uint64_t i=0; i<nbCoresMax_; ++i) {
-          if ((cores[i] < min) && (cores[i] > minTime)) {
-            freeCores = oldFreeCores;
-            min = cores[i];
-            indexFreeCores[freeCores] = i;
-            ++freeCores;
-          } else if (cores[i] == min) {
-            indexFreeCores[freeCores] = i;
-            ++freeCores;
-          }
+        if (!advance()) {
+          return;
         }
-        minTime = min;
         continue;
       } else if (stepIT == currentSteps.end()) {
         break;
@@ -517,8 +577,10 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
     }
     if ((step.nb_cores_ <= freeCores) && (minTime >= notStartBefore)) {
       step.estimatedStartTime_ = minTime;
-      if (step.dependencies_.empty() && (step.task_->estimatedEndTime_ < minTime)) {
-        step.task_->estimatedEndTime_ = minTime;
+      uint64_t const stepDuration = ns_Schedule::DurationHistory::Instance().Estimate(step);
+      // the task ends with its last steps: their estimated end, not their start
+      if (step.dependencies_.empty() && (step.task_->estimatedEndTime_ < minTime + stepDuration)) {
+        step.task_->estimatedEndTime_ = minTime + stepDuration;
       }
 
       bool firstChild = true;
@@ -547,24 +609,15 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
         stepStart = stepIT;
       }
 
-      uint64_t endTime = minTime + (step.timeout_ == 0 ? 600000 : (step.timeout_ * 1000));
+      uint64_t endTime = minTime + stepDuration;
       for(uint64_t i=0; i<step.nb_cores_; ++i) {
         cores[indexFreeCores[(freeCores - 1) - i]] = endTime;
       }
       freeCores -= step.nb_cores_;
       if (freeCores == 0) {
-        uint64_t min = std::numeric_limits<uint64_t>::max();
-        for(uint64_t i=0; i<nbCoresMax_; ++i) {
-          if ((cores[i] < min) && (cores[i] > minTime)) {
-            min = cores[i];
-            indexFreeCores[0] = i;
-            freeCores = 1;
-          } else if (cores[i] == min) {
-            indexFreeCores[freeCores] = i;
-            ++freeCores;
-          }
+        if (!advance()) {
+          return;
         }
-        minTime = min;
         if (skipped) {
           stepIT =  stepStart;
           skipped = false;
@@ -889,6 +942,29 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
   return result;
 }
 
+namespace {
+// How long a step's shutdown script may run before it is killed.
+constexpr std::chrono::seconds shutdownTimeout__{60};
+};
+
+pid_t ns_Executor::Local::WaitForPidOrKill(pid_t pid,
+    std::filesystem::path const& cgroupPath, ns_Schedule::Step* step) {
+  auto const deadline = std::chrono::steady_clock::now() + shutdownTimeout__;
+  while (true) {
+    pid_t const done = waitpid(pid, nullptr, WNOHANG);
+    if (done != 0) {
+      return done;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      LOGW << "Shutdown script of step " << step->ID() << " still running after " <<
+          shutdownTimeout__.count() << " s: killing it" << Log::Flags::End;
+      KillSession(pid, cgroupPath, step, "Step shutdown timeout");
+      return waitpid(pid, nullptr, 0);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+}
+
 void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
   LocalData* localData = dynamic_cast<LocalData*>(step.executor_data_);
   if (localData == nullptr) {
@@ -904,7 +980,8 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
           std::to_string(step.TaskID()) + ":" + step.ID());
     }
     LOGD << "Step shutdown final pid: " << pid << Log::Flags::End;
-    pid_t retval = waitpid(pid, nullptr, 0);
+    // Bounded wait: one shutdown script that never ends would hold the stop back for ever.
+    pid_t retval = WaitForPidOrKill(pid, localData->cgroup_path_, &step);
     LOGD << "Step shutdown final pid: " << pid << " wait return: " << retval << " errno: " << errno << Log::Flags::End;
     KillSession(pid, localData->cgroup_path_, &step, "Step shutdown final");
   }
@@ -1018,6 +1095,15 @@ void ns_Executor::Local::GetRunningOutput(
       int index = std::stoi(type);
       if (index < step.readable_files_.size()) {
         file = localData->run_path_ / step.readable_files_[index].path;
+        // the step ended (its run folder is gone): the copy kept next to its stdout (see EndRun)
+        std::error_code ec;
+        std::filesystem::path const kept = std::filesystem::path(step.stdout_).parent_path() /
+            (std::to_string(index) + "." + step.ID() + ".txt");
+        if (!std::filesystem::exists(file, ec) && std::filesystem::exists(kept, ec)) {
+          file = kept;
+          data.live = false;
+          data.partialFile = false;
+        }
       } else {
         throw std::runtime_error("");
       }
@@ -1107,11 +1193,35 @@ void ns_Executor::Local::UpdateStepStats(ExecutorData* data) const {
   }
 }
 
+// the least free space among the storages of the executor (run and export paths), in bytes
+uint64_t ns_Executor::Local::MinFreeDisk() const {
+  uint64_t least = UINT64_MAX;
+  for (auto const& [name, values] : stats_.storages) {
+    least = std::min(least, values.second);
+  }
+  return least;
+}
+
 void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAllocator<>& alloc) const {
   root.AddMember("name", rapidjson::Value(Name().c_str(), alloc), alloc);
-  root.AddMember("nb_cores", nbCoresMax_, alloc);
+  // the maximum of cores: its default, a temporary one until (ms, 0: none), the cores in use, the cores at most; a
+  // temporary maximum past its end is shown as the default (the next scheduling round restores it)
+  uint64_t const nowMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count());
+  bool const temporary = (nbCoresUntilMs_ != 0) && (nowMs < nbCoresUntilMs_);
+  root.AddMember("nb_cores", temporary ? nbCoresMax_ : nbCoresDefault_, alloc);
+  root.AddMember("nb_cores_default", nbCoresDefault_, alloc);
+  root.AddMember("nb_cores_until", temporary ? nbCoresUntilMs_ : 0, alloc);
+  root.AddMember("nb_cores_used", nbCoresUsed_, alloc);
+  root.AddMember("nb_cores_limit", nbCoresLimit_, alloc);
+  // free disk needed to start a step (bytes), and whether new steps wait for it
+  root.AddMember("disk_minimum", config_.diskMinimumGB_ * 1024 * 1024 * 1024, alloc);
+  root.AddMember("disk_blocked", diskBlocked_, alloc);
   rapidjson::Value stats(rapidjson::kObjectType);
   stats.AddMember("load_memory", stats_.memory, alloc);
+  // the machine's memory (bytes): total, and what the steps need left free to start (memMinimumRatio)
+  stats.AddMember("memory_total", static_cast<uint64_t>(os_.Memory().Total()), alloc);
+  stats.AddMember("memory_minimum", static_cast<uint64_t>(memMinAllowed_), alloc);
   stats.AddMember("load_cores", stats_.cores, alloc);
   rapidjson::Value loadPerCore(rapidjson::kArrayType);
   for(auto const loadCore : stats_.perCores) {
@@ -1288,6 +1398,30 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
     KillCGroupSession(localData->cgroup_path_, &step, "End run");
   }
 
+  // The files the step declares as streams (e.g. the fuzzer's error log) are read from its run folder, which goes away:
+  // keep their state at the end of the step next to its stdout and stderr (logs/<index>.<step>.txt, archived with the
+  // task), so that a finished task still shows them. At most the last 16 MB of each.
+  for (size_t index = 0; index < step.readable_files_.size(); ++index) {
+    std::error_code ec;
+    std::filesystem::path const source = localData->run_path_ / step.readable_files_[index].path;
+    if (!std::filesystem::is_regular_file(source, ec)) {
+      continue;
+    }
+    std::filesystem::path const target = std::filesystem::path(step.stdout_).parent_path() /
+        (std::to_string(index) + "." + step.ID() + ".txt");
+    constexpr std::uintmax_t maxSize = 16 * 1024 * 1024;
+    std::uintmax_t const size = std::filesystem::file_size(source, ec);
+    std::ifstream in(source, std::ios::binary);
+    std::ofstream out(target, std::ios::binary | std::ios::trunc);
+    if (ec || !in || !out) {
+      continue;
+    }
+    if (size > maxSize) {
+      in.seekg(static_cast<std::streamoff>(size - maxSize));
+    }
+    out << in.rdbuf();
+  }
+
   localData->fdCaptureThread_.RemoveFD(localData->pipeFDOut[0]);
   localData->fdCaptureThread_.RemoveFD(localData->pipeFDErr[0]);
   close(localData->pipeFDOut[1]);
@@ -1327,6 +1461,7 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
 }
 
 std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
+  std::lock_guard<std::mutex> lock(coresLock_);
   std::vector<uint64_t> result;
   if (config_.nbCores_ == 0) {
     for (size_t i=0; i<coresFree_.size(); ++i) {
@@ -1344,7 +1479,7 @@ std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
       coresFree_[result[i]] = false;
     }
   }
-  nbCoresFree_ -= result.size();
+  nbCoresUsed_ += result.size();
 
   UpdateUserSliceCpuset();
 
@@ -1352,6 +1487,7 @@ std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
 }
 
 void ns_Executor::Local::ReAssignCores(std::vector<uint64_t>& cores) {
+  std::lock_guard<std::mutex> lock(coresLock_);
   uint64_t nbCores = 0;
   for (uint64_t core: cores) {
     if (core < coresFree_.size()) {
@@ -1360,20 +1496,17 @@ void ns_Executor::Local::ReAssignCores(std::vector<uint64_t>& cores) {
     }
   }
 
-  if (nbCoresFree_ > nbCores) {
-    nbCoresFree_ -= nbCores;
-  } else {
-    nbCoresFree_ = 0;
-  }
+  nbCoresUsed_ += nbCores;
 
   UpdateUserSliceCpuset();
 }
 
 inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
+  std::lock_guard<std::mutex> lock(coresLock_);
   for(uint64_t core: cores) {
     coresFree_[core] = true;
   }
-  nbCoresFree_ += cores.size();
+  nbCoresUsed_ = nbCoresUsed_ > cores.size() ? nbCoresUsed_ - cores.size() : 0;
 
   UpdateUserSliceCpuset();
 }
@@ -1732,10 +1865,10 @@ inline uint64_t ns_Executor::Local::EstimatedFinishTime(ns_Schedule::Step const*
         endTP.time_since_epoch()).count();
   }
 
-  uint64_t duration = step->timeout_ == 0 ? 600000 : (step->timeout_ * 1000);
   if (step->IsRunning()) {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        step->StartTime().time_since_epoch()).count() + duration;
+    uint64_t const nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    return ns_Schedule::DurationHistory::Instance().EstimatedEnd(*step, nowMs);
   }
-  return step->estimatedStartTime_ + duration;
+  return step->estimatedStartTime_ + ns_Schedule::DurationHistory::Instance().Estimate(*step);
 }

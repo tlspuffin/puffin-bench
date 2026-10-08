@@ -76,6 +76,13 @@ public:
   virtual void SyncTaskEnvironment(ExecutorTaskData* data) const = 0;
   virtual void UpdateTaskEnvironment(ExecutorTaskData* data) = 0;
 
+  // A temporary maximum of cores for the steps (the default of the configuration again after durationSec; 0: back to
+  // it now). A lower maximum kills nothing: running steps keep their cores, new ones wait. false + error otherwise.
+  virtual bool SetMaxCores(uint64_t maxCores, uint64_t durationSec, std::string& error) {
+    error = "not supported by this executor";
+    return false;
+  }
+
 protected:
   Executor(std::string const& name);
 

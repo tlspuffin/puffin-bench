@@ -116,6 +116,8 @@ public:
   struct ns_Schedule::SRessourcesSummary UpdateStats(std::vector<ns_Schedule::Step*> steps);
 
   rapidjson::Value FlagJSON(rapidjson::Document::AllocatorType& alloc) const;
+  // what the history shows of a task: its steps by outcome, core-hours, first start and last end
+  rapidjson::Value HistorySummaryJSON(rapidjson::Document::AllocatorType& alloc) const;
 
   bool AllOtherStepsProcessedAfterCancel(ns_Schedule::Step* step) const;
 
