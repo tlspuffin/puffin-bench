@@ -119,6 +119,8 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/board/launchers/tlspu
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/config/git_restapi-config.json" "${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.c" GitRestAPIConfig_JSON)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/config/publisher_config.json" "${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.c" PublishConfig_JSON)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/publisher/summary_config.js" "${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.c" PublishSummaryConfig_JS)
+# the noise floors of Results: edited on the machine, so installed as a configuration (only when missing)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/publisher/regression_floors.json" "${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/regression_floors_json.c" PublishRegressionFloors_JSON)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/config/vis_comparator-config.json" "${CMAKE_SOURCE_DIR}/embeded/installer/config/vis_comparator-config_json.c" VisComparatorConfig_JSON)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/index.html" "${CMAKE_SOURCE_DIR}/embeded/installer/html/index_html.c" NavigationIndex_HTML)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/publisher/tlspuffin/.rules" "${CMAKE_SOURCE_DIR}/embeded/installer/publisher/tlspuffin/rules.c" PublisherTLSPuffin_RULES)
@@ -132,7 +134,7 @@ add_custom_command(
   COMMAND "${BASH_EXECUTABLE}" "${TLSPUFFIN_SCRIPTS_DIR}/build.sh"
   COMMAND ${CMAKE_COMMAND} -E copy "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf_full.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/PR_perf_full.sh"
   COMMAND ${CMAKE_COMMAND} -E copy "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities_full.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/PR_vulnerabilities_full.sh"
-  DEPENDS "${TLSPUFFIN_SCRIPTS_DIR}/build.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_common.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_compat.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities.sh"
+  DEPENDS "${TLSPUFFIN_SCRIPTS_DIR}/build.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_common.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_compat.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/vuln_targets.json"
   COMMENT "Running build.sh to generate PR_perf_full.sh / PR_vulnerabilities_full.sh"
   VERBATIM
 )
@@ -145,7 +147,7 @@ EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/embeded/i
   html/board/launchers/tlspuffin/jobsconfig.json
   html/jobsscripts/tlspuffin/PR_campaign.json html/jobsscripts/tlspuffin/PR_perf_cargo.json html/jobsscripts/tlspuffin/PR_perf_full.sh 
   html/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo.json
-  html/jobsscripts/tlspuffin/shell.nix html/jobsscripts/tlspuffin/wolfssl_put.c.patch tools/qjs 
+  html/jobsscripts/tlspuffin/shell.nix html/jobsscripts/tlspuffin/wolfssl_put.c.patch html/jobsscripts/tlspuffin/vuln_targets.json tools/qjs 
   tools/js/utils.js tools/js/perf_experiment_end.js tools/js/vuln_experiment_end.js tools/js/perf_summary_run.js tools/js/vuln_summary_run.js
   tools/js/get_last_stats_time.js
   html/publisher/summary.html html/publisher/summary.css html/publisher/summary.js
@@ -153,9 +155,10 @@ EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/embeded/i
   html/publisher/summary_graph.js html/publisher/summary_managegraphs.js 
   html/publisher/summary_graphoverview.js html/publisher/summary_graphoverview.css 
   html/publisher/summary_graphmetrics.js html/publisher/summary_graphmetrics.css
-  html/publisher/summary_graphcompare.js
+  html/publisher/summary_graphcompare.js html/publisher/plotly_lazy.js
+  html/publisher/bugs.html html/publisher/bugs.css html/publisher/bugs.js
+  html/common/commitinfo.js
   html/third-party/plotly/plotly-3.3.0.min.js
-  html/index.css
 )
 EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/embeded/installer/samples.c" SampleFiles 
   FILES samples/scheduler.service samples/scheduler.sudoers
@@ -173,6 +176,7 @@ add_library(installer.lib STATIC
     "${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.c" 
+    "${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/regression_floors_json.c" 
     "${CMAKE_SOURCE_DIR}/embeded/installer/config/vis_comparator-config_json.c" 
     "${CMAKE_SOURCE_DIR}/embeded/installer/html/index_html.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/publisher/tlspuffin/rules.c"
@@ -193,6 +197,7 @@ add_executable(installer src/installer/main.cxx
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.h 
+    ${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/regression_floors_json.h 
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/vis_comparator-config_json.h 
     ${CMAKE_SOURCE_DIR}/embeded/installer/html/index_html.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/publisher/tlspuffin/rules.h
@@ -215,6 +220,7 @@ add_executable(installer-static src/installer/main.cxx
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.h 
+    ${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/regression_floors_json.h 
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/vis_comparator-config_json.h 
     ${CMAKE_SOURCE_DIR}/embeded/installer/html/index_html.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/publisher/tlspuffin/rules.h
