@@ -2,6 +2,15 @@ import { logsManager } from './logsmanager.js';
 import { Clipboard } from './clipboard.js';
 import { DropMenu } from './dropmenu.js';
 
+// The published results of a task (publish_link: the Results page at #<task id>), with its commit (&commit=<sha>):
+// Results shows the card of the commit when the publisher keeps a newer task of the same libraries instead
+export function ResultsLink(task) {
+  const link = task?.publish_link || null;
+  const commit = (task?.args ?? []).find(arg => arg.key === 'COMMIT_ID')?.value;
+  if (!link || !/^[0-9a-f]{7,40}$/i.test(commit ?? '') || !/#[^#&=]+$/.test(link)) return link;
+  return `${link}&commit=${commit}`;
+}
+
 export class TaskCard {
 
   // Options
@@ -879,7 +888,7 @@ export class TaskCard {
     const div = document.createElement('div');
     div.className = 'card-task-links';
     div.append(this.#CreateTaskQuickLink(task.id));
-    const publishLink = task?.publish_link;
+    const publishLink = ResultsLink(task);
     if (publishLink) {
       div.append(this.#CreatePublishQuickLink(publishLink));
     }
