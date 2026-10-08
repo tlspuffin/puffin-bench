@@ -4,3 +4,5 @@ data/tools/qjs
 scripts/PR_perf_full.sh
 scripts/PR_vulnerabilities_full.sh
 __pycache__/
+scripts/PR_targets.sh
+scripts/PR_version.sh

@@ -1,0 +1,35 @@
+{
+  "_doc": [
+    "The bugs the Vuln jobs look for, and the known bugs set apart. The only file to edit; readable at /html/publisher/bugs.html (Results: ❔ → Bugs reference).",
+    "Targets, one entry per vendor preset of VulnA (\"<vendor>:<preset>\"): cve: the CVE left in the preset (tlspuffin puffin-build/vendors/wolfssl/builder.cmake: the declared vulnerabilities minus the preset's fixes); kind: how the fuzzer records it, crash (match: a function among the top 3 frames of the fuzzer's backtrace or of the replay's stack) or claim (match: the security violation message); note: where the rule comes from.",
+    "An objective matching the target ends the experiment (PR_vulnerabilities.sh, monitor TargetedObjectiveFound) and makes the 🎯 of the pages. A preset not listed (VulnB) ends on its first objective that is not set apart, as before.",
+    "_not_targeted: claims of the security oracle that are a known CVE of the old library versions, never a target: on the library (library) below the version (below) they do not end an experiment and are shown as ⦸ on the pages; anywhere else the claim is a bug like any other (⚠ unexpected, 🚨 new).",
+    "New bugs (🚨): in a configuration with a target (BUF, SKIP…), a bug its earlier tasks never had; in a plain version (no target, e.g. Perf's wolfSSL 5.8.0), a bug that is none of the CVEs tlspuffin declares for that build (its vendorinfo: known minus fixed vulnerabilities, recorded as cli.vulnerabilities) with a signature here, which is then shown as 📋 known. A CVE's signature: kind/match in _cves, else those of the target naming it, else the claim of _not_targeted naming it (objectives_page/cve_signatures.jq); a CVE without one cannot be recognised: give it kind and match in _cves.",
+    "Taken into account by: new tasks (scripts/build.sh writes them into the job scripts, copied to /srv/puffin-bench/data/html/jobsscripts/tlspuffin/), and the objectives reports written from then on (objectives_report.sh)."
+  ],
+  "wolfssl:wolfssl540-buf":   { "cve": "CVE-2022-39173", "kind": "crash", "match": "RefineSuites",
+                                "note": "stack-buffer-overflow in RefineSuites; 616 objectives of 7 VulnA tasks (2026-10-07)" },
+  "wolfssl:wolfssl530-cdos":  { "cve": "CVE-2022-38153", "kind": "crash", "match": "AddSessionToCache",
+                                "note": "crash in wolfSSL_Free < AddSessionToCache; depends on the fuzzer's session cache: replays do not reproduce it, the fuzzer's backtrace is the evidence" },
+  "wolfssl:wolfssl540-heap":  { "cve": "CVE-2022-42905", "kind": "crash", "match": "AddPacketInfo",
+                                "note": "heap-buffer-overflow in AddPacketInfo (with ASan); 7 VulnA tasks" },
+  "wolfssl:wolfssl540-sdos2": { "cve": "CVE-2022-38152", "kind": "crash", "match": "DoTls13ClientHello",
+                                "note": "crash in DoTls13ClientHello; 7 VulnA tasks" },
+  "wolfssl:wolfssl510-skip":  { "cve": "CVE-2022-25640", "kind": "claim", "match": "Authentication bypass",
+                                "note": "the oracle's claim of an authentication bypass; 7 VulnA tasks" },
+  "_cves": {
+    "_doc": "The CVEs the Vuln jobs are built around (reference table of the tlspuffin evaluation): alias, CVSS, type, first found by tlspuffin (✓/✗), version, TLS version, as given there. Shown on the Bugs reference page. Optional kind and match (as for a target): how to recognise the CVE when no target names it.",
+    "CVE-2021-3449":  { "alias": "SDOS1", "cvss": 5.9, "type": "Server DoS, M", "found_by_puffin": false, "version": "1.1.1j", "tls": "1.2" },
+    "CVE-2022-25638": { "alias": "SIG",   "cvss": 6.5, "type": "Auth. Bypass, P", "found_by_puffin": false, "version": "5.1.0", "tls": "1.3" },
+    "CVE-2022-25640": { "alias": "SKIP",  "cvss": 7.5, "type": "Auth. Bypass, P", "found_by_puffin": false, "version": "5.1.0", "tls": "1.3" },
+    "CVE-2022-38152": { "alias": "SDOS2", "cvss": 7.5, "type": "Server DoS, M", "found_by_puffin": true, "version": "5.4.0", "tls": "1.3" },
+    "CVE-2022-38153": { "alias": "CDOS",  "cvss": 5.9, "type": "Client DoS, M", "found_by_puffin": true, "version": "5.3.0", "tls": "1.2" },
+    "CVE-2022-39173": { "alias": "BUF",   "cvss": 7.5, "type": "Server DoS, M", "found_by_puffin": true, "version": "5.5.0", "tls": "1.3" },
+    "CVE-2022-42905": { "alias": "HEAP",  "cvss": 9.1, "type": "Info. Leak, M", "found_by_puffin": true, "version": "5.5.0", "tls": "1.3" },
+    "CVE-2023-6936":  { "alias": "CALLB", "cvss": 5.3, "type": "Info. Leak, M", "found_by_puffin": true, "version": "5.6.4", "tls": "1.3" }
+  },
+  "_not_targeted": {
+    "Negotiated cipher is not in agent's configured ciphers list": { "cve": "CVE-2024-5814", "library": "wolfssl", "below": "5.7.2",
+        "note": "tlspuffin e6bbd77b (2026-03): the oracle of CVE-2024-5814, which every wolfSSL < 5.7.2 has; set apart only there: on any other library or version this claim is a bug" }
+  }
+}
