@@ -83,7 +83,10 @@ class LogsManager {
           <div class="modal-content">
             <div class="modal-header">
               <h3>Step Logs - <span id="step-name"></span></h3>
-              <button class="modal-close" id="modal-close">&times;</button>
+              <span class="modal-actions">
+                <button class="modal-refresh" id="modal-refresh" title="Refresh the logs (Cmd/Ctrl+R)">🔄</button>
+                <button class="modal-close" id="modal-close" title="Close (Esc)">&times;</button>
+              </span>
             </div>
             <div class="modal-body">
               <div class="logs-tabs">
@@ -106,6 +109,19 @@ class LogsManager {
       modal.addEventListener('wheel', e => e.preventDefault(), { passive: false });
 
       modal.querySelector(`#modal-close`).onclick = () => this.CloseModal();
+      modal.querySelector(`#modal-refresh`).onclick = () => this.Refresh();
+      // keys of the top bar (board/nav.js): Esc closes the logs, Cmd/Ctrl+R refreshes them instead of the page
+      const shown = () => modal.classList.contains('show');
+      window.addEventListener('pb-escape', (event) => {
+        if ((event.detail?.layer !== 'modal') || event.defaultPrevented || !shown()) return;
+        event.preventDefault();
+        this.CloseModal();
+      });
+      window.addEventListener('pb-modal-refresh', (event) => {
+        if (event.defaultPrevented || !shown()) return;
+        event.preventDefault();
+        this.Refresh();
+      });
       LogsManager.#modal = {
         div: modal,
         stepName: modal.querySelector(`#step-name`),
@@ -311,12 +327,73 @@ class LogsManager {
     if (step.id !== '' && step.id !== '.') stepName += ` ${step.id}`;
     stepName += ` (${taskName})`;
 
-    this.#UpdateActiveTab();
-
     LogsManager.#modal.stepName.innerText = stepName;
     LogsManager.#modal.div.classList.add('show');
 
+    // a tab without content is grey and cannot be clicked: no click to find it empty, and an empty view is not a
+    // display error; the first tab with content is shown
+    const available = await this.#ProbeTabs(step);
+    if (!available.includes(this.#type) && available.length) this.#type = available[0];
+    this.#UpdateActiveTab();
+
     await this.#RetrieveFullStepLogs(10000000);
+  }
+
+  // Reload every output of the step from the start (and which ones have content), keeping the tab shown
+  async Refresh() {
+    if (!this.#step) return;
+    const button = LogsManager.#modal.div.querySelector('#modal-refresh');
+    button.classList.remove('spin');
+    void button.offsetWidth;
+    button.classList.add('spin');
+    if (this.#timerID != null) {
+      window.clearTimeout(this.#timerID);
+      this.#timerID = null;
+    }
+    if (this.#abortController != null) {
+      this.#abortController.abort();
+      this.#abortController = null;
+    }
+    Object.values(this.#outputs).forEach((output) => {
+      output.terminal.SetText('');
+      output.decoder     = new TextDecoder('utf-8');
+      output.lastoffset  = 0;
+      output.state       = 0;
+      output.supportSeek = true;
+      output.startOffset = 0;
+      output.live        = false;
+      output.partial     = 1;
+    });
+    const available = await this.#ProbeTabs(this.#step);
+    if (!available.includes(this.#type) && available.length) this.#type = available[0];
+    this.#UpdateActiveTab();
+    await this.#RetrieveFullStepLogs(10000000);
+  }
+
+  // Which outputs of the step have content (1 byte asked for each): the others are greyed out, with why in the hover
+  async #ProbeTabs(step) {
+    const stepID = this.#StepID(step);
+    const types = Object.keys(this.#outputs);
+    const results = await Promise.all(types.map(async type => {
+      try {
+        const response = await fetch(
+            `http://${window.location.host}/api/task/${step.task_id}/${step.uuid}/${stepID}/output/${type}/1/0`,
+            { cache: 'no-store' });
+        const data = response.ok ? await response.json() : null;
+        if (!data?.success) return [type, false, 'not available: not kept for this step (finished before it was archived), or never written'];
+        if (!(data.filesize > 0)) return [type, false, data.live ? 'empty so far' : 'empty'];
+        return [type, true, ''];
+      } catch (error) {
+        return [type, true, ''];  // unknown: leave it usable
+      }
+    }));
+    for (const [type, ok, why] of results) {
+      const tab = this.#outputs[type].tab;
+      tab.disabled = !ok;
+      tab.classList.toggle('empty', !ok);
+      tab.title = ok ? '' : `${tab.textContent}: ${why}`;
+    }
+    return results.filter(([, ok]) => ok).map(([type]) => type);
   }
 
 }

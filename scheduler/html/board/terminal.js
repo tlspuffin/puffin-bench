@@ -70,6 +70,9 @@ export class Terminal {
 
     this.charsPerLine = Math.floor(containerWidth / this.charWidth);
     this.visibleLines = Math.ceil(containerHeight / this.lineHeight);
+    // vertical padding of the text: the view shows that much less text than the container height
+    const style = getComputedStyle(this.contentPre);
+    this.verticalPadding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
   }
 
   #PrepareText(text) {
@@ -177,7 +180,10 @@ export class Terminal {
     const totalVisualLines = this.lines.reduce((sum, line) =>
         sum + (Math.ceil(line.charCount / this.charsPerLine) || 1), 0
     );
-    const phantomHeight = (totalVisualLines - 1) * this.lineHeight + this.container.clientHeight;
+    // scroll height of the content (plus a spare line): at the bottom, the last line is at the bottom of the
+    // view, not at its top above an empty view
+    const phantomHeight = Math.max((totalVisualLines + 1) * this.lineHeight + (this.verticalPadding ?? 0),
+        this.container.clientHeight);
     this.#phantomDiv.style.height = `${phantomHeight}px`
 
     const visibleLines = this.lines.slice(this.visibleStartLine, endLine);
