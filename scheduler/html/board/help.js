@@ -1,10 +1,16 @@
+import { FormatTip } from './tips.js';
 export const helpTexts = {
-  'task.quicklink': 'Copy the link to this task page',
+  'task.quicklink': 'Click: copy the link of the task page · Cmd/Ctrl+click or middle click: open it in a new tab',
   'task.publishlink': 'Copy the link to the published results and open it in a new tab',
   'task.steprunpath': 'Copy the run directory of this step on the executor',
   'task.menu': 'Task actions: priority, cancel, new task',
   'task.cancel': 'Cancel every running and pending step of this task',
   'task.launchagain': 'Open the launcher of this project, pre-filled with this task\'s settings',
+  'task.status': 'Running: a step runs. Waiting for cores: started, its next steps wait for free cores. Scheduled: no step started yet, with its estimated start. The bar counts the finished (green) and running (white) steps; ends ~ is the estimated end.',
+  'step.monitor': 'Last message of the step monitor, summarized; click for the full message',
+  'board.fold': 'Fold the steps of every task',
+  'board.unfold': 'Unfold the steps of every task',
+  'board.foldactive': 'Unfold only the steps that run an attempt, fold the others',
   'task.priority': 'Higher priority is scheduled first. Press Enter to apply.',
   'step.toggle': 'Show or hide the attempts of this step',
   'step.estimate': 'Estimated start time',
@@ -13,15 +19,20 @@ export const helpTexts = {
   'step.logs': 'Open the output logs of this attempt',
   'step.cancel': 'Cancel only this step attempt',
   'step.exitcode': 'Exit code of the process (0 = success). Not set, Timedout, Cancelled and Launch Error are set by the scheduler, not by the process.',
-  'board.counters': 'Number of steps (not tasks) in each state',
-  'board.lastupdate': 'Time of the last refresh. The page does not refresh on its own.',
+  'board.counters': 'Number of tasks; the hover gives their steps',
+  'board.done12': 'Tasks finished or cancelled in the last 12 hours (History)',
+  'board.done': 'Finished tasks in the History',
+  'board.lastupdate': 'Time of the last refresh. The page does not refresh on its own: 🔄 in the top bar.',
   'board.cpu': 'Executor CPU load. Yellow above 50%, red above 80%. Hover the bar for per-core load.',
   'board.mem': 'Executor memory usage. Yellow above 50%, red above 80%.',
   'board.storage': 'Used space on this storage. Yellow above 50%, red above 80%.',
   'launcher.new': 'Start a new task: choose a project, then fill in its launch form',
   'launcher.project': 'Open the launch form of this project',
+  'history.stats': 'Finished tasks in total · in the last 30 days: number of tasks · their core-hours (cores × run time of their steps) · how many found objectives (🐞)',
+  'history.search': 'Matches the commit, PR, message, task name, id, user, type and package (all the words)',
+  'history.filter': 'Show only this package (all | tlspuffin | sshpuffin), these users, types or states; with none selected in a group, the group does not filter',
   'history.sort': 'Sort the timeline by start or end time. Tasks are grouped under the date of the chosen time.',
-  'history.card': 'Show the final state of this task',
+  'history.card': 'Show the details of this task on the right: actions, times, arguments, configurations, task card',
   'history.delete': 'Delete this task\'s archived results, including the copy on the publish server. Cannot be undone.',
   'history.jobtype': 'Show this user\'s finished tasks for this job type',
   'history.all': 'Show the finished tasks of every user and job type',
@@ -38,6 +49,7 @@ export class Help {
   #style;
   #texts;
   #tooltip;
+  #timer = null;
   #current;
   #panel;
   #toggle;
@@ -139,24 +151,35 @@ export class Help {
     if (!target || (target === this.#current)) {
       return;
     }
+    // an element (itself or inside it) with its own hover or click window (tips.js) wins: one window at a time
+    const inner = event.target.closest?.('[title], [data-pb-tip], [data-click-tip]');
+    if (inner && target.contains(inner)) {
+      this.#Hide();
+      return;
+    }
     const text = this.#texts[target.dataset.help];
     if (!text) {
       console.warn(`Help: no text for "${target.dataset.help}"`);
       return;
     }
     this.#current = target;
+    // after 500 ms, as every hover of the bench (tips.js)
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => {
+      if (this.#current !== target) return;
 
-    const main = document.createElement('div');
-    main.textContent = text;
-    this.#tooltip.replaceChildren(main);
-    if (target.dataset.url) {
-      const url = document.createElement('div');
-      url.className = this.#style.url;
-      url.textContent = target.dataset.url;
-      this.#tooltip.appendChild(url);
-    }
-    this.#tooltip.classList.add(this.#style.visible);
-    this.#Place(target);
+      const main = document.createElement('div');
+      main.innerHTML = FormatTip(text);
+      this.#tooltip.replaceChildren(main);
+      if (target.dataset.url) {
+        const url = document.createElement('div');
+        url.className = this.#style.url;
+        url.textContent = target.dataset.url;
+        this.#tooltip.appendChild(url);
+      }
+      this.#tooltip.classList.add(this.#style.visible);
+      this.#Place(target);
+    }, 500);
   }
 
   #Leave(event) {
@@ -170,6 +193,7 @@ export class Help {
   }
 
   #Hide() {
+    clearTimeout(this.#timer);
     this.#current = null;
     this.#tooltip?.classList.remove(this.#style.visible);
   }
