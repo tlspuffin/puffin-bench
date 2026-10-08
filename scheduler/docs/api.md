@@ -339,6 +339,55 @@ Regex: `/api/task/(\d+)/priority/(-?\d+)`. `priority` is a signed integer (`int6
 
 ---
 
+### Health of the Scheduler
+
+```
+GET /api/health
+```
+
+Unlike `GET /api/tasks/running`, which only reads the state file, this takes the schedule lock (what a submission
+waits for), for at most 2 s: what the status light of the top bar and the launcher probe before a submission.
+
+**Response `200 OK`:**
+
+```json
+{ "success": true, "data": { "state": "up", "stopping": false, "lock_taken": true, "lock_wait_ms": 0,
+  "lock_timeout_ms": 2000,
+  "http": { "threads": 7, "threads_max": 64, "queued": 0, "connections": 7, "connections_max": 10, "refused": 0,
+            "total": 106 } } }
+```
+
+`state`: `up`; `slow` (the lock took 500 ms or more); `busy` (not taken within 2 s, e.g. a task being archived);
+`stopping` (the scheduler is stopping: a submission would be refused). `http`: the HTTP server's threads, queued and
+open connections, refused and total connections since the start. A client should bound its own wait (the top bar
+gives up after 8 s and shows the scheduler as not answering).
+
+---
+
+### Temporary Maximum of Cores
+
+```
+PATCH /api/executor/<name>/max_cores/<max>/<seconds>
+```
+
+Regex: `/api/executor/([A-Za-z0-9_.-]+)/max_cores/(\d+)/(\d+)`. Sets a maximum of cores for the steps of an executor for `seconds` (1 s to 7 days); `max` 0 goes back to the default (`nbCores` of the configuration) at once. At most the cores of the configuration. A higher maximum lets more steps start; a lower one kills nothing: running steps keep their cores, the next ones wait until they fit. The default comes back at the end, checked at every scheduling round. The status (`GET /api/tasks/running`, `executors[]`) gives `nb_cores` (the maximum now), `nb_cores_default`, `nb_cores_until` (ms since the epoch, 0: none), `nb_cores_used` and `nb_cores_limit`.
+
+**Response `200 OK`:** `{ "success": true }`; **`400 Bad Request`** with the reason otherwise (unknown executor, more than the cores of the configuration, duration out of range).
+
+---
+
+### Remove the Folders of Tasks that No Longer Exist
+
+```
+POST /api/runs/cleanup
+```
+
+Every folder of the run path named by a task id that the task manager no longer holds (left by a stop: the tasks are not restored) is renamed and removed in the background (`FolderRemover`), under the schedule lock, so that no task is being created meanwhile. The same happens for every such folder at start.
+
+**Response `200 OK`:** `{ "success": true, "removed": ["<task id>", ...] }`.
+
+---
+
 ### Update Task Args
 
 ```
@@ -453,12 +502,20 @@ Entries whose task record is stale (not running, not cancelled, and no matching 
       "running": false,
       "cancelled": false,
       "publish_link": "http://publisher.example.com/files/tlspuffin#1713240000000",
-      "flag": { "color": "#6f6f00" }
+      "flag": { "color": "#6f6f00" },
+      "end_timestamp": 1713247200000,
+      "args": [ { "key": "COMMIT_ID", "value": "5c588ab11ce137d8199cfcde2897d95b83f830e1" } ],
+      "summary": {
+        "steps": { "total": 63, "ok": 61, "failed": 1, "timed_out": 1, "cancelled": 0, "other": 0 },
+        "core_hours": 18.4,
+        "start_timestamp": 1713240003000,
+        "end_steps_timestamp": 1713247190000
+      }
     }
   ]
 }
 ```
-`publish_link` is `""` when no publish server is configured for the task. `flag` is `{}` if `Flag()` was never called by the step script.
+`publish_link` is `""` when no publish server is configured for the task. `flag` is `{}` if `Flag()` was never called by the step script. `args` (task arguments) and `summary` (`Task::HistorySummaryJSON`: steps by outcome — `ok` is Done with exit code 0 —, core-hours as cores × run time of the steps, first step start and last step end, in ms) are recorded when the task is added and when it ends; entries recorded before they existed lack them. The history page (`html/board/history.js`) shows them.
 
 ---
 
@@ -569,6 +626,7 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | GET | `/api/task/(\d+)/final_state$` | `RequestHandlerTaskGetState(final=true)` |
 | GET | `/api/task/(\d+)/state$` | `RequestHandlerTaskGetState(final=false)` |
 | GET | `/api/tasks/running` (literal) | `RequestHandlerTasksRunning` |
+| GET | `/api/health` (literal) | `RequestHandlerHealth` |
 | GET | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCacheGet` |
 | GET | `/api/users$` | `RequestHandlerUsersList` |
 | GET | `/api/user/([a-zA-Z0-9_-]+)/job_types$` | `RequestHandlerUserJobsTypeList` |
@@ -577,6 +635,8 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | POST | `/api/task/new` (literal) | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/(\d+)/priority/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/executor/([A-Za-z0-9_.-]+)/max_cores/(\d+)/(\d+)` | `RequestHandlerExecutorMaxCores` |
+| POST | `/api/runs/cleanup` (literal) | `RequestHandlerRunsCleanup` |
 | PATCH | `/api/task/(\d+)/args$` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/(\d+)/step/(\d+)` | `RequestHandlerTaskCancelStep` |
