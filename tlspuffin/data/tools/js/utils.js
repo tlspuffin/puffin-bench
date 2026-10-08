@@ -262,6 +262,37 @@ export function SplitObjects(buffer) {
 
 const CHUNK_SIZE = 131072;
 
+// GlobalExecsAt(files, timeMs): the total execs of the experiment at that moment (ms since the epoch), interpolated
+// between the two global snapshots of the stats around it; files: the stats in time order (a stats file purged when too
+// large leaves its beginning in .0 and .1, see CheckObjectif). Before the first snapshot (e.g. a seed that finds the bug
+// at once), that snapshot's execs: an upper bound. null when no file covers that moment.
+export function GlobalExecsAt(files, timeMs) {
+  let firstAfter = null;
+  for (const file of files) {
+    if (!IsFile(file)) continue;
+    const text = std.loadFile(file);
+    if (!text) continue;
+    let prev = null;
+    for (const line of SplitObjects(text)) {
+      let s;
+      try { s = JSON.parse(line); } catch (error) { continue; }
+      if (s?.type !== 'global' || s.time?.secs_since_epoch === undefined || s.total_execs === undefined) continue;
+      const t = s.time.secs_since_epoch * 1000 + Math.floor((s.time.nanos_since_epoch ?? 0) / 1e6);
+      if (t >= timeMs) {
+        if (prev === null) {
+          // this file starts after that moment: an earlier one may cover it, else the first snapshot is an upper bound
+          firstAfter ??= s.total_execs;
+          break;
+        }
+        const f = (t === prev.t) ? 1 : (timeMs - prev.t) / (t - prev.t);
+        return Math.round(prev.execs + f * (s.total_execs - prev.execs));
+      }
+      prev = { t, execs: s.total_execs };
+    }
+  }
+  return firstAfter;
+}
+
 export function GetLastStats(file, clientsNb) {
   let clients = { error: null, nb: clientsNb, infos: [] };
   let errorObj = { errno: 0 };

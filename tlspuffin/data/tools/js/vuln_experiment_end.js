@@ -75,7 +75,10 @@ function Main() {
     const stats_1 = Utils.GetLastStats(statsFile + '.1', stats.nb);
     if (stats.nb === 0) stats.nb = stats_1.nb;
     if (!Utils.IsClientArrayFull(stats.infos, stats.nb)) {
-      for (let i=0; i<(stats.nb+1); ++i) {
+      // every index IsClientArrayFull checks: 0 (global) and the clients 1..nb at index id + 1 (up to nb + 1); the loop
+      // stopped at nb, so a client found only in stats.json.1 (after the truncation of stats.json, e.g. a client that
+      // stopped reporting) was never taken and the run had no summary ("Error with stats.json")
+      for (let i=0; i<(stats.nb+2); ++i) {
         if (stats.infos[i] === undefined) stats.infos[i] = stats_1.infos[i]
       }
     }
@@ -150,8 +153,33 @@ function Main() {
   }
 
   const globalObjectiveSize = result.global[0]?.tEnd?.objective_size ?? 0;
-  result.state = ((result.state === "Done") && ((globalObjectiveSize > 0) || (nbObjectiveOnDisk > 0))) ? 
-      'success' : 'fail';
+  // job scripts since 2026-10-06 also give the targeted and not targeted objectives (a known CVE found besides the
+  // one the experiment looks for, PR_common.sh OBJECTIVES_NOT_TARGETED): success needs a targeted one
+  const targeted = Utils.IsNumeric(scriptArgs[8] ?? '') ? Number(scriptArgs[8]) : null;
+  const notTargeted = Utils.IsNumeric(scriptArgs[9] ?? '') ? Number(scriptArgs[9]) : 0;
+  if (targeted !== null) {
+    result.nb_objective_targeted = targeted;
+    result.nb_objective_not_targeted = notTargeted;
+  }
+  // time to find: when the fuzzer saved the first targeted objective (ms since the epoch, its name), from the start of
+  // the experiment's stats (as the durations of older results, which end at the last stats: up to a minute later)
+  const firstTargetedMs = Utils.IsNumeric(scriptArgs[10] ?? '') ? Number(scriptArgs[10]) : null;
+  // the expected bug of the configuration (vuln_targets.json): its CVE, and the objectives of another bug
+  if (Utils.IsString(scriptArgs[12] ?? null) && scriptArgs[12] !== '') {
+    result.expected_cve = scriptArgs[12];
+    result.nb_objective_unexpected = Utils.IsNumeric(scriptArgs[11] ?? '') ? Number(scriptArgs[11]) : 0;
+  }
+  const start = result.global[0]?.t0?.time?.secs_since_epoch;
+  if ((firstTargetedMs !== null) && (typeof start === 'number')) {
+    result.first_targeted_objective_ms = firstTargetedMs;
+    result.time_to_find_s = Math.max(0, firstTargetedMs / 1000 - start);
+    // execs to find: the total execs when the fuzzer saved that objective (not at the end of the run, which comes after
+    // the monitor saw it and the fuzzer stopped)
+    const execs = Utils.GlobalExecsAt([`${statsFile}.0`, `${statsFile}.1`, statsFile], firstTargetedMs);
+    if (execs !== null) result.execs_to_find = execs;
+  }
+  const found = (targeted !== null) ? (targeted > 0) : ((globalObjectiveSize > 0) || (nbObjectiveOnDisk > 0));
+  result.state = ((result.state === "Done") && found) ? 'success' : 'fail';
 
   const saveRetVal = Utils.SaveFile(outFile, JSON.stringify(result)+'\n');
   if (saveRetVal !== null) {
