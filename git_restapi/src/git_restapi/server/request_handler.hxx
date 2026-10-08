@@ -43,5 +43,6 @@ REQUESTHANDLER(CORSOptions);
 REQUESTHANDLER(History, std::string const, std::string const);
 REQUESTHANDLER(Log, std::string const, std::string const);
 REQUESTHANDLER(Logs, std::string const);
+REQUESTHANDLER(Presets, std::string const, std::string const);
 
 };
