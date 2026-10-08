@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runs of a commit</title><link rel="stylesheet" href="runs.css"></head>
+<body><div id="runs"><p style="padding:20px">Loading the runs…</p></div>
+<template id="help-panel">
+  <h2>Runs of a commit</h2>
+  <p>Every task the publisher keeps for this tlspuffin commit and type, oldest first. Results shows the latest; the others stay here with their data.</p>
+  <ul>
+    <li><b>puffin-bench</b>: the commit of the job scripts the task ran with (recorded by the run since 2026-10-07; before, its job script matched to a commit of the history; “unknown script” when none matches: local changes). The deployed version is in the hover when it differs.</li>
+    <li>Between two rows: what changed (job scripts, timeout, cores, compat rules, LibAFL) and which differences are significant: two-sided <a href="https://en.wikipedia.org/wiki/Mann%E2%80%93Whitney_U_test" target="_blank" rel="noopener">Mann-Whitney U test ↗</a> (compares the runs by their ranks: no normal distribution assumed, an outlier does not decide), p &lt; 0.05 (exact for small samples without ties). On the runs, 5 per configuration: Perf, the mean of the run's 3 clients (they share its coverage map and corpus: tested per client, 18 to 28 % of the comparisons of a task with itself came out significant at p &lt; 0.05, per run 3 %); Vuln, its time to find. The smallest p possible with 5 runs against 5 is 0.008. Many tests are made: a lone p near 0.05 can be chance. Same job scripts and a difference: variance or machine load (execs/s).</li>
+    <li>Vuln: runs that found the expected bug and succeeded / runs (🎯, the same count as Results and the objectives report), time to find (mean ± sd) of those runs only: as the monitor of the run measured it (since bf0392b: the first objective of the expected bug); for a task whose job scripts had no target (before 2026-10-07: a run ended on its first objective, whatever the bug), the time of its first objective of the expected bug, and a run without it is not counted. Hover: the time to the expected bug of every run, also those not counted.</li>
+    <li>Vuln charts: per configuration, one row per task (its runs as dots) and, from 2 runs, a box as in the overview graphs of Results: quartiles with the median, whiskers to the extreme runs, the mean (dashed) ± sd (thin bar, cut at the extreme runs: time to find is skewed, one long run makes mean - sd fall below the fastest run or below 0; an arrow marks a cut end), and mean ± sd on the right. Two tasks whose boxes overlap widely do not differ beyond their spread; one far run moves the mean, not the box.</li>
+    <li>Perf: per library, mean ± sd over the clients of the runs (as Results), and the charts of six metrics.</li>
+    <li>Details: a cell with the box cursor opens a small window on click (the times of each run); the charts and links show theirs on hover.</li>
+    <li>This page lists every difference with p &lt; 0.05 between two tasks of the <i>same</i> commit. Results, between a commit and its ancestor, is stricter: p ≤ 0.016 and a change beyond the noise floor measured on such same-commit pairs (<code>regression_floors.measured.json</code> here, applied from <code>/html/publisher/regression_floors.json</code>).</li>
+  </ul>
+</template>
+<script type="module" src="runs.js"></script></body></html>
