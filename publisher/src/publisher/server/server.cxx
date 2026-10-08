@@ -2,6 +2,8 @@
 #include "request_handler_factory.hxx"
 #include <iostream>
 #include <Poco/Net/HTTPServer.h>
+#include <Poco/Timespan.h>
+#include <Poco/ThreadPool.h>
 #include <Poco/Net/SecureServerSocket.h>
 
 ns_Server::MyServerApp::MyServerApp(ns_Server::Config const& config, 
@@ -26,13 +28,26 @@ int ns_Server::MyServerApp::main(const std::vector<std::string>& args) {
   serverSocket->bind(address, true, false);
   serverSocket->listen(64);
 
+  // Own pool, declared before the server so that it outlives it: its threads are joined before main() returns, so
+  // that no request is still served while the publisher's objects are destroyed (the publisher once aborted when
+  // stopped while a page was polling it). Keep-alive bounded: an open browser tab no longer pins a thread for 15 s.
+  Poco::Net::HTTPServerParams::Ptr params = new Poco::Net::HTTPServerParams;
+  params->setMaxThreads(64);
+  params->setMaxQueued(256);
+  params->setKeepAlive(true);
+  params->setKeepAliveTimeout(Poco::Timespan(5, 0));
+  params->setMaxKeepAliveRequests(100);
+  Poco::ThreadPool threadPool(4, 64);
+
   Poco::Net::HTTPServer server(new RequestHandlerFactory(config_, apis_), 
-      *serverSocket, new Poco::Net::HTTPServerParams);
+      threadPool, *serverSocket, params);
 
   server.start();
   std::cout << "Server started on port " << config_.port_ << "..." << std::endl;
   waitForTerminationRequest();
-  server.stop();
+  // close the open connections too, then wait for the requests being served
+  server.stopAll(true);
+  threadPool.joinAll();
   delete serverSocket;
   return 0;
 }
