@@ -56,11 +56,22 @@ const dataDefinitions = {
     }
   },
   Vuln: {
+    // execs to find: the total execs when the objective that ended the run was saved (runs since 2026-10-07), else
+    // the execs of the clients when the run stopped (later: after the monitor saw it)
+    total_execs: {
+      target: 'success',
+      compute: {
+        datapath: [ 'execs_to_find', 'clients.tEnd.total_execs' ],
+        value: (execsToFind, clients) => (typeof execsToFind?.[0] === 'number') ? [ execsToFind[0] ] : clients
+      }
+    },
+    // time to find: when the fuzzer saved the first targeted objective (time_to_find_s, results since 2026-10-06),
+    // else the duration of each client until the experiment was stopped (up to a minute after the objective)
     durations_s: {
       target: 'success',
       compute: {
-        datapath: [ 'clients.tEnd.time.secs_since_epoch', 'clients.t0.time.secs_since_epoch' ],
-        value: DiffArray
+        datapath: [ 'time_to_find_s', 'clients.tEnd.time.secs_since_epoch', 'clients.t0.time.secs_since_epoch' ],
+        value: (timeToFind, ends, starts) => (typeof timeToFind?.[0] === 'number') ? [ timeToFind[0] ] : DiffArray(ends, starts)
       }
     },
     fail_duration_s: {
@@ -68,12 +79,6 @@ const dataDefinitions = {
       compute: {
         datapath: [ 'clients.tEnd.time.secs_since_epoch', 'clients.t0.time.secs_since_epoch' ],
         value: DiffArray
-      }
-    },
-    total_execs: {
-      target: 'success',
-      compute: {
-        datapath: [ 'clients.tEnd.total_execs' ],
       }
     },
     fail_total_execs: {
@@ -202,6 +207,17 @@ function BuildDataSet(source, json) {
     return {};
   }
 
+  // when it ran: the latest end of its runs (seconds since the epoch), for the "run date" order of the commits
+  let ran = 0;
+  for (const library of Object.values(libraries)) {
+    for (const attempt of (Array.isArray(library?.data) ? library.data : [])) {
+      for (const snapshot of (Array.isArray(attempt?.global) ? attempt.global : [])) {
+        const end = snapshot?.tEnd?.time?.secs_since_epoch;
+        if (typeof end === 'number' && end > ran) ran = end;
+      }
+    }
+  }
+
   const metrics = {};
   const errors = {};
   const status = {}
@@ -210,6 +226,10 @@ function BuildDataSet(source, json) {
       source, 
       index: json?.index, 
       type, 
+      ran,
+      // the puffin-bench versions that produced them (recorded per library by the job scripts since 2026-10-06)
+      benches: [...new Map(Object.values(libraries).map(library => library?.bench).filter(bench => bench?.commit)
+          .map(bench => [bench.commit, bench])).values()],
       metrics, 
       errors, 
       global_status: 'no run', 
@@ -246,7 +266,9 @@ function BuildDataSet(source, json) {
         // set when the experiment could not run as required (e.g. LibreSSL without ASAN support)
         unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported,
         // objectives replayed and grouped by bug (see ExperimentReplayObjectives), absent for older results
-        objectives: libraries[library]?.objectives
+        objectives: libraries[library]?.objectives,
+        // each run by its attempt: its state in the summary ('success', 'fail', or none when its summary is missing)
+        runs: libraries[library].data.map(attempt => ({ id: attempt?.id, state: attempt?.state ?? null }))
       };
       libraries[library].data.forEach(attempt => {
         if (attempt?.error !== undefined) {
@@ -411,7 +433,9 @@ export async function LoadGitData(refresh, config, project) {
     const response = await fetch(config.urlGit(project)+refresh, 
         {cache: 'no-store', signal: fetchControllerGit.signal});
     if ((!response.ok) || (response.status != 200)) {
-      throw(`Network or server error, status ${response.status}`);
+      // the service says why in its body (e.g. "Unknown repository sshpuffin")
+      const reason = (await response.json().catch(() => null))?.error;
+      throw(`${reason ? `${reason}, ` : 'Network or server error, '}status ${response.status}`);
     }
     const body = await response.json();
     if ((body?.success != null) && (!body.success)) {

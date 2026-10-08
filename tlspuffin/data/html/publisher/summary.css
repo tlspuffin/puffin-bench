@@ -5,21 +5,30 @@
 }
 
 :root {
-  --color-success: #27ae60;
-  --color-warning: #f39c12;
-  --color-error: #e74c3c;
-  --color-gray: #95a5a6;
-  --color-primary: #3498db;
-  --color-primary-dark: #2980b9;
-  --color-bg: #f5f5f5;
-  --color-card: #ffffff;
-  --color-card-closed: #eeeeee;
-  --color-text: #2c3e50;
-  --color-text-light: #7f8c8d;
-  --color-border: #ecf0f1;
-  --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
-  --shadow-md: 0 4px 8px rgba(0,0,0,0.15);
-  --transition: all 0.3s ease;
+  /* dark theme, shared with the scheduler pages and the objectives pages */
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-error: #f85149;
+  --color-gray: #8b8b8b;
+  --color-primary: #58a6ff;
+  --color-primary-dark: #1f6feb;
+  --color-bg: #000000;
+  --color-panel: #111111;
+  --color-card: #151515;
+  --color-card-closed: #101010;
+  --color-inset: #0f0f0f;
+  --color-hover: #1c2433;
+  --color-input: #0b0b0b;
+  --color-text: #e8e8e8;
+  --color-text-light: #8b8b8b;
+  --color-border: #262626;
+  --color-border-strong: #333333;
+  --color-perf: #1f6feb;
+  --color-vuln: #db6d28;
+  --shadow-sm: none;
+  --shadow-md: 0 6px 18px rgba(0,0,0,0.6);
+  --transition: all 0.2s ease;
+  color-scheme: dark;
 }
 
 .hidden {
@@ -199,7 +208,7 @@ body {
   border: 2px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
-  background: white;
+  background: var(--color-input);
   color: var(--color-text);
   cursor: pointer;
   transition: var(--transition);
@@ -218,7 +227,7 @@ body {
 #graph-container {
   flex: 1;
   min-height: 500px;
-  background: white;
+  background: var(--color-inset);
   border-radius: 8px;
   border: 1px solid var(--color-border);
   padding: 20px;
@@ -339,7 +348,7 @@ header {
   margin-bottom: 10px;
   border: 2px solid var(--color-border);
   border-radius: 6px;
-  background: white;
+  background: var(--color-card);
   color: var(--color-text);
   cursor: pointer;
   font-size: 14px;
@@ -348,7 +357,7 @@ header {
 
 .btn:hover {
   border-color: var(--color-primary);
-  background: #f0f8ff;
+  background: var(--color-hover);
 }
 
 .btn.active {
@@ -386,7 +395,7 @@ header {
   /*border: 2px solid var(--color-border);*/
   border: 0px;
   border-radius: 6px;
-  background: white;
+  background: transparent;
   cursor: pointer;
   font-size: 18px;
   transition: var(--transition);
@@ -395,7 +404,7 @@ header {
 
 .clear-search-btn:hover {
   border-color: var(--color-primary);
-  background: #f0f8ff;
+  background: var(--color-hover);
   transform: translateY(-1px);
 }
 
@@ -497,7 +506,7 @@ header {
 }
 
 .combobox-list li:hover {
-  background: #f0f8ff;
+  background: var(--color-hover);
   color: var(--color-primary);
 }
 
@@ -607,8 +616,8 @@ header {
 
 .branch-name {
   font-size: 0.85em;
-  color: #6a737d;
-  background: #f1f8ff;
+  color: var(--color-text-light);
+  background: #161b22;
   padding: 0.1rem 0.4rem;
   border-radius: 3px;
 }
@@ -660,7 +669,7 @@ header {
 .type-section {
   margin: 15px 0;
   padding: 15px;
-  background: #f8f9fa;
+  background: var(--color-inset);
   border-radius: 8px;
   border-left: 4px solid var(--color-primary);
 }
@@ -739,14 +748,14 @@ header {
   align-items: baseline;
   gap: 12px;
   padding: 12px;
-  background: white;
+  background: var(--color-card);
   border-radius: 6px;
   transition: var(--transition);
   border: 1px solid var(--color-border);
 }
 
 .lib-item:hover {
-  background: #f8f9fa;
+  background: var(--color-hover);
   border-color: var(--color-primary);
 }
 
@@ -768,11 +777,11 @@ header {
 }
 
 .lib-item-stats-fail {
-  color: red;
+  color: var(--color-error);
 }
 
 .lib-item.alert {
-  background-color: yellow;
+  background-color: #2a2208;
 }
 
 .stat-item {
@@ -788,7 +797,7 @@ header {
 }
 
 .stat-item:hover {
-  background: #e9ecef;
+  background: var(--color-hover);
 }
 
 .stat-field {
@@ -801,56 +810,11 @@ header {
   user-select: none;
 }
 
-/* Stats tooltip */
-.stats-tooltip {
-  position: absolute;
-  left: 100%;
-  top: 0;
-  margin-left: 10px;
-  background: var(--color-text);
-  color: white;
-  padding: 12px;
-  border-radius: 8px;
-  box-shadow: var(--shadow-md);
-  min-width: 250px;
-  z-index: 1000;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-  font-size: 12px;
-  line-height: 1.5;
-  opacity: 0;
-  visibility: hidden;
-  transition: var(--transition);
-  pointer-events: none;
-}
 
-.stats-tooltip.visible {
-  opacity: 1;
-  visibility: visible;
-}
 
-.tooltip-title {
-  font-weight: 700;
-  font-size: 14px;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-}
 
-.tooltip-section {
-  margin: 8px 0;
-}
 
-.tooltip-section div {
-  margin: 4px 0;
-}
 
-.tooltip-nostats {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.8);
-  font-style: italic;
-}
 
 /* Type filters */
 .type-filters {
@@ -865,7 +829,7 @@ header {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: white;
+  background: var(--color-card);
   border: 2px solid var(--color-border);
   border-radius: 6px;
   cursor: pointer;
@@ -876,7 +840,7 @@ header {
 
 .type-filter-label:hover {
   border-color: var(--color-primary);
-  background: #f0f8ff;
+  background: var(--color-hover);
 }
 
 .type-filter-label input[type="checkbox"] {
@@ -1146,7 +1110,7 @@ header {
 .lib-graph {
   height: 30vh;
   min-height: 280px;
-  background: white;
+  background: var(--color-inset);
   border-radius: 6px;
   border: 1px solid var(--color-border);
 }
@@ -1221,13 +1185,6 @@ header {
     gap: 8px;
   }
 
-  .stats-tooltip {
-    left: auto;
-    right: 0;
-    top: 100%;
-    margin-left: 0;
-    margin-top: 10px;
-  }
 
   .lib-name {
     min-width: auto;
@@ -1270,11 +1227,11 @@ header {
 }
 
 .asan-on {
-  color: #2e7d32;
+  color: var(--color-success);
 }
 
 .asan-off {
-  color: #c62828;
+  color: var(--color-error);
 }
 
 .asan-unknown {
@@ -1287,15 +1244,15 @@ header {
   padding: 0 6px;
   border: 1px solid #b33;
   border-radius: 4px;
-  background: #fff3f3;
-  color: #900;
+  background: #3a1214;
+  color: #ff9b95;
   cursor: pointer;
 }
-.lib-objectives:hover { background: #ffe0e0; }
+.lib-objectives:hover { background: #5a1a1d; }
 /* objectives found, but no replay confirmed a bug */
-.lib-objectives.unconfirmed { border-color: #d97a00; background: #fff6e8; color: #a35a00; }
-.lib-objectives.unconfirmed:hover { background: #ffe9c7; }
-.lib-objectives-panel.unconfirmed { border-left-color: #d97a00; background: #fffbf3; }
+.lib-objectives.unconfirmed { border-color: #d29922; background: #2e2208; color: #e3b341; }
+.lib-objectives.unconfirmed:hover { background: #46340c; }
+.lib-objectives-panel.unconfirmed { border-left-color: #d29922; background: #17130a; }
 a.lib-objectives { margin-left: 4px; text-decoration: none; }
 .lib-objectives-panel {
   max-width: 70vw;
@@ -1303,21 +1260,651 @@ a.lib-objectives { margin-left: 4px; text-decoration: none; }
   margin: 4px 0;
   padding: 6px 8px;
   border-left: 3px solid #b33;
-  background: #fffafa;
+  background: #170d0e;
   font-size: 0.85em;
 }
-.lib-objectives-info { margin-bottom: 4px; color: #555; }
+.lib-objectives-info { margin-bottom: 4px; color: var(--color-text-light); }
 .lib-objective summary { cursor: pointer; }
-.lib-objective .objective-type { font-family: monospace; color: #900; }
+.lib-objective .objective-type { font-family: monospace; color: #ff9b95; }
 .lib-objective .objective-frames { font-family: monospace; }
-.lib-objective .objective-runs { color: #777; margin-left: 6px; }
-.lib-objective .objective-no-crash { color: #777; }
-.lib-objective .objective-trace { color: #555; margin: 2px 0; font-family: monospace; }
+.lib-objective .objective-runs { color: var(--color-text-light); margin-left: 6px; }
+.lib-objective .objective-no-crash { color: var(--color-text-light); }
+.lib-objective .objective-trace { color: var(--color-text-light); margin: 2px 0; font-family: monospace; }
 .lib-objective pre {
   max-height: 300px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
-  background: #f6f6f6;
+  background: var(--color-input);
   padding: 4px;
 }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Compact layout: one-line commit header, test types side by side on wide screens, one table row per library.
+   Everything else stays available in the hovers (commit line, build cell, metric cells).
+   --------------------------------------------------------------------------------------------------------------- */
+.commit {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.commit:hover {
+  transform: none;
+}
+
+.commit-header {
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom-width: 1px;
+}
+
+.commit-header .pastilles {
+  flex-direction: row;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.commit-header .pastille {
+  font-size: 13px;
+}
+
+.commit-header .pastille-label {
+  font-size: 12px;
+}
+
+.commit-header .commit-info {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.commit-header .commit-id {
+  font-size: 14px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-where {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-light);
+  white-space: nowrap;
+}
+
+.commit-where .date {
+  margin-left: 0;
+  font-size: 12px;
+}
+
+/* commit line (see commitinfo.js) */
+.commit-line .ci-sha {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+}
+
+.commit-line .ci-pr {
+  font-weight: 700;
+}
+
+.commit-line .ci-nopr {
+  color: var(--color-text-light);
+  font-size: 0.9em;
+}
+
+.commit-line .ci-msg {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-weight: 400;
+  color: var(--color-text);
+}
+
+.commit-line .ci-custom {
+  font-weight: 600;
+}
+
+/* test types: side by side when both tables fit in the width, one below the other otherwise */
+.type-sections {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.type-section {
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0;
+  padding: 4px 8px 6px;
+  border-left-width: 3px;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.type-header {
+  margin-bottom: 2px;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.type-header h3 {
+  font-size: 13px;
+}
+
+.type-header-actions {
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.type-header-action,
+.type-header-actions > button,
+.type-header-actions .action-dropdown > button {
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 5px;
+  background: var(--color-card);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.type-header-action h3 {
+  display: inline;
+  font-size: 12px;
+}
+
+.type-header-actions > button:hover,
+.type-header-actions .action-dropdown > button:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
+/* drop-downs are in the header now: open downwards */
+.type-header-actions .action-dropdown-menu {
+  bottom: auto;
+  top: 100%;
+  left: auto;
+  right: 0;
+  margin-bottom: 0;
+  margin-top: 4px;
+}
+
+.no-run {
+  padding: 2px 0;
+}
+
+/* libraries */
+.libs-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  background: var(--color-card);
+  border-radius: 4px;
+}
+
+.libs-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-light);
+  text-align: right;
+  padding: 1px 6px;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.libs-table th.metric-header {
+  cursor: pointer;
+}
+
+.libs-table td {
+  padding: 2px 6px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.libs-table .col-lib,
+.libs-table .col-build {
+  text-align: left;
+}
+
+.libs-table tr + tr td {
+  border-top: 1px solid var(--color-border);
+}
+
+.libs-table tr.lib-row:hover td {
+  background: var(--color-hover);
+}
+
+.libs-table tr.lib-row.alert td {
+  background: #2a2208;
+}
+
+.libs-table .lib-icon {
+  font-size: 13px;
+}
+
+.libs-table .lib-name {
+  font-weight: 700;
+}
+
+.libs-table .lib-stats {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.libs-table .warn-icon {
+  font-size: 12px;
+}
+
+.libs-table .lib-objectives {
+  font-size: 11px;
+}
+
+.lib-build {
+  cursor: help;
+}
+
+.lib-build-token {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  color: var(--color-text-light);
+}
+
+.lib-flags {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #1d2a52;
+  color: #a5b4fc;
+}
+
+/* metric tooltips: out of the layout until shown, then fixed next to the cell (see CreateMetricCell) */
+
+
+.libs-table .metric-cell {
+  display: table-cell;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 0;
+}
+
+.libs-table .metric-cell .stat-value {
+  color: var(--color-text);
+}
+
+.stat-pm {
+  font-size: 11px;
+  color: var(--color-text-light);
+}
+
+/* metrics of the failed runs, under the library */
+.libs-table tr.lib-fail-row td {
+  font-size: 12px;
+  color: var(--color-error);
+  border-top: none;
+  padding-top: 0;
+}
+
+.libs-table tr.lib-fail-row td:first-child {
+  text-align: right;
+}
+
+/* the failed-run metrics wrap instead of widening the table */
+.libs-table tr.lib-fail-row td:last-child {
+  white-space: normal;
+  text-align: left;
+}
+
+.libs-table tr.lib-fail-row .stat-item {
+  display: inline-flex;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.libs-table tr.lib-fail-row .stat-field {
+  font-weight: 600;
+}
+
+/* objectives grouped by bug, under the library */
+.libs-table tr.lib-panel-row td {
+  text-align: left;
+  white-space: normal;
+}
+
+.libs-table .lib-objectives-panel {
+  max-width: none;
+  margin: 2px 0;
+}
+
+.lib-objectives-report {
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Dark layout: the bench navigation bar on top (board/nav.js), one toolbar row below it (tabs, search, filters,
+   counter, graphs, refresh), the commits right under it; on wide screens one column per result type (Perf on the
+   left, Vuln on the right), so that the columns of every commit line up.
+   --------------------------------------------------------------------------------------------------------------- */
+body {
+  background: var(--color-bg);
+  line-height: 1.45;
+  font-size: 13px;
+}
+
+a { color: var(--color-primary); }
+
+header {
+  position: sticky;
+  top: var(--pb-nav-height, 0px);
+  z-index: 50;
+  margin: 0;
+  border: none;
+}
+
+.header-top.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border);
+}
+
+#header-title { display: none; }
+
+.header-middle.seg {
+  flex-wrap: nowrap;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.header-middle.seg .tab {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #bbb;
+  border-top: none;
+  border-right: 1px solid var(--color-border-strong);
+}
+
+.header-middle.seg .tab:last-child { border-right: none; }
+.header-middle.seg .tab:hover { color: #fff; background: var(--color-hover); border-top-color: transparent; }
+.header-middle.seg .tab.active { color: #fff; background: #1f2937; }
+
+#filters, .filters, .filters-campaign {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+#filters.hidden, .filters-campaign.hidden { display: none !important; }
+
+.filters .filter-group, .filters .search-group { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+
+.toolbar input[type="text"],
+.toolbar #search-input {
+  flex: 0 1 auto;
+  width: 240px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-input);
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.toolbar input[type="text"]:focus,
+.toolbar #search-input:focus { outline: none; border-color: var(--color-primary); box-shadow: none; }
+
+.toolbar .clear-search-btn,
+.toolbar .campaign-search-group button {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-light);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar .clear-search-btn:hover { color: var(--color-text); background: none; transform: none; }
+
+/* chips: status filters, type filters, PR state */
+.toolbar .btn,
+.toolbar .type-filter-label {
+  margin: 0;
+  padding: 1px 9px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: #bbb;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.toolbar .btn:hover, .toolbar .type-filter-label:hover { border-color: #4b6bd6; background: transparent; }
+.toolbar .btn.active { border-color: #4b6bd6; background: #1d2a52; color: #fff; font-weight: 400; }
+
+.toolbar .type-filters { display: inline-flex; gap: 4px; margin: 0; flex-wrap: nowrap; }
+.toolbar .type-filter-label { gap: 0; cursor: pointer; }
+.toolbar .type-filter-label input { display: none; }
+.toolbar .type-filter-label:has(input:checked) { border-color: #4b6bd6; background: #1d2a52; color: #fff; }
+
+.toolbar .sep { width: 1px; height: 18px; background: var(--color-border-strong); }
+.toolbar .grow { flex: 1; }
+.toolbar .counter { color: var(--color-text-light); font-size: 11px; white-space: nowrap; cursor: help; }
+
+.toolbar .header-right { gap: 6px; align-items: center; }
+
+.toolbar .refresh-btn {
+  padding: 2px 9px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: #181818;
+  color: #ddd;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.toolbar .refresh-btn:hover { background: var(--color-hover); transform: none; box-shadow: none; }
+.toolbar #refresh-btn[data-type="gold"] { background: var(--gold, #ffc400); color: #111; border-color: transparent; }
+#refresh-infos { top: calc(100% + 2px); }
+
+/* commits */
+.page { padding: 6px 10px 30px; }
+#loading { padding: 30px 10px; }
+#loading.ended .spinner { display: none; }
+#loading.ended h1 { font-size: 15px; font-weight: 500; }
+
+.commit {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 6px 8px 8px;
+  margin-bottom: 6px;
+}
+
+.commit:not([data-state="open"]) { background: var(--color-card-closed); }
+.commit:not([data-state]) { background: var(--color-card); }
+.commit:hover { box-shadow: none; }
+
+.commit-header { border-bottom: none; padding-bottom: 2px; margin-bottom: 4px; }
+.commit-success .commit-header, .commit-fail .commit-header,
+.commit-mixed .commit-header, .commit-no-run .commit-header { border-bottom: none; }
+
+.type-section {
+  background: var(--color-inset);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-perf);
+}
+
+.type-section[data-type="Vuln"] { border-left-color: var(--color-vuln); }
+.libs-table { background: transparent; }
+.libs-table tr + tr td { border-top-color: #1d1d1d; }
+.result-anchor { scroll-margin-top: 80px; }
+/* the card a link points to (summary.js ScrollToTarget): its top bar marked, edge to edge, until the next link; with
+   a task (#<task id>), its result too */
+.commit { scroll-margin-top: 80px; }
+.commit.pb-target { border-color: var(--color-primary-dark); }
+.commit.pb-target > .commit-header {
+  margin: -6px -8px 4px;
+  padding: 6px 8px 2px;
+  border-radius: 7px 7px 0 0;
+  background: rgba(88, 166, 255, 0.14);
+  box-shadow: inset 0 2px 0 var(--color-primary);
+  animation: pb-target-flash 1.6s ease-out;
+}
+.type-section.pb-target { outline: 1px solid var(--color-primary-dark); }
+@keyframes pb-target-flash { from { background: rgba(88, 166, 255, 0.45); } }
+.no-run { padding: 0 2px; font-size: 12px; }
+
+/* one column per result type on wide screens; a commit without a type keeps its column empty */
+.type-columns { display: flex; flex-direction: column; gap: 8px; }
+.type-slot-empty { display: none; }
+
+@media (min-width: 1100px) {
+  .type-columns {
+    display: grid;
+    grid-template-columns: repeat(var(--types, 2), minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .type-columns[data-types="2"] { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+  .type-columns > .type-section { grid-row: 1; max-width: none; }
+
+  .type-slot-empty {
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    height: 100%;
+    border: 1px dashed var(--color-border);
+    border-radius: 6px;
+    color: #555;
+    font-size: 12px;
+  }
+}
+
+/* modals of the graphs */
+.modal-header { background: var(--color-panel); padding: 8px 16px; }
+.modal-close:hover { color: #fff; }
+/* commit date | run date */
+.toolbar .order-toggle { display: inline-flex; gap: 0; }
+.toolbar .order-toggle .btn { border-radius: 0; margin: 0; }
+.toolbar .order-toggle .btn:first-child { border-radius: 6px 0 0 6px; }
+.toolbar .order-toggle .btn:last-child { border-radius: 0 6px 6px 0; }
+/* "run on 06/10 16:06 · bench d10↗" in a type block header, between its title and its actions */
+.type-headers .type-run { font-size: 12px; color: var(--color-text-light); white-space: nowrap; margin-right: auto; padding-left: 10px; }
+.type-headers .type-run a { color: inherit; text-decoration: underline dotted; }
+.type-headers .type-run a:hover { color: var(--color-primary, #58a6ff); }
+/* commit header: one font size; the branch and date in grey, the status dots last */
+.commit-header .commit-id, .commit-header .commit-id *, .commit-header .commit-where, .commit-header .commit-where .date,
+.commit-header .pastille, .commit-header .pastille-label { font-size: 13px; }
+.commit-header .commit-where, .commit-header .commit-where .date { color: var(--color-text-light); }
+.commit-header .commit-info { flex: 1; min-width: 0; }
+.commit-header .pastilles { margin-left: auto; }
+.commit-header .commit-id { flex: 0 1 auto; }
+.commit-header .commit-where { margin-left: 4px; }
+/* 🐞 panel from the objectives report: Bug A, B… as in the report */
+.lib-bug { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; padding: 3px 0; }
+.lib-bug .objective-letter { font-weight: 700; font-size: 12px; white-space: nowrap; }
+.lib-bug .objective-warn { color: #ffb74d; font-size: 12px; white-space: nowrap; }
+.lib-bug .muted { color: var(--color-text-light); }
+.lib-bug .objective-not-target { color: var(--color-text-light); border: 1px dashed currentColor; border-radius: 999px; padding: 0 6px; font-size: 11px; white-space: nowrap; }
+/* 🕘 N runs: the tasks of the commit kept by the publisher (runs page) */
+.type-runs { margin-left: 8px; padding: 0 8px; border: 1px solid #4b6bd6; border-radius: 999px; font-size: 12px; color: #cfe3ff; text-decoration: none; white-space: nowrap; }
+.type-runs:hover { background: #1d2a52; text-decoration: none; }
+/* comparison with the nearest ancestor (ApplyRegression) */
+.reg-head { font-size: 12px; color: var(--color-text-light); margin: 2px 0 4px; }
+.reg-head .reg-gap { opacity: .8; }
+.reg-delta { margin-left: 4px; font-size: 11px; white-space: nowrap; cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.reg-delta:hover { text-decoration: underline dotted; }
+.reg-better { color: #3fb950; font-weight: 700; }
+.reg-worse { color: #f85149; font-weight: 700; }
+.reg-faint { color: var(--color-text-light); opacity: .55; font-weight: 400; }
+.reg-warn { color: #d29922; cursor: help; }
+.reg-notes { color: #d29922; cursor: help; }
+.reg-details { position: absolute; z-index: 50; max-width: 420px; white-space: pre-line; background: #151515; color: #e8e8e8; border: 1px solid #4b6bd6; border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.45; box-shadow: 0 4px 16px #000a; }
+/* 🎯 chip: the expected bug of the configuration found in k/n runs */
+.lib-objectives.target-chip { border-color: #3fb950; color: #7ee787; background: transparent; }
+.lib-objectives.target-chip.target-partial { border-color: #d4a72c; color: #e3b341; background: transparent; }
+.lib-objectives.target-chip.target-none { border-color: #f85149; color: #ff7b72; background: transparent; }
+.lib-objectives.target-chip .badge-lost { color: #e3b341; font-weight: 600; }
+.lib-objectives .badge-nt { border: 1px dashed currentColor; border-radius: 999px; padding: 0 4px; font-size: 10.5px; opacity: .7; }
+.lib-objectives .badge-ux { color: #ffb74d; font-size: 10.5px; }
+.lib-bug .objective-expected { color: #7ee787; font-size: 11px; white-space: nowrap; }
+/* a metric cell opens its statistics on click */
+.metric-cell.has-stats { cursor: pointer; }
+.metric-cell.has-stats:hover .stat-value { text-decoration: underline dotted; }
+.lib-objectives .badge-nr { opacity: .6; font-size: 10.5px; }
+/* details panel of a change or a value: structured */
+.reg-details { white-space: normal; min-width: 260px; }
+.reg-details .rd-title { font-weight: 700; margin-bottom: 3px; }
+.reg-details .rd-sub { color: #8b8b8b; font-weight: 400; font-size: 11px; }
+.reg-details .rd-change { font-size: 14px; margin: 2px 0 6px; }
+.reg-details .rd-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+.reg-details .rd-grid > span:nth-child(odd) { color: #8b8b8b; }
+.reg-details .rd-warn { margin-top: 6px; color: #d29922; font-size: 12px; } .reg-details .rd-warn ul { margin: 2px 0 0 16px; padding: 0; }
+.reg-details .rd-note { margin-top: 6px; color: #8b8b8b; font-size: 11px; }
+.reg-details .rd-values { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 3px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.reg-details .rd-values span { background: #1f1f1f; border: 1px solid #333; border-radius: 4px; padding: 0 4px; }
+/* 🚨 a bug never seen for this library before this task: very visible */
+.new-bug { margin-right: 4px; cursor: help; animation: new-bug-pulse 1.2s ease-in-out infinite; }
+@keyframes new-bug-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.lib-bug .objective-new { background: #da3633; color: #fff; font-weight: 700; border-radius: 999px; padding: 0 7px; font-size: 11px; white-space: nowrap; }
+/* "no Perf run": a link to launch it */
+a.type-slot-empty { text-decoration: none; cursor: pointer; }
+a.type-slot-empty .slot-launch { opacity: 0; margin-left: 6px; color: #58a6ff; font-weight: 600; transition: opacity .15s; }
+a.type-slot-empty:hover { border-color: #58a6ff; color: #ddd; } a.type-slot-empty:hover .slot-launch { opacity: 1; }
+/* the comparison line: short, its details on hover (or focus) */
+.reg-head { position: relative; display: inline-block; cursor: context-menu; }
+.reg-details .rd-section { margin-top: 8px; font-weight: 600; font-size: 12px; }
+.reg-details .rd-warn-text { color: #d29922; }
+.reg-details .rd-list { margin: 2px 0 0 16px; padding: 0; font-size: 12px; }
+/* the comparison inside the header line */
+.type-run .reg-head { margin: 0; font-size: inherit; white-space: nowrap; }
+.type-headers .type-run { white-space: normal; min-width: 0; flex: 1 1 auto; }
+.type-headers .type-header-actions, .type-headers .type-header-action { white-space: nowrap; flex-shrink: 0; }
+/* the build cell: harness (hover: what was built), ASAN, "--" when extra fuzzer options were used */
+.lib-build .lib-harnesskind { cursor: help; }
+.lib-flags-mark { color: #58a6ff; font-weight: 800; font-family: ui-monospace, Menlo, monospace; cursor: help; padding: 0 3px;
+  border: 1px solid #58a6ff66; border-radius: 4px; font-size: 11px; }
+/* ❓ objectives without category */
+.uncat { margin-left: 4px; color: #d29922; font-size: 11px; font-weight: 700; border: 1px dashed #d2992288; border-radius: 999px; padding: 0 6px; white-space: nowrap; }
+
+/* the comparison line opens a window on click: its parts take its cursor (not the ? of a hover) */
+.reg-head * { cursor: inherit !important; }
+.lib-objectives .report-pending { opacity: .7; }
+/* the library cell (icon, name, chips) on one line */
+.libraries-table td.col-lib, td.col-lib { white-space: nowrap; }
+/* "No results for this commit": a link to launch a PR task, same box as before */
+a.no-run { display: block; text-decoration: none; color: inherit; cursor: pointer; }
+a.no-run .slot-launch { opacity: 0; margin-left: 6px; color: #58a6ff; font-weight: 600; transition: opacity .15s; }
+a.no-run:hover { color: #ddd; } a.no-run:hover .slot-launch { opacity: 1; }
+/* "No results for this commit" on the commit line */
+.commit-header .no-run.no-run-inline { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; margin: 0 0 0 12px; padding: 0; font-size: 12px; color: var(--color-text-light, #8b8b8b); white-space: nowrap; border: none; background: none; }
+.commit-header .no-run-inline .no-run-launch { color: #58a6ff; font-weight: 700; border: 1px solid #58a6ff88; border-radius: 6px; padding: 0 7px; background: #1d2a52; }
+.commit-header a.no-run-inline:hover .no-run-launch { background: #2a3d75; border-color: #58a6ff; color: #fff; }
+
+/* 🐞 at the end of the line of a type: its bug report */
+.type-bugs { text-decoration: none; font-size: 0.95em; cursor: pointer; }
+.type-bugs:hover { filter: brightness(1.3); }
