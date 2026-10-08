@@ -3,23 +3,62 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Task View</title>
+  <title>Task</title>
   <link rel="stylesheet" href="board.css">
   <link rel="stylesheet" href="taskcard.css">
   <link rel="stylesheet" href="task.css">
 </head>
-<body>
-  <div class="header" id="header">
-    <div class="stats-bar">
-      <div class="stat" id="error-stat" style="display:none">
-        <span class="stat-value" style="color:#f44336" id="error-message"></span>
-      </div>
+<body class="task-page">
+  <div class="task-error" id="error-stat" hidden><span id="error-message"></span></div>
+
+  <div class="task-wrap" id="task" hidden>
+    <div class="task-head">
+      <h1><span id="task-title"></span><span class="task-state" id="task-state"></span></h1>
+      <div class="task-meta" id="task-meta"></div>
+      <div class="task-actions" id="task-actions"></div>
     </div>
+
+    <h2>Settings</h2>
+    <div class="task-settings" id="task-settings"></div>
+
+    <h2>Steps <span class="task-hint">— an attempt: its duration (and the objectives it found); hover: details; click: its logs</span></h2>
+    <div class="task-steps-scroll"><table class="task-steps" id="task-steps"></table></div>
+
+    <details class="task-classic" open>
+      <summary>Every step and attempt <span class="task-hint">— the card of the Scheduler: monitor summaries (click: the full message), exit codes, per-step actions</span></summary>
+      <div id="container-running-steps" class="container-running-steps"></div>
+    </details>
   </div>
 
-  <div id="container-running-steps" class="container-running-steps"></div>
-
   <div id="exec-tooltip" class="exec-tooltip"></div>
+
+  <template id="help-panel">
+    <h2>What is shown</h2>
+    <p>One task, running or finished. The page does not refresh on its own: <b>🔄</b> in the top bar.</p>
+
+    <h2>Header and actions</h2>
+    <ul>
+      <li>Job type and commit (<code>VulnA@5c588a #540 message</code>), the state of the task, who started it, when it started and ended, its duration and steps.</li>
+      <li><b>↻ Relaunch as template</b>: the launcher, pre-filled with every setting of this task (job type, commit, package, vendor, features, parameters, timeout, cores…); edit any field, then launch. An edited field is outlined. A task started automatically (for a commit or a PR) has no launcher record: its job type and commit are filled in, the other settings are the defaults.</li>
+      <li>📊 its published results, <b>🕘 N runs</b> (when its commit was run several times: every task of that commit and type, compared), 🐞 its objectives (live page while it runs, final report once it ended), ⬇️ its artefacts (logs, outputs of every attempt, objectives and their replay reports), 🔗 a link to this page.</li>
+      <li>While it runs: its priority and ✖ cancel.</li>
+      <li>Once it ended: <b>💣 Delete</b> its archived results, here and on the publisher; Results then shows the previous run of the same commit and type, if any.</li>
+    </ul>
+
+    <h2>Settings</h2>
+    <p>The settings in readable form (from the launcher the task was started with), then <b>every argument</b> as it was given.</p>
+
+    <h2>Steps</h2>
+    <ul>
+      <li>One row per step (Init, Build, Experiment…), one column per configuration (library); a chip per attempt: its duration, the number of objectives it found.</li>
+      <li>Colours: <span class="att done">done</span> <span class="att running">running</span> <span class="att pending">pending</span> <span class="att timedout">timed out</span> <span class="att cancelled">cancelled</span> <span class="att failed">failed</span>.</li>
+      <li>Hover a chip: state, exit code, cores, start and end, the summary of its monitor message. Click: its logs.</li>
+    </ul>
+
+    <h2>Every step and attempt</h2>
+    <p>The card of the Scheduler, unfolded: monitor summaries (click for the full message), exit codes, cancel one step, 📜 logs.</p>
+    <p>Details: an element with the <span style="cursor:context-menu;text-decoration:underline dotted">box cursor</span> (an arrow with a small box) opens a small window on <b>click</b> (Esc or a click elsewhere closes it); an element with the <span style="cursor:help;text-decoration:underline dotted">? cursor</span>, a link or a button explains itself on <b>hover</b> (after half a second). Press <b>?</b> to toggle this panel.</p>
+  </template>
 
   <script type="module" src="task.js"></script>
 </body>
