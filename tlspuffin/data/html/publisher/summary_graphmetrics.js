@@ -1,8 +1,7 @@
 import { Metrics } from './summary_metrics.js';
 import { Graph } from './summary_graph.js';
 import { manageGraphs } from './summary_managegraphs.js';
-import '../third-party/plotly/plotly-3.3.0.min.js';
-const Plotly = window.Plotly;
+import { Plotly } from './plotly_lazy.js';
 
 class GraphMetrics {
   #metrics;
@@ -38,6 +37,8 @@ class GraphMetrics {
   #BuildDialog() {
     this.#html = document.createElement('div');
     this.#html.classList.add('graph-modal');
+    // a commit clicked on the axis (Graph.DecorateGraphXTicks): this window closes, the page shows its card
+    this.#html.addEventListener('pb-show-commit', () => this.Close());
     const closeWindow = document.createElement('div');
     closeWindow.classList.add('graph-modal-overlay');
     closeWindow.onclick = this.Close.bind(this);
@@ -128,7 +129,7 @@ class GraphMetrics {
 
     // Close modal on ESC key
     this.#saveDocKeyDown = document.onkeydown;
-    document.onkeydown = (event) => {if (event.key === 'Escape') { this.Close(); }};
+    document.onkeydown = (event) => {if (event.key === 'Escape') { event.preventDefault(); this.Close(); }};
 
     this.#ApplyDefaultSelection();
   }
@@ -253,7 +254,10 @@ class GraphMetrics {
     
     const [ traces, layout, config, unusedCommitsList ] = 
         this.#graph.GenerateGraphData(selectedType, selectedLibrary, selectedMetric);
-    const ApplyColors = () => Graph.ColorGraphXTicks(this.#graphContainer, unusedCommitsList, '#e74c3c');
+    const ApplyColors = () => {
+      Graph.ColorGraphXTicks(this.#graphContainer, unusedCommitsList, '#e74c3c');
+      Graph.DecorateGraphXTicks(this.#graphContainer);
+    };
     Plotly.newPlot(this.#graphContainer.id, traces, layout, config)
         .then((result) => { ApplyColors(); this.#graphContainer.on('plotly_afterplot', ApplyColors); });
 
