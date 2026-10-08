@@ -210,3 +210,38 @@ void ns_Server::RequestHandlerLogs::handleRequest(Poco::Net::HTTPServerRequest& 
   out << buffer;
   out.flush();
 }
+
+void ns_Server::RequestHandlerPresets::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
+  std::string const repo = std::get<0>(args_);
+  std::string const& commitid = std::get<1>(args_);
+
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json; charset=utf-8");
+
+  if (apis_->gitAPI_.find(repo) == apis_->gitAPI_.end()) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+    std::ostream& out = response.send();
+    out << ErrorJSON("Unknown repository " + repo);
+    out.flush();
+    return;
+  }
+
+  std::string buffer;
+  bool notFound = false;
+  if (!apis_->gitAPI_.at(repo).Presets(commitid, buffer, notFound)) {
+    response.setStatus(notFound ? Poco::Net::HTTPResponse::HTTP_NOT_FOUND
+                                : Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    std::ostream& out = response.send();
+    out << ErrorJSON(buffer);
+    out.flush();
+    return;
+  }
+  std::ostream& out = response.send();
+  out << buffer;
+  out.flush();
+}
