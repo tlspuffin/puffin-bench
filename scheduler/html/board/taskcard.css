@@ -192,6 +192,10 @@
   color: #bbb;
 }
 
+.card-task-args > :first-child {
+  flex-shrink: 0;
+}
+
 .card-task-args:has(+ :not(.card-task-args)) {
   margin-bottom: 15px;
 }
@@ -571,3 +575,369 @@
 .logs-scroll-overlay::-webkit-scrollbar-thumb:hover {
   background: #666;
 }
+
+/* ── Task state (see TaskCard.Status) ─────────────────────────────────────────────────────────────────────── */
+.card-task-status {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "badge times count" "bar bar bar";
+  align-items: center;
+  gap: 4px 8px;
+  margin: -12px -4px 10px;
+  padding: 6px 8px;
+  border-radius: 10px 10px 4px 4px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.card-task-status-badge {
+  grid-area: badge;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.card-task-status-times {
+  grid-area: times;
+  color: #ccc;
+  overflow-wrap: normal;
+}
+
+.card-task-progress-count {
+  grid-area: count;
+  color: #aaa;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-task-progress {
+  grid-area: bar;
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.card-task-progress-done {
+  background: #4CAF50;
+}
+
+.card-task-progress-running {
+  background: white;
+}
+
+.card-task-status-running .card-task-status-badge {
+  background: #2e7d32;
+  color: white;
+}
+
+.card-task-status-waiting .card-task-status-badge {
+  background: #5d4037;
+  color: #ffcc80;
+}
+
+.card-task-status-scheduled .card-task-status-badge {
+  background: transparent;
+  color: #FF9800;
+  border: 1px dashed #FF9800;
+}
+
+.card-task-status-cancelling .card-task-status-badge {
+  background: #b71c1c;
+  color: white;
+}
+
+/* running tasks stand out, scheduled ones step back */
+.card-task-running.card-task-running {
+  border-top: 3px solid transparent;
+}
+
+.card-task-running.card-task-running.card-task-running:not(.card-task-scheduled):not(.card-task-waiting):not(.card-task-cancelling) {
+  border-top-color: #4CAF50;
+  box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.35);
+}
+
+.card-task-running.card-task-waiting {
+  border-top-color: #ffb74d;
+}
+
+.card-task-running.card-task-scheduled {
+  border-style: dashed;
+  border-top: 3px dashed #FF9800;
+  opacity: 0.8;
+}
+
+.card-task-running.card-task-scheduled:hover {
+  opacity: 1;
+}
+
+/* ── Compact layout ───────────────────────────────────────────────────────────────────────────────────────── */
+.card-task-running {
+  padding: 12px 10px 10px;
+}
+
+.card-task-args {
+  margin-top: 2px;
+  margin-bottom: 2px;
+  gap: 0.6rem;
+  font-size: 13px;
+}
+
+.card-task-args:has(+ :not(.card-task-args)) {
+  margin-bottom: 8px;
+}
+
+/* the COMMIT_ID argument once resolved: the commit line alone */
+.card-task-args-commit > :first-child {
+  display: none;
+}
+
+.card-step {
+  margin-top: 6px;
+  padding: 4px 4px;
+}
+
+.card-step:hover {
+  transform: none;
+}
+
+.card-step-main-name .card-attempt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.card-step-squares {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 220px;
+}
+
+.card-step-square {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--accent-color);
+  opacity: 0.9;
+}
+
+.card-step-square.state-pending {
+  background: transparent;
+  border: 1px solid #FF9800;
+}
+
+.card-step-square.state-running {
+  box-shadow: 0 0 4px white;
+}
+
+.card-step-square.failed {
+  background: #f44336;
+}
+
+.card-step-running {
+  margin-top: 4px;
+}
+
+.card-step-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px 0;
+  font-size: 12px;
+  color: #bbb;
+}
+
+.card-step-summary .card-step-value-name {
+  padding: 1px 8px;
+  font-size: 13px;
+  color: white;
+}
+
+.card-attempt-item {
+  padding: 8px 10px;
+  margin-top: 4px;
+}
+
+/* pending and finished attempts: one line */
+.card-attempt-item.card-attempt-compact {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.card-attempt-compact-name {
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.card-attempt-compact-info {
+  flex: 1;
+  color: #ccc;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-attempt-compact .card-attempt-logs-btn {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.card-attempt-compact-monitor {
+  flex-basis: 100%;
+  color: #999;
+  font-size: 11px;
+}
+
+.card-step-running {
+  padding-bottom: 4px;
+}
+
+.card-attempt-compact .card-attempt-cancel-btn {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.card-attempt-item.card-attempt-running {
+  border-left: 3px solid #4CAF50;
+}
+
+/* task arguments: one line, warnings on their own lines */
+.card-task-args-box {
+  margin: 4px 0 6px;
+  font-size: 12px;
+}
+
+.card-task-args-line {
+  color: #bbb;
+}
+
+/* an argument on one line, cut with … at the width of the card (its full value in the hover) */
+.card-task-args-line .card-task-arg {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.card-task-args-warning {
+  margin-top: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 152, 0, 0.15);
+  color: #ffcc80;
+}
+
+/* monitor message of an attempt: one line, the full message on click */
+.card-attempt-monitor {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+
+.card-attempt-monitor-summary {
+  display: flex;
+  gap: 4px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.card-attempt-monitor-summary:hover {
+  color: #ddd;
+}
+
+/* the items carry their own colors; the marker shows the most severe one */
+.card-attempt-monitor-summary.level-warning .card-attempt-monitor-toggle {
+  color: #ffb74d;
+}
+
+.card-attempt-monitor-summary.level-error .card-attempt-monitor-toggle {
+  color: #ff5252;
+}
+
+.card-attempt-monitor-summary.level-success .card-attempt-monitor-toggle {
+  color: #69f0ae;
+}
+
+.card-attempt-monitor-toggle {
+  flex-shrink: 0;
+}
+
+.card-attempt-monitor-full {
+  margin: 4px 0 2px;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  background: #1e1e1e;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  color: #ddd;
+}
+
+.card-task-id {
+  font-size: 15px;
+}
+
+/* attempt highlighted by its monitor summary (objective: the run found what it looks for) */
+.card-attempt-item.card-attempt-highlight.highlight-objective {
+  background: rgba(255, 196, 0, 0.16);
+  border: 1px solid #ffc400;
+  border-left: 4px solid #ffc400;
+}
+
+.card-attempt-item.card-attempt-highlight.highlight-error {
+  background: rgba(255, 82, 82, 0.12);
+  border-left: 4px solid #ff5252;
+}
+
+/* buttons of the state strip gathered from the attempts (e.g. live objectives) */
+.card-task-links-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.card-task-link-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  text-decoration: none;
+  background: #455a64;
+  color: white;
+}
+
+.card-task-link-badge.highlight-objective {
+  background: #ffc400;
+  color: #1a1a1a;
+  box-shadow: 0 0 8px rgba(255, 196, 0, 0.6);
+}
+
+a.card-task-link-badge:hover {
+  filter: brightness(1.1);
+  text-decoration: underline;
+}
+
+.card-step-square.highlight-objective {
+  background: #ffc400;
+  box-shadow: 0 0 5px #ffc400;
+}
+/* logs viewer: an output without content */
+.tab-btn.empty, .tab-btn:disabled { opacity: .4; cursor: not-allowed; }
+.tab-btn.empty:hover { background: inherit; }
+/* logs viewer: 🔄 next to the close button */
+.modal-actions { display: flex; align-items: center; gap: 14px; }
+.modal-refresh { background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1; opacity: .75; }
+.modal-refresh:hover { opacity: 1; }
+.modal-refresh.spin { animation: modal-refresh-spin .5s linear; }
+@keyframes modal-refresh-spin { to { transform: rotate(360deg); } }
