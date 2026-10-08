@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unordered_set>
+
 #include "config.hxx"
 #include "task.hxx"
 #include "step.hxx"
@@ -35,6 +37,8 @@ public:
       LoadStatus(rapidjson::Value const& tasksmanager, ns_Schedule::Schedule const* schedule);
 
   std::string GetTaskState(uint64_t taskID);
+  // the ids of the tasks it holds (pending, running, ending)
+  std::unordered_set<uint64_t> TaskIDs();
 
   bool TaskUpdateArgs(uint64_t taskID, 
     std::unordered_map<std::string, std::string>& newArgs);

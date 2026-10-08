@@ -1,4 +1,5 @@
 #pragma once
+#include <mutex>
 
 #include "executor.hxx"
 #include "../../system/linux.hxx"
@@ -99,11 +100,23 @@ public:
   void SyncTaskEnvironment(ExecutorTaskData* data) const;
   void UpdateTaskEnvironment(ExecutorTaskData* data);
 
+  bool SetMaxCores(uint64_t maxCores, uint64_t durationSec, std::string& error) override;
+
 private:
   ns_Executor::LocalConfig const& config_;
   ns_System::Linux& os_;
-  uint64_t nbCoresFree_;
+  // cores: in use by the running steps; the maximum for the steps (the default of the configuration, or a temporary
+  // one until nbCoresUntilMs_); the cores the executor may use at all (configuration: cores, excludeCores)
+  uint64_t nbCoresUsed_;
   uint64_t nbCoresMax_;
+  uint64_t nbCoresDefault_ = 0;
+  uint64_t nbCoresLimit_ = 0;
+  uint64_t nbCoresUntilMs_ = 0;
+  // new steps wait: the run and export storage has less than diskMinimumGB free
+  bool diskBlocked_ = false;
+  uint64_t MinFreeDisk() const;
+  uint64_t FreeCores() const { return nbCoresMax_ > nbCoresUsed_ ? nbCoresMax_ - nbCoresUsed_ : 0; }
+  void CheckMaxCoresExpiry();
   std::vector<bool> coresFree_;
   uint64_t nbChild_;
   uint16_t serverPort_;
@@ -114,6 +127,9 @@ private:
   struct Executor::OSLoad stats_;
   uint8_t cpuMaxLoad_;
   uint64_t memMinAllowed_;
+  // The cores bookkeeping, and the user.slice cpuset derived from it, is also updated by the
+  // step shutdowns, which run in parallel when the scheduler stops.
+  std::mutex coresLock_;
 
   void WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step, std::string const& label);
   void KillSession(pid_t sessionID, std::filesystem::path const& cgroupPath, 

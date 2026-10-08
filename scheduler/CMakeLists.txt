@@ -158,6 +158,10 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.html" "${CMA
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h" History_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h" History_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/help.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h" Help_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/hostlinks.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/hostlinks_js.h" HostLinks_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/tips.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/tips_js.h" Tips_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/nav.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/nav_js.h" Nav_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/navhelp.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/navhelp_js.h" NavHelp_JS)
 
 set(SCHEDULER_SRC 
   src/scheduler/config.cxx 
@@ -165,6 +169,7 @@ set(SCHEDULER_SRC
   src/scheduler/server/config.cxx src/scheduler/server/server.cxx src/scheduler/server/parts_handler.cxx src/scheduler/server/request_handler.cxx 
   src/scheduler/schedule/config.cxx src/scheduler/schedule/schedule.cxx src/scheduler/schedule/task.cxx src/scheduler/schedule/step.cxx 
   src/scheduler/schedule/tasksmanager.cxx src/scheduler/schedule/step_configurations.cxx src/scheduler/schedule/publish.cxx
+  src/scheduler/schedule/duration_history.cxx src/scheduler/schedule/folder_remover.cxx
   src/scheduler/schedule/executor/config.cxx src/scheduler/schedule/executor/executor.cxx src/scheduler/schedule/executor/local.cxx 
   src/scheduler/schedule/executor/output_ring.cxx
   src/scheduler/system/linux_cores.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx 
@@ -181,7 +186,7 @@ set(SCHEDULER_SRC
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/hostlinks_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/tips_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/nav_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/navhelp_js.h 
   ${GENERATED_VERSION_C}
 )
 

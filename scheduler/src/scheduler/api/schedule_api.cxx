@@ -19,6 +19,14 @@ uint64_t ns_API::ScheduleAPI::AddTask(std::string const& name,
       user, jobType);
 }
 
+bool ns_API::ScheduleAPI::ProbeLock(uint32_t timeoutMs, uint64_t& waitedMs) {
+  return schedule_.ProbeLock(timeoutMs, waitedMs);
+}
+
+bool ns_API::ScheduleAPI::IsStopping() const {
+  return schedule_.IsStopping();
+}
+
 void ns_API::ScheduleAPI::GetRunningTaskSummary() {
 }
 
