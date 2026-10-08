@@ -133,6 +133,8 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 | POST | `/api/task/new` | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/<id>` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/<id>/priority/<priority>` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/executor/<name>/max_cores/<max>/<seconds>` | `RequestHandlerExecutorMaxCores` |
+| POST | `/api/runs/cleanup` | `RequestHandlerRunsCleanup` |
 | PATCH | `/api/task/<id>/args` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/<id>` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/<id>/step/<uuid>` | `RequestHandlerTaskCancelStep` |
@@ -195,6 +197,7 @@ Drift note: an earlier revision of this documentation set referenced `html/board
   tasksmanager.json          full task/step state, rewritten every loop iteration
   status.json                running-steps snapshot
   steps_done.json            append-only log of every step that finished
+  step_durations.json        last durations of each kind of step, for the estimated times (see task-step-lifecycle.md)
   <taskID>.zip               completed task archive (built by `zip`, moved here)
   <taskID>.json              task metadata snapshot (post-archive)
   Canceled/

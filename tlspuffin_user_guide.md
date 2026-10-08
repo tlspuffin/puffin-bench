@@ -149,7 +149,7 @@ CleanAllRepo
 ### Perf vs Vuln termination
 
 - **Perf**: the fuzzer runs for the full `timeout` — reaching it without dying counts as `success`; dying earlier (crash, hang-kill) counts as `fail`. Default `70m` in `PR_perf_cargo.json`, 5 retries.
-- **Vuln**: stops as soon as at least one `.trace` file appears under `experiments/*/objective/`; a run is `success` only if the task reached `Done` **and** an objective was actually found (on-disk count or in the last stats snapshot) — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
+- **Vuln**: a VulnA run stops when the fuzzer records the **expected bug** of its configuration (declared in `vuln_targets.json`, see [Expected bugs](#expected-bugs-and-new-bugs)); other objectives are kept, and the known CVE-2024-5814 is set apart on wolfSSL < 5.7.2 (it never ends a run there; elsewhere its claim is a bug). A configuration without declared target (VulnB) stops at its first objective that is not set apart. A run is `success` only if the task reached `Done` **and** the expected bug (any objective without target) was found — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
 
 ---
 
@@ -267,15 +267,15 @@ The scheduler's generic cache endpoints (`GET`/`PUT /api/cache/<id>`, see [sched
 
 ## Vulnerability configurations (group A)
 
-`PR_vulnerabilities-groupA_cargo.json` tests five known WolfSSL vulnerabilities in parallel, 5 retries × 190-minute timeout each:
+`PR_vulnerabilities-groupA_cargo.json` tests five known WolfSSL vulnerabilities in parallel, 5 retries × 190-minute timeout each. The expected bug of each preset (the CVE left in it, and how the fuzzer records it) is declared in `vuln_targets.json`:
 
-| Config | Vendor preset | CVE |
-|--------|----------------|-----|
-| BUF | `wolfssl:wolfssl540-buf` | CVE-2022-42905 |
-| CDOS | `wolfssl:wolfssl530-cdos` | CVE-2022-39173 |
-| HEAP | `wolfssl:wolfssl540-heap` (+asan) | CVE-2022-39173 |
-| SDOS2 | `wolfssl:wolfssl540-sdos2` | CVE-2022-39173 |
-| SKIP | `wolfssl:wolfssl510-skip` | CVE-2022-25638 + CVE-2022-39173 |
+| Config | Vendor preset | Expected CVE | Recognised by |
+|--------|----------------|-----|-----|
+| BUF | `wolfssl:wolfssl540-buf` | CVE-2022-39173 | crash in `RefineSuites` |
+| CDOS | `wolfssl:wolfssl530-cdos` | CVE-2022-38153 | crash in `AddSessionToCache` |
+| HEAP | `wolfssl:wolfssl540-heap` (+asan) | CVE-2022-42905 | crash in `AddPacketInfo` |
+| SDOS2 | `wolfssl:wolfssl540-sdos2` | CVE-2022-38152 | crash in `DoTls13ClientHello` |
+| SKIP | `wolfssl:wolfssl510-skip` | CVE-2022-25640 | claim `Authentication bypass` |
 
 ## Vulnerability configurations (group B)
 
@@ -285,6 +285,17 @@ The scheduler's generic cache endpoints (`GET`/`PUT /api/cache/<id>`, see [sched
 |--------|----------------|--------|
 | SDOS1 | `openssl:openssl111j` | OpenSSL 111j |
 | SIG | `wolfssl:wolfssl510-sig` | CVE-2022-25640 + CVE-2022-39173 |
+
+No target is declared for group B: a run ends at its first objective that is not set apart.
+
+## Expected bugs and new bugs
+
+- **The file to edit**: `tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json` — the expected bug of each VulnA preset (`cve`, `kind`: `crash` with `match` among the top 3 frames of the fuzzer's backtrace or of the replay's stack, or `claim` with the violation message; `note`: where the rule comes from) and, under `_not_targeted`, the claims of known CVEs that are never a target, each with its scope (CVE-2024-5814: set apart only on wolfSSL < 5.7.2, which all have it; on any other library or version the claim is a bug like any other); under `_cves`, the reference table of the CVEs of the Vuln jobs (alias, CVSS, type, version, TLS), with an optional signature (`kind`, `match`) for a CVE no target names. `scripts/build.sh` writes both into the job scripts (`PR_targets.sh`); new tasks and the objectives reports written afterwards use them.
+- **To read it**: the **🎯 Bugs reference** page, `http://<host>:10083/html/publisher/bugs.html` (linked from the help of Results, from every objectives report and from the guide of the bench): the targets, the CVEs set apart, and the bugs found so far per library.
+- **On the pages**: 🎯 expected (VulnA: `🎯 k/n` on Results and on the objectives report, the same count: runs that found it **and succeeded**, i.e. ended normally with their end-of-run summary, the runs of the statistics; `+k failed`: runs that found it without succeeding, e.g. ended by their timeout or without end-of-run summary, why on click of the row's status icon and listed on the report; green every run, amber every configuration but not every run, red a configuration in no run; the report's banner, the 🎯 pill of the task on the scheduler's history page and the Runs page give the conclusion with the same counts (one verdict, `bugs.js`, written into the report; `check_verdicts.py` checks them all after each cron pass); a task whose job scripts had no target (before 2026-10-07) is marked "before targets": its runs succeeded on any objective; a faint `· no replay` when no replay reproduced it in some runs, the fuzzer's log being the evidence; the failed-runs row of Results lists the runs without end-of-run summary), ⦸ set apart, ⚠ unexpected (another bug of a configuration with a target), 📋 known (a CVE tlspuffin declares for the build of a plain version), 🚨 **new bug**.
+- **New bugs**: `scripts/tools/known_bugs.js` (run by `objectives_report.sh --all`) rebuilds `/html/objectives/known_bugs.json` from every final objectives report, oldest first: `<library>|<signature>` → the first task with it, the signature being the claim or the top function of the crash. A real bug (fuzzer record or replay), neither expected nor set apart, is marked 🚨 NEW BUG on its report and 🚨🚨🚨 on Results:
+  - in a configuration with an expected bug (an alias: BUF, SKIP…), when no earlier task had its signature in that configuration, whatever the job (VulnA, VulnB, Perf, campaigns);
+  - in a plain version (e.g. Perf's wolfSSL 5.8.0, a campaign on wolfssl540), when it is none of the CVEs tlspuffin declares for that build — the build's `vendorinfo.sh` (puffin-build): known vulnerabilities of the version (the library's `builder.cmake`) minus those the preset fixes, recorded by `ForcedBuild` as `cli.vulnerabilities` — whose signature `vuln_targets.json` gives (a CVE's own `kind`/`match` in `_cves`, else its target's, else its claim in `_not_targeted`; `objectives_page/cve_signatures.jq`). Such a bug is shown as 📋 known · CVE; any other is new on every task until it is added to the file. A run without declaration (built before puffin-build, Rust harness, job scripts before 2026-10-09) follows the first rule.
 
 ## Performance configurations
 

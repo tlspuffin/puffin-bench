@@ -151,6 +151,7 @@ verbatim in `Task::flag_`, later serialised into the task JSON and exposed via t
 | `cgroupPath` | `/sys/fs/cgroup/scheduler.service` | cgroup v2 root the scheduler tries to use (symbolic, `${euid}`/`${uid}` resolved) |
 | `cpuMaxLoad` | 90 | CPU load percent above which no new step starts (only enforced when cgroup `cpuset` control is unavailable — see below) |
 | `memMinimumRatio` | 0.15 | Fraction of total memory that must stay free; scheduling stops below it |
+| `diskMinimumGB` | 50 | Free space (GB) needed on the run and export storage to start a step; below it new steps wait, running ones go on (0: no check) |
 
 `executor.sh` and `functions.sh` are embedded in the binary at build time
 (`embeded/scheduler/scripts/executor_sh.h`, `functions_sh.h`) and written out to `scriptPath` by
@@ -158,8 +159,12 @@ verbatim in `Task::flag_`, later serialised into the task JSON and exposed via t
 
 ### CPU Core Management
 
-`Local` maintains `vector<bool> coresFree_` (size `nbCoresMax_`) and a running count
-`nbCoresFree_`.
+`Local` maintains `vector<bool> coresFree_` and counts the cores **in use** (`nbCoresUsed_`); the free
+cores are `nbCoresMax_ - nbCoresUsed_` (`FreeCores()`). `nbCoresMax_` is the default of the configuration
+(`nbCoresDefault_`) or a temporary maximum set by `SetMaxCores()` (`PATCH /api/executor/<name>/max_cores/...`)
+until `nbCoresUntilMs_`, at most the cores of the configuration (`nbCoresLimit_`): a lower maximum kills nothing,
+the next steps wait until they fit; the default comes back at the end (`CheckMaxCoresExpiry()`, every
+scheduling round).
 
 **`AssignCores(nbCores)`** (called from `Execute()`, before `fork()`):
 1. If `config_.nbCores_ == 0` (explicit `cores` list mode), take the first N free indices in
@@ -167,7 +172,7 @@ verbatim in `Task::flag_`, later serialised into the task JSON and exposed via t
 2. Otherwise call `os_.Cores().SelectMostIdleCores(nbCores, &coresFree_)` — reads the current
    `/proc/stat` delta ratios cached in `CoresMonitor` (refreshed by the `Linux` system-monitor
    thread, not by this call) and returns the `nbCores` least-loaded free indices.
-3. Mark those indices `false` in `coresFree_`, decrement `nbCoresFree_`.
+3. Mark those indices `false` in `coresFree_`, add them to `nbCoresUsed_`.
 4. `UpdateUserSliceCpuset()` — best-effort `sudo -n systemctl set-property user.slice
    AllowedCPUs=...` to keep the desktop/login session off the cores reserved for jobs (silently
    disabled if `sudo` is unavailable or the cgroup root is itself under `/user.slice/`).

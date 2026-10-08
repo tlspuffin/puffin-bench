@@ -5,10 +5,14 @@
 ```
 html/
 ├── board/                      Web dashboard (served as static files under /files/board/)
-│   ├── board.html / board.js / board.css     Entry point, polling loop, task list rendering
-│   ├── taskcard.html/js/css                  Task card component: step display, log modal
+│   ├── board.html / board.js / board.css     Entry point, refresh, the running and pending tasks in one
+│   │                                         horizontally scrolling row (running, waiting for cores,
+│   │                                         scheduled), Fold all / Unfold active / Unfold all
+│   ├── taskcard.html/js/css                  Task card component: state strip (state, steps, estimated
+│   │                                         start/end), steps with one square per attempt, log modal
 │   ├── task.html / task.js / task.css        Single-task detail view
-│   ├── history.html / history.js / history.css  Task history view
+│   ├── history.html / history.js / history.css  Finished tasks of every user in one list grouped by day,
+│   │                                            filters, details of a task in a drawer
 │   ├── terminal.js                           In-browser log viewer (stdout/stderr streaming)
 │   ├── logsmanager.js                        Log chunk streaming helpers
 │   ├── clipboard.js                          Copy-to-clipboard helper
