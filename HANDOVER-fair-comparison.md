@@ -1,6 +1,7 @@
 # Handover state — fair comparison of historical tlspuffin commits
 
 > Working notes so that anyone can resume this work. **Drop this file before merging the PR(s).**
+> **Open work on the UI, objectives and launcher (2026-10-06 onwards): see `HANDOVER-open-work.md` first.**
 > Update it (and commit) at the end of every step.
 
 ## Goal (requirements from the maintainer)
@@ -511,3 +512,17 @@ Record `"compat"` in cli json; `compat.json` artefact.
   (dropped before merge). Replies' auto-added footers removed by the maintainer. New commit on #10: confirmed vs
   unconfirmed objectives (red / orange 🐞 everywhere, objectives.confirmed). tlspuffin#545: rustfmt fixed
   (d9b09ff44), CI green, waiting for review; #544 green, waiting for review.
+- 2026-10-06: puffin-bench #12 (pr/commit-context, stacked on #10): commit context everywhere (commitinfo.js:
+  merge / PR tip / PR member "#N·i/n" / dev commit; git_restapi returns `pulls`), board as one row of task cards
+  (state strip, ETA from DurationHistory = median of the last 15 durations per job type|step|config, stored in
+  exports/step_durations.json), monitor messages summarized by the launcher (#MONITOR_JSON line written by
+  MonitorExperiment), objectives highlighted with a link to the live page, objectives report pages rebuilt
+  (report.js/report.css next to the pages), History page redesigned (scheduler records a per-task summary and
+  args in the users DB; tasks finished before this deploy have no summary and show fewer details).
+  Exact replays: ExperimentSaveExecution writes `.currentlaunch` (binary + sha256, faketime prefix, ASLR, flags,
+  ASAN env); replays run that binary directly with the same options (SDOS2 no-crash replays lacked
+  --put-use-clear); a changed binary is a replay-error. Compat rule security_claim_objective
+  (2dad52a3c..0ac66344b, 28 dev commits): restores the abort on Error::SecurityClaim dropped by 1dce52383.
+  To deploy on cassis-calc: stop target → checkout pr/commit-context → deploy.sh →
+  `./scheduler --only-install --force-install config.json` → start target. Validation pending: Vuln group A on
+  dev tip (SDOS2 as security violations, SDOS2 0-min runs), Vuln on 92251a295 / 02a930273 (compat rule).
