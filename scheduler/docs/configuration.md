@@ -164,7 +164,8 @@ The only supported executor `type` is `1` (Local); any other value throws `"Exec
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `nbCores` / `excludeCores` | uint / array | `1` core, `excludeCores: [0]` | Together select which cores the executor may assign: start from all cores, keep `nbCores` of them, excluding the indices in `excludeCores`. Used only when `cores` is absent. |
+| `nbCores` / `excludeCores` | uint / array | `1` core, `excludeCores: [0]` | Together select which cores the executor may assign: start from all cores, keep `nbCores` of them, excluding the indices in `excludeCores`. Used only when `cores` is absent. `nbCores` is the default maximum of cores in use at once; the board's "change max" sets a temporary one. The tlspuffin deploy script writes 80 % of the machine's cores. |
+| `diskMinimumGB` | uint | `50` | Free space (GB) needed on the run and export storage to start a step; below it new steps wait, running ones go on; 0: no check. |
 | `cores` | array of uint | — | Alternative, explicit form: the exact list of core indices the executor may use (overrides `nbCores`/`excludeCores` when present). |
 | `scriptPath` | path | `scripts` | Directory containing `executor.sh` and `functions.sh`; must already exist (`canonical()`), the two scripts themselves are auto-extracted if missing. |
 | `logsSize` | uint | `16777216` (16 MiB) | Per-step in-memory output ring buffer size in bytes. |

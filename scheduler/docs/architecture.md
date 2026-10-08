@@ -120,11 +120,12 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 
 | Method | Path pattern | Handler |
 |---|---|---|
-| GET | `/api/task/<id>/<uuid>/<step>/output/(stdout\|stderr\|N)/<size>/<offset>` | `RequestHandlerTaskOutputs` |
+| GET | `/api/task/<id>/<uuid>/<step>/output/(stdout\|stderr\|commands\|N)/<size>/<offset>` | `RequestHandlerTaskOutputs` |
 | GET | `/api/task/<id>/artefacts` | `RequestHandlerTaskGetArtefacts` |
 | GET | `/api/task/<id>/final_state` | `RequestHandlerTaskGetState` (final) |
 | GET | `/api/task/<id>/state` | `RequestHandlerTaskGetState` |
 | GET | `/api/tasks/running` | `RequestHandlerTasksRunning` |
+| GET | `/api/runs/unknown` | `RequestHandlerRunsUnknown` |
 | GET | `/api/cache/<id>` | `RequestHandlerCacheGet` |
 | GET | `/api/users` | `RequestHandlerUsersList` |
 | GET | `/api/user/<user>/job_types` | `RequestHandlerUserJobsTypeList` |
@@ -133,6 +134,8 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 | POST | `/api/task/new` | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/<id>` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/<id>/priority/<priority>` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/executor/<name>/max_cores/<max>/<seconds>` | `RequestHandlerExecutorMaxCores` |
+| POST | `/api/runs/cleanup` | `RequestHandlerRunsCleanup` |
 | PATCH | `/api/task/<id>/args` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/<id>` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/<id>/step/<uuid>` | `RequestHandlerTaskCancelStep` |
@@ -183,6 +186,7 @@ Drift note: an earlier revision of this documentation set referenced `html/board
   <taskID>/
     logs/          stdout.<stepID>-<rankID>-<attemptID>.txt  (live, via MemoryRing)
                    stderr.<stepID>-<rankID>-<attemptID>.txt
+                   commands.<stepID>-<rankID>-<attemptID>.txt  every command of the step (executor.sh)
                    .steps.json           append-only per-task step-finish log
     output/        created but not currently archived (rename to final storage
                    is commented out in Task::FinalizeAndArchive)
@@ -195,6 +199,7 @@ Drift note: an earlier revision of this documentation set referenced `html/board
   tasksmanager.json          full task/step state, rewritten every loop iteration
   status.json                running-steps snapshot
   steps_done.json            append-only log of every step that finished
+  step_durations.json        last durations of each kind of step, for the estimated times (see task-step-lifecycle.md)
   <taskID>.zip               completed task archive (built by `zip`, moved here)
   <taskID>.json              task metadata snapshot (post-archive)
   Canceled/
