@@ -547,3 +547,109 @@
   border: 1px solid #f44336;
   color: #e57373;
 }
+/* the scheduler answered but is slow or busy: the launch goes on */
+.jl-toast.warn {
+  display: block;
+  background: rgba(255, 196, 0, 0.12);
+  border: 1px solid #ffc400;
+  color: #ffd089;
+}
+
+/* commit line of the task descriptions on the board, task and history pages (see describeTask, commitinfo.js) */
+.commit-line .ci-sha {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+}
+
+.commit-line a {
+  color: #1f6feb;
+  text-decoration: none;
+}
+
+.commit-line a:hover {
+  text-decoration: underline;
+}
+
+.commit-line .ci-pr {
+  font-weight: 700;
+}
+
+.commit-line .ci-nopr {
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
+.commit-line .ci-msg {
+  font-weight: 400;
+}
+
+/* monitor summary of the tlspuffin experiments on the board (see describeMonitor) */
+.tp-mon {
+  white-space: nowrap;
+}
+
+a.tp-mon {
+  color: inherit;
+  text-decoration: underline dotted;
+}
+
+.tp-mon-success {
+  color: #b9f6ca;
+}
+
+/* objectives found where they are the expected outcome (VulnA/VulnB): plain */
+.tp-mon.tp-mon-objective-expected { font-weight: 700; }
+
+/* objectives found: a bold pill */
+.tp-mon.tp-mon-objective {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ffc400;
+  color: #1a1a1a;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.tp-mon-warning {
+  color: #ffcc80;
+}
+
+.tp-mon-error {
+  color: #ff8a80;
+}
+
+.tp-mon-muted {
+  color: #888;
+}
+/* relaunch as template: a field changed from the task's setting */
+.jl-edited { outline: 1px solid #ffb74d; outline-offset: 0; }
+
+/* ── Vendor presets (picker of the commit's presets) ── */
+.jl-vendor-field { min-width: 0; width: 100%; }
+.jl-vendor-line { display: flex; gap: 8px; align-items: center; }
+.jl-vendor-line > :first-child { flex: 1; min-width: 0; }
+.jl-vendor-line > :first-child input { width: 100%; box-sizing: border-box; }
+.jl-preset-btn { white-space: nowrap; background: var(--jl-bg); border: 1px solid var(--jl-border-light); border-radius: 8px;
+  color: var(--jl-text); font-size: 12px; padding: 7px 10px; cursor: pointer; }
+.jl-preset-btn:hover, .jl-preset-btn.on { border-color: var(--jl-accent); }
+.jl-presets { display: none; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--jl-border); border-radius: 10px;
+  background: var(--jl-bg); }
+.jl-presets.open { display: block; }
+.jl-presets-row { display: grid; grid-template-columns: 70px 1fr; gap: 8px; align-items: baseline; padding: 4px 0; }
+.jl-presets-label { font-size: 11px; text-transform: uppercase; color: var(--jl-text-muted); letter-spacing: .05em; }
+.jl-presets-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.jl-preset-chip { padding: 3px 10px; border-radius: 50px; border: 1px solid var(--jl-border-light); background: var(--jl-surface);
+  color: #bbb; font-size: 12px; cursor: pointer; font-family: inherit; }
+.jl-preset-chip:hover { border-color: #888; color: #eee; }
+.jl-preset-chip.asan { border-style: dashed; }
+.jl-preset-chip.cve { color: #ffb74d; }
+.jl-preset-chip.on { border-color: var(--jl-accent); color: #fff; background: color-mix(in srgb, var(--jl-accent) 22%, transparent); }
+.jl-presets-info { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--jl-border); font-size: 12px; color: var(--jl-text-muted); }
+.jl-presets-info b { color: var(--jl-text); font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+.jl-asan-on { color: #7ee787; }
+.jl-presets-status { font-size: 12px; color: var(--jl-text-muted); }
+.jl-vendor-note { font-size: 12px; color: #ffb74d; margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.jl-vendor-note:empty { display: none; }
+.jl-vendor-note .jl-note-ok { color: var(--jl-text-muted); }
+.jl-preset-chip.latest { border-color: #3fb950; color: #7ee787; }
+.jl-preset-chip.latest.on { background: color-mix(in srgb, #3fb950 22%, transparent); color: #fff; }
