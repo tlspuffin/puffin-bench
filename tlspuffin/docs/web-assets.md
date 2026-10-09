@@ -4,7 +4,7 @@
 
 ## Landing Page (`index.html`)
 
-A static page installed to `<datapath>/html/index.html`, with `${SCHEDULER_PORT}`/`${PUBLISHER_PORT}`/`${VIS_COMPARATOR_PORT}` resolved by the installer at install time (see [configuration.md](configuration.md)). It renders a left-hand nav (`#navitems`) built from a hardcoded `services` array — Scheduler board, Publisher results, vis_comparator, and the scheduler's history page — each opening in the `#content` iframe. Purely navigational; no data processing of its own.
+A static page installed to `<datapath>/html/index.html`, with `${SCHEDULER_PORT}`/`${PUBLISHER_PORT}`/`${VIS_COMPARATOR_PORT}` resolved by the installer at install time (see [configuration.md](configuration.md)). It renders a left-hand nav (`#navitems`) built from a hardcoded `services` array — Scheduler board, Publisher results, vis_comparator, and the scheduler's history page — each opening in the `#content` iframe; the Scheduler board is shown first. Purely navigational; no data processing of its own.
 
 ## Job Launcher (`board/launchers/`)
 

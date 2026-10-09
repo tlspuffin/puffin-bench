@@ -184,6 +184,34 @@ h1 {
   text-align: left;
 }
 
+.timesline-task-link {
+  flex: 0 0 auto;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  font-size: 1.35em;
+  line-height: 1;
+  padding: 2px 4px;
+  margin: -8px 0;
+  border: 2px solid #e53935;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 0 6px 1px rgba(229, 57, 53, 0.8);
+}
+
+.timesline-task-link:hover {
+  background: #ffd6d4;
+}
+
+.timesline-task-link.timesline-task-link-warning {
+  border-color: #f08c00;
+  box-shadow: 0 0 6px 1px rgba(240, 140, 0, 0.8);
+}
+
+.timesline-task-link.timesline-task-link-warning:hover {
+  background: #ffe9c7;
+}
+
 .timesline-content-main > button:last-child {
   flex: 0 0 auto;
   margin-left: auto;

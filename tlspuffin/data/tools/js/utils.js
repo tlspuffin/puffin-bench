@@ -101,6 +101,47 @@ export function AttachLogStats(libResult, attempt, library, attemptID, outPath) 
   }
 }
 
+// Objectives replayed at the end of an attempt (objectives-<library>-<attempt>.json, see ExperimentReplayObjectives):
+// the attempt keeps the counts, the library merges the groups (same bug type and top frames) of its attempts.
+const MAX_OBJECTIVE_GROUPS = 20;
+// replays that confirm a bug (crash, security violation, panic); "no-crash" and "replay-error" do not
+const UNCONFIRMED_OBJECTIVE_TYPES = ['no-crash', 'replay-error'];
+export function AttachObjectives(libResult, attempt, library, attemptID, outPath) {
+  const objectives = ReadJSON(`${outPath}/objectives-${library}-${attemptID}.json`, {});
+  if ((objectives === null) || !Array.isArray(objectives.groups)) {
+    return;
+  }
+  attempt.objectives = { total: objectives.total ?? 0, replayed: objectives.replayed ?? 0, distinct: objectives.groups.length };
+  const merged = libResult.objectives ?? { total: 0, replayed: 0, groups: [] };
+  // every group of the attempts merged so far (not serialized): the 20 shown are selected once all are counted
+  if (merged.allGroups === undefined) {
+    Object.defineProperty(merged, 'allGroups', { value: [...merged.groups], enumerable: false, writable: true });
+  }
+  merged.total += objectives.total ?? 0;
+  merged.replayed += objectives.replayed ?? 0;
+  objectives.groups.forEach(group => {
+    const key = `${group.type}|${(group.frames ?? []).join(' < ')}`;
+    let target = merged.allGroups.find(item => item.key === key);
+    if (target === undefined) {
+      target = { key: key, type: group.type, frames: group.frames ?? [], summary: group.summary ?? '', count: 0, attempts: [],
+                 first_trace: group.first_trace, first_attempt: attemptID, first_found: group.first_found,
+                 excerpt: group.excerpt ?? '' };
+      merged.allGroups.push(target);
+    } else if ((group.first_found ?? Infinity) < (target.first_found ?? Infinity)) {
+      Object.assign(target, { first_trace: group.first_trace, first_attempt: attemptID, first_found: group.first_found,
+                              excerpt: group.excerpt ?? '' });
+    }
+    target.count += group.count ?? 0;
+    if (!target.attempts.includes(attemptID)) target.attempts.push(attemptID);
+  });
+  merged.allGroups.sort((a, b) => b.count - a.count);
+  merged.distinct = merged.allGroups.length;
+  merged.confirmed = merged.allGroups.filter(item => !UNCONFIRMED_OBJECTIVE_TYPES.includes(item.type))
+                                     .reduce((sum, item) => sum + item.count, 0);
+  merged.groups = merged.allGroups.slice(0, MAX_OBJECTIVE_GROUPS);
+  libResult.objectives = merged;
+}
+
 function Utf8ByteLength(str) {
   let bytes = 0;
   for (let i = 0; i < str.length; i++) {
