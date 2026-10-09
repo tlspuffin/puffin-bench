@@ -112,6 +112,28 @@ Full endpoint reference: [scheduler/docs/api.md](scheduler/docs/api.md).
 | `vendor` | flow JSON, per configuration | Vendor preset in format `library:version` (e.g. `wolfssl:wolfssl580-asan`). |
 | `experiment` | flow JSON, per configuration | Experiment name passed to `tlspuffin experiment`. |
 | `required_features` | flow JSON, per configuration | Extra cargo feature the `Experiment*` step requires present (e.g. `introspection`, used by every `PR_perf_cargo.json` entry). |
+| `SMT_MODE` | `args[SMT_MODE]` (launcher: **CPU sharing**) | How the scheduler chooses the CPUs of each run, see below; the machine's default (`smt` of the executor, `pairs`) when absent. |
+
+### CPU sharing (hardware threads)
+
+The machines have two hardware threads per physical core (SMT). A fuzzer client runs slower when the other thread of
+its physical core is busy: measured on cassis, wolfSSL clients made ~22 % fewer execs/s with a busy twin thread, and
+before 2026-10-09 the scheduler gave logical CPUs without regard to it (on cacio, 80 % of the fuzzing time ran on a
+physical core shared with another run). Each run now gets:
+
+- **default (`pairs`)**: whole physical cores, all their threads to the run, on one NUMA node when possible. Its
+  clients share cores only with each other, the same way in every run: results are comparable between runs and tasks.
+  A run of 3 CPUs takes 2 physical cores (4 CPUs, one idle).
+- **one client per physical core (`one`)**: each client alone on its core, the other threads reserved and idle.
+  Faster per client (0–30 % depending on the library) and closest to a machine running nothing else, but twice the CPUs:
+  fewer runs at once. For absolute figures (e.g. a paper).
+- **logical CPUs (`any`)**: as before, two runs may share a physical core; to reproduce older conditions.
+
+The CPUs of the runs are also kept from the other processes of the machine (users, services, Docker containers),
+when the scheduler's sudo rules allow it (see the scheduler's configuration). Each run records its CPUs, the mode,
+its NUMA nodes and whether a thread of its cores was outside it (`cli.cpus`); Results marks two runs compared with a
+different mode or sharing as ⚠ not comparable. Runs in different modes are not comparable for speed (execs,
+time to find), and the noise floors of Results were measured before this (see the handover: to measure again).
 
 ---
 
