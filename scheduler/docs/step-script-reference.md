@@ -64,6 +64,8 @@ Before running the step function, the local executor (`src/scheduler/schedule/ex
 |----------|---------|
 | `THEJOB_CORES` | Comma-separated list of assigned CPU core indices (e.g. `"2,3,4,5"`) |
 | `THEJOB_NB_CORES` | Number of assigned cores; computed by `executor.sh` itself by counting `THEJOB_CORES` entries (not sent by the C++ side) |
+| `THEJOB_CORES_IDLE` | The other threads of the physical cores of `THEJOB_CORES`, reserved by the step and left idle (CPU sharing `pairs` with an odd number of CPUs, `one`); empty otherwise |
+| `THEJOB_SMT_MODE` | How the CPUs were chosen: `pairs` (whole physical cores), `one` (one thread per physical core) or `any` (logical CPUs); `SMT_MODE` of the step's configuration args, else of the task, else the executor's `smt` (see [executor.md](executor.md)) |
 | `THEJOB_SERVER_PORT` | Port of the local cache HTTP server (`http://localhost:${THEJOB_SERVER_PORT}/api/cache`) |
 
 ### Control
