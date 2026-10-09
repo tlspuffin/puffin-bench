@@ -1,4 +1,5 @@
 #include "request_handler.hxx"
+#include "server.hxx"
 #include "parts_handler.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
@@ -10,6 +11,47 @@
 #include <Poco/Base64Encoder.h>
 #include <Poco/StreamCopier.h>
 #include <Poco/URI.h>
+#include <sys/stat.h>
+#include <Poco/DateTime.h>
+#include <Poco/DateTimeFormat.h>
+#include <Poco/DateTimeFormatter.h>
+#include <Poco/DateTimeParser.h>
+#include <Poco/Timestamp.h>
+
+namespace {
+// Static files are revalidated on every load ("Cache-Control: no-cache" with their modification time as
+// Last-Modified): an unchanged file costs a 304, a changed one is sent at once. Without these headers browsers reused
+// files of an earlier version (a page script after an update) until a hard reload.
+// True when the request's If-Modified-Since is not older than the file: the 304 is sent.
+bool NotModifiedSince(Poco::Net::HTTPServerRequest const& request, Poco::Net::HTTPServerResponse& response,
+    std::filesystem::path const& file) {
+  response.set("Cache-Control", "no-cache");
+  struct stat info {};
+  if (::stat(file.c_str(), &info) != 0) {
+    return false;
+  }
+  Poco::Timestamp const modified = Poco::Timestamp::fromEpochTime(info.st_mtime);
+  response.set("Last-Modified", Poco::DateTimeFormatter::format(modified, Poco::DateTimeFormat::HTTP_FORMAT));
+  if (!request.has("If-Modified-Since")) {
+    return false;
+  }
+  try {
+    int tzd = 0;
+    Poco::DateTime const since = Poco::DateTimeParser::parse(Poco::DateTimeFormat::HTTP_FORMAT,
+        request.get("If-Modified-Since"), tzd);
+    if (since.timestamp().epochTime() - tzd >= modified.epochTime()) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_MODIFIED);
+      response.setContentLength(0);
+      response.send();
+      return true;
+    }
+  } catch (...) {
+    // an unreadable date: the file is sent
+  }
+  return false;
+}
+};
+
 
 inline static bool ToBool(std::string const& v) {
   return v == "1" || v == "true" || v == "on" || v == "yes";
@@ -166,6 +208,62 @@ void ns_Server::RequestHandlerTaskNew::handleRequest(Poco::Net::HTTPServerReques
   out.flush();
 }
 
+namespace {
+// A submission that waits longer than this is already a bad experience; the light turns
+// orange. The probe itself gives up after probeTimeoutMs__ and reports "busy".
+constexpr uint32_t probeTimeoutMs__ = 2000;
+constexpr uint64_t slowLockMs__ = 500;
+};
+
+void ns_Server::RequestHandlerHealth::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+
+  response.setChunkedTransferEncoding(true);
+  response.setContentType("application/json; charset=utf-8");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+
+  // Unlike /api/tasks/running, which only reads the state file, this takes the schedule
+  // lock: it is the lock a submission waits for, so it is what a status light must probe.
+  uint64_t waitedMs = 0;
+  bool const stopping = apis_->scheduleAPI_.IsStopping();
+  bool const lockTaken = apis_->scheduleAPI_.ProbeLock(probeTimeoutMs__, waitedMs);
+
+  struct ns_Server::HTTPStats stats;
+  bool const haveStats = ns_Server::GetHTTPStats(stats);
+
+  char const* state = "up";
+  if (stopping) {
+    state = "stopping";
+  } else if (!lockTaken) {
+    state = "busy";
+  } else if (waitedMs >= slowLockMs__) {
+    state = "slow";
+  }
+
+  std::ostream& out = response.send();
+  out << R"({"success": true, "data": {"state": ")" << state
+      << R"(", "stopping": )" << (stopping ? "true" : "false")
+      << R"(, "lock_taken": )" << (lockTaken ? "true" : "false")
+      << R"(, "lock_wait_ms": )" << waitedMs
+      << R"(, "lock_timeout_ms": )" << probeTimeoutMs__;
+  if (haveStats) {
+    out << R"(, "http": {"threads": )" << stats.threads_
+        << R"(, "threads_max": )" << stats.threadsMax_
+        << R"(, "queued": )" << stats.queued_
+        << R"(, "connections": )" << stats.connections_
+        << R"(, "connections_max": )" << stats.connectionsMax_
+        << R"(, "refused": )" << stats.refused_
+        << R"(, "total": )" << stats.total_
+        << "}";
+  }
+  out << "}}";
+  out.flush();
+}
+
 void ns_Server::RequestHandlerTasksRunning::handleRequest(Poco::Net::HTTPServerRequest& request,
     Poco::Net::HTTPServerResponse& response) {
   if (ManageCORS(request, response)) {
@@ -308,6 +406,57 @@ void ns_Server::RequestHandlerTaskCancelStep::handleRequest(Poco::Net::HTTPServe
     *out << R"({"success": false, "error": ")" << e.what() << R"("})";
   }
   out->flush();
+}
+
+// the folders of tasks that no longer exist (left by a stop): removed in the background; their names
+void ns_Server::RequestHandlerRunsCleanup::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  try {
+    auto removed = apis_->scheduleAPI_.CleanupRunFolders();
+    out = &(response.send());
+    *out << R"({"success": true, "removed": [)";
+    for (size_t i = 0; i < removed.size(); ++i) {
+      *out << (i ? ", " : "") << '"' << removed[i] << '"';
+    }
+    *out << "]}";
+    out->flush();
+  } catch(std::exception const& e) {
+    if (out == nullptr) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
+}
+
+void ns_Server::RequestHandlerExecutorMaxCores::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  std::ostream* out = nullptr;
+  try {
+    std::string error;
+    if (!apis_->scheduleAPI_.ExecutorSetMaxCores(std::get<0>(args_), std::stoull(std::get<1>(args_)),
+            std::stoull(std::get<2>(args_)), error)) {
+      throw std::runtime_error(error);
+    }
+    out = &(response.send());
+    *out << R"({"success": true})";
+    out->flush();
+  } catch(std::exception const& e) {
+    if (out == nullptr) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+      out = &(response.send());
+    }
+    *out << R"({"success": false, "error": ")" << e.what() << R"("})";
+    out->flush();
+  }
 }
 
 void ns_Server::RequestHandlerTaskUpdatePriority::handleRequest(Poco::Net::HTTPServerRequest& request,
@@ -671,6 +820,9 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
       return;
     }
 
+    if (NotModifiedSince(request, response, filename)) {
+      return;
+    }
     SendFile(filename, response, out);
   } catch (const std::exception& e) {
     LOGW << "File server error: " << e.what() << Log::Flags::End;

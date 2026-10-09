@@ -52,7 +52,7 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
     scriptPath_("scripts"), logsSize_(16*1024*1024), 
     //cgroupPathSymbolic_("/sys/fs/cgroup/user.slice/user-${euid}.slice/user@${euid}.service/"),
     cgroupPathSymbolic_("/sys/fs/cgroup/scheduler.service"), 
-    cgroupPath_(), cpuMaxLoad_(90), memMinRatio_(0.15)
+    cgroupPath_(), cpuMaxLoad_(90), memMinRatio_(0.15), diskMinimumGB_(50)
 {
   uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   cores_.assign(maxNbCores, true);
@@ -152,6 +152,7 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
 
   cpuMaxLoad_ = GetOrDefault(node, "cpuMaxLoad", defaultLocalConfig.cpuMaxLoad_);
   memMinRatio_ = GetOrDefault(node, "memMinimumRatio", defaultLocalConfig.memMinRatio_);
+  diskMinimumGB_ = GetOrDefault(node, "diskMinimumGB", defaultLocalConfig.diskMinimumGB_);
 }
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
@@ -183,4 +184,5 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
 
   node.AddMember("cpuMaxLoad", cpuMaxLoad_, alloc);
   node.AddMember("memMinimumRatio", memMinRatio_, alloc);
+  node.AddMember("diskMinimumGB", diskMinimumGB_, alloc);
 }

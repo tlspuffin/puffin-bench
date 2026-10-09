@@ -27,6 +27,7 @@ else()
 endif()
 
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/tlspuffin_history.sh" "${CMAKE_SOURCE_DIR}/embeded/git_restapi/scripts/tlspuffin_history_sh.h" TLSPuffinHistory_Script)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/scripts/tlspuffin_presets.sh" "${CMAKE_SOURCE_DIR}/embeded/git_restapi/scripts/tlspuffin_presets_sh.h" TLSPuffinPresets_Script)
 
 set(OPENSSL_SEARCH_ROOT "/usr/lib" CACHE PATH "openssl lib search path")
 set(OPENSSL_SEARCH_ROOT_INCLUDE "/usr/include" CACHE PATH "openssl include search path")
@@ -107,6 +108,7 @@ set(SRV_SRC
   src/git_restapi/api/api.cxx
   src/utils/logs.cxx src/utils/rapidjson.cxx src/utils/dir.cxx src/utils/httpsclient.cxx
   ${CMAKE_SOURCE_DIR}/embeded/git_restapi/scripts/tlspuffin_history_sh.h
+  ${CMAKE_SOURCE_DIR}/embeded/git_restapi/scripts/tlspuffin_presets_sh.h
   ${GENERATED_VERSION_C}
 )
 

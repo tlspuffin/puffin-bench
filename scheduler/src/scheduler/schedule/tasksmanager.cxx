@@ -205,6 +205,15 @@ ns_Schedule::TasksManager::LoadStatus(rapidjson::Value const& tasksmanager,
   return std::make_tuple<>(stepsPending, stepsRunning, stepsDone);
 }
 
+std::unordered_set<uint64_t> ns_Schedule::TasksManager::TaskIDs() {
+  std::lock_guard<std::mutex> lock(lock_);
+  std::unordered_set<uint64_t> ids;
+  for (auto const* task : tasks_) {
+    ids.insert(task->id_);
+  }
+  return ids;
+}
+
 std::string ns_Schedule::TasksManager::GetTaskState(uint64_t taskID) {
   std::lock_guard<std::mutex> lock(lock_);
   for(Task* task: tasks_) {

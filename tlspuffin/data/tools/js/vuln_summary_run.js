@@ -48,7 +48,10 @@ function BuildSummary(commitID, timestamp, type, artefactsPath, outPath) {
           const readJSONError = {};
           const json = Utils.ReadJSON(`${outPath}/summary-${library}-${parseInt(file)}.json`, readJSONError);
           if (json !== null) {
-            if ((libResult.trust_objective === 1) && (!libResult.flag_objective) &&  
+            // an objective (since 2026-10-06: a targeted one, see PR_common.sh OBJECTIVES_NOT_TARGETED)
+            if ((libResult.trust_objective === 1) && (!libResult.flag_objective) && (json?.nb_objective_targeted !== undefined)) {
+              if (json.nb_objective_targeted > 0) libResult.flag_objective = true;
+            } else if ((libResult.trust_objective === 1) && (!libResult.flag_objective) &&  
                 ((json?.global?.tEnd?.objective_size !== undefined) && (json.global.tEnd.objective_size > 0) || 
                 (json?.clients?.some((item => (item?.tEnd?.objective_size !== undefined) && (item.tEnd.objective_size > 0)))))) {
               libResult.flag_objective = true;

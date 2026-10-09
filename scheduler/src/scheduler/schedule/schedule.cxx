@@ -1,4 +1,9 @@
+#include "duration_history.hxx"
+#include "folder_remover.hxx"
 #include "schedule.hxx"
+#include <chrono>
+#include <thread>
+#include <vector>
 #include "task.hxx"
 #include "executor/local.hxx"
 #include "../../utils/file.hxx"
@@ -39,10 +44,19 @@ bool ns_Schedule::Schedule::shutdownTasksAtExit__ = true;
 ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::UsersAPI& users, 
     ns_System::Linux& os, uint16_t serverPort) 
     : config_(config), exportPath_(config.exportPath_), tasksManager_(config), 
-      threadRunning_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
+      threadRunning_(false), stopping_(false), steps_(), stepsRunning_(), defaultExecutor_("local"), 
       monitor_(config.monitorsPath_), archiver_(), os_(os), users_(users)
 {
   static int installHandler = InstallSigUSRHandler();
+
+  // how long the steps take, for the estimated start and end times (see DurationHistory)
+  DurationHistory::Instance().Load(config.exportPath_);
+  // run folders of finished tasks whose removal was interrupted by a stop (see FolderRemover)
+  FolderRemover::Instance().RemoveLeftovers(config.runPath_);
+  // and the folders of the tasks of the previous run: tasks are not restored, a stop leaves their folders
+  for (auto const& name : FolderRemover::Instance().RemoveOrphans(config.runPath_, {})) {
+    LOGI << "Run folder of a task that no longer exists removed: " << name << Log::Flags::End;
+  }
 
   for (auto const& executorConfig : config.executors_) {
     ns_Executor::Executor* executor = ns_Executor::Executor::Build(executorConfig.second, serverPort, os_);
@@ -55,6 +69,7 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::Users
 
   // Disable LoadStatus, step group not managed by Executor::Local reload system
   // To remove disable too true in Taskmanager constructor
+  // (and pass the restored task ids to RemoveOrphans above, which otherwise removes their run folders)
   /*auto [pendingsSteps, stepsRunning, stepsDone] = tasksManager_.LoadStatus(this);
   steps_.insert(steps_.end(), pendingsSteps.begin(), pendingsSteps.end());
   stepsRunning_.insert(stepsRunning_.end(), stepsRunning.begin(), stepsRunning.end());
@@ -73,6 +88,9 @@ ns_Schedule::Schedule::Schedule(ns_Schedule::Config const& config, ns_API::Users
 }
 
 ns_Schedule::Schedule::~Schedule() {
+  // A request already being served when the stop began must not add a task to a scheduler
+  // that is going away.
+  stopping_.store(true);
   lockThread_.lock();
   if (threadRunning_) {
     threadRunning_ = false;
@@ -102,6 +120,11 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
     std::unordered_map<std::string, std::string>& args, 
     std::unordered_map<std::string, std::string>& runtimeConfig, 
     std::string const& user, std::string const& jobType) {
+
+  if (stopping_.load()) {
+    throw std::runtime_error(
+        "The scheduler is stopping and cannot accept a task; try again once it is back up");
+  }
 
   std::string tasksList;
   {
@@ -178,7 +201,7 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
 }
 
 bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
-  std::lock_guard<std::mutex> lock(lockThread_);
+  std::lock_guard<std::timed_mutex> lock(lockThread_);
   for(ns_Schedule::Step* step : steps_) {
     if ((step->task_->id_ != taskID) || (step->uuid_ != stepUUID)) {
       continue;
@@ -191,7 +214,7 @@ bool ns_Schedule::Schedule::CancelStep(uint64_t taskID, uint64_t stepUUID) {
 }
 
 bool ns_Schedule::Schedule::CancelTask(uint64_t taskID, std::string const& source) {
-  std::lock_guard<std::mutex> lock(lockThread_);
+  std::lock_guard<std::timed_mutex> lock(lockThread_);
   for (auto it = steps_.begin(); it != steps_.end(); ++it) {
     ns_Schedule::Step* step = *it;
     if (step->task_->id_ == taskID) {
@@ -203,8 +226,33 @@ bool ns_Schedule::Schedule::CancelTask(uint64_t taskID, std::string const& sourc
   return false;
 }
 
+std::vector<std::string> ns_Schedule::Schedule::CleanupRunFolders() {
+  // under the schedule lock: no task is being created (a submission takes it) while the folders are listed
+  std::lock_guard<std::timed_mutex> lock(lockThread_);
+  auto removed = FolderRemover::Instance().RemoveOrphans(config_.runPath_, tasksManager_.TaskIDs());
+  for (auto const& name : removed) {
+    LOGI << "Run folder of a task that no longer exists removed: " << name << Log::Flags::End;
+  }
+  return removed;
+}
+
+bool ns_Schedule::Schedule::ExecutorSetMaxCores(std::string const& name, uint64_t maxCores, uint64_t durationSec,
+    std::string& error) {
+  std::lock_guard<std::timed_mutex> lock(lockThread_);
+  auto it = executors_.find(name);
+  if (it == executors_.end()) {
+    error = "no executor " + name;
+    return false;
+  }
+  if (!it->second->SetMaxCores(maxCores, durationSec, error)) {
+    return false;
+  }
+  SaveStatus(false);
+  return true;
+}
+
 bool ns_Schedule::Schedule::TaskUpdatePriority(uint64_t taskID, int64_t newPriority) {
-  std::lock_guard<std::mutex> lock(lockThread_);
+  std::lock_guard<std::timed_mutex> lock(lockThread_);
   auto itBegin = steps_.begin();
   auto itEnd = steps_.end();
   bool found = false;
@@ -240,7 +288,7 @@ bool ns_Schedule::Schedule::TaskUpdatePriority(uint64_t taskID, int64_t newPrior
 
 bool ns_Schedule::Schedule::TaskUpdateArgs(uint64_t taskID, 
     std::unordered_map<std::string, std::string>& newArgs) {
-  std::lock_guard<std::mutex> lock(lockThread_);
+  std::lock_guard<std::timed_mutex> lock(lockThread_);
   if (!tasksManager_.TaskUpdateArgs(taskID, newArgs)) {
     return false;
   }
@@ -409,7 +457,9 @@ void ns_Schedule::Schedule::GetOutput(
     return;
   }
 
-  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0)) {
+  // stdout, stderr, or a stream declared by the step: its index, kept at the end of the step (see Local::EndRun)
+  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0) &&
+      (type.empty() || (type.find_first_not_of("0123456789") != std::string::npos))) {
     return;
   }
 
@@ -617,15 +667,7 @@ void ns_Schedule::Schedule::ScheduleLoop() {
   }
 
   SaveStatus(true);
-  if (shutdownTasksAtExit__) {
-    for (ns_Schedule::Step* step: steps_) {
-      if (step->IsRunning()) {
-        step->Shutdown();
-      }
-    }
-  }
-
-  archiver_.WaitForCompletion();
+  ShutdownAtExit();
 
   threadRunning_ = false;
   lockThread_.unlock();
@@ -662,6 +704,7 @@ void ns_Schedule::Schedule::ManageEndOfStep(
 
   AppendStepToFinishLog(step->task_->steps_file_, *step);
   AppendStepToFinishLog(stepsDoneFile, *step);
+  DurationHistory::Instance().Add(*step);
 
   stepsRunning_.remove(step);
   auto itStep = std::find(steps_.begin(), steps_.end(), step);
@@ -840,3 +883,49 @@ int ns_Schedule::Schedule::InstallSigUSRHandler() {
     return sigaction(SIGUSR1, &sa, NULL);
 }
 
+// Called by ScheduleLoop holding lockThread_; returns holding it again. The running steps are shut
+// down in parallel, without the lock: each one costs the kill grace of its session (up to 4 s
+// without cgroups, 2 s with) plus its shutdown script, and they used to run one after the other
+// with the lock held.
+void ns_Schedule::Schedule::ShutdownAtExit() {
+  std::list<ns_Schedule::Step*> toShutdown;
+  if (shutdownTasksAtExit__) {
+    for (ns_Schedule::Step* step: steps_) {
+      if (step->IsRunning()) {
+        toShutdown.push_back(step);
+      }
+    }
+  }
+  lockThread_.unlock();
+
+  std::vector<std::thread> shutdowns;
+  shutdowns.reserve(toShutdown.size());
+  for (ns_Schedule::Step* step : toShutdown) {
+    shutdowns.emplace_back([step]() {
+      try {
+        step->Shutdown();
+      } catch (std::exception const& e) {
+        LOGE << "Shutdown of step " << step->ID() << " failed: " << e.what() << Log::Flags::End;
+      } catch (...) {
+        LOGE << "Shutdown of step " << step->ID() << " failed" << Log::Flags::End;
+      }
+    });
+  }
+  for (std::thread& t : shutdowns) {
+    t.join();
+  }
+  archiver_.WaitForCompletion();
+
+  lockThread_.lock();
+}
+
+bool ns_Schedule::Schedule::ProbeLock(uint32_t timeoutMs, uint64_t& waitedMs) {
+  auto const start = std::chrono::steady_clock::now();
+  bool const taken = lockThread_.try_lock_for(std::chrono::milliseconds(timeoutMs));
+  waitedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start).count());
+  if (taken) {
+    lockThread_.unlock();
+  }
+  return taken;
+}

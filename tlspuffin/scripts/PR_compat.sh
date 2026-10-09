@@ -14,7 +14,7 @@
 #
 # A rule can be disabled with the task argument COMPAT_DISABLE (comma separated ids, or "all").
 
-COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info toml_cli_locked stats_monitor_heartbeat )
+COMPAT_RULES=( wo_bit wo_trunc log_config reseed_warn codec_warn wolfssl_reseed_warn wolfssl_reseed_error openssl_descriptor_info wolfssl_descriptor_info boringssl_clear_info toml_cli_locked stats_monitor_heartbeat security_claim_objective reservoir_sample_warn reservoir_sample_warn_dev subterm_size_warn )
 
 declare -A COMPAT_RANGE=(
   # bit-level mutations enabled by default (opt-out --wo-bit); opt-in --with-bit from e13983d
@@ -54,6 +54,19 @@ declare -A COMPAT_RANGE=(
   # broker timeout", KeyNotFound ClientId(0)), killing the run (10/20 runs of dcf9ff4e7). From 2f06dfef8 (#486)
   # the sender is registered first; here the heartbeat is ignored, as in the tlspuffin fix (pr/monitor-heartbeat)
   [stats_monitor_heartbeat]="92251a29515c05733832c67fe637a7bd54b84055 2f06dfef8b0a530e058d489ffee0179be10a3f7a"
+  # objective fix: 1dce52383 (stats datapoints, #406) dropped the Error::SecurityClaim case of the single-PUT
+  # harness, so a security-claim violation (e.g. authentication bypass, no crash) was no longer an objective;
+  # restored by 45a6bc5eb (#461). Here the violation is logged and the process aborts, as in that fix (an abort is
+  # an objective until ac3b89aff)
+  [security_claim_objective]="2dad52a3c64458f446f721ef83107fa89905b8dc 0ac66344b28143c07a2813bb743d8d374bd3a169"
+  # the mutators log every term over the size cap at WARN ("Skipping term because it is too large"), ~580,000
+  # lines per 70 min SKIP run of dcf9ff4e7: the 20 rolled warn.log files (10 MB each) then hold about 20 min, and a
+  # security claim violation, logged at WARN just before the harness aborts (until ac3b89aff), is rotated away
+  # before the bench reads it. [reservoir_sample]: removed by d4455dfc7, back from 0cd3fed80 and still on dev
+  # (two rules, same patch: open from 0cd3fed80); [find_all_sub_term_filtered]: removed by d4455dfc7
+  [reservoir_sample_warn]="ce5a15be7949c787001b657d5f891e00aa07dd5d d4455dfc7ae00994971890594c85d8fbee01c109"
+  [reservoir_sample_warn_dev]="0cd3fed801fa4e3e7b7b22246e5b56b5dcfc91a9 -"
+  [subterm_size_warn]="ce5a15be7949c787001b657d5f891e00aa07dd5d d4455dfc7ae00994971890594c85d8fbee01c109"
 )
 
 # source lines patched by the rules at Init: "<file>|<text of the lines>|<from>|<to>[|<offset>]" (literal strings;
@@ -68,6 +81,10 @@ declare -A COMPAT_PATCH=(
   [wolfssl_descriptor_info]='tlspuffin/harness/wolfssl/src/put.c|"descriptor %u version: %s type: |_log(PUFFIN.info,|_log(PUFFIN.debug,|-1'
   [boringssl_clear_info]='tlspuffin/src/rust_put/boringssl/mod.rs|log::info!("BoringSSL PUT does not support clearing mode")|log::info!|log::debug!'
   [stats_monitor_heartbeat]='puffin/src/fuzzer/stats_monitor.rs|let global_stats = self.global(client_stats_manager);|let global_stats = |if client_stats_manager.get(sender_id).is_err() { return Ok(()); } let global_stats = '
+  [security_claim_objective]='puffin/src/fuzzer/harness.rs|if let Ok(ctx) = runner.execute(input|) {|).map_err({ fn compat_security_claim(err: crate::error::Error) -> crate::error::Error { if let crate::error::Error::SecurityClaim(msg) = &err { log::warn!("{}", msg); std::process::abort(); } err } compat_security_claim }) {'
+  [reservoir_sample_warn]='puffin/src/fuzzer/utils.rs|"[reservoir_sample] Skipping term because it is too large: {}",|log::warn!(|log::debug!(|-1'
+  [reservoir_sample_warn_dev]='puffin/src/fuzzer/utils.rs|"[reservoir_sample] Skipping term because it is too large: {}",|log::warn!(|log::debug!(|-1'
+  [subterm_size_warn]='puffin/src/fuzzer/utils.rs|"[find_all_sub_term_filtered] Skipping term because it is too large: {}",|log::warn!(|log::debug!(|-1'
   [toml_cli_locked]='tools/mk_vendor|cargo install toml-cli --version "0.2.3"|cargo install toml-cli --version "0.2.3"|PATH="${PATH}:${CARGO_HOME:-${HOME}/.cargo}/bin"; if ! command -v toml > /dev/null; then flock "${HOME:-/tmp}/.puffin-bench-rustup.lock" env -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u RUSTDOC -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET -u RUSTUP_TOOLCHAIN sh -c "rustup toolchain install stable --profile minimal && cargo +stable install toml-cli --locked --version 0.2.3"; fi'
 )
 
@@ -169,6 +186,27 @@ CompatProbe_stats_monitor_heartbeat() {
   CompatHasPatchLine stats_monitor_heartbeat &&
       ! grep -qF 'client_stats_insert(sender_id)' <<< "${monitor}" &&
       ! grep -qF 'client_stats_manager.get(sender_id).is_err()' <<< "${monitor}"
+}
+
+CompatProbe_security_claim_objective() {
+  local harness;
+  harness=$( CompatCat "puffin/src/fuzzer/harness.rs" ) || return 1;
+  # the single-PUT harness (up to the next function) does not handle Error::SecurityClaim
+  CompatHasPatchLine security_claim_objective &&
+      ! awk '/^pub fn harness</ { on = 1; next } on && /^pub fn / { on = 0 } on' <<< "${harness}" | grep -qF 'SecurityClaim'
+}
+
+# the two eras of [reservoir_sample] told apart by [find_all_sub_term_filtered], present in the first one only
+CompatProbe_reservoir_sample_warn() {
+  CompatHasOffsetLine reservoir_sample_warn && CompatHasPatchLine subterm_size_warn
+}
+
+CompatProbe_reservoir_sample_warn_dev() {
+  CompatHasOffsetLine reservoir_sample_warn_dev && ! CompatHasPatchLine subterm_size_warn
+}
+
+CompatProbe_subterm_size_warn() {
+  CompatHasOffsetLine subterm_size_warn
 }
 
 # Is commit $2 in the declared range of rule $1? (start is ancestor, end is not)

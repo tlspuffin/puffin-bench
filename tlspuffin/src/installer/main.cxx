@@ -9,6 +9,7 @@
 #include <embeded/installer/config/git_restapi_config_json.h>
 #include <embeded/installer/config/publisher_config_json.h>
 #include <embeded/installer/html/publisher/summary_config_js.h>
+#include <embeded/installer/html/publisher/regression_floors_json.h>
 #include <embeded/installer/config/vis_comparator-config_json.h>
 #include <embeded/installer/html/index_html.h>
 #include <embeded/installer/publisher/tlspuffin/rules.h>
@@ -21,6 +22,7 @@
 #include "../utils/file_compressed.hxx"
 #include <iostream>
 #include <filesystem>
+#include <cstring>
 #include <string>
 #include <fstream>
 #include <tuple>
@@ -60,18 +62,33 @@ bool WriteFile(std::string const& filename, std::string const& content) {
 
 bool WriteBinary(std::filesystem::path const& dest, unsigned char const* begin, 
     unsigned char const* end) {
-  std::ofstream ofs(dest, std::ios::binary | std::ios::trunc);
+  // written next to the destination, then renamed over it: a binary that is still running (text file busy)
+  // can not be overwritten in place, but it can be replaced
+  std::filesystem::path tmp = dest;
+  tmp += ".new";
+  std::ofstream ofs(tmp, std::ios::binary | std::ios::trunc);
   if (!ofs.is_open()) {
-    std::cerr << "Unable to write " << dest << std::endl;
+    std::cerr << "Unable to write " << tmp << ": " << std::strerror(errno) << std::endl;
     return false;
   }
   ofs.write(reinterpret_cast<char const*>(begin), end - begin);
   ofs.close();
-  std::filesystem::permissions(dest,
+  if (!ofs.good()) {
+    std::cerr << "Unable to write " << tmp << ": " << std::strerror(errno) << std::endl;
+    return false;
+  }
+  std::filesystem::permissions(tmp,
       std::filesystem::perms::owner_all |
       std::filesystem::perms::group_read | std::filesystem::perms::group_exec,
       std::filesystem::perm_options::replace);
-  return ofs.good();
+  std::error_code ec;
+  std::filesystem::rename(tmp, dest, ec);
+  if (ec) {
+    std::cerr << "Unable to replace " << dest << ": " << ec.message() << std::endl;
+    std::filesystem::remove(tmp, ec);
+    return false;
+  }
+  return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -278,12 +295,16 @@ int main(int argc, char* argv[]) {
       std::tuple{ binaryPath / "git_restapi-config.json", (char const*)GitRestAPIConfig_JSON_data },
       std::tuple{ binaryPath / "publisher_config.json", (char const*)PublishConfig_JSON_data },
       std::tuple{ dataPath / "html" / "publisher" / "summary_config.js", (char const*)PublishSummaryConfig_JS_data },
+      // edited on the machine (the noise floors of Results): kept by a deploy, replaced only with --force-config
+      std::tuple{ dataPath / "html" / "publisher" / "regression_floors.json", (char const*)PublishRegressionFloors_JSON_data },
       std::tuple{ dataPath / "html" / "index.html", (char const*)NavigationIndex_HTML_data },
       std::tuple{ dataPath / "publisher" / "tlspuffin" / ".rules", (char const*)PublisherTLSPuffin_RULES_data },
       std::tuple{ dataPath / "publisher" / "sshpuffin" / ".rules", (char const*)PublisherSSHPuffin_RULES_data },
       std::tuple{ binaryPath / "vis_comparator-config.json", (char const*)VisComparatorConfig_JSON_data },
   }) {
-    if (!std::filesystem::exists(file) || overrideConfig) {
+    // the landing page is not a configuration: replaced with the other files (--force-files)
+    bool const page = (file == dataPath / "html" / "index.html");
+    if (!std::filesystem::exists(file) || overrideConfig || (page && override)) {
       std::string config = data;
       config = ResolveVariables(config, variables);
       if (WriteFile(file, config)) {

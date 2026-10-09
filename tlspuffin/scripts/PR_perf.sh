@@ -41,7 +41,8 @@ ExperimentEnd() {
   if [ ! -s task.json ]; then
     echo '{ "error": "task.json not available" }' > "${outFile}"
   elif statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
-    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${experimentUUID}" "${outFile}" >> "${THEJOB_USER_STATE_FILE}" 
+    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${experimentUUID}" "${outFile}" >> "${THEJOB_USER_STATE_FILE}"
+    RecordLoad "${outFile}"
   else
     echo '{ "error": "stats.json not found" }' > "${outFile}"
   fi
@@ -58,6 +59,7 @@ SummaryRun () {
   CreateArtefact "./summary.json" "summary.json" "commit_id:${COMMIT_ID}"
   "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/perf_summary_run.js" "${COMMIT_ID}" "${THEJOB_USER}" "${THEJOB_TASK_ID}" "${TYPE}" "${CAMPAIGN_ID}" "${THEJOB_ARTEFACTS_PATH}" "${THEJOB_OUT_PATH}" ./summary.json
   local flagObjective=$?
+  SummaryAddBench ./summary.json;
   (( flagObjective == 2 )) && return 1;
   if [ "${flagObjective}" == '0' ]; then
     Flag '{"color": "#6f6f00"}';

@@ -46,11 +46,14 @@ REQUESTHANDLER(Error);
 REQUESTHANDLER(Options);
 REQUESTHANDLER(TaskNew);
 REQUESTHANDLER(TasksRunning);
+REQUESTHANDLER(Health);
 REQUESTHANDLER(TaskOutputs, std::string const, std::string const, 
     std::string const, std::string const, std::string const , std::string const);
 REQUESTHANDLER(TaskCancelOrDelete, std::string const);
 REQUESTHANDLER(TaskCancelStep, std::string const, std::string const);
 REQUESTHANDLER(TaskUpdatePriority, std::string const, std::string const);
+REQUESTHANDLER(RunsCleanup);
+REQUESTHANDLER(ExecutorMaxCores, std::string const, std::string const, std::string const);
 REQUESTHANDLER(TaskUpdateArgs, std::string const);
 REQUESTHANDLER(TaskGetArtefacts, std::string const);
 REQUESTHANDLER(TaskGetState, bool, std::string const);

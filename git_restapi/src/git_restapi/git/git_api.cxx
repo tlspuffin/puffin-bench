@@ -2,6 +2,7 @@
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
 #include <fstream>
+#include <algorithm>
 #include <set>
 #include <regex>
 #include "rapidjson/document.h"
@@ -12,7 +13,7 @@
 
 ns_GIT::GitAPI::GitAPI(Config const config, std::string const& name, 
     std::unordered_map<std::string, std::string> const& parameters) 
-    : directory_(config.storage_ / name), scriptsPath_(config.scriptsPath_), 
+    : directory_(config.storage_ / name), scriptsPath_(config.scriptsPath_), pullRefs_(false),
     historyBufferTS_(), historyBuffer_(), apiResetTS_(0), apiRemaining_(0)
 {
   std::string const& url = parameters.at("url");
@@ -49,6 +50,19 @@ ns_GIT::GitAPI::GitAPI(Config const config, std::string const& name,
     std::ifstream ifs(directory_ / "pr_infos_cache.json");
     if (ifs.is_open()) {
       ifs >> apiResetTS_ >> apiRemaining_;
+    }
+
+    // GitHub repository: also fetch the head of every pull request (refs/pull/<number>/head), to tell which PR
+    // a commit belongs to (Logs); every later fetch (--all) updates them
+    std::string const pullCommandLine = "export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=echo; cd \"" + repoPath + "\" && "
+        "{ git config --get-all remote.origin.fetch | grep -q 'refs/pull/' || "
+        "git config --add remote.origin.fetch '+refs/pull/*/head:refs/remotes/origin/pull/*'; } && "
+        "git fetch origin >/dev/null 2>&1";
+    int pullRet = std::system(pullCommandLine.c_str());
+    pullRefs_ = WIFEXITED(pullRet) && (WEXITSTATUS(pullRet) == 0);
+    if (!pullRefs_) {
+      LOGW << "Unable to fetch the pull request heads of " << url << ": no PR of the commits in the logs"
+           << Log::Flags::End;
     }
   }
 
@@ -224,6 +238,8 @@ bool ns_GIT::GitAPI::Logs(std::vector<std::string> commitIDs, std::string& resul
           }
         }
 
+        AddPullRequests(commitID, commit, alloc);
+
         commits.PushBack(commit, alloc);
       }
       if (ferror(fstdout)) {
@@ -246,6 +262,75 @@ bool ns_GIT::GitAPI::Logs(std::vector<std::string> commitIDs, std::string& resul
   doc.Accept(writer);
   result = sb.GetString();
   return true;
+}
+
+// Output lines of a command (without end of line); false if it could not run or failed
+static bool CommandLines(std::string const& commandLine, std::vector<std::string>& lines) {
+  lines.clear();
+  FILE* fstdout = popen(commandLine.c_str(), "r");
+  if (fstdout == nullptr) {
+    return false;
+  }
+  std::string buffer(4096, '\0');
+  while (fgets(buffer.data(), buffer.size(), fstdout) != nullptr) {
+    std::string line(buffer.c_str());
+    line.erase(line.find_last_not_of(" \n\r") + 1);
+    if (!line.empty()) {
+      lines.push_back(line);
+    }
+  }
+  int retInt = pclose(fstdout);
+  return WIFEXITED(retInt) && (WEXITSTATUS(retInt) == 0);
+}
+
+// "pulls": the pull requests the commit belongs to, newest first: [{ number, index, total }], the commit being the
+// index-th of the total commits of the PR (origin/dev..<PR head>; index == total: the commit is the PR head).
+// Only for commits that are not on origin/dev (those name the PR they merge in their message), and at most
+// maxPulls PRs (stacked PRs contain the commits of the PRs below them).
+void ns_GIT::GitAPI::AddPullRequests(std::string const& commitID, rapidjson::Value& commit,
+    rapidjson::MemoryPoolAllocator<>& alloc) {
+  static constexpr size_t maxPulls = 5;
+  if (!pullRefs_) {
+    return;
+  }
+  if (commit.HasMember("base") && commit["base"].IsString() && (commitID == commit["base"].GetString())) {
+    return;
+  }
+  std::string const git = "git -C \"" + (directory_ / "repo").string() + "\" ";
+  std::vector<std::string> refs;
+  if (!CommandLines(git + "for-each-ref --contains " + commitID +
+      " --format='%(refname:lstrip=4)' refs/remotes/origin/pull/ 2>/dev/null", refs)) {
+    return;
+  }
+  std::vector<uint64_t> numbers;
+  for (auto const& ref : refs) {
+    if ((!ref.empty()) && (ref.find_first_not_of("0123456789") == std::string::npos)) {
+      numbers.push_back(std::stoull(ref));
+    }
+  }
+  std::sort(numbers.rbegin(), numbers.rend());
+
+  rapidjson::Value pulls(rapidjson::kArrayType);
+  for (uint64_t number : numbers) {
+    if (pulls.Size() >= maxPulls) {
+      break;
+    }
+    std::vector<std::string> members;
+    if (!CommandLines(git + "rev-list --reverse origin/dev..refs/remotes/origin/pull/" + std::to_string(number) +
+        " 2>/dev/null", members)) {
+      continue;
+    }
+    auto it = std::find(members.begin(), members.end(), commitID);
+    if (it == members.end()) {
+      continue;
+    }
+    rapidjson::Value pull(rapidjson::kObjectType);
+    pull.AddMember("number", number, alloc);
+    pull.AddMember("index", static_cast<uint64_t>(it - members.begin() + 1), alloc);
+    pull.AddMember("total", static_cast<uint64_t>(members.size()), alloc);
+    pulls.PushBack(pull, alloc);
+  }
+  commit.AddMember("pulls", pulls, alloc);
 }
 
 bool ns_GIT::GitAPI::SaveFile(std::string const& file, std::string const& content) {
@@ -406,5 +491,95 @@ bool ns_GIT::GitAPI::ManageExternalPR(rapidjson::Document& json, std::string& re
   json.Accept(writerResult);
   result = sb.GetString();
 
+  return true;
+}
+
+bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, bool& notFound) {
+  notFound = false;
+  std::filesystem::path const cacheFile = directory_ / "presets_cache.json";
+  std::lock_guard presetsLock(presetsLock_);
+  if (!presetsLoaded_) {
+    presetsLoaded_ = true;
+    std::ifstream ifs(cacheFile);
+    std::string content((std::istreambuf_iterator<char>(ifs)), {});
+    rapidjson::Document doc;
+    doc.Parse(content.c_str());
+    if (!doc.HasParseError() && doc.IsObject()) {
+      for (auto const& entry : doc.GetObject()) {
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        entry.value.Accept(writer);
+        presets_[entry.name.GetString()] = buffer.GetString();
+      }
+    }
+  }
+  // a short id may match several cached commits: the cache answers only when it names exactly one
+  std::string const* cached = nullptr;
+  size_t matches = 0;
+  for (auto const& [commit, json] : presets_) {
+    if (commit.rfind(commitID, 0) == 0) {
+      cached = &json;
+      ++matches;
+    }
+  }
+  if (matches == 1) {
+    result = *cached;
+    return true;
+  }
+
+  std::string const commandLine = (scriptsPath_ / "tlspuffin_presets.sh").string() + " \"" +
+      (directory_ / "repo").string() + "\" " + commitID + " 2>/dev/null";
+  auto run = [&](std::string& output) -> int {
+    std::shared_lock lock(lock_);
+    output.clear();
+    FILE* fstdout = popen(commandLine.c_str(), "r");
+    if (fstdout == nullptr) {
+      return -1;
+    }
+    char buffer[4096];
+    size_t size = 0;
+    while ((size = fread(buffer, 1, sizeof(buffer), fstdout)) > 0) {
+      output.append(buffer, size);
+    }
+    int const status = pclose(fstdout);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  };
+  int status = run(result);
+  if (status == 2) {
+    // a commit pushed since the last fetch
+    std::lock_guard lock(lock_);
+    // a failed fetch leaves the commit unknown (the retry below answers so)
+    if (std::system(("git -C \"" + (directory_ / "repo").string() + "\" fetch --all --quiet >/dev/null 2>&1").c_str()) != 0) {
+      LOGW << "git fetch failed, looking for the presets of " << commitID << Log::Flags::End;
+    }
+  }
+  if (status == 2) {
+    status = run(result);
+  }
+  if (status == 2) {
+    notFound = true;
+    result = "Unknown commit " + commitID;
+    return false;
+  }
+  rapidjson::Document doc;
+  doc.Parse(result.c_str());
+  if ((status != 0) || doc.HasParseError() || !doc.IsObject() || !doc.HasMember("commit") || !doc["commit"].IsString()) {
+    result = "Error while running tlspuffin_presets.sh";
+    return false;
+  }
+  presets_[doc["commit"].GetString()] = result;
+
+  rapidjson::Document all;
+  all.SetObject();
+  for (auto const& [commit, json] : presets_) {
+    rapidjson::Document one(&all.GetAllocator());
+    one.Parse(json.c_str());
+    all.AddMember(rapidjson::Value(commit.c_str(), all.GetAllocator()), rapidjson::Value(one, all.GetAllocator()),
+        all.GetAllocator());
+  }
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  all.Accept(writer);
+  SaveFile(cacheFile, buffer.GetString());
   return true;
 }

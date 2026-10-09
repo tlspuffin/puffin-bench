@@ -14,6 +14,7 @@
 #include <list>
 #include <string>
 #include <mutex>
+#include <atomic>
 #include <thread>
 #include <unordered_map>
 #include <rapidjson/document.h>
@@ -26,6 +27,11 @@ public:
       ns_System::Linux& os, uint16_t serverPort);
   ~Schedule();
   std::string TaskManagerStateFile() const;
+  // Health of the schedule thread as seen by a submission: time needed to take the
+  // schedule lock, capped at timeoutMs. Returns false when the lock could not be taken.
+  bool ProbeLock(uint32_t timeoutMs, uint64_t& waitedMs);
+  bool IsStopping() const { return stopping_.load(); }
+
   uint64_t AddTask(std::string const& name, std::string const& tasksListPattern, 
       std::string const& functions, 
       std::unordered_map<std::string, std::vector<uint8_t>>& files,
@@ -35,6 +41,10 @@ public:
   bool CancelStep(uint64_t taskID, uint64_t stepUUID);
   bool CancelTask(uint64_t taskID, std::string const& source);
   bool TaskUpdatePriority(uint64_t taskID, int64_t newPriority);
+  // a temporary maximum of cores of an executor (see Executor::SetMaxCores)
+  // the folders of tasks that no longer exist in the run path (FolderRemover::RemoveOrphans): their names
+  std::vector<std::string> CleanupRunFolders();
+  bool ExecutorSetMaxCores(std::string const& name, uint64_t maxCores, uint64_t durationSec, std::string& error);
   bool TaskUpdateArgs(uint64_t taskID, 
       std::unordered_map<std::string, std::string>& newArgs);
   bool DeleteTaksDone(uint64_t taskID);
@@ -52,6 +62,7 @@ public:
 
 private:
   void ScheduleLoop();
+  void ShutdownAtExit();
   std::list<ns_Schedule::Step*> SearchTasksToRun();
   bool ProcessDelayedCleanup(std::list<ns_Schedule::Step*>& delayedSteps, 
       std::ofstream& stepsDoneFile);
@@ -67,9 +78,11 @@ private:
 
   ns_Schedule::TasksManager tasksManager_;
 
-  std::mutex lockThread_;
+  std::timed_mutex lockThread_;
   std::thread thread_;
   bool threadRunning_;
+  // Set as soon as the stop begins: submissions still in flight are refused.
+  std::atomic<bool> stopping_;
   std::list<ns_Schedule::Step*> steps_;
   std::list<ns_Schedule::Step*> stepsRunning_;
   std::list<ns_Schedule::Step*> stepsDone_;
