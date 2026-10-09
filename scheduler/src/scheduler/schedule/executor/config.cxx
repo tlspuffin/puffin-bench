@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include "../../system/cpu_topology.hxx"
 
 ns_Executor::Config::Config(enum ns_Executor::Config::Type type, std::string const& name) 
     : type_(type), name_(name)
@@ -52,7 +53,7 @@ ns_Executor::LocalConfig::LocalConfig(std::string const& name)
     scriptPath_("scripts"), logsSize_(16*1024*1024), 
     //cgroupPathSymbolic_("/sys/fs/cgroup/user.slice/user-${euid}.slice/user@${euid}.service/"),
     cgroupPathSymbolic_("/sys/fs/cgroup/scheduler.service"), 
-    cgroupPath_(), cpuMaxLoad_(90), memMinRatio_(0.15), diskMinimumGB_(50)
+    cgroupPath_(), cpuMaxLoad_(90), memMinRatio_(0.15), diskMinimumGB_(50), smt_("pairs")
 {
   uint64_t maxNbCores = ns_System::CoreStats::NbCores();
   cores_.assign(maxNbCores, true);
@@ -70,6 +71,10 @@ void ns_Executor::LocalConfig::Validate(bool forceInstall) const {
   if ((cores_.size() > maxNbCores) || ((nbCores_ > maxNbCores))) {
     throw std::runtime_error("Config of Local executor requires more cores than system have (" + 
         std::to_string(maxNbCores) + ")");
+  }
+  ns_System::SmtMode smtMode;
+  if (!ns_System::ParseSmtMode(smt_, smtMode)) {
+    throw std::runtime_error("Config of Local executor: smt must be \"pairs\", \"one\" or \"any\", not \"" + smt_ + "\"");
   }
   auto discard = std::filesystem::canonical(scriptPath_);
   for(auto const& [ file, data, size ] : {
@@ -153,6 +158,7 @@ void ns_Executor::LocalConfig::DoLoad(rapidjson::Value const& node) {
   cpuMaxLoad_ = GetOrDefault(node, "cpuMaxLoad", defaultLocalConfig.cpuMaxLoad_);
   memMinRatio_ = GetOrDefault(node, "memMinimumRatio", defaultLocalConfig.memMinRatio_);
   diskMinimumGB_ = GetOrDefault(node, "diskMinimumGB", defaultLocalConfig.diskMinimumGB_);
+  smt_ = GetOrDefault<std::string>(node, "smt", defaultLocalConfig.smt_);
 }
 
 void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node, 
@@ -185,4 +191,5 @@ void ns_Executor::LocalConfig::DoSave(rapidjson::Value& node,
   node.AddMember("cpuMaxLoad", cpuMaxLoad_, alloc);
   node.AddMember("memMinimumRatio", memMinRatio_, alloc);
   node.AddMember("diskMinimumGB", diskMinimumGB_, alloc);
+  node.AddMember("smt", rapidjson::Value(smt_.c_str(), alloc), alloc);
 }
