@@ -45,6 +45,7 @@ export class JobLauncher {
   #parametersInput = null;
   #nbAttemptsInput = null;
   #nbCoreInput     = null;
+  #smtSelect       = null;
   #memMaxInput     = null;
   #vendorListInput = null;
   #vendorCatalog   = {};
@@ -371,6 +372,7 @@ export class JobLauncher {
     if (custom.nbAttempts != null) this.#nbAttemptsInput.value = String(custom.nbAttempts);
     if (custom.nbCore     != null) this.#nbCoreInput.value     = String(custom.nbCore);
     if (custom.memMax     != null) this.#memMaxInput.value     = String(custom.memMax);
+    if (custom.smt        != null) this.#smtSelect.value       = custom.smt;
 
     if (custom.name) {
       this.#taskNameInput.value = custom.name;
@@ -385,7 +387,7 @@ export class JobLauncher {
   #templateInputs() {
     return [this.#commitInput, this.#packageListInput, this.#taskNameInput, this.#vendorListInput, this.#featuresInput,
       this.#parametersInput, this.#campaignIdInput, this.#timeoutDayInput, this.#timeoutInput, this.#timeoutMinInput,
-      this.#nbAttemptsInput, this.#nbCoreInput, this.#memMaxInput]
+      this.#nbAttemptsInput, this.#nbCoreInput, this.#memMaxInput, this.#smtSelect]
         // a ListInput widget: its text field
         .map(input => (input instanceof HTMLElement) ? input : input?.input)
         .filter(input => input instanceof HTMLElement);
@@ -537,6 +539,29 @@ export class JobLauncher {
     timeoutLabel.textContent = 'Timeout';
     this.#timeoutSection.append(timeoutLabel, this.#buildTimeout());
     body.appendChild(this.#timeoutSection);
+
+    // ── CPU sharing (every job type): how the scheduler chooses the CPUs of each run (task argument SMT_MODE) ──
+    const smtRow = this.#el('div', 'jl-field-row');
+    const smtLabel = this.#el('span', 'jl-label');
+    smtLabel.textContent = 'CPU sharing';
+    this.#smtSelect = this.#el('select', 'jl-select');
+    for (const [value, text] of [
+      ['', 'default: whole physical cores, shared within the run'],
+      ['one', 'one client per physical core (twice the CPUs)'],
+      ['any', 'logical CPUs, as before (to reproduce older runs)'],
+    ]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      this.#smtSelect.appendChild(option);
+    }
+    this.#smtSelect.title = 'The machine has 2 hardware threads per physical core: a fuzzer client runs slower when the other '
+        + 'thread of its core is busy. Default: each run gets whole physical cores, its clients share them only with each '
+        + 'other (the same for every run: comparable). One client per core: each client alone on its core (faster per '
+        + 'client, closest to a machine running nothing else), the other threads reserved and idle. Logical CPUs: as '
+        + 'before 2026-10-09, two runs may share a physical core.';
+    smtRow.append(smtLabel, this.#smtSelect);
+    body.appendChild(smtRow);
 
     // ── Campaign-only fields ──
     this.#campaignExtra = this.#el('div', 'jl-campaign-extra');
@@ -1486,6 +1511,7 @@ export class JobLauncher {
       nbAttempts: parseInt(this.#nbAttemptsInput.value, 10) || 1,
       nbCore:     parseInt(this.#nbCoreInput.value,     10) || 1,
       memMax:     parseInt(this.#memMaxInput.value,     10) || 0,
+      smt:        this.#smtSelect.value,
     };
   }
 
@@ -1534,6 +1560,8 @@ export class JobLauncher {
 
       fd.append('args[COMMIT_ID]', commit);
       fd.append('args[PACKAGE]', this.#packageListInput.value.trim() || 'tlspuffin');
+      // CPU sharing: the machine's default unless asked
+      if (this.#smtSelect.value) fd.append('args[SMT_MODE]', this.#smtSelect.value);
       if (isCampaign) {
         fd.append('args[CAMPAIGN_ID]', this.#campaignId());
         fd.append('args[SAVE_CORPUS]', 1);

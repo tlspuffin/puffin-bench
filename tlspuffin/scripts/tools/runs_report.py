@@ -21,7 +21,7 @@ OUT = f'{PB_ROOT}/data/html/runs'
 CACHE = f'{PB_ROOT}/data/runs-cache'
 HERE = os.path.dirname(os.path.realpath(__file__))
 CHECKOUT = os.path.realpath(f'{HERE}/../../..')
-CACHE_VERSION = 9
+CACHE_VERSION = 10
 # the expected bugs and the claims set apart (vuln_targets.json, the one file to edit; read by main)
 TARGETS_FILE = f'{CHECKOUT}/tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json'
 # claim -> {cve, library, below}: set apart only on that library below that version, everywhere without library
@@ -316,11 +316,17 @@ def task_record(path_json, ctype, md5table, targets):
             # what each library built (for the comparability of two tasks) and the machine load of the runs (since 2026-10-07)
             rec['builds'] = {}
             rec['load'] = {}
+            rec['cpus'] = {}
             for lib, info in (summary.get('libraries') or {}).items():
                 cli = info.get('cli') or {}; lb = cli.get('library') or {}
                 rec['builds'][lib] = {'library': lb.get('name'), 'version': lb.get('version'), 'harness': 'C' if cli.get('cputs') else 'Rust',
                                       # None: not recorded (older runs), not "without ASan"
                                       'asan': (cli.get('asan') or {}).get('instrumented')}
+                # how its CPUs were chosen (job scripts since 2026-10-09): mode, whether a thread of their cores was outside
+                # the run, NUMA nodes; None: not recorded
+                cpus = cli.get('cpus')
+                if isinstance(cpus, dict) and cpus.get('smt'):
+                    rec['cpus'][lib] = {'smt': cpus['smt'], 'shared': (cpus.get('shared_twins') or 0) > 0, 'nodes': len(cpus.get('nodes') or [])}
                 # per core of the machine: only from runs that recorded its cores (cores_of, since 2026-10-09; the
                 # earlier ones have the cores of the step, which gives a load several times too high)
                 loads = [(d.get('load') or {}) for d in info.get('data') or [] if (d.get('load') or {}).get('cores_of') == 'machine']
@@ -465,6 +471,10 @@ def regression(groups):
                                 + ' → ' + ' '.join(f'{x}' for x in (bb['library'], bb['version'], bb['harness'], 'ASan' if bb['asan'] else '') if x))
                 if ctype == 'Vuln' and va[lib].get('_monitor') != vb[lib].get('_monitor'):
                     warn.append(f'monitor: run ends on {"/".join(va[lib].get("_monitor") or ["?"])} → {"/".join(vb[lib].get("_monitor") or ["?"])}')
+                ca, cb = (a.get('cpus') or {}).get(lib), (b.get('cpus') or {}).get(lib)
+                if ca and cb and (ca['smt'], ca['shared']) != (cb['smt'], cb['shared']):
+                    desc = lambda c: f"{c['smt']}{', cores shared with others' if c['shared'] else ''}"
+                    warn.append(f'CPU sharing {desc(ca)} → {desc(cb)}')
                 la, lb_ = (a.get('load') or {}).get(lib), (b.get('load') or {}).get(lib)
                 if la is not None and lb_ is not None and abs(lb_ - la) > max_load_diff:
                     warn.append(f'machine load per core {la:.2f} → {lb_:.2f}')

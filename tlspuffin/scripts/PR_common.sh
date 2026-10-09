@@ -384,7 +384,7 @@ ExperimentSetupForCargo() {
   echo "${build}" > ./.build_info;
   echo "Build: ${build}";
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities} }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -1297,6 +1297,31 @@ DetectVendorVulnerabilities() {
   jq -cn --arg k "${known}" --arg f "${fixed}" '($k | split(" ") | map(select(. != ""))) as $known
       | ($f | split(" ") | map(select(. != ""))) as $fixed
       | { known: $known, fixed: $fixed, declared: ($known - $fixed) }' 2> /dev/null || echo null;
+}
+
+# CpusInfo: the CPUs of the step as JSON, for the comparability of runs (Results): the CPUs given (THEJOB_CORES), the
+# other threads of their physical cores reserved and idle (THEJOB_CORES_IDLE), how they were chosen (THEJOB_SMT_MODE:
+# pairs, one, any; schedulers before 2026-10-09 give none: any), their NUMA nodes, and how many of the CPUs given have
+# a thread of their core outside the step (shared_twins: another run or another process may use it)
+CpusInfo() {
+  local cores="${THEJOB_CORES:-}" idle="${THEJOB_CORES_IDLE:-}" mode="${THEJOB_SMT_MODE:-any}";
+  local -A mine=(); local cpu twin nodes='' shared=0;
+  for cpu in ${cores//,/ } ${idle//,/ }; do mine[${cpu}]=1; done
+  for cpu in ${cores//,/ }; do
+    # its physical core: "3,23" or "0-1"
+    local part twin lo hi outside=0;
+    for part in $( tr ',' ' ' < /sys/devices/system/cpu/cpu${cpu}/topology/thread_siblings_list 2> /dev/null ); do
+      lo=${part%-*}; hi=${part#*-};
+      for (( twin = lo; twin <= hi; twin++ )); do
+        [ -n "${mine[${twin}]:-}" ] || outside=1;
+      done
+    done
+    shared=$(( shared + outside ));
+    nodes+=" $( ls -d /sys/devices/system/cpu/cpu${cpu}/node* 2> /dev/null | head -1 | sed 's/.*node//' )";
+  done
+  jq -cn --arg c "${cores}" --arg i "${idle}" --arg m "${mode}" --arg n "${nodes}" --argjson s "${shared}" \
+      '{ cores: ($c | split(",") | map(select(. != "") | tonumber)), idle: ($i | split(",") | map(select(. != "") | tonumber)),
+         smt: $m, nodes: ($n | split(" ") | map(select(. != "") | tonumber) | unique), shared_twins: $s }' 2> /dev/null || echo null;
 }
 
 ExperimentEndCommon() {
