@@ -172,7 +172,7 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/duration_history.cxx src/scheduler/schedule/folder_remover.cxx
   src/scheduler/schedule/executor/config.cxx src/scheduler/schedule/executor/executor.cxx src/scheduler/schedule/executor/local.cxx 
   src/scheduler/schedule/executor/output_ring.cxx
-  src/scheduler/system/linux_cores.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx 
+  src/scheduler/system/linux_cores.cxx src/scheduler/system/cpu_topology.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx
   src/scheduler/system/linux.cxx
   src/scheduler/api/schedule_api.cxx src/scheduler/api/users_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
@@ -206,3 +206,4 @@ add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 add_executable(testOutputRing src/test_output_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
+add_executable(testCpuTopology src/test_cpu_topology.cxx src/scheduler/system/cpu_topology.cxx)

@@ -38,6 +38,9 @@ struct LocalConfig : public Config {
   double memMinRatio_;
   // free space needed on the run and export storage to start a step (GB); 0: no check
   uint64_t diskMinimumGB_;
+  // how the CPUs of a step are chosen (ns_System::SmtMode): "pairs" (whole physical cores, the default), "one" (one
+  // thread per physical core) or "any" (logical CPUs, as before); a task can ask another one (argument SMT_MODE)
+  std::string smt_;
   void Validate(bool forceInstall) const;
 
   LocalConfig(std::string const& name);
