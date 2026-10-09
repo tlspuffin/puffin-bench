@@ -653,3 +653,17 @@ a.tp-mon {
 .jl-vendor-note .jl-note-ok { color: var(--jl-text-muted); }
 .jl-preset-chip.latest { border-color: #3fb950; color: #7ee787; }
 .jl-preset-chip.latest.on { background: color-mix(in srgb, #3fb950 22%, transparent); color: #fff; }
+
+/* ── CPU sharing (SMT_MODE) ── */
+.jl-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--jl-bg);
+  border: 1px solid var(--jl-border-light);
+  border-radius: 8px;
+  color: white;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+}
+.jl-select:focus { border-color: var(--jl-accent); }
