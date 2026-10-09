@@ -1,1 +1,10 @@
+# The scheduler keeps the other processes of the machine off the CPUs of its steps by restricting these slices
+# to the CPUs no step holds, while steps run; it gives them all CPUs back at start and when no step runs.
+# WARNING: system.slice holds every system service and container of the machine (e.g. Docker), also those of
+# other users, and machine.slice their virtual machines: on a shared machine they get fewer CPUs while steps run.
+# The setting persists (also across reboots) if the scheduler stops abnormally; to give all CPUs back by hand:
+#   sudo systemctl set-property system.slice AllowedCPUs=0-$(( $(nproc --all) - 1 ))   (the same for the others)
+# Leave out the lines of the slices that must not be restricted.
 <user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property user.slice AllowedCPUs=*
+<user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property system.slice AllowedCPUs=*
+<user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property machine.slice AllowedCPUs=*

@@ -3,6 +3,7 @@
 
 #include "executor.hxx"
 #include "../../system/linux.hxx"
+#include "../../system/cpu_topology.hxx"
 #include "output_ring.hxx"
 #include <cstdint>
 #include <vector>
@@ -42,6 +43,10 @@ public:
     rapidjson::Document::AllocatorType& alloc) const;
 
   std::vector<uint64_t> cores_;
+  // the other threads of the step's physical cores, reserved by it and left idle (smt pairs/one), and the mode the
+  // CPUs were chosen with (see ns_System::SmtMode)
+  std::vector<uint64_t> idle_cores_;
+  std::string smt_mode_ = "any";
   std::filesystem::path run_path_;
   std::filesystem::path artefacts_file_;
   pid_t pid_;
@@ -145,10 +150,26 @@ private:
   pid_t RunShutdown(ns_Schedule::Step& step, LocalData* localData);
   void EndRun(ns_Schedule::Step& step, LocalData* localData, bool releaseCores);
 
-  std::vector<uint64_t> AssignCores(uint64_t nbCores);
-  void ReAssignCores(std::vector<uint64_t>& cores);
-  void ReleaseCores(std::vector<uint64_t>& cores);
-  void UpdateUserSliceCpuset();
+  // the CPUs of a step: whole physical cores (smt pairs, one) or logical CPUs (any), in coresFree_ order
+  // (mode: the one asked, set to any when whole physical cores could not be found)
+  ns_System::CpuAllocation AssignCores(ns_Schedule::Step const& step, ns_System::SmtMode& mode);
+  void ReAssignCores(std::vector<uint64_t> const& cores);
+  void ReleaseCores(std::vector<uint64_t> const& cores);
+  // the slices whose processes are kept off the CPUs of the steps (user.slice, system.slice, machine.slice): restricted to
+  // the CPUs no step holds, given or idle; a slice whose update is refused (sudo) is left alone, logged once
+  void UpdateSlicesCpuset();
+  std::vector<std::string> slicesRestricted_;
+
+  // the layout of the CPUs (physical cores, NUMA nodes) and the mode of the configuration (smt: pairs by default)
+  ns_System::CpuTopology topology_;
+  ns_System::SmtMode smtMode_ = ns_System::SmtMode::Pairs;
+  // the mode of a step: its task argument SMT_MODE (pairs, one, any), else the configuration's; a mode the pool can
+  // never satisfy (not enough whole physical cores in it, e.g. a pool of the second threads of cores) falls back to any
+  ns_System::SmtMode StepSmtMode(ns_Schedule::Step const& step) const;
+  // the CPUs a step consumes (given and idle): what it counts against the maximum of cores
+  uint64_t CpusConsumed(ns_Schedule::Step const& step) const;
+  // the most CPUs a step of that mode can get from the whole pool (all free)
+  uint64_t PoolCapacity(ns_System::SmtMode mode, uint64_t nbCpus) const;
 
   std::vector<std::string> BuildExecutorArgs(ns_Schedule::Step const& step);
   int16_t CheckExternalProcessIsRunning(pid_t pid, 
