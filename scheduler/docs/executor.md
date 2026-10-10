@@ -166,23 +166,43 @@ until `nbCoresUntilMs_`, at most the cores of the configuration (`nbCoresLimit_`
 the next steps wait until they fit; the default comes back at the end (`CheckMaxCoresExpiry()`, every
 scheduling round).
 
-**`AssignCores(nbCores)`** (called from `Execute()`, before `fork()`):
-1. If `config_.nbCores_ == 0` (explicit `cores` list mode), take the first N free indices in
-   order.
-2. Otherwise call `os_.Cores().SelectMostIdleCores(nbCores, &coresFree_)` — reads the current
-   `/proc/stat` delta ratios cached in `CoresMonitor` (refreshed by the `Linux` system-monitor
-   thread, not by this call) and returns the `nbCores` least-loaded free indices.
-3. Mark those indices `false` in `coresFree_`, add them to `nbCoresUsed_`.
-4. `UpdateUserSliceCpuset()` — best-effort `sudo -n systemctl set-property user.slice
-   AllowedCPUs=...` to keep the desktop/login session off the cores reserved for jobs (silently
-   disabled if `sudo` is unavailable or the cgroup root is itself under `/user.slice/`).
+**Physical cores.** At start the executor reads the layout of the CPUs (`ns_System::CpuTopology`, sysfs: the
+threads of each physical core, `topology/thread_siblings_list`, and the NUMA node of each CPU). With hardware threads
+(SMT) a fuzzer client runs slower when the other thread of its physical core is busy (measured on cassis: ~22 %
+fewer execs/s for wolfSSL), so the mode of a step (`StepSmtMode()`: the task argument `SMT_MODE`, else the
+configuration's `smt`) decides how its CPUs are chosen:
+- `pairs` (default): whole physical cores, all their threads to the step, until it has its CPUs; the thread left by an
+  odd number of CPUs is reserved and idle. A 3-CPU step consumes 4 CPUs.
+- `one`: one thread of each of N physical cores, the other threads reserved and idle. A 3-CPU step consumes 6 CPUs.
+- `any`: logical CPUs, as before.
+
+`ns_System::AllocatePhysicalCores()` takes the free physical cores (all their threads free), on one NUMA node when one
+has enough (the node with the fewest free cores that is enough, keeping the larger ones for larger steps), else on as
+few nodes as possible. A pool that can never give a step whole cores (e.g. a pool of the second threads of cores)
+falls back to `any` for that step. The capacity counts the CPUs a step consumes (`CpusConsumed()`), and
+`FindRunnableSteps()` plays the allocations of the steps it accepts on a copy of the free CPUs, so that a step it
+accepts is one `AssignCores()` can place.
+
+**`AssignCores(step, mode)`** (called from `Execute()`, before `fork()`):
+1. `pairs`/`one`: `AllocatePhysicalCores()`; when it fails (the cores changed since the check), logical CPUs and the mode
+   `any`, logged.
+2. `any`: if `config_.nbCores_ == 0` (explicit `cores` list mode), the first N free indices in order; otherwise
+   `os_.Cores().SelectMostIdleCores(nbCores, &coresFree_)`, the least-loaded free indices (from the `/proc/stat`
+   ratios cached by `CoresMonitor`).
+3. The CPUs given and the idle ones are marked used; `LocalData` keeps both (`cores_`, `idle_cores_`) and the mode
+   (`smt_mode_`), saved with the step and given to it as `THEJOB_CORES`, `THEJOB_CORES_IDLE`, `THEJOB_SMT_MODE`.
+4. `UpdateSlicesCpuset()` — `sudo -n systemctl set-property <slice> AllowedCPUs=<the CPUs no step holds>` for
+   `user.slice`, `system.slice` and `machine.slice` (when it exists): users, services and their containers (Docker),
+   virtual machines stay off the CPUs of the steps, idle ones included. A slice whose update is refused at start (no
+   sudo rule for it) or that contains the scheduler's cgroup is left alone; the log says which slices are restricted,
+   the status gives them (`slices_restricted`).
 
 Actual pinning happens **inside the forked child**, after `setsid()`: `PinCoresToProcess(cores)`
 calls `sched_setaffinity(0, ...)` and then reads back `sched_getaffinity` to confirm every
 requested core stuck.
 
-**`ReleaseCores(cores)`** — called from `Local::EndRun()` (after a step finishes or is killed):
-marks the indices free again, `UpdateUserSliceCpuset()`.
+**`ReleaseCores(cores)`** — called from `Local::EndRun()` (after a step finishes or is killed) for the CPUs given and
+the idle ones: marks the indices free again, `UpdateSlicesCpuset()`.
 
 **`ReAssignCores(cores)`** — reserves cores for a step found still running by
 `CheckReloadRunning()` (reload path).

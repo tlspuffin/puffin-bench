@@ -166,6 +166,7 @@ The only supported executor `type` is `1` (Local); any other value throws `"Exec
 |---|---|---|---|
 | `nbCores` / `excludeCores` | uint / array | `1` core, `excludeCores: [0]` | Together select which cores the executor may assign: start from all cores, keep `nbCores` of them, excluding the indices in `excludeCores`. Used only when `cores` is absent. `nbCores` is the default maximum of cores in use at once; the board's "change max" sets a temporary one. The tlspuffin deploy script writes 80 % of the machine's cores. |
 | `diskMinimumGB` | uint | `50` | Free space (GB) needed on the run and export storage to start a step; below it new steps wait, running ones go on; 0: no check. |
+| `smt` | string | `"pairs"` | How the CPUs of a step are chosen on a machine with hardware threads (SMT): `pairs`, whole physical cores, all their threads to the step (its clients share cores only with each other; the thread left by an odd number of CPUs is reserved and idle), on one NUMA node when possible; `one`, one thread per physical core, the others reserved and idle (each client alone on its core, twice the CPUs); `any`, logical CPUs whatever their cores (before 2026-10-09: two steps could share a physical core). A task can ask another mode with the argument `SMT_MODE`. A pool without enough whole physical cores for a step (e.g. only the second threads of cores) gives it logical CPUs (`any`), recorded with the run. |
 | `cores` | array of uint | — | Alternative, explicit form: the exact list of core indices the executor may use (overrides `nbCores`/`excludeCores` when present). |
 | `scriptPath` | path | `scripts` | Directory containing `executor.sh` and `functions.sh`; must already exist (`canonical()`), the two scripts themselves are auto-extracted if missing. |
 | `logsSize` | uint | `16777216` (16 MiB) | Per-step in-memory output ring buffer size in bytes. |
@@ -297,5 +298,7 @@ WantedBy=multi-user.target
 **`scheduler.sudoers`**:
 ```
 <user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property user.slice AllowedCPUs=*
+<user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property system.slice AllowedCPUs=*
+<user> ALL=(root) NOPASSWD: /usr/bin/systemctl set-property machine.slice AllowedCPUs=*
 ```
-Lets the service user adjust the `user.slice` `AllowedCPUs` cgroup property without a password, needed when the executor reassigns CPU affinity outside its own delegated slice.
+Lets the service user restrict the slices of the other processes of the machine to the CPUs no step holds, without a password: users' sessions (`user.slice`), services and their containers, e.g. Docker's (`system.slice`), virtual machines and containers of systemd-machined (`machine.slice`). Each slice is restricted only when its line is there (the log says which at start). Logins that do not go through PAM (`UsePAM no` in `sshd_config`) stay in `system.slice/ssh.service`: covered by the `system.slice` line only.
