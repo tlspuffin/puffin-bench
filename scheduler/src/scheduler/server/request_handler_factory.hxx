@@ -36,7 +36,7 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   RequestHandler* requestHandler = nullptr;
 
   static auto regexTaskOutputs = 
-      std::regex(R"(/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr|[0-9]+)/(\d+)/(-?\d+))");
+      std::regex(R"(/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr|commands|[0-9]+)/(\d+)/(-?\d+))");
   static auto regexTaskGetArtefacts = std::regex(R"(/api/task/(\d+)/artefacts$)");
   static auto regexTaskGetFinalState = std::regex(R"(/api/task/(\d+)/final_state$)");
   static auto regexTaskGetState = std::regex(R"(/api/task/(\d+)/state$)");

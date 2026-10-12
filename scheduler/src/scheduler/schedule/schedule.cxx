@@ -464,8 +464,9 @@ void ns_Schedule::Schedule::GetOutput(
     return;
   }
 
-  // stdout, stderr, or a stream declared by the step: its index, kept at the end of the step (see Local::EndRun)
-  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0) &&
+  // stdout, stderr, the commands of the step (executor.sh), or a stream declared by the step: its index, kept at the
+  // end of the step (see Local::EndRun)
+  if ((type.compare("stdout") != 0) && (type.compare("stderr") != 0) && (type.compare("commands") != 0) &&
       (type.empty() || (type.find_first_not_of("0123456789") != std::string::npos))) {
     return;
   }

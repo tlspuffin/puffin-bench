@@ -137,6 +137,9 @@ if [ ! -r "${THEJOB_ENV_PATH}" ]; then
   touch "${THEJOB_ENV_PATH}"
 fi
 
+# every command of the step from here, with its variables: logs/commands.<step>.txt (functions.sh StartCommandsTrace)
+StartCommandsTrace
+
 source "${THEJOB_FUNCTIONS_PATH}"
 
 if ! declare -F "${THEJOB_ENTRYPOINT}" > /dev/null; then
