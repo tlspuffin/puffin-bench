@@ -1084,10 +1084,16 @@ void ns_Executor::Local::GetRunningOutput(
   } else if (type == "stderr") {
     fd = localData->pipeFDErr[0];
     file = step.stderr_;
+  } else if (type == "commands") {
+    // every command of the step (executor.sh, functions.sh StartCommandsTrace), next to its stdout, written as it runs
+    file = std::filesystem::path(step.stdout_).parent_path() / ("commands." + step.ID() + ".txt");
+    data.live = (localData->pipeFDOut[0] != -1);  // the step runs: its stdout is still captured
+    data.supportSeek = true;
+    data.partialFile = data.live;
   }
   if (fd != -1) {
     localData->fdCaptureThread_.Read(fd, data);
-  } else if ((type != "stdout") && (type != "stderr")) {
+  } else if ((type != "stdout") && (type != "stderr") && (type != "commands")) {
     try {
       data.live = true;
       data.supportSeek = true;

@@ -941,3 +941,13 @@ a.card-task-link-badge:hover {
 .modal-refresh:hover { opacity: 1; }
 .modal-refresh.spin { animation: modal-refresh-spin .5s linear; }
 @keyframes modal-refresh-spin { to { transform: rotate(360deg); } }
+
+/* COMMANDS of the step logs (logsmanager.js): "<time> <function>:<line>  $ <command>", the variables of the step */
+.logs-filter { display: none; margin-left: auto; align-self: center; padding: 0 14px; font-size: 12px; color: #aaa; cursor: pointer; user-select: none; }
+.logs-filter.shown { display: inline-flex; align-items: center; gap: 6px; }
+.logs-content pre.commands .cmd-time { color: #7d8590; }
+.logs-content pre.commands .cmd-where { color: #8b949e; }
+.logs-content pre.commands .cmd-prompt { color: #3fb950; font-weight: 700; }
+.logs-content pre.commands .cmd-text { color: #79c0ff; }
+.logs-content pre.commands .cmd-head { color: #d29922; font-weight: 600; }
+.logs-content pre.commands .cmd-var { color: #d2a8ff; }
