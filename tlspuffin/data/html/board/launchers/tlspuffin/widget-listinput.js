@@ -53,6 +53,8 @@ export class ListInput {
   // ex: this.#cls('item') -> 'jl-item' si classPrefix === 'jl'
   #cls(suffix) { return `${this.#prefix}-${suffix}`; }
 
+  // the text field itself (e.g. to outline it)
+  get input() { return this.#inputEl; }
   get value() { return this.#inputEl.value; }
   set value(v) { this.#inputEl.value = v; }
   set placeholder(v) { this.#inputEl.placeholder = v; }

@@ -20,6 +20,20 @@ The tlspuffin launcher itself, under `board/launchers/tlspuffin/`, is a self-con
   1. Fetches `jobsconfig.json` to populate the job-type chips, and the commit history from `commitsUrl` to populate a searchable, tabbed commit picker (`main/dev`, `PR`, `branches`, `All`) — PR data can be refreshed on demand against git_restapi's `?refresh=all`/`?refresh=local` (rate-limited GitHub API calls, credit/reset info surfaced in the refresh button's tooltip).
   2. For `campaign` jobs, exposes extra fields (timeout, vendor/features/impl, per-attempt core/memory limits) that get folded into `runtime[RUNTIME_*]` form fields — these are the `${RUNTIME_*}` placeholders `PR_campaign.json` expects (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)); this substitution is entirely client-side JS template literals, unrelated to the installer's own `${...}` substitution.
   3. On launch, fetches the job's `config`/`script`/`files` as blobs and posts them as multipart form parts alongside `args[COMMIT_ID]`, `args[PACKAGE]`, and (for campaigns) `args[CAMPAIGN_ID]`/`args[SAVE_CORPUS]`/`args[DISABLE_KILL_ON_HANG]`.
+  4. `describeTask(task)` — called by the scheduler's board, task page and history (through `launchers.js`'s `DescribeTask`; the scheduler itself stays project-agnostic): resolves the task's commit (`COMMIT_ID` argument, or the commit id in the task name) with git_restapi and returns the commit line for the task title (`Perf@5c588a #540 [title]`, or `my test · Perf@…` for a custom name; type from the default name or the job type) and for the `COMMIT_ID` argument. An unknown commit (or git_restapi down) keeps the task name.
+
+  5. `describeMonitor(task, message)` — the one-line summary of a running experiment on the board: corpus size and age (⚠️ amber after 60 min without a new entry), objectives (🎉, linked to the live objectives page; plain, without 🎉, in VulnA/VulnB tasks, which look for known bugs), fuzzing errors and crashes, log volume, ASAN, age of the stats; the details in the hovers, the full message on click; red for errors, amber for warnings (stale stats, log volume, ASAN not instrumented). An attempt that found objectives is highlighted (gold box, gold square in the step header, 🎉 pill; not in VulnA/VulnB), and the task's state strip gets a `🎉 N objectives · live ↗` button (objectives of all its attempts) to the live objectives page; once the task is finished, `· report ↗` to its final page, or `· report pending` until `objectives_report.sh` has written it. It reads the `#MONITOR_JSON` line that `MonitorExperiment` (`scripts/PR_common.sh`) appends to its message, or the message text for runs started before that line existed.
+
+## Commit Context (`common/commitinfo.js`)
+
+Shared by the dashboard and the tlspuffin launcher (served as `/files/common/commitinfo.js` next to `board/` and `publisher/`). It describes a commit as one line, `5c588a #540 [title]`: the short hash links to the commit, `#540` to the PR, the full id, kind, date and message are in the hover, and the message is capped.
+
+- **merge**: a `dev` commit that merged a PR, from its message (`… (#540)` squash merge, or `Merge pull request #540 from …`).
+- **tip**: the head of a PR: of an open PR (git_restapi history), or of any PR (`pulls` of the git_restapi logs, `index == total`); several PRs, newest first.
+- **member**: an intermediate commit of a PR, `#453·3/7` (3rd of the 7 commits of the PR, `pulls` of the git_restapi logs).
+- otherwise `[NO_PR]`; a commit git_restapi does not know shows its hash only (no claim about its PR).
+
+sshpuffin is in the same repository: same links.
 
 ## Publisher Results Dashboard (`publisher/`)
 
@@ -50,11 +64,11 @@ scheduler task → summary.json artefact (see tlspuffin-job-scripts.md)
 
 ### Rendering (`summary_render.js`)
 
-`RenderCommit`/`RenderCampaigns` build the per-commit DOM cards: a colored "pastille" per result type (success/fail/mixed/no-run), metric widgets with hover tooltips (mean/stddev computed client-side via `ComputeBasicStats`/`CalculateStats`), and action buttons/dropdowns linking out to the scheduler's task page (`ShowDetails`), a result-archive download (`DownloadResults`, streams the scheduler's `/api/task/:id/artefacts`), and vis_comparator (deep-linked with the commit/library as query params — see `summary.js`'s `config.vis_comparator_*` URL builders).
+`RenderCommit`/`RenderCampaigns` build the per-commit DOM cards: a one-line header (a colored "pastille" per result type — success/fail/mixed/no-run —, the commit line of `common/commitinfo.js`, branch and date), then the result types side by side when they fit (stacked otherwise), each a table with one row per library: the library and its warnings and 🐞 objectives button, the build (harness, ASAN, preset@commit, flags; sources and description in the hover), the successful/total runs, and one column per metric (mean±sd in short form; values, range, median and exact mean in the hover, computed client-side via `ComputeBasicStats`/`CalculateStats`; a click on a column header switches it to per-run values), plus a row with the metrics of the failed runs, and action buttons/dropdowns linking out to the scheduler's task page (`ShowDetails`), a result-archive download (`DownloadResults`, streams the scheduler's `/api/task/:id/artefacts`), and vis_comparator (deep-linked with the commit/library as query params — see `summary.js`'s `config.vis_comparator_*` URL builders).
 
 ### Graphing (`summary_graph.js`, `summary_graphmetrics.js`, `summary_graphoverview.js`, `summary_graphcompare.js`, `summary_managegraphs.js`)
 
-All four graph modals are thin wrappers around Plotly (`third-party/plotly/`), sharing the same trace-building static helpers in `Graph` (`summary_graph.js`): multi-attempt metrics render as box plots, single-value ones as diamond scatter markers, x-axis ticks are commit hashes ordered oldest→newest and annotated with a "compiled vs. cargo" (`⚙C`/`🦀`) marker from each attempt's `cli.json`.
+All four graph modals are thin wrappers around Plotly (`third-party/plotly/`), sharing the same trace-building static helpers in `Graph` (`summary_graph.js`): multi-attempt metrics render as box plots, single-value ones as diamond scatter markers, x-axis ticks are commits ordered oldest→newest, `⚙C 5c588a #540`: a "compiled vs. cargo" (`⚙C`/`🦀`) marker from each attempt's `cli.json`, the short hash and the PR (links), the full commit line in the hover (`Graph.TickLabel`, `Graph.DecorateGraphXTicks`).
 
 | Module | Opened from | Shows |
 |---|---|---|

@@ -1,6 +1,5 @@
 import { Metrics } from './summary_metrics.js';
-import '../third-party/plotly/plotly-3.3.0.min.js';
-const Plotly = window.Plotly;
+import { Plotly } from './plotly_lazy.js';
 
 class ManageGraphs {
   #registeredGraphs;

@@ -1,6 +1,7 @@
 #include "task.hxx"
 #include "step.hxx"
 #include "schedule.hxx"
+#include "folder_remover.hxx"
 #include "executor/executor.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
@@ -515,6 +516,11 @@ bool ns_Schedule::Task::DeleteRunFolders() {
   bool success = true;
   for(std::filesystem::path const& path:
       { run_root_path_, functions_path_, files_path_ }) {
+    // the run folder (checkouts, builds) is removed in the background: removing it here held the schedule
+    // lock, and new task submissions, for minutes
+    if ((path == run_root_path_) && FolderRemover::Instance().Remove(path)) {
+      continue;
+    }
     std::error_code ec;
     if (std::filesystem::remove_all(path, ec) == -1) {
       success = false;
@@ -905,3 +911,47 @@ ns_Schedule::Task::State ns_Schedule::Task::StateStringToEnum(std::string const&
   };
   return map.at(state);
 }
+
+rapidjson::Value ns_Schedule::Task::HistorySummaryJSON(rapidjson::Document::AllocatorType& alloc) const {
+  uint64_t total = 0, ok = 0, failed = 0, timedOut = 0, cancelled = 0, other = 0;
+  uint64_t start = 0, end = 0;
+  double coreMs = 0;
+  for (ns_Schedule::Step const* step : steps_) {
+    ++total;
+    std::string const state = step->StateName();
+    if (state == "Done") {
+      (step->exit_code_ == 0) ? ++ok : ++failed;
+    } else if (state == "TimedOut") {
+      ++timedOut;
+    } else if (state == "Cancelled") {
+      ++cancelled;
+    } else {
+      ++other;
+    }
+    uint64_t const stepStart = step->StartMs();
+    uint64_t const stepEnd = step->EndMs();
+    if ((stepStart > 0) && ((start == 0) || (stepStart < start))) {
+      start = stepStart;
+    }
+    if (stepEnd > end) {
+      end = stepEnd;
+    }
+    if ((stepStart > 0) && (stepEnd > stepStart)) {
+      coreMs += static_cast<double>(stepEnd - stepStart) * static_cast<double>(step->nb_cores_);
+    }
+  }
+  rapidjson::Value steps(rapidjson::kObjectType);
+  steps.AddMember("total", total, alloc);
+  steps.AddMember("ok", ok, alloc);
+  steps.AddMember("failed", failed, alloc);
+  steps.AddMember("timed_out", timedOut, alloc);
+  steps.AddMember("cancelled", cancelled, alloc);
+  steps.AddMember("other", other, alloc);
+  rapidjson::Value summary(rapidjson::kObjectType);
+  summary.AddMember("steps", steps, alloc);
+  summary.AddMember("core_hours", coreMs / 3600000.0, alloc);
+  summary.AddMember("start_timestamp", start, alloc);
+  summary.AddMember("end_steps_timestamp", end, alloc);
+  return summary;
+}
+

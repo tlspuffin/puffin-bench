@@ -1,0 +1,142 @@
+/* objectives page of a task (report.js) */
+:root { --bg:#000; --panel:#111; --card:#151515; --text:#e8e8e8; --muted:#8b8b8b; --line:#262626; --link:#58a6ff;
+  --red:#f85149; --purple:#a371f7; --orange:#d29922; --gray:#6e7681; color-scheme:dark; }
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--text); font:13px -apple-system,Segoe UI,Roboto,sans-serif }
+a { color:var(--link); text-decoration:none } a:hover { text-decoration:underline }
+code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace }
+.muted { color:var(--muted) } .ok { color:#3fb950 } .bad { color:var(--red) } .grow { flex:1 }
+.top { background:var(--panel); border-bottom:1px solid var(--line); padding:6px 12px }
+.crumb { color:var(--muted); font-size:12px }
+h1 { font-size:15px; margin:0 0 2px }
+h1 .commit-line .ci-msg { font-weight:400 }
+.commit-line .ci-sha { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight:700 }
+.commit-line .ci-pr { font-weight:700 } .commit-line .ci-nopr { color:var(--muted); font-size:.85em }
+.meta { color:var(--muted); font-size:12px }
+.live { display:inline-block; padding:0 8px; border-radius:999px; background:#3fb95033; color:#7ee787; font-size:11px; font-weight:700 }
+.tiles { display:flex; flex-wrap:wrap; gap:6px; margin-top:5px }
+.tile { display:inline-flex; align-items:baseline; gap:5px; background:var(--card); border:1px solid var(--line); border-radius:999px; padding:1px 10px }
+.tile b { font-size:13px } .tile span { color:var(--muted); font-size:12px }
+.tile.gold { background:#2a2208; border-color:#ffc400 } .tile.gold b { color:#ffc400 }
+.wrap { max-width:1400px; margin:0 auto; padding:8px 12px 30px }
+.note { color:var(--muted); font-size:12px; margin:4px 0 }
+.bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px }
+.chip { padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:var(--card); font-size:12px; cursor:pointer; color:var(--text) }
+.chip.on { background:#1d2a52; border-color:#4b6bd6; color:#fff }
+h2 { font-size:13px; margin:12px 0 6px; color:var(--muted) }
+.card { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden }
+.bug { border-bottom:1px solid var(--line) } .bug:last-child { border-bottom:none }
+.bug > summary { list-style:none; display:grid; grid-template-columns: 112px 190px minmax(0,1fr) minmax(160px,300px); gap:12px; cursor:pointer;
+  align-items:center; padding:6px 12px; cursor:pointer }
+.bug > summary::-webkit-details-marker { display:none }
+.bug > summary:hover { background:#1a1a1a } .bug[open] > summary { background:#1c2433 }
+.count { font-size:15px; font-weight:800 } .count small { font-size:11px; color:var(--muted); font-weight:400 }
+.count small.nr { display:block; white-space:nowrap; color:#ffb74d }
+.type { display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:700; color:#fff; white-space:nowrap }
+.type.asan { background:var(--red) } .type.sec { background:var(--purple) } .type.panic { background:var(--orange) }
+.type.none { background:var(--gray) }
+.frames { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.frames b { color:var(--red) }
+.where { display:flex; flex-wrap:wrap; gap:4px }
+.lib { font-size:11px; padding:1px 6px; border-radius:4px; background:#1f1f1f; border:1px solid var(--line); white-space:nowrap }
+.detail { display:grid; grid-template-columns: minmax(0,1fr) 320px; gap:14px; padding:4px 14px 14px }
+pre { margin:0; max-height:340px; overflow:auto; background:#0b0b0b; border:1px solid var(--line); color:#e2e8f0; padding:10px; border-radius:6px;
+  font-size:12px; line-height:1.4; white-space:pre-wrap; word-break:break-all }
+pre .hl { color:#fca5a5; font-weight:700 }
+.side { font-size:12px }
+.side .row { display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding:4px 0 }
+.side .row > span:last-child { text-align:right; overflow-wrap:anywhere }
+.btn { display:inline-block; padding:4px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card);
+  font-size:12px; margin:8px 6px 0 0; cursor:pointer }
+.libtable { width:100%; border-collapse:collapse; font-size:13px }
+.libtable th { text-align:left; color:var(--muted); font-weight:600; font-size:12px; padding:6px 10px; border-bottom:1px solid var(--line) }
+.libtable td { padding:6px 10px; border-bottom:1px solid var(--line) }
+.unconf { background:#17130a; border-left:3px solid var(--orange); padding:6px 12px; border-radius:4px; color:#e3b341; font-size:12px }
+@media (max-width: 900px) {
+  .bug > summary { grid-template-columns: 60px 1fr; }
+  .bug > summary .frames, .bug > summary .where { grid-column: 1 / -1 }
+  .detail { grid-template-columns: 1fr }
+}
+
+/* live.html: one row per running task with objectives (live.js) */
+.live-row { display:block; margin:8px 0; padding:8px 12px; color:inherit; text-decoration:none }
+.live-row:hover { border-color:var(--link); text-decoration:none }
+.live-row.gold { background:#2a2208; border-color:#ffc400 }
+.live-head { display:flex; gap:10px; align-items:baseline; font-size:14px }
+.live-counts { display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:4px; color:var(--muted) }
+.live-counts b { color:var(--text) }
+.live-row.gold .live-counts span:first-child b { color:#ffc400 }
+.jobtype { font-weight:700; color:#c9c9c9 }
+/* what the fuzzer saw, when the replay does not confirm it */
+.fz { display:inline-block; padding:0 6px; border-radius:4px; background:#3a2a10; color:#ffb74d; font-size:11px; font-weight:700 }
+.mismatch { display:inline-block; margin-left:4px; padding:1px 6px; border:1px solid #f08c00; border-radius:999px; color:#ffb74d; font-size:11px; white-space:nowrap }
+.tile.warn { border-color:#f08c00 } .tile.warn b { color:#ffb74d }
+.repro { display:inline-block; margin-left:4px; padding:1px 6px; border:1px solid #2ea043; border-radius:999px; color:#7ee787; font-size:11px; white-space:nowrap }
+.logs { display:flex; flex-direction:column; gap:6px; min-width:0 }
+.logtitle { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em }
+.bugletter { display:block; font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.03em }
+a.type.letter { min-width:22px; text-align:center; text-decoration:none; cursor:pointer }
+a.type.letter:hover { filter:brightness(1.2); text-decoration:none }
+.bug:target > summary { outline:1px solid var(--link); outline-offset:-1px }
+/* a bug row opens on click: chevron, and the type badges stacked on the left */
+.chev { display:inline-block; color:var(--muted); font-size:12px; transition:transform .15s }
+.bug[open] .chev { transform:rotate(90deg); color:var(--text) }
+.bug > summary:hover .chev { color:var(--link) }
+.bug > summary > div:nth-child(2) { display:flex; flex-direction:column; align-items:flex-start; gap:4px }
+.bug > summary > div:nth-child(2) .mismatch { margin-left:0 }
+/* a bug opened from a link is not hidden under the sticky top bar */
+.bug { scroll-margin-top: 70px }
+/* traces of a bug: zip and one by one */
+.traces-row > span:last-child { display:flex; flex-direction:column; align-items:flex-end; gap:4px }
+.trace-list summary { cursor:pointer; color:var(--muted, #8b8b8b); font-size:12px }
+.trace-list a.trace { display:block; font-size:11.5px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px }
+
+/* print / PDF: light, without the controls; the bugs are unfolded by report.js (beforeprint) */
+@media print {
+  :root { --bg:#fff; --panel:#fff; --card:#fff; --text:#111; --muted:#555; --line:#ccc; --link:#0645ad; color-scheme:light; }
+  body { background:#fff; color:#111; font-size:11px }
+  .pb-nav, .pb-help, .bar, .btn, .page-tools, .chev { display:none !important }
+  .bug { break-inside:avoid-page; border-color:#ccc }
+  .bug > summary, .bug[open] > summary, .bug > summary:hover { list-style:none; background:#f0f3f8 !important; color:#111 }
+  .lib { background:#fff; color:#111 }
+  pre { white-space:pre-wrap; word-break:break-all; background:#f6f6f6 !important; color:#111 !important; max-height:none !important }
+  a { color:#0645ad }
+  .live { background:none; color:#111 }
+}
+/* a bug that is not the target of VulnA/VulnB (another known CVE) */
+.not-target { display:inline-block; margin-left:4px; padding:0 7px; border-radius:999px; border:1px dashed var(--muted); color:var(--muted); font-size:11px; white-space:nowrap }
+.bug:has(.not-target) > summary { opacity:.8 }
+a.type.letter.not-target-letter { opacity:.4 }
+a.type.letter.not-target-letter:hover { opacity:.8 }
+/* expected bug of the configuration (vuln_targets.json), and a bug that is neither it nor a known CVE set apart */
+.expected { display:inline-block; margin-left:4px; padding:0 7px; border-radius:999px; border:1px solid #3fb950; color:#7ee787; font-size:11px; white-space:nowrap }
+.unexpected { display:inline-block; margin-left:4px; padding:0 7px; border-radius:999px; border:1px solid #f08c00; color:#ffb74d; font-size:11px; white-space:nowrap }
+.tile.ok-tile b { color:#7ee787 } .tile.warn-tile { border-color:#f08c00 } .tile.warn-tile b { color:#ffb74d }
+/* 🚨 a bug never seen for its library before this task */
+.known-cve { display:inline-block; margin-left:4px; padding:0 7px; border-radius:999px; border:1px solid #6e7681; color:#c9d1d9; font-size:11px; white-space:nowrap }
+.new-bug-badge { display:inline-block; margin-left:4px; padding:1px 8px; border-radius:999px; background:#da3633; color:#fff; font-weight:800; font-size:11px; white-space:nowrap; animation: new-bug-pulse 1.2s ease-in-out infinite }
+@keyframes new-bug-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+/* under the symptom of a bug: expected / set apart / unexpected / new */
+.symptom { min-width: 0 } .bug-tags { margin-top: 3px } .bug-tags > span:first-child { margin-left: 0 }
+/* ⏳ objectives a live page has not replayed yet: waiting resolves them, so faint */
+.tile.pending-tile { opacity: .55; border-style: dashed; }
+.note.pending-final { border-color: #d29922; color: #ffb74d; }
+
+/* the expected bugs (VulnA/VulnB), first of the tiles: green all found in every run, amber not every run, orange some
+   configurations missed, red none */
+.expected-banner { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px; padding:3px 12px; border-radius:999px; font-size:13px; border:1.5px solid }
+.expected-banner b { font-size:15px }
+.expected-banner .exp-runs { opacity:.85 }
+.expected-banner.exp-all { background:#12361f; border-color:#3fb950; color:#aff5b4 } .expected-banner.exp-all b { color:#7ee787 }
+.expected-banner.exp-partial { background:#2e2a0f; border-color:#d4a72c; color:#f2d98b } .expected-banner.exp-partial b { color:#e3b341 }
+.expected-banner.exp-some { background:#3a2410; border-color:#f08c00; color:#ffcf99 } .expected-banner.exp-some b { color:#ffb74d }
+.expected-banner.exp-none { background:#3d1214; border-color:#f85149; color:#ffb3ad } .expected-banner.exp-none b { color:#ff7b72 }
+.expected-banner.exp-provisional { background:#1c1c1c; border-color:#8b8b8b; color:#d0d0d0 } .expected-banner.exp-provisional b { color:#e8e8e8 }
+.exp-chip.exp-provisional { background:#4b4b4b; color:#fff }
+.expected-banner .exp-failed { font-weight:600; color:#e3b341 }
+.run-failures { margin:10px 0 4px; padding:8px 12px; border:1.5px solid #d4a72c; border-radius:8px; background:#2e2a0f; color:#f2d98b; font-size:13px }
+.run-failures b { color:#e3b341 } .run-failures ul { margin:4px 0 0; padding-left:20px }
+.run-failures li b { color:inherit }
+.libtable .runs-failed { color:#e3b341; font-weight:600; cursor:context-menu }
+.exp-chip { padding:0 7px; border-radius:999px; font-size:11.5px; font-weight:600; cursor:context-menu }
+.exp-chip.exp-all { background:#238636; color:#fff } .exp-chip.exp-partial { background:#9e6a03; color:#fff } .exp-chip.exp-none { background:#b62324; color:#fff }

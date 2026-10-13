@@ -7,7 +7,8 @@ import { GraphManager } from './graphmanager.js';
 import { TASK_TYPES, ICONS, DEFAULT_LEGEND_FORMAT } from './constants.js';
 import { state, globalDynamicSubtasks, globalCampaigns, getModalCancelFn, clearModalCancel, dedupSubtasks, resolveExperimentSlot, resolveMetricEntry, nextCommitColor, experimentKey, slotKey, removeGraph, fetchMetricSet } from './state.js';
 import { initSidebar, BuildSidebar, flattenMetricPaths, reloadGraphData } from './sidebar.js';
-import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL, OpenInfoModal } from './dialogs.js';
+import { initDialogs, ConfigBaseInformations, AddGraphique, EditGraph, OpenView, OpenTemplate, SaveAsTemplate, tryLoadViewFromURL, tryLoadTemplateFromURL, SuggestTemplatesFromURL } from './dialogs.js';
+import { HELP_HTML } from './help.js';
 
 // ============================================================
 // CONFIGURATION
@@ -44,10 +45,9 @@ headerEditBtn.title = 'Rename this view';
 headerEditBtn.style.display = 'none';
 let headerEditInput = null;
 
-const serverName = window.location.hostname;
 const headerBrand = document.createElement('div');
 headerBrand.className = 'header-brand';
-headerBrand.textContent = `Experiment Analyzer on ${serverName}`;
+headerBrand.textContent = 'Experiment Analyzer';
 
 function commitTitleEdit() {
   if (headerEditBtn.dataset.editing !== 'true' || !headerEditInput) return;
@@ -521,9 +521,11 @@ uiSaveTpl.onclick = function() {
 headerToolbar.appendChild(uiSaveTpl);
 UIElt.push(uiSaveTpl);
 
-const uiInfo = UI.CreateToolbarBtn('Help', 'Explains how this webapp works');
-uiInfo.onclick = OpenInfoModal;
-headerToolbar.appendChild(uiInfo);
+// the help is the ❔ of the bench's top bar (board/nav.js), which shows this template as the help of the page
+const helpTemplate = document.createElement('template');
+helpTemplate.id = 'help-panel';
+helpTemplate.innerHTML = HELP_HTML;
+document.head.appendChild(helpTemplate);
 
 UIElt.forEach(function(element) {
   UI.DisableElement(element);
@@ -537,6 +539,7 @@ const modalpage = document.getElementById('modalpage');
 
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape' && getModalCancelFn()) {
+    e.preventDefault();
     const fn = getModalCancelFn();
     clearModalCancel();
     fn();

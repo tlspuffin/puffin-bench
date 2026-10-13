@@ -300,7 +300,7 @@ async function rebuildMetricsUI(ctx, forceTimeRecalc = false) {
           const warn = document.createElement('span');
           warn.className = 'experiment-slot-warn';
           warn.textContent = ICONS.WARN;
-          warn.title = resolved
+          warn.dataset.clickTip = resolved
             ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
             : 'No data';
           const removeBtn = row.querySelector('.experiment-remove-btn');
@@ -728,7 +728,7 @@ export async function AddGraphique(prefill = null, editId = null) {
       const warn = document.createElement('span');
       warn.className = 'experiment-slot-warn';
       warn.textContent = ICONS.WARN;
-      warn.title = resolved
+      warn.dataset.clickTip = resolved
         ? `No data for ${CommitHelp.ShortHash(resolved.commit)}/${resolved.tasktype}/${resolved.subtask}`
         : 'No data';
       row.appendChild(warn);

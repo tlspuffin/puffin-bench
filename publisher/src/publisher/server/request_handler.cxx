@@ -10,6 +10,47 @@
 #include <Poco/Base64Encoder.h>
 #include <Poco/StreamCopier.h>
 #include <Poco/URI.h>
+#include <sys/stat.h>
+#include <Poco/DateTime.h>
+#include <Poco/DateTimeFormat.h>
+#include <Poco/DateTimeFormatter.h>
+#include <Poco/DateTimeParser.h>
+#include <Poco/Timestamp.h>
+
+namespace {
+// Static files are revalidated on every load ("Cache-Control: no-cache" with their modification time as
+// Last-Modified): an unchanged file costs a 304, a changed one is sent at once. Without these headers browsers reused
+// files of an earlier version (a page script after an update) until a hard reload.
+// True when the request's If-Modified-Since is not older than the file: the 304 is sent.
+bool NotModifiedSince(Poco::Net::HTTPServerRequest const& request, Poco::Net::HTTPServerResponse& response,
+    std::filesystem::path const& file) {
+  response.set("Cache-Control", "no-cache");
+  struct stat info {};
+  if (::stat(file.c_str(), &info) != 0) {
+    return false;
+  }
+  Poco::Timestamp const modified = Poco::Timestamp::fromEpochTime(info.st_mtime);
+  response.set("Last-Modified", Poco::DateTimeFormatter::format(modified, Poco::DateTimeFormat::HTTP_FORMAT));
+  if (!request.has("If-Modified-Since")) {
+    return false;
+  }
+  try {
+    int tzd = 0;
+    Poco::DateTime const since = Poco::DateTimeParser::parse(Poco::DateTimeFormat::HTTP_FORMAT,
+        request.get("If-Modified-Since"), tzd);
+    if (since.timestamp().epochTime() - tzd >= modified.epochTime()) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_MODIFIED);
+      response.setContentLength(0);
+      response.send();
+      return true;
+    }
+  } catch (...) {
+    // an unreadable date: the file is sent
+  }
+  return false;
+}
+};
+
 
 static std::unordered_map<std::string, std::pair<std::string, std::ios_base::openmode>> 
     mimeType {
@@ -330,6 +371,9 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
       openmode = mimeTypeIT->second.second;
     }
 
+    if (NotModifiedSince(request, response, filename)) {
+      return;
+    }
     std::ifstream file(filename, openmode);
     if (!file.is_open()) {
       //detectHostileIP_.RecordFailedRequest(srcIP);

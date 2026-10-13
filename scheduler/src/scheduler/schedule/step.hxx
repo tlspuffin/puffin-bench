@@ -83,6 +83,10 @@ public:
 
   std::chrono::time_point<std::chrono::system_clock> StartTime() const;
   std::chrono::milliseconds RunTime() const;
+  // start and end in ms since the epoch, 0 when not set (history summary of the task)
+  uint64_t StartMs() const;
+  uint64_t EndMs() const;
+  std::string StateName() const;
 
   void MarkPending();
   void MarkRunning();
@@ -221,6 +225,10 @@ inline std::chrono::time_point<std::chrono::system_clock> Step::StartTime() cons
     return std::chrono::time_point<std::chrono::system_clock>::clock::now();
   }
   return time_points_[0];
+}
+
+inline std::string Step::StateName() const {
+  return StateEnumToString(state_);
 }
 
 inline std::chrono::milliseconds Step::RunTime() const {

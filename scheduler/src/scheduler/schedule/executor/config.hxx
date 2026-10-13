@@ -36,6 +36,8 @@ struct LocalConfig : public Config {
   std::filesystem::path cgroupPath_;
   uint8_t cpuMaxLoad_;
   double memMinRatio_;
+  // free space needed on the run and export storage to start a step (GB); 0: no check
+  uint64_t diskMinimumGB_;
   void Validate(bool forceInstall) const;
 
   LocalConfig(std::string const& name);
