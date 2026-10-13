@@ -10,8 +10,8 @@
 #
 # It installs the system packages and Nix (multi-user), limits the ASLR entropy for old ASAN runtimes,
 # creates PB_ROOT, writes the systemd units of the four services (grouped by puffin-bench.target; a
-# service only starts once deploy.sh has installed its binary) and the sudoers entry the scheduler
-# needs to set the CPU sets of its tasks. Safe to re-run.
+# service only starts once deploy.sh has installed its binary) and the sudoers entries the scheduler
+# needs to keep the other processes off the CPUs of its tasks. Safe to re-run.
 
 set -euo pipefail
 
@@ -107,10 +107,16 @@ systemctl daemon-reload
 systemctl enable puffin-bench.target "${SERVICES[@]/#/puffin-}"
 
 Step "sudoers"
-echo "${PB_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl set-property user.slice AllowedCPUs=*" \
-    > /etc/sudoers.d/puffin-bench
+# the scheduler keeps users' sessions (user.slice), services and containers (system.slice) and virtual machines
+# (machine.slice) off the CPUs of its steps while they run (samples/scheduler.sudoers)
+for slice in user.slice system.slice machine.slice; do
+  echo "${PB_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl set-property ${slice} AllowedCPUs=*"
+done > /etc/sudoers.d/puffin-bench
 chmod 440 /etc/sudoers.d/puffin-bench
 visudo -cf /etc/sudoers.d/puffin-bench
+echo "WARNING: while steps run, every service and container of this machine (system.slice, machine.slice), also"
+echo "those of other users, only gets the CPUs no step holds; remove their lines from /etc/sudoers.d/puffin-bench"
+echo "if they must keep all CPUs"
 
 Step "Check the login shell of the services"
 if ! out="$( sudo -u "${PB_USER}" env -i HOME="${PB_HOME}" PATH="${NIX_BIN}:/usr/bin:/bin" bash -l -c 'echo login-shell-ok' < /dev/null 2>&1 )" ||
