@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -26,9 +27,19 @@ public:
 
 private:
   std::filesystem::path outputDir_;
-  std::unordered_map<std::string, std::ofstream> writers_;
+  std::unordered_map<std::string, std::vector<uint8_t>> buffers_;
+  uint64_t buffersSize_;
 
-  void AssertWriter(std::string const& seriesName);
+  void UpdateData(std::string const& seriesName, uint8_t const* data, size_t size);
+  void FlushBuffers();
 };
+
+inline void StreamingWriter::Save(const std::string& seriesName, uint64_t value) {
+  UpdateData(seriesName, reinterpret_cast<uint8_t const*>(&value), sizeof(uint64_t));
+}
+
+inline void StreamingWriter::Save(const std::string& seriesName, double value) {
+  UpdateData(seriesName, reinterpret_cast<uint8_t const*>(&value), sizeof(double));
+}
 
 };

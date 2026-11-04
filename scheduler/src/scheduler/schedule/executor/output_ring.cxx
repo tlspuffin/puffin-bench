@@ -159,7 +159,8 @@ bool ns_Executor::FileRing::WriteBytes(uint8_t const* data, uint64_t size) {
       if (errno == EAGAIN || errno == EINTR) {
         continue;
       }
-      LOGE << "Fatal error when writing on " << file_ << " errno " << errno << Log::Flags::End;
+      int saveErrno = errno;
+      LOGE << "Fatal error when writing on " << file_ << " errno " << saveErrno << Log::Flags::End;
       return false;
     }
     written += ret;
@@ -388,11 +389,13 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(
     int fd, std::shared_ptr<ns_Executor::OutputBuffer> outputBuffer) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
-    LOGE << "Unable to retrieve flags on fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to retrieve flags on fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
     return false;
   }
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    LOGE << "Unable to set O_NONBLOCK on fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to set O_NONBLOCK on fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
     return false;
   }
 
@@ -401,7 +404,8 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(
   std::pair<std::unordered_map<int, std::shared_ptr<OutputBuffer>>::iterator, bool> storage;
   storage = fds_.insert({fd, std::shared_ptr<ns_Executor::OutputBuffer>(outputBuffer)});
   if (!storage.second) {
-    LOGE << "Unable to store fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to store fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
     return false;
   }
 
@@ -422,12 +426,14 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFD(int fd) {
   std::lock_guard<std::mutex> lock(lockFDs_);
   auto it = fds_.find(fd);
   if (it == fds_.end()) {
-    LOGE << "Unable to remove no existing fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to remove no existing fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
     return false;
   }
   bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
   if (!success) {
-    LOGE << "Unable to remove fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to remove fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
   }
   fds_.erase(it);
 
@@ -464,7 +470,8 @@ void ns_Executor::FDCaptureThread::FDCaptureThreadImpl::threadMain() {
       if (errno == EINTR) {
         continue;
       }
-      LOGE << "Fatal Error epoll_wait failed errno: " << errno << Log::Flags::End;
+      int saveErrno = errno;
+      LOGE << "Fatal Error epoll_wait failed errno: " << saveErrno << Log::Flags::End;
       return;
     }
 
@@ -516,7 +523,8 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::AddFD(int fd) {
   epollEvent.events = EPOLLIN | EPOLLPRI;
   epollEvent.data.fd = fd;
   if (epoll_ctl(epollID_, EPOLL_CTL_ADD, fd, &epollEvent) != 0) {
-    LOGE << "Unable to add fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to add fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
     return false;
   }
   return true;
@@ -531,12 +539,14 @@ bool ns_Executor::FDCaptureThread::FDCaptureThreadImpl::RemoveFDNoLock(int fd) {
 
   auto it = fds_.find(fd);
   if (it == fds_.end()) {
-    LOGE << "Unable to remove no existing fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to remove no existing fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
     return false;
   }
   bool success = epoll_ctl(epollID_, EPOLL_CTL_DEL, fd, nullptr) == 0;
   if (!success) {
-    LOGE << "Unable to remove fd: " << fd << " errno: " << errno << Log::Flags::End;
+    int saveErrno = errno;
+    LOGE << "Unable to remove fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
   }
   fds_.erase(it);
 

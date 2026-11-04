@@ -5,6 +5,8 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <sstream>
+#include <unistd.h>
 
 class Log {
 public:
@@ -197,3 +199,17 @@ extern Logs logs;
 #define LOGW if (!logs.logsLevel_.warning) {} else logs.w()
 #define LOGI if (!logs.logsLevel_.info) {} else logs.i()
 #define LOGD if (!logs.logsLevel_.debug) {} else logs.d()
+
+#define LOG_CHILD_(enabled, fd, mark, ...) do { \
+  if (enabled) { \
+    std::ostringstream logChildOSS_; \
+    logChildOSS_ << mark << __VA_ARGS__ << '\n'; \
+    std::string const logChildLine_ = logChildOSS_.str(); \
+    ssize_t logChildUnused_ = write(fd, logChildLine_.data(), logChildLine_.size()); \
+    (void)logChildUnused_; \
+  } \
+} while (0)
+
+#define LOGE_CHILD(...) LOG_CHILD_(logs.logsLevel_.error,   STDERR_FILENO, "[X] ",  __VA_ARGS__)
+#define LOGW_CHILD(...) LOG_CHILD_(logs.logsLevel_.warning, STDERR_FILENO, "/!\\ ", __VA_ARGS__)
+#define LOGD_CHILD(...) LOG_CHILD_(logs.logsLevel_.debug,   STDOUT_FILENO, "** ",  __VA_ARGS__)

@@ -339,7 +339,7 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
   variables.emplace("TASK_USER", user_);
   variables.emplace("TASK_JOB_TYPE", job_type_);
 
-  publish_link_ = publish_.ViewLink(variables);
+  publish_link_ = (request_cancel_ ? "" : publish_.ViewLink(variables));
 
   try {
     if (!std::filesystem::create_directory(finalSavePath)) {

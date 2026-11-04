@@ -124,7 +124,8 @@ inline bool FDCaptureThread::AddFD(int fd, OutputBuffer* outputBuffer) {
     std::lock_guard lock((lockFDs_));
     auto result = fds_.insert({fd, outputBufferPtr});
     if (!result.second) {
-      LOGE << "Unable to store fd: " << fd << " errno: " << errno << Log::Flags::End;
+      int saveErrno = errno;
+      LOGE << "Unable to store fd: " << fd << " errno: " << saveErrno << Log::Flags::End;
       return false;
     }
 

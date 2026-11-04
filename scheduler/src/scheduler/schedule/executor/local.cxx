@@ -23,16 +23,24 @@
 #define FREE_ARG_STRINGS(args) for(char* string: args) free(string)
 
 template<typename T>
-static bool WriteCGroup(std::string const& filename, T const& value) {
+static bool WriteCGroup(std::string const& filename, T const& value, bool inMainProcess) {
   std::ofstream ofs(filename);
   if (!ofs.is_open()) {
-    LOGE << "Unable to open " << filename << Log::Flags::End;
+    if (inMainProcess) {
+      LOGE << "Unable to open " << filename << Log::Flags::End;
+    } else {
+      LOGE_CHILD("Unable to open " << filename);
+    }
     return true;
   }
   ofs << value;
   ofs.close();
   if (ofs.fail()) {
-    LOGE << "Unable to write " << value << " in " << filename << Log::Flags::End;
+    if (inMainProcess) {
+      LOGE << "Unable to write " << value << " in " << filename << Log::Flags::End;
+    } else {
+      LOGE_CHILD("Unable to write " << value << " in " << filename);
+    }
     return true;
   }
   return false;
@@ -182,8 +190,9 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
+    int savedErrno = errno;
     throw std::runtime_error(std::string("Failed to enable subreaper mode: ") + 
-        std::strerror(errno));
+        std::strerror(savedErrno));
   }
 
   cgroupRootCapabilities_ = DetectCGroupSupport(cgroupRoot_, cgroupRootCapabilitiesString_);
@@ -263,7 +272,7 @@ bool ns_Executor::Local::TaskPrepareToRun(ns_Schedule::Task* task) {
     return true;
   }
 
-  if (WriteCGroup(localtaskData->cgroupPath_ / "cgroup.subtree_control", cgroupRootCapabilitiesString_)) {
+  if (WriteCGroup(localtaskData->cgroupPath_ / "cgroup.subtree_control", cgroupRootCapabilitiesString_, true)) {
     std::filesystem::remove(localtaskData->cgroupPath_);
     localtaskData->cgroupPath_.clear();
     return true;
@@ -632,20 +641,22 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 #endif
 
   if (pipe(localData->pipeFDOut) != 0) {
+    int savedErrno = errno;
     throw std::runtime_error(
-        std::string("creation of pipe for stdout failed: ") + std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
+        std::string("creation of pipe for stdout failed: ") + std::to_string(savedErrno) +
+        " (" + std::strerror(savedErrno) + ")"
     );
   }
   if (fcntl(localData->pipeFDOut[1], F_SETPIPE_SZ, 1048576) == -1) {
     LOGW << "Unable to upgrade stdout pipe buffer size for " << step.task_->id_ << "/" << step.ID() << Log::Flags::End;
   }
   if (pipe(localData->pipeFDErr) != 0) {
+    int savedErrno = errno;
     close(localData->pipeFDOut[0]);
     close(localData->pipeFDOut[1]);
     throw std::runtime_error(
-        std::string("creation of pipe for stderr failed: ") + std::to_string(errno) +
-        " (" + std::strerror(errno) + ")"
+        std::string("creation of pipe for stderr failed: ") + std::to_string(savedErrno) +
+        " (" + std::strerror(savedErrno) + ")"
     );
   }
   if (fcntl(localData->pipeFDErr[1], F_SETPIPE_SZ, 1048576) == -1) {
@@ -684,147 +695,157 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
 
   pid_t pid = fork();
   if (pid == 0) {
-    pid = getpid();
+    try {
+      pid = getpid();
 
 #ifdef UPDATE_CHILD_UMASK
-    umask(0022);
+      umask(0022);
 #endif
 
-    std::string cores;
-    for(uint64_t core: localData->cores_) {
-      cores += std::to_string(core) + ',';
-    }
-    cores.pop_back();
+      std::string cores;
+      for(uint64_t core: localData->cores_) {
+        cores += std::to_string(core) + ',';
+      }
+      cores.pop_back();
 
-    if (!cgroupRoot_.empty()) {
-      std::filesystem::create_directories(localData->cgroup_path_);
+      if (!cgroupRoot_.empty()) {
+        std::filesystem::create_directories(localData->cgroup_path_);
 
-      if ((cgroupRootCapabilities_ & 1) && (step.memory_max_ > 0)) {
-        if (WriteCGroup(localData->cgroup_path_ / "memory.max", step.memory_max_)) {
-          LOGE << "unable to set cgroup memory.max for step" << step.ID() << Log::Flags::End;
-          exit(-1);
+        if ((cgroupRootCapabilities_ & 1) && (step.memory_max_ > 0)) {
+          if (WriteCGroup(localData->cgroup_path_ / "memory.max", step.memory_max_, false)) {
+            LOGE_CHILD("unable to set cgroup memory.max for step " << step.ID());
+            _exit(-1);
+          } else {
+            LOGD_CHILD("Step " << step.ID() << " set memory max to " << step.memory_max_);
+          }
+        }
+
+        if (cgroupRootCapabilities_ & 2) {
+          if (WriteCGroup(localData->cgroup_path_ / "cpuset.cpus", cores, false)) {
+            LOGW_CHILD("Unable to force cpuset.cpus for step " << step.ID());
+          }
+        }
+
+        if (WriteCGroup(localData->cgroup_path_ / "cgroup.procs", pid, false)) {
+          LOGE_CHILD("unable to self register in cgroup for step " << step.ID());
+          _exit(-1);
         } else {
-          LOGD << "Step " << step.ID() << " set memory max to " << step.memory_max_ << Log::Flags::End;
+          LOGD_CHILD("Step " << step.ID() << " use " << localData->cgroup_path_);
         }
       }
 
-      if (cgroupRootCapabilities_ & 2) {
-        if (WriteCGroup(localData->cgroup_path_ / "cpuset.cpus", cores)) {
-          LOGW << "Unable to force cpuset.cpus" << Log::Flags::End;
-        }
+      pid_t spid = setsid();
+      if (spid == -1) {
+        LOGE_CHILD("setsid failed for step " << step.ID());
+        _exit(-1);
+      }
+      if (!PinCoresToProcess(localData->cores_, false)) {
+        LOGE_CHILD("set core affinity failed for step " << step.ID());
+        _exit(-1);
+      }
+      if (chdir(localData->run_path_.c_str()) != 0) {
+        LOGE_CHILD("chdir failed for step " << step.ID());
+        _exit(-1);
       }
 
-      if (WriteCGroup(localData->cgroup_path_ / "cgroup.procs", pid)) {
-        LOGE << "unable to self register in cgroup for step" << step.ID() << Log::Flags::End;
-        exit(-1);
-      } else {
-        LOGD << "Step " << step.ID() << " use " << localData->cgroup_path_ << Log::Flags::End;
+      std::ofstream stepParameters = std::ofstream(localData->step_parameters_file_, std::ios::trunc);
+      for(auto const& [ key, value ]: step.args_) {
+        stepParameters << key << "=\"" << value << "\" ";
       }
+      stepParameters.close();
+
+      std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::trunc);
+      stepLauncher << "THEJOB_ROOT_PATH=\"" << localData->run_path_ << "\"\n"
+          << "THEJOB_FUNCTIONS_PATH=\"" << step.task_->functions_path_ << "\"\n"
+          << "THEJOB_ENV_PATH=\"" << step.task_->env_path_ << "\"\n"
+          << "THEJOB_USER_FILES_PATH=\"" << step.task_->files_path_ << "\"\n"
+          << "THEJOB_OUT_PATH=\"" << step.task_->outputs_path_ << "\"\n"
+          << "THEJOB_ARTEFACTS_FILE=\"" << localData->artefacts_file_ << "\"\n"
+          << "THEJOB_ARTEFACTS_PATH=\"" << step.task_->artefacts_path_ << "\"\n"
+          << "THEJOB_TOOLS_PATH=\"" << step.task_->tools_path_ << "\"\n"
+          << "THEJOB_USER=\"" << step.task_->user_ << "\"\n"
+          << "THEJOB_UNIQ_STEP=" << (step.next_ == &step) << "\n"
+          << "THEJOB_PID=" << pid << "\n"
+          << "THEJOB_API_URL=\"" << step.task_->apiURL_ << "\"\n"
+          << "THEJOB_TASK_ID=" << step.task_->id_ << "\n"
+          << "THEJOB_STEP_UUID=\"" << step.uuid_ << "\"\n"
+          << "THEJOB_STEP_ID=\"" << step.id_ << "\"\n"
+          << "THEJOB_STEP_NUMID=\"" << step.step_id_ << "\"\n"
+          << "THEJOB_STEP_RANK_ID=\"" << step.rank_id_ << "\"\n"
+          << "THEJOB_STEP_ATTEMPT_ID=" << step.attempt_id_ << "\n"
+          << "THEJOB_RUN_ID=" << step.run_id_ << "\n"
+          << "THEJOB_CORES=\"" << cores << "\"\n"
+          << "THEJOB_ENTRYPOINT=\"" << step.function_ << "\"\n"
+          << "THEJOB_PARAMETERS_PATH=\"" << localData->step_parameters_file_ << "\"\n"
+          << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
+          << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
+          << "THEJOB_SERVER_PORT=\"" << serverPort_ << "\"\n"
+          << "THEJOB_USER_STATE_FILE=\"" << localData->user_state_file_ << "\"\n"
+          << "THEJOB_FLAG_FILE=\"" << localTaskData->flag_file_ << "\"\n"
+          << "THEJOB_DONE_FILE=\"" << localData->done_file_ << "\"\n";
+      if (step.monitor_) {
+        stepLauncher << "THEJOB_MONITOR_PARAMETERS_PATH=\"" << step.monitor_->ToArgs() << 
+          " " << step.monitor_path_.string() << "\"\n";
+      }
+      if (step.group_status_ != ns_Schedule::Step::stepsGroup_None_) {
+        stepLauncher << "THEJOB_STEP_GROUP_ID=\"" << step.group_id_ << "\"\n";
+      }
+      stepLauncher.close();
+
+      std::vector<std::string> args_strings = BuildExecutorArgs(step);
+      if (args_strings.empty()) {
+        LOGE_CHILD("Can not build args for process, step " << step.ID());
+       _exit(-1);
+      }
+      std::vector<char*> args_chars;
+      for(std::string const& arg: args_strings) {
+        args_chars.push_back(strdup(arg.c_str()));
+      }
+      args_chars.push_back(nullptr);
+
+      LOGD_CHILD("Step running: " << step.task_->id_ << " / " << step.ID()  << 
+          " uuid: " << step.uuid_ << " with pid: " << pid);
+
+      if (!RedirectOutput(outhandler, errhandler)) {
+        LOGE_CHILD("RedirectOutput failed for step " << step.ID());
+        _exit(-1);
+      }
+
+      close_range(3, ~0U, 0);
+
+      std::filesystem::path script = config_.scriptPath_ / "executor.sh";
+      int retval = execv(script.c_str(), args_chars.data());
+      int savedErrno = errno;
+      LOGE_CHILD("Unable to execute " << script << " : " 
+          << strerror(savedErrno) << " for step " << step.ID());
+
+    } catch(std::exception const& e) {
+      LOGE_CHILD("Exception in child for step " << step.ID() << ": " << e.what());
+    } catch(...) {
+      LOGE_CHILD("Unknown exception in child for step " << step.ID());
     }
 
-    pid_t spid = setsid();
-    if (spid == -1) {
-      LOGE << "setsid failed" << Log::Flags::End;
-      exit(-1);
-    }
-    if (!PinCoresToProcess(localData->cores_)) {
-      LOGE << "set core affinity failed" << Log::Flags::End;
-      exit(-1);
-    }
-    if (chdir(localData->run_path_.c_str()) != 0) {
-      LOGE << "chdir failed" << Log::Flags::End;
-      exit(-1);
+    try {
+      std::ofstream fatalErrorProf(localData->fatalerror_file_, std::ios::trunc);
+      fatalErrorProf << "0";
+      fatalErrorProf.close();
+      sync();
+    } catch(std::exception const& e) {
+      LOGE_CHILD("Exception in failed child for step " << step.ID() << ": " << e.what());
+    } catch(...) {
+      LOGE_CHILD("Unknown exception in failed child for step " << step.ID());
     }
 
-    std::ofstream stepParameters = std::ofstream(localData->step_parameters_file_, std::ios::trunc);
-    for(auto const& [ key, value ]: step.args_) {
-      stepParameters << key << "=\"" << value << "\" ";
-    }
-    stepParameters.close();
-
-    std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::trunc);
-    stepLauncher << "THEJOB_ROOT_PATH=\"" << localData->run_path_ << "\"\n"
-        << "THEJOB_FUNCTIONS_PATH=\"" << step.task_->functions_path_ << "\"\n"
-        << "THEJOB_ENV_PATH=\"" << step.task_->env_path_ << "\"\n"
-        << "THEJOB_USER_FILES_PATH=\"" << step.task_->files_path_ << "\"\n"
-        << "THEJOB_OUT_PATH=\"" << step.task_->outputs_path_ << "\"\n"
-        << "THEJOB_ARTEFACTS_FILE=\"" << localData->artefacts_file_ << "\"\n"
-        << "THEJOB_ARTEFACTS_PATH=\"" << step.task_->artefacts_path_ << "\"\n"
-        << "THEJOB_TOOLS_PATH=\"" << step.task_->tools_path_ << "\"\n"
-        << "THEJOB_USER=\"" << step.task_->user_ << "\"\n"
-        << "THEJOB_UNIQ_STEP=" << (step.next_ == &step) << "\n"
-        << "THEJOB_PID=" << pid << "\n"
-        << "THEJOB_API_URL=\"" << step.task_->apiURL_ << "\"\n"
-        << "THEJOB_TASK_ID=" << step.task_->id_ << "\n"
-        << "THEJOB_STEP_UUID=\"" << step.uuid_ << "\"\n"
-        << "THEJOB_STEP_ID=\"" << step.id_ << "\"\n"
-        << "THEJOB_STEP_NUMID=\"" << step.step_id_ << "\"\n"
-        << "THEJOB_STEP_RANK_ID=\"" << step.rank_id_ << "\"\n"
-        << "THEJOB_STEP_ATTEMPT_ID=" << step.attempt_id_ << "\n"
-        << "THEJOB_RUN_ID=" << step.run_id_ << "\n"
-        << "THEJOB_CORES=\"" << cores << "\"\n"
-        << "THEJOB_ENTRYPOINT=\"" << step.function_ << "\"\n"
-        << "THEJOB_PARAMETERS_PATH=\"" << localData->step_parameters_file_ << "\"\n"
-        << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
-        << "THEJOB_STDERR_PATH=\"" << step.stderr_ << "\"\n"
-        << "THEJOB_SERVER_PORT=\"" << serverPort_ << "\"\n"
-        << "THEJOB_USER_STATE_FILE=\"" << localData->user_state_file_ << "\"\n"
-        << "THEJOB_FLAG_FILE=\"" << localTaskData->flag_file_ << "\"\n"
-        << "THEJOB_DONE_FILE=\"" << localData->done_file_ << "\"\n";
-    if (step.monitor_) {
-      stepLauncher << "THEJOB_MONITOR_PARAMETERS_PATH=\"" << step.monitor_->ToArgs() << 
-        " " << step.monitor_path_.string() << "\"\n";
-    }
-    if (step.group_status_ != ns_Schedule::Step::stepsGroup_None_) {
-      stepLauncher << "THEJOB_STEP_GROUP_ID=\"" << step.group_id_ << "\"\n";
-    }
-    stepLauncher.close();
-
-    std::vector<std::string> args_strings = BuildExecutorArgs(step);
-    if (args_strings.empty()) {
-      LOGE << "Can not build args for process" << Log::Flags::End;
-      exit(-1);
-    }
-    std::vector<char*> args_chars;
-    for(std::string const& arg: args_strings) {
-      args_chars.push_back(strdup(arg.c_str()));
-    }
-    args_chars.push_back(nullptr);
-
-    {
-      std::stringstream oss;
-      oss << "Step running: " << step.task_->id_ << " / " << step.ID()  << \
-          " uuid: " << step.uuid_ << " with pid: " << pid;
-      LOGD << oss.str() << Log::Flags::End;
-    }
-
-    if (!RedirectOutput(outhandler, errhandler)) {
-      LOGE << "RedirectOutput failed" << Log::Flags::End;
-      exit(-1);
-    }
-
-    close_range(3, ~0U, 0);
-
-    std::filesystem::path script = config_.scriptPath_ / "executor.sh";
-    int retval = execv(script.c_str(), args_chars.data());
-
-    LOGE << "Unable to excecute " << script << " : " 
-        << strerror(errno) << Log::Flags::End;
-
-    std::ofstream fatalErrorProf(localData->fatalerror_file_, std::ios::trunc);
-    fatalErrorProf << "0";
-    fatalErrorProf.close();
-    sync();
-
-    exit(-1);
+    _exit(-1);
   }
 
   localData->pid_ = pid;
 
   if (pid == -1) {
+    int errnoSaved = errno;
     ReleaseCores(localData->cores_);
     throw std::runtime_error("Local Executor failed to fork " + 
-        std::to_string(step.step_id_) + " : " + std::strerror(errno));
+        std::to_string(step.step_id_) + " : " + std::strerror(errnoSaved));
   }
 
   step.MarkRunning();
@@ -860,10 +881,11 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::CheckFinishedSteps(
       errno = EINTR;
     }
     if ((childPID == -1) && (errno != EINTR)) {
+      int savedErrno = errno;
       throw std::runtime_error(
           std::string("waitpid failed in CheckFinishedSteps: errno=") +
-          std::to_string(errno) +
-          " (" + std::strerror(errno) + ")");
+          std::to_string(savedErrno) +
+          " (" + std::strerror(savedErrno) + ")");
     } else if (childPID == localData->pid_) {
       --nbChild_;
 
@@ -898,15 +920,43 @@ void ns_Executor::Local::Shutdown(ns_Schedule::Step& step) {
   KillSession(localData->pid_, localData->cgroup_path_, &step, "Step timeout run");
 
   if (!std::filesystem::exists(localData->fatalerror_file_)) {
-    pid_t pid = RunShutdown(step, localData);
-    if (pid <= 0) {
-      throw std::runtime_error("Executor::Local was unable to run shutdown for: " + 
-          std::to_string(step.TaskID()) + ":" + step.ID());
+    pid_t pid = -1;
+    for (int i=0; (pid<= 0) && (i<3); ++i) {
+      try {
+        pid = RunShutdown(step, localData);
+      } catch (std::runtime_error const& e) {
+        LOGE << e.what() << " (attempt " << (i + 1) << "/3)" << Log::Flags::End;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+      }
     }
-    LOGD << "Step shutdown final pid: " << pid << Log::Flags::End;
-    pid_t retval = waitpid(pid, nullptr, 0);
-    LOGD << "Step shutdown final pid: " << pid << " wait return: " << retval << " errno: " << errno << Log::Flags::End;
-    KillSession(pid, localData->cgroup_path_, &step, "Step shutdown final");
+    if (pid > 0) {
+      LOGD << "Step shutdown final pid: " << pid << Log::Flags::End;
+      pid_t retval = -1;
+      for(int i=0; i<900; ++i) {
+        retval = waitpid(pid, nullptr, WNOHANG);
+        int savedErrno = errno;
+        if (retval == 0) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          continue;
+        }
+        if (retval > 0) {
+          LOGD << "Step shutdown final pid: " << pid << " wait success: " << retval << 
+              Log::Flags::End;
+        } else {
+          LOGE << "Step shutdown final pid: " << pid << " wait failed: " << retval << 
+              " errno: " << savedErrno << "." << Log::Flags::End;
+        }
+        break;
+      }
+      if (retval == 0) {
+        LOGW << "Step shutdown final pid: " << pid << " wait never success" << 
+              Log::Flags::End;
+      }
+      KillSession(pid, localData->cgroup_path_, &step, "Step shutdown final");
+    } else {
+      LOGE << "Executor::Local unable to run shutdown for: " << step.TaskID() << ":" 
+          << step.ID() << ", shutdown script skipped" << Log::Flags::End;
+    }
   }
 
   EndRun(step, localData, true);
@@ -1145,13 +1195,15 @@ void ns_Executor::Local::WaitSessionEnd(pid_t sessionID, ns_Schedule::Step* step
         " uuid: " << step->uuid_ << " session: " << sessionID << 
         " cleaned_pid: " << killedPID << Log::Flags::End;
   }
+  int savedErrno = errno;
   std::vector<pid_t> pids = os_.Process().GetPidsBySid(sessionID);
   for(pid_t pid: pids) {
     LOGD << "waiting for " << pid << Log::Flags::End;
     waitpid(pid, nullptr, 0);
+    savedErrno = errno;
     LOGD << "waiting for " << pid << " done" << Log::Flags::End;
   }
-  LOGD << label << " done: " << step->ID() << " session: " << sessionID << " errno: " << errno << Log::Flags::End;
+  LOGD << label << " done: " << step->ID() << " session: " << sessionID << " errno: " << savedErrno << Log::Flags::End;
 
   if (kill(-sessionID, 0) == 0) {
     LOGE << "WaitSessionEnd done, but session" << sessionID << " seems to still have process" << Log::Flags::End;
@@ -1207,76 +1259,89 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
   pid_t pid = fork();
 
   if (pid == 0) {
-    pid_t localPID = getpid();
+    try {
+      pid_t localPID = getpid();
 
 #ifdef UPDATE_CHILD_UMASK
-    umask(0022);
+      umask(0022);
 #endif
 
-    if (!localData->cgroup_path_.empty()) {
-      std::filesystem::create_directory(localData->cgroup_path_);
-      std::ofstream procFile(localData->cgroup_path_ / "cgroup.procs");
-      if (procFile.is_open()) {
-        procFile << localPID;
-        procFile.close();
-      } else {
-        LOGE << "unable to self register in cgroup" << Log::Flags::End;
-        exit(-1);
-     }
+      if (!localData->cgroup_path_.empty()) {
+        std::filesystem::create_directory(localData->cgroup_path_);
+        std::ofstream procFile(localData->cgroup_path_ / "cgroup.procs");
+        if (procFile.is_open()) {
+          procFile << localPID;
+          procFile.close();
+        } else {
+          LOGE_CHILD("unable to self register in cgroup");
+          _exit(-1);
+       }
+      }
+
+      pid_t spid = setsid();
+      if (spid == -1) {
+        LOGE_CHILD("setsid failed");
+        _exit(-1);
+      }
+      if (chdir(localData->run_path_.c_str()) != 0) {
+        LOGE_CHILD("chdir failed");
+        _exit(-1);
+      }
+
+      std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::app);
+      stepLauncher << "THEJOB_SHUTDOWN=1\n";
+      stepLauncher.close();
+
+      std::vector<std::string> args_strings = BuildExecutorArgs(step);
+      if (args_strings.empty()) {
+        LOGE_CHILD("Can not build args for process");
+        _exit(-1);
+      }
+      std::vector<char*> args_chars;
+      for(std::string const& arg: args_strings) {
+        args_chars.push_back(strdup(arg.c_str()));
+      }
+      args_chars.push_back(nullptr);
+
+      LOGD_CHILD("Step running shutdown: " << step.task_->id_ << " / " << step.ID()  << 
+          " uuid: " << step.uuid_ << " with pid: " << spid);
+
+      if (!RedirectOutput(outhandler, errhandler)) {
+        LOGE_CHILD("RedirectOutput failed");
+        _exit(-1);
+      }
+
+      close_range(3, ~0U, 0);
+
+      std::filesystem::path script = config_.scriptPath_ / "executor.sh";
+      int retval = execv(script.c_str(), args_chars.data());
+
+      int savedErrno = errno;
+      LOGE_CHILD("Unable to execute " << script << " : " << strerror(savedErrno));
+    } catch(std::exception const& e) {
+      LOGE_CHILD("Exception in child: " << e.what());
+    } catch(...) {
+      LOGE_CHILD("Unknown exception in child");
     }
 
-    pid_t spid = setsid();
-    if (spid == -1) {
-      LOGE << "setsid failed" << Log::Flags::End;
-      exit(-1);
-    }
-    if (chdir(localData->run_path_.c_str()) != 0) {
-      LOGE << "chdir failed" << Log::Flags::End;
-      exit(-1);
-    }
-
-    std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::app);
-    stepLauncher << "THEJOB_SHUTDOWN=1\n";
-    stepLauncher.close();
-
-    std::vector<std::string> args_strings = BuildExecutorArgs(step);
-    if (args_strings.empty()) {
-      LOGE << "Can not build args for process" << Log::Flags::End;
-      exit(-1);
-    }
-    std::vector<char*> args_chars;
-    for(std::string const& arg: args_strings) {
-      args_chars.push_back(strdup(arg.c_str()));
-    }
-    args_chars.push_back(nullptr);
-
-    LOGD << "Step running shutdown: " << step.task_->id_ << " / " << step.ID()  << \
-        " uuid: " << step.uuid_ << " with pid: " << spid << Log::Flags::End;
-
-    if (!RedirectOutput(outhandler, errhandler)) {
-      LOGE << "RedirectOutput failed" << Log::Flags::End;
-      exit(-1);
+    try {
+      std::ofstream fatalErrorProf(localData->fatalerror_file_, std::ios::app);
+      fatalErrorProf << "0";
+      fatalErrorProf.close();
+      sync();
+    } catch(std::exception const& e) {
+      LOGE_CHILD("Exception in failed child: " << e.what());
+    } catch(...) {
+      LOGE_CHILD("Unknown exception in failed child");
     }
 
-    close_range(3, ~0U, 0);
-
-    std::filesystem::path script = config_.scriptPath_ / "executor.sh";
-    int retval = execv(script.c_str(), args_chars.data());
-
-    LOGE << "Unable to excecute " << script << " : " 
-        << strerror(errno) << Log::Flags::End;
-
-    std::ofstream fatalErrorProf(localData->fatalerror_file_, std::ios::app);
-    fatalErrorProf << "0";
-    fatalErrorProf.close();
-    sync();
-
-    exit(-1);
+    _exit(-1);
   }
 
   if (pid == -1) {
+    int savedErrno = errno;
     throw std::runtime_error("Local Executor failed to fork " + 
-        std::to_string(step.step_id_) + " : " + std::strerror(errno));
+        std::to_string(step.step_id_) + " : " + std::strerror(savedErrno));
   }
 
   return pid;
@@ -1518,7 +1583,7 @@ int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoo
   }
 
   pid_t pid = getpid();
-  if (WriteCGroup(serverFolder / "cgroup.procs", pid)) {
+  if (WriteCGroup(serverFolder / "cgroup.procs", pid, true)) {
     cgroupRoot.clear();
     return 0;
   }
@@ -1527,7 +1592,7 @@ int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoo
   int32_t capabilities = 7;
   std::vector<std::string> capabilitiesName {"+memory", "+cpuset", "+pids"};
   for(size_t i=0; i<capabilitiesName.size(); ++i) {
-    if (WriteCGroup(capabilitiesFile, capabilitiesName[i])) {
+    if (WriteCGroup(capabilitiesFile, capabilitiesName[i], true)) {
       capabilities -= (1 << i);
     } else {
       capabilitiesString += capabilitiesName[i] + " ";
@@ -1548,7 +1613,7 @@ int32_t ns_Executor::Local::DetectCGroupSupport(std::filesystem::path& cgroupRoo
   }
 
   capabilitiesFile = cgroupRoot / "cgroup.subtree_control";
-  if (WriteCGroup(capabilitiesFile, capabilitiesString)) {
+  if (WriteCGroup(capabilitiesFile, capabilitiesString, true)) {
     std::filesystem::remove(cgroupRoot);
     capabilitiesString.clear();
     cgroupRoot.clear();
@@ -1593,7 +1658,7 @@ void ns_Executor::Local::GatherStats() {
   }
 }
 
-bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) {
+bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_, bool inMainProcess) {
   std::set<uint64_t> coresSet;
   cpu_set_t mask;
   CPU_ZERO(&mask);
@@ -1603,11 +1668,17 @@ bool ns_Executor::Local::PinCoresToProcess(std::vector<uint64_t> const& cores_) 
   }
 
   if (sched_setaffinity(0, sizeof(mask), &mask) != 0) {
-    LOGE << "sched_setaffinity failed: " << strerror(errno) << " core(s): ";
+    int savedErrno = errno;
+    std::stringstream oss;
+    oss << "sched_setaffinity failed: " << strerror(savedErrno) << " core(s): ";
     for(uint64_t core : cores_) {
-      LOGE << core << " ";
+      oss << core << " ";
     }
-    LOGE << Log::Flags::End;
+    if (inMainProcess) {
+      LOGE << oss.str() << Log::Flags::End;
+    } else {
+      LOGE_CHILD(oss.str());
+    }
     return false;
   }
 
