@@ -142,7 +142,7 @@ private:
 
   void GatherStats();
 
-  static bool PinCoresToProcess(std::vector<uint64_t> const& cores_);
+  static bool PinCoresToProcess(std::vector<uint64_t> const& cores_, bool inMainProcess);
   static void SaveArtefacts(ns_Schedule::Step& step);
   static uint64_t EstimatedFinishTime(ns_Schedule::Step const* step);
 };
