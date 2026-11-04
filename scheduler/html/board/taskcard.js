@@ -708,7 +708,7 @@ export class TaskCard {
     div.className = 'card-task-links';
     div.append(this.#CreateTaskQuickLink(task.id));
     const publishLink = task?.publish_link;
-    if (publishLink) {
+    if ((!task.cancelled) && publishLink) {
       div.append(this.#CreatePublishQuickLink(publishLink));
     }
     return div;

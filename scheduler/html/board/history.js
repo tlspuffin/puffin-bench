@@ -112,7 +112,7 @@ function CreateTimelinesCard(task) {
 
   const publishSpan = document.createElement('span');
   const publishLink = task?.publish_link;
-  if (publishLink) {
+  if ((!task.cancelled) && publishLink) {
     publishSpan.textContent = '🗂️';
     publishSpan.dataset.help = 'task.publishlink';
     publishSpan.onclick = (event) => {
