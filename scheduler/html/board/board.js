@@ -164,7 +164,8 @@ async function RefreshBoard() {
 }
 
 function Main() {
-  new Help(helpTexts, {}, 'help-panel', 'help-button');
+  Launchers.BuildUI();
+  new Help({ ...helpTexts, ...Launchers.helpTexts }, {}, 'help-panel', 'help-button');
 
   const title = document.getElementById('header-title');
   title.innerText = `Experiment Scheduler Dashboard on ${window.location.hostname}`;
@@ -182,5 +183,4 @@ function Main() {
   RefreshBoard();
 }
 
-Launchers.BuildUI();
 Main();

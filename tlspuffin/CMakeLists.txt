@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.5.0)
-project(scheduler)
+cmake_minimum_required(VERSION 3.12.0)
+project(puffin-bench)
 
 set (CMAKE_CXX_STANDARD 17)
 enable_language(ASM)
@@ -161,7 +161,7 @@ EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/embeded/instal
   FILES samples/scheduler.service samples/scheduler.sudoers
 )
 
-add_library(installer.lib STATIC 
+add_library(installer.lib OBJECT src/installer/main.cxx 
     src/utils/logs.cxx src/utils/logs.hxx src/utils/variables.cxx src/utils/variables.hxx 
     src/utils/file_compressed.cxx src/utils/file_compressed.hxx
     src/installer/system/linux_cores.cxx src/installer/system/linux_cores.hxx
@@ -184,7 +184,7 @@ target_link_libraries(installer.lib PUBLIC ${LibArchiveTN})
 target_include_directories(installer.lib PRIVATE ${CMAKE_SOURCE_DIR})
 add_dependencies(installer.lib generate_version)
 
-add_executable(installer src/installer/main.cxx 
+add_executable(installer 
     ${CMAKE_SOURCE_DIR}/embeded/installer/files.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/samples.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/scheduler_config_json.h
@@ -206,7 +206,7 @@ add_executable(installer src/installer/main.cxx
 target_link_libraries(installer PRIVATE installer.lib)
 target_include_directories(installer PRIVATE ${CMAKE_SOURCE_DIR})
 
-add_executable(installer-static src/installer/main.cxx 
+add_executable(installer-static 
     ${CMAKE_SOURCE_DIR}/embeded/installer/files.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/samples.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/scheduler_config_json.h

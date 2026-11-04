@@ -6,6 +6,28 @@ link.rel  = 'stylesheet';
 link.href = new URL('./joblauncher.css', import.meta.url);
 document.head.appendChild(link);
 
+// Registered by the board's launchers.js into its help system (keys are
+// prefixed with the project name to avoid collisions between launchers).
+export const helpTexts = {
+  'tlspuffin.name':       'Task name. Filled in from the job type and commit until you edit it.',
+  'tlspuffin.user':       'Your name, recorded with the task. Remembered in this browser.',
+  'tlspuffin.jobtype':    'What to run. The job type decides which fields below are shown.',
+  'tlspuffin.commit':     'Commit to build: type a hash (7+ hex characters) or pick one from the list. Typing filters the list.',
+  'tlspuffin.clear':      'Clear the commit',
+  'tlspuffin.tabs':       'main/dev: commits on main and dev. PR: open pull requests. branches: other branch heads. All: everything, newest first.',
+  'tlspuffin.package':    'Package to build and run. The choices come from the job type.',
+  'tlspuffin.timeout':    'Maximum run time. The scheduler stops the run after this delay (Timed out).',
+  'tlspuffin.campaignid': 'Campaign identifier, used in the task name. Letters, digits, _, @ and - only.',
+  'tlspuffin.impl':       'C: vendor is a library:version pair (e.g. wolfssl:wolfssl540). Rust: vendor is a cargo feature (e.g. wolfssl540).',
+  'tlspuffin.vendor':     'Library under test. The suggestions depend on the package and Impl.',
+  'tlspuffin.features':   'Extra cargo features required for the build, comma-separated',
+  'tlspuffin.parameters': 'Extra command-line flags passed to the fuzzer',
+  'tlspuffin.attempts':   'Number of independent runs',
+  'tlspuffin.cores':      'CPU cores per run',
+  'tlspuffin.memory':     'Memory limit in MB. 0 = no limit.',
+  'tlspuffin.unknown':    'This hash is not in the commit list (not fetched yet, or a typo). Check it before launching.',
+};
+
 export class JobLauncher {
   #config;
   #data = { dev: [], pr_open: [], pr: [], all: [] };
@@ -155,6 +177,7 @@ export class JobLauncher {
     this.#taskNameInput.spellcheck = false;
     this.#taskNameInput.autocomplete = 'off';
     this.#taskNameInput.addEventListener('input', () => { this.#titleModified = true; });
+    this.#taskNameInput.dataset.help = 'tlspuffin.name';
     const editIcon = this.#el('span', 'jl-edit-icon');
     editIcon.textContent = '✏️';
     const closeBtn = this.#el('button', 'jl-close');
@@ -172,6 +195,7 @@ export class JobLauncher {
     const userSection = this.#el('div', 'jl-field-row');
     const userLabel = this.#el('span', 'jl-label');
     userLabel.textContent = 'User';
+    userLabel.dataset.help = 'tlspuffin.user';
     this.#usernameInput = this.#el('input', 'jl-commit-input');
     this.#usernameInput.type = 'text';
     this.#usernameInput.placeholder = 'your name';
@@ -190,6 +214,7 @@ export class JobLauncher {
     const chipSection = this.#el('div');
     const chipLabel = this.#el('span', 'jl-label');
     chipLabel.textContent = 'Job type';
+    chipLabel.dataset.help = 'tlspuffin.jobtype';
     chipSection.append(chipLabel, this.#buildChips());
     body.appendChild(chipSection);
 
@@ -197,6 +222,7 @@ export class JobLauncher {
     const commitSection = this.#el('div');
     const commitLabel = this.#el('span', 'jl-label');
     commitLabel.textContent = 'Commit';
+    commitLabel.dataset.help = 'tlspuffin.commit';
     this.#commitInput = this.#el('input', 'jl-commit-input');
     this.#commitInput.type = 'text';
     this.#commitInput.placeholder = 'Type a hash or pick from the list…';
@@ -216,7 +242,7 @@ export class JobLauncher {
 
     const clearBtn = this.#el('button', 'jl-icon-btn');
     clearBtn.type  = 'button';
-    clearBtn.title = 'Clear';
+    clearBtn.dataset.help = 'tlspuffin.clear';
     clearBtn.textContent = '🧹';
     clearBtn.addEventListener('mousedown', e => e.preventDefault());
     clearBtn.addEventListener('click', () => this.#clearCommit());
@@ -244,6 +270,7 @@ export class JobLauncher {
     this.#packageRow = this.#el('div', 'jl-field-row', 'jl-package-row');
     const packageLabel = this.#el('span', 'jl-label');
     packageLabel.textContent = 'Package';
+    packageLabel.dataset.help = 'tlspuffin.package';
     this.#packageListInput = new ListInput(
       () => this.#packageOptions,
       () => { this.#updateVendorOptions(); this.#validate(); },
@@ -257,6 +284,7 @@ export class JobLauncher {
     this.#timeoutSection = this.#el('div', 'jl-field-row', 'jl-timeout-section');
     const timeoutLabel = this.#el('span', 'jl-label');
     timeoutLabel.textContent = 'Timeout';
+    timeoutLabel.dataset.help = 'tlspuffin.timeout';
     this.#timeoutSection.append(timeoutLabel, this.#buildTimeout());
     body.appendChild(this.#timeoutSection);
 
@@ -269,6 +297,7 @@ export class JobLauncher {
     body.appendChild(this.#el('hr', 'jl-sep'));
 
     this.#confirmUnknownEl = this.#el('div', 'jl-confirm-unknown');
+    this.#confirmUnknownEl.dataset.help = 'tlspuffin.unknown';
     this.#confirmUnknownCheck = this.#el('input');
     this.#confirmUnknownCheck.type = 'checkbox';
     this.#confirmUnknownCheck.id = 'jl-confirm-unknown-check';
@@ -362,6 +391,7 @@ export class JobLauncher {
     }, { passive: false });
 
     const footer = this.#el('div', 'jl-tabs-footer');
+    footer.dataset.help = 'tlspuffin.tabs';
     const tabs = [
       { key: 'dev',     label: 'main/dev' },
       { key: 'pr_open', label: 'PR' },
@@ -454,6 +484,7 @@ export class JobLauncher {
     const campaignIdRow = this.#el('div', 'jl-field-row');
     const campaignIdLabel = this.#el('span', 'jl-label');
     campaignIdLabel.textContent = 'Campaign ID';
+    campaignIdLabel.dataset.help = 'tlspuffin.campaignid';
     this.#campaignIdInput = this.#el('input', 'jl-commit-input');
     this.#campaignIdInput.type = 'text';
     this.#campaignIdInput.placeholder = 'e.g. my-campaign-2025';
@@ -469,6 +500,7 @@ export class JobLauncher {
     const implRow = this.#el('div', 'jl-field-row');
     const implLabel = this.#el('span', 'jl-label');
     implLabel.textContent = 'Impl';
+    implLabel.dataset.help = 'tlspuffin.impl';
     const implChips = this.#el('div', 'jl-chips');
     for (const impl of [{ value: 'c', label: 'C' }, { value: 'rust', label: 'Rust' }]) {
       const input = this.#el('input', 'jl-chip-input');
@@ -494,6 +526,7 @@ export class JobLauncher {
     const vendorRow = this.#el('div', 'jl-field-row');
     const vendorLabel = this.#el('span', 'jl-label');
     vendorLabel.textContent = 'Vendor';
+    vendorLabel.dataset.help = 'tlspuffin.vendor';
     this.#vendorListInput = new ListInput(
       () => this.#vendorOptions,
       () => this.#validate(),
@@ -505,6 +538,7 @@ export class JobLauncher {
     const featRow = this.#el('div', 'jl-field-row');
     const featLabel = this.#el('span', 'jl-label');
     featLabel.textContent = 'Features';
+    featLabel.dataset.help = 'tlspuffin.features';
     this.#featuresInput = this.#el('input', 'jl-commit-input');
     this.#featuresInput.type = 'text';
     this.#featuresInput.placeholder = 'e.g. introspection';
@@ -515,6 +549,7 @@ export class JobLauncher {
     const paramsRow = this.#el('div', 'jl-field-row');
     const paramsLabel = this.#el('span', 'jl-label');
     paramsLabel.textContent = 'Parameters';
+    paramsLabel.dataset.help = 'tlspuffin.parameters';
     this.#parametersInput = this.#el('input', 'jl-commit-input');
     this.#parametersInput.type = 'text';
     this.#parametersInput.placeholder = 'e.g. --put-use-clear';
@@ -528,6 +563,7 @@ export class JobLauncher {
 
     const attemptsSubLabel = this.#el('span', 'jl-mem-sublabel');
     attemptsSubLabel.textContent = 'Attempts';
+    attemptsSubLabel.dataset.help = 'tlspuffin.attempts';
     this.#nbAttemptsInput = this.#el('input', 'jl-timeout-input');
     this.#nbAttemptsInput.type = 'number';
     this.#nbAttemptsInput.min = '1';
@@ -536,6 +572,7 @@ export class JobLauncher {
 
     const coreSubLabel = this.#el('span', 'jl-mem-sublabel');
     coreSubLabel.textContent = 'Cores';
+    coreSubLabel.dataset.help = 'tlspuffin.cores';
     this.#nbCoreInput = this.#el('input', 'jl-timeout-input');
     this.#nbCoreInput.type = 'number';
     this.#nbCoreInput.min = '1';
@@ -544,6 +581,7 @@ export class JobLauncher {
 
     const memSubLabel = this.#el('span', 'jl-mem-sublabel');
     memSubLabel.textContent = 'Memory';
+    memSubLabel.dataset.help = 'tlspuffin.memory';
     this.#memMaxInput = this.#el('input', 'jl-timeout-input');
     this.#memMaxInput.type = 'number';
     this.#memMaxInput.min = '0';

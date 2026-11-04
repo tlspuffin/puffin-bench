@@ -393,7 +393,7 @@ function UpdateSortIndexTimesLine(event) {
 }
 
 function Main() {
-  new Help(helpTexts, {}, 'help-panel', 'help-button');
+  new Help({ ...helpTexts, ...Launchers.helpTexts }, {}, 'help-panel', 'help-button');
   const sortIndexSelect = document.getElementById('sortIndex-select');
   currentSelection.timesLineIndex = sortIndexSelect?.value ?? 'id';
   sortIndexSelect.onchange = UpdateSortIndexTimesLine;

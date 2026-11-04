@@ -72,7 +72,7 @@ async function Refresh() {
 }
 
 function Main() {
-  new Help(helpTexts);
+  new Help({ ...helpTexts, ...Launchers.helpTexts });
 
   const id = GetQueryParam('id');
   dataUrl = id ? `/api/task/${id}/state` : GetQueryParam('data');

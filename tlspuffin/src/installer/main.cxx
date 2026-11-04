@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
   for(int i=1; i<argc; ++i) {
     auto it = options.find(argv[i]);
     if (it == options.end()) {
-      LOGE << "Error unknow option " << argv[i] << "\n";
+      LOGE << "Error unknow option " << argv[i] << Log::Flags::End;
       return 1;
     }
     if (it->second.type() == typeid(void*)) {
@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
           "\t--port-git <network-port-for-git_restapi>\n" <<
           "\t--port-scheduler <network-port-for-scheduler>\n" <<
           "\t--port-publisher <network-port-for-publisher>\n" <<
-          "\t--port-vis <network-port-for-vis_comparator>\n" <<
+          "\t--port-vis <network-port-for-vis_comparator>" <<
           Log::Flags::End;
       return 0;
     } else if (it->second.type() == typeid(bool*)) {
@@ -128,25 +128,25 @@ int main(int argc, char* argv[]) {
     } else if (it->second.type() == typeid(std::string*)) {
       ++i;
       if (i >= argc) {
-        LOGE << "Error missing argument for option " << argv[i-1] << "\n";
+        LOGE << "Error missing argument for option " << argv[i-1] << Log::Flags::End;
         return 1;
       }
       *(std::any_cast<std::string*>(it->second)) = argv[i];
     } else if (it->second.type() == typeid(std::filesystem::path*)) {
       ++i;
       if (i >= argc) {
-        LOGE << "Error missing argument for option " << argv[i-1] << "\n";
+        LOGE << "Error missing argument for option " << argv[i-1] << Log::Flags::End;
         return 1;
       }
       *(std::any_cast<std::filesystem::path*>(it->second)) = argv[i];
     }
   }
   if (rootPath.empty() && (binaryPath.empty() || dataPath.empty())) {
-    LOGE << "Error require argument (--rootpath) or (--binpath and --datapath)\n";
+    LOGE << "Error require argument (--rootpath) or (--binpath and --datapath)" << Log::Flags::End;
     return 1;
   }
   if (!rootPath.empty() && (!binaryPath.empty() && !dataPath.empty())) {
-    LOGE << "Error can not mix arguments (--rootpath) and (--binpath and --datapath)\n";
+    LOGE << "Error can not mix arguments (--rootpath) and (--binpath and --datapath)" << Log::Flags::End;
     return 1;
   }
 

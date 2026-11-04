@@ -5,8 +5,16 @@ link.rel  = 'stylesheet';
 link.href = new URL('./launchers.css', import.meta.url);
 document.head.appendChild(link);
 
+export const helpTexts = {};
+
 const mods = await Promise.all(config.projects.map(p => import(`./${p}/joblauncher.js`)));
 export const launchers = mods.map((m, i) => {
+  for (const [key, text] of Object.entries(m.helpTexts ?? {})) {
+    if (key in helpTexts) {
+      console.warn(`Launchers: help key "${key}" from ${config.projects[i]} overrides an existing one`);
+    }
+    helpTexts[key] = text;
+  }
   const instance = new m.JobLauncher();
   return { label: config.projects[i], open: (args) => instance.open(args) };
 });
