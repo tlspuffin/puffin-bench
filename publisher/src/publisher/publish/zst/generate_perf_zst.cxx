@@ -56,37 +56,60 @@ static DataType StringToDataType(std::string const& type) {
   }
 }
 
-StreamingWriter::StreamingWriter(std::filesystem::path outputDir) : outputDir_(outputDir)
-{}
-
-void StreamingWriter::AssertWriter(const std::string& seriesName) {
-  if (writers_.find(seriesName) != writers_.end()) {
-    return;
+StreamingWriter::StreamingWriter(std::filesystem::path outputDir) : outputDir_(outputDir), 
+    buffersSize_(0)
+{
+  std::filesystem::path rootPath = outputDir_ / "series";
+  std::error_code ec;
+  if (!std::filesystem::exists(rootPath)) {
+    std::filesystem::create_directories(rootPath, ec);
+    if (ec) {
+      throw std::runtime_error("Cannot create directory " + rootPath.string() + ": " + ec.message());
+    }
   }
-  std::filesystem::path series_path = outputDir_ / "series" / (seriesName + ".bin");
-  std::filesystem::create_directories(series_path.parent_path());
-  std::ofstream writer(series_path, std::ios::binary);
-  if (!writer.is_open()) {
-    throw std::runtime_error("Cannot open " + series_path.string());
-  }
-  writers_[seriesName] = std::move(writer);
 }
 
-void StreamingWriter::Save(const std::string& seriesName, uint64_t value) {
-  AssertWriter(seriesName);
-  writers_[seriesName].write(reinterpret_cast<const char*>(&value), sizeof(uint64_t));
+void StreamingWriter::UpdateData(const std::string& seriesName, uint8_t const* data, size_t size) {
+  auto [it, inserted] = buffers_.try_emplace(seriesName);
+  if (inserted) {
+    std::filesystem::path seriesPath = outputDir_ / "series" / (seriesName + ".bin");
+    std::error_code ec;
+    std::filesystem::create_directories(seriesPath.parent_path(), ec);
+    if (ec) {
+      throw std::runtime_error("Cannot create directory " + seriesPath.parent_path().string() + ": " + ec.message());
+    }
+  }
+  it->second.insert(it->second.end(), data, data+size);
+  buffersSize_ += size;
+  if (buffersSize_ > (256*1024*1024)) {
+    FlushBuffers();
+  }
 }
 
-void StreamingWriter::Save(const std::string& seriesName, double value) {
-  AssertWriter(seriesName);
-  writers_[seriesName].write(reinterpret_cast<const char*>(&value), sizeof(double));
+void StreamingWriter::FlushBuffers() {
+  std::filesystem::path rootPath = outputDir_ / "series";
+  for (auto& [seriesName, seriesBuffer] : buffers_) {
+    if (seriesBuffer.empty()) {
+      continue;
+    }
+    std::filesystem::path seriesPath = rootPath / (seriesName + ".bin");
+    std::ofstream writer(seriesPath, std::ios::binary | std::ios::app);
+    if (!writer.is_open()) {
+      throw std::runtime_error("Cannot open " + seriesPath.string());
+    }
+    writer.write(reinterpret_cast<const char*>(seriesBuffer.data()), seriesBuffer.size());
+    writer.close();
+    if (writer.fail()) {
+      throw std::runtime_error("Error while writing " + seriesPath.string());
+    }
+    seriesBuffer.clear();
+  }
+  buffersSize_ = 0;
 }
 
 void StreamingWriter::SaveMetadata(std::unordered_map<std::string, DataInfo> const& dataInfos,
     uint64_t nbClient, uint64_t runTime, uint64_t goalTime) {
-  for (auto& [_, stream] : writers_) {
-    stream.close();
-  }
+  FlushBuffers();
 
   rapidjson::Document doc;
   doc.SetObject();
