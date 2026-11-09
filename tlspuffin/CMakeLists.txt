@@ -132,7 +132,7 @@ add_custom_command(
   COMMAND "${BASH_EXECUTABLE}" "${TLSPUFFIN_SCRIPTS_DIR}/build.sh"
   COMMAND ${CMAKE_COMMAND} -E copy "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf_full.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/PR_perf_full.sh"
   COMMAND ${CMAKE_COMMAND} -E copy "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities_full.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/PR_vulnerabilities_full.sh"
-  DEPENDS "${TLSPUFFIN_SCRIPTS_DIR}/build.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_common.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities.sh"
+  DEPENDS "${TLSPUFFIN_SCRIPTS_DIR}/build.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_common.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_compat.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities.sh"
   COMMENT "Running build.sh to generate PR_perf_full.sh / PR_vulnerabilities_full.sh"
   VERBATIM
 )

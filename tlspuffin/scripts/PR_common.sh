@@ -1,5 +1,18 @@
 #### HELPER START ####
 
+# Command prefix running the fuzzer without ASLR (inherited across fork/exec; setarch execs the command, so a
+# background PID stays the fuzzer's): ASAN runtimes of LLVM < 18, used by older tlspuffin commits, crash at
+# random at startup when the kernel uses more than 28 bits of mmap randomization (recent kernels: 32).
+# Empty when setarch is unavailable or with COMPAT_DISABLE=no_aslr (or "all"), which runs the fuzzer with ASLR as
+# before, e.g. to reproduce older results.
+NoAslrPrefix() {
+  CompatIsDisabled no_aslr && return 0;
+  local arch;
+  arch=$( uname -m );
+  setarch "${arch}" -R true > /dev/null 2>&1 && echo "setarch ${arch} -R";
+  return 0;
+}
+
 ExperimentCheckAllThreadsRunning() {
   local tlspuffin_pid="$1"; shift;
   local -n ref_oldfilesize=$1; shift;
@@ -117,6 +130,23 @@ FindFile() {
   return 1
 }
 
+# What an experiment built, in words: the step arguments give both a vendor preset (C harness, used when the
+# commit has that preset and the cputs feature) and features (Rust harness, the fallback), so the arguments alone
+# do not tell which library version ran. Usage: BuildDescription <cputs> <vendor> <features> <library> <version>
+# e.g. "C harness, wolfssl580-asan" or "Rust harness, wolfssl540 (vendor wolfssl580-asan not available at this commit)".
+# Mirrored for older results (no "build" in cli-<library>.json) by summary_render.js and objectives_report.sh.
+BuildDescription() {
+  local cputs="$1" vendor="$2" features="$3" library="$4" version="$5";
+  if [ "${cputs}" == true ]; then
+    echo "C harness, ${vendor#*:}";
+    return 0;
+  fi
+  local desc="Rust harness, features ${features}";
+  [ -n "${library}" ] && [ "${library}" != 'NA' ] && desc="Rust harness, ${library}${version}";
+  [ -n "${vendor}" ] && desc+=" (vendor ${vendor#*:} not available at this commit)";
+  echo "${desc}";
+}
+
 ComputeBuildRuntimeInfo() {
   if [ -z "$1" ]; then
     echo "Missing package parameter"
@@ -161,6 +191,7 @@ ComputeBuildRuntimeInfo() {
           }
     fi
   fi
+  CompatBuildRules "${package}" "${vendor}" "${refcputs}" ref_features || return 1;
   if [ -n "${required_features}" ]; then
     ref_features="${required_features},${ref_features}"
   fi
@@ -225,7 +256,7 @@ ExperimentSetup() {
     cp "${THEJOB_USER_FILES_PATH}/shell.nix" . || return 1;
   fi
 
-  nix-shell --run "\"${ref_binary}\" seed" || return 1;
+  $( NoAslrPrefix ) nix-shell --run "\"${ref_binary}\" seed" || return 1;
 
   rm -rf ./experiments
 
@@ -304,7 +335,22 @@ ExperimentSetupForCargo() {
     fi
   fi
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" } }";
+  local asanInfo='';
+  if [ -s ./.asan_info.json ]; then
+    asanInfo=$( < ./.asan_info.json );
+  else
+    DetectAsan "./target/release/${PACKAGE}" "${ref_esfc_features}" "${vendor}" asanInfo || asanInfo='null';
+  fi
+
+  local vendorSources='null';
+  [ -s ./.vendor_sources.json ] && vendorSources=$( < ./.vendor_sources.json );
+
+  local build;
+  build=$( BuildDescription "${cputs}" "${vendor}" "${ref_esfc_features}" "${library}" "${library_version}" );
+  echo "${build}" > ./.build_info;
+  echo "Build: ${build}";
+
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources} }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -479,6 +525,238 @@ ExperimentReport() {
   fi
 }
 
+# ASAN status of a built binary, as a JSON record in the referenced variable.
+# Checked on the binary itself (the "Running with shared ASAN support" message of tlspuffin is
+# logged before its logger is set up, so it never reaches the logs):
+#   - instrumented code: references to __asan_report_* (the C library under test was built with ASAN)
+#   - runtime: shared (ldd lists libclang_rt.asan / libasan) or static (__asan_init defined)
+# instrumented is null when the tools are missing or the binary is not found.
+DetectAsan() {
+  local binary="$1";
+  local features="$2";
+  local vendor="$3";
+  if [ -z "$4" ]; then
+    echo "Missing reference parameter for asan info";
+    return 1;
+  fi
+  local -n ref_asan=$4;
+
+  local requested=false;
+  [[ ",${features}," == *",asan,"* || "${vendor}" == *-asan* ]] && requested=true;
+
+  local instrumented=null;
+  local runtime='unknown';
+  local reports=0;
+  if [ -x "${binary}" ] && command -v readelf > /dev/null && command -v ldd > /dev/null; then
+    local symbols=$( readelf -Ws "${binary}" 2>/dev/null );
+    reports=$( grep -c '__asan_report_' <<< "${symbols}" );
+    if ldd "${binary}" 2>/dev/null | grep -q -E 'libclang_rt\.asan|libasan'; then
+      runtime='shared';
+    elif awk '$8 == "__asan_init" && $7 != "UND" { found = 1 } END { exit !found }' <<< "${symbols}"; then
+      runtime='static';
+    else
+      runtime='none';
+    fi
+    (( reports > 0 )) && [ "${runtime}" != 'none' ] && instrumented=true || instrumented=false;
+  fi
+
+  ref_asan="{ \"requested\": ${requested}, \"instrumented\": ${instrumented}, \"runtime\": \"${runtime}\", \"asan_report_refs\": ${reports}, \"method\": \"readelf+ldd\" }";
+}
+
+# Size of a rolled log file: every tlspuffin log config rolls its files at 10 MB
+LOG_ROLL_SIZE_BYTES=$(( 10 * 1024 * 1024 ))
+
+# Log volume of an experiment, as a JSON record in the referenced variable.
+# Rotation bounds the size on disk, so the volume written is estimated: live files plus one
+# rolling size per compressed archive. Non-empty debug/trace/terms logs (and "puffin.N.gz", the
+# debug archives of the modular-logging config) mean logging below INFO was active.
+# The broker's monitor log (stats_puffin_main_broker.log* and its rotations ./log<N>, the periodic
+# client statistics of tlspuffin's StatsMonitor) grows with the run time and the number of clients,
+# not with the log level: recorded separately ("monitor_mb"), not counted in the estimate.
+# The volume is compared per hour of run and per fuzzing core (start and cores saved by ExperimentSaveLaunchInfo,
+# end = last write of a counted log), so that runs of any length and width are judged alike: warns above
+# LOG_WARN_MB_PER_CORE_HOUR (task argument, default 15, i.e. 50 MB for a 70 min run on 3 cores, about 10x dev),
+# or above LOG_WARN_MB MB in total when that task argument is given, or when verbose logs are present.
+ExperimentLogStats() {
+  local experiment_base="$1";
+  shift;
+  if [ -z "$1" ]; then
+    echo "Missing reference parameter for log stats";
+    return 1;
+  fi
+  local -n ref_logstats=$1;
+  shift;
+
+  [[ ${LOG_WARN_MB_PER_CORE_HOUR:-} =~ ^[0-9]+$ ]] || LOG_WARN_MB_PER_CORE_HOUR=15;
+  local warnTotalMB='';
+  [[ ${LOG_WARN_MB:-} =~ ^[0-9]+$ ]] && warnTotalMB="${LOG_WARN_MB}";
+
+  # start of the run and its fuzzing cores
+  local start='' cores='';
+  [ -r ./.experiment_launch ] && read -r start cores < ./.experiment_launch;
+  [[ ${start} =~ ^[0-9]+$ ]] || start=$( stat --format=%Y "${experiment_base}/README.md" 2> /dev/null );
+  [[ ${cores} =~ ^[0-9]+$ ]] && (( cores > 0 )) || cores="${THEJOB_NB_CORES:-1}";
+  [[ ${cores} =~ ^[0-9]+$ ]] && (( cores > 0 )) || cores=1;
+
+  local -a dirs=( ./log );
+  [ -n "${experiment_base}" ] && dirs+=( "${experiment_base}/log" );
+
+  local bytes=0 estimated=0 files=0 rolled=0 verbose='' monitor=0 end=0;
+  local file name size rollSize mtime;
+  while IFS= read -r -d '' file; do
+    name=$( basename "${file}" );
+    [[ "${name}" == stats.json* ]] && continue;
+    size=$( stat --format=%s "${file}" ) || continue;
+    rollSize=$(( size > LOG_ROLL_SIZE_BYTES ? size : LOG_ROLL_SIZE_BYTES ));
+    # the broker's log and its rotations (./log0 … ./log19, 100 MB each, "log{}" roller of tlspuffin's log.rs)
+    if [[ "${name}" == stats_puffin_main_broker.log* ]] || [[ "${file}" =~ ^\./log[0-9]+$ ]]; then
+      [[ "${name}" == *.gz ]] && (( monitor += rollSize )) || (( monitor += size ));
+      continue;
+    fi
+    (( ++files, bytes += size ));
+    mtime=$( stat --format=%Y "${file}" ) && (( mtime > end )) && end=${mtime};
+    if [[ "${name}" == *.gz ]]; then
+      (( ++rolled, estimated += rollSize ));
+    else
+      (( estimated += size ));
+    fi
+    if (( size > 0 )) && [[ "${name}" =~ ^(debug|trace|terms|puffin)(\.[0-9]+)?\.(log|gz)$ ]]; then
+      verbose+="${verbose:+, }\"${file#./}\"";
+    fi
+  done < <(
+    find "${dirs[@]}" -maxdepth 1 -type f -print0 2>/dev/null;
+    [ -n "${experiment_base}" ] &&
+        find "${experiment_base}" -maxdepth 1 -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null;
+    find . -maxdepth 1 -type f -regex './log[0-9]+' -print0 2>/dev/null
+  )
+
+  local mega=$(( 1024 * 1024 ));
+  local estimatedMB=$(( (estimated + mega - 1) / mega ));
+  local monitorMB=$(( (monitor + mega - 1) / mega ));
+  # MB per hour per core, in tenths
+  (( end > 0 )) || end=$( date +%s );
+  local minutes=1 rate10;
+  [[ ${start} =~ ^[0-9]+$ ]] && (( end > start )) && minutes=$(( (end - start + 59) / 60 ));
+  rate10=$(( estimated * 600 / (mega * minutes * cores) ));
+  local rate="$(( rate10 / 10 )).$(( rate10 % 10 ))";
+  local warning='';
+  if [ -n "${warnTotalMB}" ]; then
+    (( estimatedMB > warnTotalMB )) && warning="~${estimatedMB} MB of logs (threshold ${warnTotalMB} MB)";
+  else
+    # not before 10 min of run: the first minutes (startup) are not representative
+    (( minutes >= 10 && rate10 > LOG_WARN_MB_PER_CORE_HOUR * 10 )) &&
+        warning="~${estimatedMB} MB of logs, ${rate} MB per hour per core (threshold ${LOG_WARN_MB_PER_CORE_HOUR})";
+  fi
+  [ -n "${verbose}" ] && warning+="${warning:+; }logging below INFO (${verbose//\"/})";
+  [ -n "${warning}" ] && warning="\"${warning}\"" || warning='null';
+
+  ref_logstats="{ \"estimated_mb\": ${estimatedMB}, \"disk_bytes\": ${bytes}, \"files\": ${files}, \"rolled\": ${rolled}, \"verbose_files\": [${verbose}], \"monitor_mb\": ${monitorMB}, \"minutes\": ${minutes}, \"cores\": ${cores}, \"mb_per_core_hour\": ${rate}, \"threshold_mb_per_core_hour\": ${LOG_WARN_MB_PER_CORE_HOUR}, \"threshold_mb\": ${warnTotalMB:-null}, \"warning\": ${warning} }";
+}
+
+# Save the log stats of the current attempt next to its summary (read by *_summary_run.js)
+ExperimentSaveLogStats() {
+  local experiment_base="$1";
+  local logStats='';
+  ExperimentLogStats "${experiment_base}" logStats || return 1;
+  local crashStats='';
+  ExperimentCrashStats "${experiment_base}" crashStats && logStats="${logStats% \}}, \"crashes\": ${crashStats} }";
+  echo "${logStats}" > "${THEJOB_OUT_PATH}/logs-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
+  echo "${logStats}" >> "${THEJOB_USER_STATE_FILE}";
+}
+
+# Saved by the experiment step before the launch, for ExperimentEnd: where the step writes its stderr (read by
+# ExperimentCrashStats: with LibAFL launchers that do not redirect the clients' stderr, their crash reports end up
+# there), and the start time and fuzzing cores of the run (read by ExperimentLogStats).
+ExperimentSaveLaunchInfo() {
+  echo "${THEJOB_STDERR_PATH:-}" > ./.experiment_stderr_path
+  echo "$( date +%s ) ${THEJOB_NB_CORES:-1}" > ./.experiment_launch
+}
+
+# Fuzzing clients that crashed and were restarted during an experiment, as a JSON record in the referenced
+# variable: "Spawning next client (id N)" with N > 0 (each client is spawned once with id 0) and AddressSanitizer
+# reports, counted in every place the clients' output goes depending on the commit (log/puffin_main_broker_std*.log,
+# tlspuffin.out, the stderr of the experiment step). A crash storm (e.g. a harness bug hit by most inputs) makes the
+# executions of the run meaningless. Warns above CRASH_WARN_RESTARTS (task argument, default 100). Only at
+# ExperimentEnd: the files can reach hundreds of MB.
+ExperimentCrashStats() {
+  local experiment_base="$1";
+  if [ -z "$2" ]; then
+    echo "Missing reference parameter for crash stats";
+    return 1;
+  fi
+  local -n ref_crashstats=$2;
+
+  [[ ${CRASH_WARN_RESTARTS:-} =~ ^[0-9]+$ ]] || CRASH_WARN_RESTARTS=100;
+
+  local -a files=();
+  local f;
+  for f in "${experiment_base}"/log/puffin_main_broker_std{out,err}.log "${experiment_base}"/{,log/}tlspuffin.out ./log/puffin_main_broker_std{out,err}.log; do
+    [ -n "${experiment_base}" ] || [[ "${f}" == ./* ]] || continue;
+    [ -f "${f}" ] && files+=( "${f}" );
+  done
+  if [ -r ./.experiment_stderr_path ]; then
+    f=$( < ./.experiment_stderr_path );
+    [ -n "${f}" ] && [ -f "${f}" ] && files+=( "${f}" );
+  fi
+
+  local restarts=0 asan=0;
+  if (( ${#files[@]} > 0 )); then
+    read -r restarts asan < <( LC_ALL=C awk '/Spawning next client \(id [1-9]/ { r++ } /^==[0-9]+==ERROR: AddressSanitizer/ { a++ }
+      END { print r + 0, a + 0 }' "${files[@]}" );
+  fi
+  local warning='null';
+  (( restarts > CRASH_WARN_RESTARTS )) &&
+      warning="\"${restarts} client restarts after a crash (${asan} ASAN reports, threshold ${CRASH_WARN_RESTARTS})\"";
+  ref_crashstats="{ \"client_restarts\": ${restarts}, \"asan_reports\": ${asan}, \"files\": ${#files[@]}, \"threshold\": ${CRASH_WARN_RESTARTS}, \"warning\": ${warning} }";
+}
+
+# Sources of the vendor libraries built for the experiment (./vendor/<name>), as a JSON array in the referenced
+# variable: repository, requested ref and the commit it resolves to. Fork branches (e.g. tlspuffin/libressl
+# fuzz-v3.3.3) move, so the same tlspuffin commit can be built from different sources over time.
+#   puffin-build: vendor/<name>/.vendor_config, [sources] repo + branch|commit (or url + hash for archives)
+#   older mk_vendor: vendor/<name>/mk_vendor.conf, FETCH_ARG:URL= / FETCH_ARG:REF=
+# A branch or tag is resolved with git ls-remote right after the build (commit null when that fails).
+DetectVendorSources() {
+  if [ -z "$1" ]; then
+    echo "Missing reference parameter for vendor sources";
+    return 1;
+  fi
+  local -n ref_sources=$1;
+  ref_sources='';
+  local dir;
+  for dir in ./vendor/*/; do
+    dir="${dir%/}";
+    local repo='' ref='';
+    if [ -r "${dir}/.vendor_config" ]; then
+      repo=$( awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && ($1 == "repo" || $1 == "url") { gsub(/"/, "", $2); print $2 }' "${dir}/.vendor_config" | head -1 );
+      ref=$( awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && ($1 == "branch" || $1 == "commit" || $1 == "hash") { gsub(/"/, "", $2); print $2 }' "${dir}/.vendor_config" | head -1 );
+      # url sources (archives): the hash is recorded as the ref, nothing to resolve
+      if grep -q '^url = ' "${dir}/.vendor_config"; then
+        ref_sources+="${ref_sources:+, }{ \"name\": \"$( basename "${dir}" )\", \"url\": \"${repo}\", \"hash\": \"${ref}\", \"commit\": null }";
+        continue;
+      fi
+    elif [ -r "${dir}/mk_vendor.conf" ]; then
+      repo=$( sed -n 's/^FETCH_ARG:URL=//p' "${dir}/mk_vendor.conf" | head -1 );
+      ref=$( sed -n 's/^FETCH_ARG:REF=//p' "${dir}/mk_vendor.conf" | head -1 );
+    fi
+    [ -n "${repo}" ] || continue;
+    local commit='';
+    if [[ "${ref}" =~ ^[0-9a-f]{40}$ ]]; then
+      commit="${ref}";
+    else
+      local -a patterns=( HEAD );
+      [ -n "${ref}" ] && patterns=( "refs/heads/${ref}" "refs/tags/${ref}" "refs/tags/${ref}^{}" );
+      local remote;
+      remote=$( timeout 60 git ls-remote "${repo}" "${patterns[@]}" 2> /dev/null );
+      # a peeled tag (^{}) gives the commit of an annotated tag
+      commit=$( grep -F '^{}' <<< "${remote}" | cut -f1 | head -1 );
+      [ -n "${commit}" ] || commit=$( cut -f1 <<< "${remote}" | head -1 );
+    fi
+    ref_sources+="${ref_sources:+, }{ \"name\": \"$( basename "${dir}" )\", \"repo\": \"${repo}\", \"ref\": \"${ref}\", \"commit\": $( [ -n "${commit}" ] && echo "\"${commit}\"" || echo null ) }";
+  done
+  ref_sources="[${ref_sources}]";
+}
+
 ExperimentEndCommon() {
   [ -r "./.reserved_port.pid" ] && kill $( cat ./.reserved_port.pid )
   ipcrm --all
@@ -526,12 +804,16 @@ ExperimentRun() {
 
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
+  CompatApplyFlags extra_flags;
+
   local binary="";
   local last_core=0;
   ExperimentSetup binary last_core "${features}" || return 1;
+  CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
-  nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  ExperimentSaveLaunchInfo
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
@@ -587,15 +869,19 @@ ExperimentRunWithCargo() {
 
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
+  CompatApplyFlags extra_flags;
+
   local last_core=0;
   ExperimentSetupForCargo last_core features || return 1;
+  CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
   local featuresCLI='';
   [ -n "${features}" ] && featuresCLI="--features=${features}";
   echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
   echo "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI}" > .currentcmd
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  ExperimentSaveLaunchInfo
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -672,12 +958,41 @@ Init () {
     patch --dry-run "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch" &&
     patch "tlspuffin/harness/wolfssl/src/put.c" < "${THEJOB_USER_FILES_PATH}/wolfssl_put.c.patch"
 
+  local compatApplied='';
+  CompatEvaluate "${THEJOB_OUT_PATH}/repo" "${COMMIT_ID}" compatApplied "${THEJOB_OUT_PATH}/compat.json" || return 1;
+  # commit inside a declared range without the bias (e.g. a commit of the tlspuffin PR that removed it):
+  # run with the probe's decision, warning shown on the scheduler board (task argument) and on the dashboard
+  if [ -n "${COMPAT_MISMATCH}" ]; then
+    COMPAT_WARNING="commit in the declared range of ${COMPAT_MISMATCH} but the probe does not match: rule(s) not applied, check the results"
+    AddGlobalParam COMPAT_WARNING "${COMPAT_WARNING}"
+  fi
+  CreateArtefact "${THEJOB_OUT_PATH}/compat.json" "compat.json" "commit_id:${COMMIT_ID}"
+  AddGlobalParam COMPAT_APPLIED "${compatApplied}"
+  COMPAT_APPLIED="${compatApplied}"
+  CompatPrepare "${THEJOB_OUT_PATH}/repo" || return 1;
+
   #nix-shell --run cargo >/dev/null 2>/dev/null || return 1;
-  LIBAFL_VER=$( nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  # first cargo call of the task: it may install the Rust toolchain of the commit; serialized between tasks
+  # (concurrent rustup installs into the same home leave broken toolchains, e.g. without cargo)
+  if ! command -v flock > /dev/null; then
+    CancelTask "flock is required on the scheduler host (package util-linux)"
+    return 1
+  fi
+  LIBAFL_VER=$( flock "${HOME:-/tmp}/.puffin-bench-rustup.lock" nix-shell --run "cd puffin; cargo pkgid libafl" | grep -i libafl | sed 's/.*@//' );
+  if [ -z "${LIBAFL_VER}" ]; then
+    CancelTask "Unable to get the LibAFL version (cargo pkgid libafl failed, see Init output)"
+    return 1
+  fi
   AddGlobalParam LIBAFL_VERSION "${LIBAFL_VER}"
   echo -e "${LIBAFL_VER}\n0.15.3" | sort -V | tail -1 | grep -Fxq 0.15.3;
   AFL_CORES_GRAMMAR=$?
   AddGlobalParam AFL_CORES_GRAMMAR "${AFL_CORES_GRAMMAR}"
+
+  # ASAN runtimes of LLVM < 18 crash at random at startup with more than 28 bits of mmap randomization
+  # (the value is only readable by root: no warning when it cannot be read)
+  local rndBits=$( cat /proc/sys/vm/mmap_rnd_bits 2> /dev/null || echo 0 );
+  (( rndBits <= 28 )) ||
+      echo "WARNING: vm.mmap_rnd_bits=${rndBits} > 28: ASAN fuzzers built with LLVM < 18 may crash at startup (AddressSanitizer:DEADLYSIGNAL); set it to 28 on this host" >&2;
 
   return 0;
 }
@@ -741,12 +1056,22 @@ ForcedBuild() {
   [ -z "${PACKAGE}" ] && PACKAGE="tlspuffin"
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
+  rm -f ./.unsupported
 
   local cputs=false
   ComputeBuildRuntimeInfo "${PACKAGE}" "${vendor}" features cputs || {
       echo "Failed to compute runtime info for vendor '${vendor}' '${features}'"
       return 1;
   }
+
+  # the experiment cannot run as required: record it and skip the next steps of this attempt
+  if [ -n "${COMPAT_UNSUPPORTED}" ]; then
+    echo "${COMPAT_UNSUPPORTED}"
+    echo "${COMPAT_UNSUPPORTED}" > ./.unsupported
+    echo "{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${features}\", \"flags\": \"${extra_flags}\", \"unsupported\": \"${COMPAT_UNSUPPORTED}\", \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ) }" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json"
+    echo "{ \"unsupported\": \"${COMPAT_UNSUPPORTED}\" }" >> "${THEJOB_USER_STATE_FILE}"
+    return 0;
+  fi
   local featuresCLI='';
   [ -n "${features}" ] && featuresCLI="--features=${features}";
 
@@ -758,11 +1083,24 @@ ForcedBuild() {
 
   rm -rf ./seeds
   echo "nix-shell --run \"cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed\""
-  nix-shell --run "cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+  $( NoAslrPrefix ) nix-shell --run "cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed" || return 1;
 
   rm -rf ./experiments
   echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help\""
-  nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" || return 1
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help" > ./.fuzzer_help.txt || return 1
+  cat ./.fuzzer_help.txt
+  CompatVerifyHelp ./.fuzzer_help.txt || return 1;
+
+  # kept in the working directory shared with the experiment step (recorded in cli-<step>.json)
+  local asanInfo='';
+  DetectAsan "./target/release/${PACKAGE}" "${features}" "${vendor}" asanInfo || return 1;
+  echo "ASAN: ${asanInfo}";
+  echo "${asanInfo}" > ./.asan_info.json;
+  local vendorSources='';
+  DetectVendorSources vendorSources || return 1;
+  echo "Vendor sources: ${vendorSources}";
+  echo "${vendorSources}" > ./.vendor_sources.json;
+  return 0;
 }
 
 Clean() {
@@ -808,6 +1146,23 @@ MonitorExperiment() {
     fi
     echo -e "\n  Time since last stats.json update: ${elapsed}s" >> ${outfile}
 
+    [ -s ./.build_info ] && echo "  Build: $( < ./.build_info )" >> ${outfile}
+    if [ -s ./.asan_info.json ]; then
+      local asanInfo=$( < ./.asan_info.json );
+      local asanState='? (not verified)';
+      [[ "${asanInfo}" == *'"instrumented": true'* ]] && asanState="✓ ($( sed -n 's/.*"runtime": "\([^"]*\)".*/\1/p' <<< "${asanInfo}" ) runtime)";
+      [[ "${asanInfo}" == *'"instrumented": false'* ]] && asanState='✗ (not instrumented)';
+      echo "  ASAN: ${asanState}" >> ${outfile}
+    fi
+
+    local logStats='';
+    if ExperimentLogStats "$exp" logStats; then
+      local logMB=$( sed -n 's/.*"estimated_mb": \([0-9]*\).*/\1/p' <<< "${logStats}" )
+      local logRate=$( sed -n 's/.*"mb_per_core_hour": \([0-9.]*\).*/\1/p' <<< "${logStats}" )
+      local logWarning=$( sed -n 's/.*"warning": "\([^"]*\)".*/\1/p' <<< "${logStats}" )
+      echo "  Logs: ~${logMB} MB${logRate:+ (${logRate} MB per hour per core)}${logWarning:+ ⚠️ ${logWarning}}" >> ${outfile}
+    fi
+
     if ! ${old_tlspuffin}; then
       # Default PUT info from log
       local log_file="$exp/log/stats_puffin_main_broker.log"
@@ -818,7 +1173,7 @@ MonitorExperiment() {
         else
           if [ -f "$README" ]; then
             default_put=$(head -n 100 "$README" | grep "Default PUT:" | cut -d' ' -f2-)
-            echo "  ${default_put} (asan?)" >> ${outfile}
+            echo "  ${default_put}" >> ${outfile}
           else
             echo "   Could not find default PUT in README or ./log/stats_puffin_main_broker.log" >> ${outfile}
           fi

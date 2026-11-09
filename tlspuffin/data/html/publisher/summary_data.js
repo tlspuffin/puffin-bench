@@ -231,7 +231,18 @@ function BuildDataSet(source, json) {
         state: [], 
         success: 0, 
         cli: libraries[library]?.cli ?? 'N/A', 
-        trust_objective: libraries[library]?.trust_objective ?? 0
+        trust_objective: libraries[library]?.trust_objective ?? 0,
+        // log volume records (see ExperimentLogStats), absent for results older than the feature
+        log_warning: libraries[library].data
+            .filter(attempt => attempt?.logs?.warning)
+            .map(attempt => ({ id: attempt.id, warning: attempt.logs.warning })),
+        log_max_mb: Math.max(0, ...libraries[library].data.map(attempt => attempt?.logs?.estimated_mb ?? 0)),
+        // fuzzing clients restarted after a crash (see ExperimentCrashStats), absent for older results
+        crash_warning: libraries[library].data
+            .filter(attempt => attempt?.logs?.crashes?.warning)
+            .map(attempt => ({ id: attempt.id, warning: attempt.logs.crashes.warning })),
+        // set when the experiment could not run as required (e.g. LibreSSL without ASAN support)
+        unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported
       };
       libraries[library].data.forEach(attempt => {
         if (attempt?.error !== undefined) {
