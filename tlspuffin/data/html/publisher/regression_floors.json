@@ -2,7 +2,9 @@
   "_doc": [
     "Floors of the comparison of a commit with its nearest ancestor on Results (scripts/tools/runs_report.py writes the comparisons in /html/runs/regression.json).",
     "A change is flagged (coloured) when p <= rule.p_max (two-sided Mann-Whitney on the runs, 5 vs 5: 0.016 = at most one pair out of order) AND |change| > its floor (%); otherwise it is shown faint.",
-    "Floor of a metric: per_machine[machine][type][metric], else per_library[type][library][metric], else floors[type][metric]. Edit and reload Results: no deploy.",
+    "Floor of a metric: per_machine_library[machine][type][library][metric], else per_machine[machine][type][metric], else per_library[type][library][metric], else floors[type][metric]. Edit and reload Results: no deploy.",
+    "All libraries at once (Perf, runs_report.py: geometric mean of the changes, Stouffer's combination of their p): pooled_per_machine[machine][type][metric], else pooled[type][metric]; none set: shown, never flagged.",
+    "Results of a major version of the measurements above 1 (PB_MAJOR_VERSION of the job scripts) take by_major[\"<major>\"], with the same structure; until it has a floor, the one of major version 1 above (wider: older setup).",
     "Values: 95th percentile of the change between two tasks of the same commit (same machine, build, timeout, monitor), measured on cassis, pesto and cacio on 2026-10-07 (117 Perf pairs, 84 Vuln pairs). This machine's own measurement, refreshed by the cron job: /html/runs/regression_floors.measured.json (a suggestion, never applied by itself).",
     "load_warning: a difference of the machine load per core between the two tasks above which their execs are marked not comparable (⚠)."
   ],

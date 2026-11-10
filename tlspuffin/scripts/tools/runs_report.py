@@ -13,7 +13,7 @@
 # puffin-bench version of a task: the job scripts' commit it recorded (runs since 2026-10-07, bench.jobscripts),
 # else the md5 of its job script (task.md5["."]) matched to a commit of the checkout's history (cat of the files
 # build.sh joins), else unknown; and the deployed version it recorded (bench.commit, runs since 2026-10-06).
-import os, sys, json, re, zipfile, gzip, hashlib, subprocess, statistics, datetime, shutil, itertools
+import os, sys, json, re, zipfile, gzip, hashlib, subprocess, statistics, datetime, shutil, itertools, math
 
 PB_ROOT = os.environ.get('PB_ROOT', '/srv/puffin-bench')
 STORAGE = f'{PB_ROOT}/data/publisher/tlspuffin'
@@ -384,13 +384,26 @@ def mann_whitney(a, b):
             f = g
         counts = f[n2]; total = sum(counts)
         return min(1.0, 2 * sum(counts[:int(umin) + 1]) / total)
-    import math
     N = n1 + n2; mu = n1 * n2 / 2
     sigma = math.sqrt(n1 * n2 / 12 * ((N + 1) - ties / (N * (N - 1))))
     if sigma == 0:
         return 1.0
     z = (abs(u - mu) - 0.5) / sigma
     return min(1.0, math.erfc(z / math.sqrt(2)))
+
+
+def pooled(changes):
+    """the change of a metric over several libraries at once, from their changes [(value, base, p)]: the geometric
+    mean of the ratios (%) and Stouffer's combination of their two-sided p, signed by the direction of each change.
+    Sees a change that hits every library (e.g. in the fuzzer's core) about √(libraries) times smaller than one
+    library alone; None below 2 libraries"""
+    nd = statistics.NormalDist()
+    ok = [(v, b, p) for v, b, p in changes if v > 0 and b > 0 and p is not None]
+    if len(ok) < 2:
+        return None
+    logs = [math.log(v / b) for v, b, _ in ok]
+    z = sum(math.copysign(nd.inv_cdf(1 - min(1.0, max(p, 1e-12)) / 2), l) for l, (_, _, p) in zip(logs, ok)) / math.sqrt(len(ok))
+    return {'delta': math.expm1(statistics.mean(logs)) * 100, 'p': min(1.0, 2 * (1 - nd.cdf(abs(z)))), 'libs': len(ok)}
 
 
 def ancestors_with_data(commits):
@@ -483,10 +496,10 @@ def regression(groups):
                                 + ' → ' + ' '.join(f'{x}' for x in (bb['library'], bb['version'], bb['harness'], 'ASan' if bb['asan'] else '') if x))
                 if ctype == 'Vuln' and va[lib].get('_monitor') != vb[lib].get('_monitor'):
                     warn.append(f'monitor: run ends on {"/".join(va[lib].get("_monitor") or ["?"])} → {"/".join(vb[lib].get("_monitor") or ["?"])}')
-                ca, cb = (a.get('cpus') or {}).get(lib), (b.get('cpus') or {}).get(lib)
-                if ca and cb and (ca['smt'], ca['shared']) != (cb['smt'], cb['shared']):
-                    desc = lambda c: f"{c['smt']}{', cores shared with others' if c['shared'] else ''}"
-                    warn.append(f'CPU sharing {desc(ca)} → {desc(cb)}')
+                sa, sb = cpu_sharing(a, lib), cpu_sharing(b, lib)
+                if sa and sb and sa != sb:
+                    desc = lambda s: s[0] + (', cores shared with others' if s[1] else '')
+                    warn.append(f'CPU sharing {desc(sa)} → {desc(sb)}')
                 if major(a) != major(b):
                     warn.append(f'puffin-bench major version {major(a)} → {major(b)}')
                 la, lb_ = (a.get('load') or {}).get(lib), (b.get('load') or {}).get(lib)
@@ -503,7 +516,16 @@ def regression(groups):
                                     'p': mann_whitney(x, y), 'n': len(y), 'n_base': len(x)}
                 # runs, runs_base: (runs measured, runs) of each side (Vuln: the runs with a time to find)
                 libs[lib] = {'warn': warn, 'metrics': metrics, 'runs': vb[lib]['_runs'], 'runs_base': va[lib]['_runs']}
-            out.setdefault(c, {})[f'{category}/{ctype}'] = {'base': base, 'gap': gap, 'task': b['id'], 'base_task': a['id'], 'notes': notes, 'libs': libs}
+            entry = {'base': base, 'gap': gap, 'task': b['id'], 'base_task': a['id'], 'major': major(b), 'notes': notes, 'libs': libs}
+            # Perf: each metric over the comparable libraries (no ⚠) at once
+            if ctype == 'Perf':
+                entry['pooled'] = {}
+                comparable = [l['metrics'] for l in libs.values() if not l['warn']]
+                for key in sorted({k for m in comparable for k in m}):
+                    pc = pooled([(m[key]['value'], m[key]['base'], m[key]['p']) for m in comparable if key in m])
+                    if pc:
+                        entry['pooled'][key] = pc
+            out.setdefault(c, {})[f'{category}/{ctype}'] = entry
     return out
 
 
@@ -513,17 +535,28 @@ def major(task):
     return (task.get('bench') or {}).get('major') or 1
 
 
+def cpu_sharing(task, lib):
+    """how the CPUs of a task's runs of a library were chosen: (mode, whether a thread of their cores was outside the
+    run); None when not recorded (job scripts before 2026-10-09). Two different ones are not comparable"""
+    c = (task.get('cpus') or {}).get(lib)
+    return (c['smt'], c['shared']) if c else None
+
+
 def measured_floors(groups):
     """the floors of this machine: 95th percentile of the change between two tasks of the same commit (same build,
-    settings and CPU sharing), per metric and per library (with at least 8 pairs), for regression_floors.json (never
-    applied by itself)"""
-    diffs = {}
+    settings, CPU sharing and major version), per metric and per library, and (Perf) over the libraries at once
+    (pooled), with at least 8 pairs each, for regression_floors.json (never applied by itself). Major version 1 at
+    the top level, the others under by_major"""
+    diffs = {}  # (major, ctype, key, lib or None or '_pooled') -> changes in %
     for (category, ctype), commits in groups.items():
         for c, ts in commits.items():
             for a, b in itertools.combinations([t for t in ts if t.get('metrics')], 2):
                 if (a.get('settings') or {}).get('timeout') != (b.get('settings') or {}).get('timeout'):
                     continue
+                if major(a) != major(b):
+                    continue
                 va, vb = task_values(a, ctype), task_values(b, ctype)
+                per_key = {}  # key -> [(value, base, p)] of the comparable libraries, for the pooled change
                 for lib in set(va) & set(vb):
                     if (a.get('builds') or {}).get(lib) != (b.get('builds') or {}).get(lib):
                         continue
@@ -531,10 +564,8 @@ def measured_floors(groups):
                     if ctype == 'Vuln' and va[lib].get('_monitor') != vb[lib].get('_monitor'):
                         continue
                     # the same CPU sharing, when both recorded it (as the regressions: another mode is not comparable)
-                    ca, cb = (a.get('cpus') or {}).get(lib), (b.get('cpus') or {}).get(lib)
-                    if ca and cb and (ca['smt'], ca['shared']) != (cb['smt'], cb['shared']):
-                        continue
-                    if major(a) != major(b):
+                    sa, sb = cpu_sharing(a, lib), cpu_sharing(b, lib)
+                    if sa and sb and sa != sb:
                         continue
                     for key, x in va[lib].items():
                         if key.startswith('_'):
@@ -542,16 +573,26 @@ def measured_floors(groups):
                         y = vb[lib].get(key) or []
                         if len(x) >= 3 and len(y) >= 3 and statistics.mean(x) > 0:
                             d = abs(statistics.mean(y) / statistics.mean(x) - 1) * 100
-                            diffs.setdefault((ctype, key, None), []).append(d); diffs.setdefault((ctype, key, lib), []).append(d)
-    out = {'measured': datetime.datetime.now().isoformat(timespec='seconds'), 'floors': {}, 'per_library': {}, 'pairs': {}}
-    for (ctype, key, lib), v in sorted(diffs.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or '')):
+                            for scope in (None, lib):
+                                diffs.setdefault((major(a), ctype, key, scope), []).append(d)
+                            per_key.setdefault(key, []).append((statistics.mean(y), statistics.mean(x), mann_whitney(x, y)))
+                if ctype == 'Perf':
+                    for key, changes in per_key.items():
+                        pc = pooled(changes)
+                        if pc:
+                            diffs.setdefault((major(a), ctype, key, '_pooled'), []).append(abs(pc['delta']))
+    out = {'measured': datetime.datetime.now().isoformat(timespec='seconds'), 'floors': {}, 'per_library': {}, 'pooled': {}, 'pairs': {}}
+    for (mj, ctype, key, lib), v in sorted(diffs.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2], kv[0][3] or '')):
         if len(v) < 8:
             continue
         v = sorted(v); q = round(v[int(0.95 * (len(v) - 1))], 2)
+        o = out if mj == 1 else out.setdefault('by_major', {}).setdefault(str(mj), {'floors': {}, 'per_library': {}, 'pooled': {}, 'pairs': {}})
         if lib is None:
-            out['floors'].setdefault(ctype, {})[key] = q; out['pairs'][f'{ctype}/{key}'] = len(v)
+            o['floors'].setdefault(ctype, {})[key] = q; o['pairs'][f'{ctype}/{key}'] = len(v)
+        elif lib == '_pooled':
+            o['pooled'].setdefault(ctype, {})[key] = q; o['pairs'][f'{ctype}/{key}/pooled'] = len(v)
         else:
-            out['per_library'].setdefault(ctype, {}).setdefault(lib, {})[key] = q
+            o['per_library'].setdefault(ctype, {}).setdefault(lib, {})[key] = q
     return out
 
 
