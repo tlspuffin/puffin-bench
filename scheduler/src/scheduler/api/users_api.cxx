@@ -66,6 +66,18 @@ bool ns_API::UsersAPI::Add(ns_Schedule::Task* task, bool running) {
   value.AddMember("flag", task->FlagJSON(alloc_), alloc_);
   value.RemoveMember("end_timestamp");
   value.AddMember("end_timestamp", task->estimatedEndTime_, alloc_);
+  value.RemoveMember("summary");
+  value.AddMember("summary", task->HistorySummaryJSON(alloc_), alloc_);
+  // the task arguments, e.g. for the history page to describe the task (commit of a task with a custom name)
+  rapidjson::Value args(rapidjson::kArrayType);
+  for (auto const& [key, argValue] : task->args_) {
+    rapidjson::Value arg(rapidjson::kObjectType);
+    arg.AddMember("key", rapidjson::Value(key.c_str(), alloc_), alloc_);
+    arg.AddMember("value", rapidjson::Value(argValue.c_str(), alloc_), alloc_);
+    args.PushBack(arg, alloc_);
+  }
+  value.RemoveMember("args");
+  value.AddMember("args", args, alloc_);
   return SaveNoLock();
 }
 

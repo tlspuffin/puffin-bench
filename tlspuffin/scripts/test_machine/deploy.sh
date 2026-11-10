@@ -6,7 +6,8 @@
 #
 # Usage: bash deploy.sh
 #   PB_ROOT   install root                      (default /srv/puffin-bench)
-#   PB_CORES  cores available to the scheduler   (default: all but core 0, which is excluded)
+#   PB_CORES  cores the scheduler's tasks may use at once (default: 80 % of the cores; core 0 is never used, and the
+#             cores not in use stay available to the users' sessions)
 #
 # The services must be stopped while their binaries are replaced:
 #   sudo systemctl stop puffin-bench.target     # updates only
@@ -17,7 +18,7 @@
 set -euo pipefail
 
 PB_ROOT="${PB_ROOT:-/srv/puffin-bench}"
-PB_CORES="${PB_CORES:-$(( $(nproc) - 1 ))}"
+PB_CORES="${PB_CORES:-$(( $(nproc) * 80 / 100 ))}"
 SRC="$( cd "$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )/../../.." && pwd )"
 SERVICES=( scheduler git_restapi publisher vis_comparator )
 
@@ -38,10 +39,40 @@ command -v nix-shell > /dev/null || [ -x /nix/var/nix/profiles/default/bin/nix-s
 [ -f /etc/sysctl.d/60-puffin-bench-asan.conf ] ||
     echo "WARNING: vm.mmap_rnd_bits not limited to 28 (re-run setup_root.sh): ASAN runs of older commits may crash at random" >&2
 for s in "${SERVICES[@]}"; do
-  if systemctl is-active --quiet "puffin-${s}.service" 2> /dev/null; then
-    Fail "puffin-${s} is running: sudo systemctl stop puffin-bench.target, then re-run"
+  # also while it stops ("deactivating": the scheduler ends its tasks first, systemd kills it after 90 s)
+  state="$( systemctl is-active "puffin-${s}.service" 2> /dev/null || true )"
+  case "${state}" in
+    inactive|failed|unknown|'') ;;
+    *) Fail "puffin-${s} is ${state}: sudo systemctl stop puffin-bench.target, wait until it is inactive, then re-run" ;;
+  esac
+  # a copy started by hand
+  if pgrep -f "^${PB_ROOT}/bin/${s}( |$)|^\./${s}( |$)" > /dev/null; then
+    Fail "a ${s} process still runs: $( pgrep -a -f "^${PB_ROOT}/bin/${s}( |$)|^\./${s}( |$)" | head -3 | tr '\n' ' ')"
   fi
 done
+
+# The run folders left by tasks (the scheduler does not restore its tasks after a stop, and keeps their folders: one
+# may hold the only copy of a run that was not archived). Nothing is removed unless the person deploying says so here;
+# without a terminal, or on any answer but "delete", they are kept (the Board's disk window lists them later).
+RUNS="$( jq -r '.schedule.runPath // empty' "${PB_ROOT}/bin/config.json" 2> /dev/null || true )"
+RUNS="${RUNS:-${PB_ROOT}/data/runs}"
+mapfile -t LEFT < <( find "${RUNS}" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{1,18}' 2> /dev/null | sort )
+if (( ${#LEFT[@]} )); then
+  Step "${#LEFT[@]} run folder(s) of tasks the scheduler no longer holds, in ${RUNS}"
+  for d in "${LEFT[@]}"; do
+    id="${d##*/}"
+    printf '  %s  task of %s UTC, last change %s, %s\n' "${id}" "$( date -u -d "@$(( 10#${id} / 1000 ))" '+%F %R' 2> /dev/null || echo '?' )" \
+        "$( date -u -r "${d}" '+%F %R' )" "$( du -sh "${d}" 2> /dev/null | cut -f1 )"
+  done
+  echo "  They are not archived: removing them loses their builds, logs and results. Kept unless you type: delete"
+  answer=''
+  [ -t 0 ] && read -r -p "  keep or delete? [keep] " answer
+  if [ "${answer}" = 'delete' ]; then
+    for d in "${LEFT[@]}"; do rm -rf --one-file-system -- "${d}"; echo "  removed ${d}"; done
+  else
+    echo "  kept"
+  fi
+fi
 
 Step "Build puffin-bench from ${SRC} ($( git -C "${SRC}" rev-parse --abbrev-ref HEAD ) $( git -C "${SRC}" rev-parse --short HEAD ))"
 cmake -S "${SRC}" -B "${SRC}/build" -DCMAKE_BUILD_TYPE=Release
@@ -54,9 +85,25 @@ FORCE=''
 [ -x "${PB_ROOT}/bin/scheduler" ] && FORCE='--force-files'
 "${INSTALLER}" --binpath "${PB_ROOT}/bin" --datapath "${PB_ROOT}/data" \
     --nb-cores "${PB_CORES}" --username "$( id -un )" ${FORCE} < /dev/null
+# the job scripts, generated again here so that they record the commit being deployed (CMake regenerates them only
+# when their sources change; build.sh stamps PR_version.sh), over the copies the installer wrote
+bash "${SRC}/tlspuffin/scripts/build.sh" > /dev/null &&
+    cp "${SRC}/tlspuffin/scripts/PR_perf_full.sh" "${SRC}/tlspuffin/scripts/PR_vulnerabilities_full.sh" \
+       "${SRC}/tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json" "${PB_ROOT}/data/html/jobsscripts/tlspuffin/" ||
+    Fail "the job scripts could not be generated"
 # the scheduler places its tasks in the cgroup of its own unit
 sed -i 's|"cgroupPath": "/sys/fs/cgroup/scheduler.service"|"cgroupPath": "/sys/fs/cgroup/puffin-scheduler.service"|' \
     "${PB_ROOT}/bin/config.json"
+
+# version shown by the navigation bar of every page (scheduler/html/board/nav.js)
+jq -n --arg commit "$( git -C "${SRC}" rev-parse HEAD )" \
+      --arg branch "$( git -C "${SRC}" rev-parse --abbrev-ref HEAD )" \
+      --arg date "$( git -C "${SRC}" log -1 --format=%cs )" \
+      --argjson dirty "$( [ -z "$( git -C "${SRC}" status --porcelain --untracked-files=no )" ] && echo false || echo true )" \
+      --arg deployed "$( date -Iseconds )" \
+      '{commit: $commit, branch: $branch, date: $date, dirty: $dirty, deployed: $deployed,
+        repository: "https://github.com/tlspuffin/puffin-bench"}' \
+    > "${PB_ROOT}/data/html/board/version.json"
 
 Step "Checks"
 status=0

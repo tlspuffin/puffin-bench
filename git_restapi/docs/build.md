@@ -8,9 +8,10 @@
 - OpenSSL development headers (`libssl-dev` or equivalent)
 
 **Runtime requirements** (not needed at build time):
-- `git` — required for all Git operations (fetch, clone, log, merge-base)
+- `git` — required for all Git operations (fetch, clone, log, merge-base, for-each-ref, rev-list, show)
 - `jq` — required by `tlspuffin_history.sh`
-- `bash` — required to execute `tlspuffin_history.sh`
+- `awk` — required by `tlspuffin_presets.sh`
+- `bash` — required to execute `tlspuffin_history.sh` and `tlspuffin_presets.sh`
 
 ## Commands
 
@@ -39,18 +40,20 @@ All dependencies except OpenSSL are fetched from their upstream repositories and
 
 ## Generated / Embedded Sources
 
-Two things are generated at configure/build time and compiled into every target:
+These are generated at configure/build time and compiled into every target:
 
 1. **Version info** (`src/version.c.in` → `${CMAKE_BINARY_DIR}/version.c`, via `CMakeGenVersion.cmake`): stamps the build date/time and the current short git commit hash (`git rev-parse --short=12 HEAD`) into `buildID`, and sets `buildGitDirty` to `1` if the working tree (or index) has uncommitted changes. `main.cxx` logs this as `Version: <buildID>[-dev]` at startup.
 
-2. **Embedded script** (`scripts/tlspuffin_history.sh` → `embeded/git_restapi/scripts/tlspuffin_history_sh.h`, via `EmbedTextFileScript` in `CMakeTextEmbedding.cmake`): compiles the script into a C string literal:
+2. **Embedded scripts** (via `EmbedTextFileScript` in `CMakeTextEmbedding.cmake`), each compiled into a C string literal:
+   - `scripts/tlspuffin_history.sh` → `embeded/git_restapi/scripts/tlspuffin_history_sh.h` (`TLSPuffinHistory_Script_data` / `_size`)
+   - `scripts/tlspuffin_presets.sh` → `embeded/git_restapi/scripts/tlspuffin_presets_sh.h` (`TLSPuffinPresets_Script_data` / `_size`)
    ```c
    static const char TLSPuffinHistory_Script_data[] = "...";
    static const size_t TLSPuffinHistory_Script_size = ...;
    ```
-   At startup, `ns_GIT::Config::Validate()` extracts this script to the configured `scripts` directory if the file is missing there, or if `--force-install` was passed. Permissions are set to `rwxr-x---`.
+   At startup, `ns_GIT::Config::Validate()` extracts each script to the configured `scripts` directory if the file is missing there, or if `--force-install` was passed. Permissions are set to `rwxr-x---`.
 
-   Pass `--force-install` on the command line to force re-extraction even if the script already exists on disk (useful after a binary update); pass `--only-install` to install and exit without starting the server or touching any repository — see [configuration.md](configuration.md).
+   Pass `--force-install` on the command line to force re-extraction even if the scripts already exist on disk (useful after a binary update); pass `--only-install` to install and exit without starting the server or touching any repository — see [configuration.md](configuration.md).
 
 ## Build Targets
 

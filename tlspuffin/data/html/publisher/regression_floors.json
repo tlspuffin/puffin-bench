@@ -1,0 +1,28 @@
+{
+  "_doc": [
+    "Floors of the comparison of a commit with its nearest ancestor on Results (scripts/tools/runs_report.py writes the comparisons in /html/runs/regression.json).",
+    "A change is flagged (coloured) when p <= rule.p_max (two-sided Mann-Whitney on the runs, 5 vs 5: 0.016 = at most one pair out of order) AND |change| > its floor (%); otherwise it is shown faint.",
+    "Floor of a metric: per_machine[machine][type][metric], else per_library[type][library][metric], else floors[type][metric]. Edit and reload Results: no deploy.",
+    "Values: 95th percentile of the change between two tasks of the same commit (same machine, build, timeout, monitor), measured on cassis, pesto and cacio on 2026-10-07 (117 Perf pairs, 84 Vuln pairs). This machine's own measurement, refreshed by the cron job: /html/runs/regression_floors.measured.json (a suggestion, never applied by itself).",
+    "load_warning: a difference of the machine load per core between the two tasks above which their execs are marked not comparable (⚠)."
+  ],
+  "rule": { "p_max": 0.016 },
+  "floors": {
+    "Perf": { "coverage": 1.2, "corpus": 4.7, "execs": 33.3 },
+    "Vuln": { "execs_to_find": 98, "time_to_find": 131 }
+  },
+  "per_library": {
+    "Perf": {
+      "BoringSSL": { "coverage": 0.46, "corpus": 4.46 },
+      "LibreSSL": { "coverage": 0.32, "corpus": 3.94 },
+      "OpenSSL": { "coverage": 0.35, "corpus": 5.82 },
+      "WolfSSL": { "coverage": 2.77, "corpus": 4.6 }
+    }
+  },
+  "per_machine": {
+    "cassis-calc": { "Perf": { "execs": 32.6 } },
+    "pesto-calc": { "Perf": { "execs": 41.4 } },
+    "cacio-calc": { "Perf": { "execs": 14.7 } }
+  },
+  "load_warning": 0.25
+}

@@ -493,3 +493,12 @@ std::vector<ns_Schedule::Step::Stream> ns_Schedule::Step::MergeStreamsConfig(
   }
   return result;
 }
+
+uint64_t ns_Schedule::Step::StartMs() const {
+  return (state_ < State::Running) ? 0 : ToMillis(time_points_[0]);
+}
+
+uint64_t ns_Schedule::Step::EndMs() const {
+  return (state_ <= State::Running) ? 0 : ToMillis(time_points_[1]);
+}
+

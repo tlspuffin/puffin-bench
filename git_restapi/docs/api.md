@@ -169,13 +169,16 @@ Each commit ID must match `[0-9a-fA-F]+`. Any non-hex value, or a `commits` fiel
 ```json
 {
   "commits": [
-    { "id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", "date": "2024-01-15", "comment": "Fix foo", "base": "..." },
+    { "id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", "date": "2024-01-15", "comment": "Fix foo", "base": "...",
+      "pulls": [ { "number": 453, "index": 3, "total": 7 } ] },
     { "id": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", "date": "2024-01-14", "comment": "Add bar", "base": "..." }
   ]
 }
 ```
 
 Each entry gets its own `base` field via a separate `git merge-base <id> origin/dev` lookup (see [architecture.md](architecture.md) for the performance implication on large batches). Commits that are not found in the repository are silently omitted from the response.
+
+When the repository has a pull request API (`url_pr`), each entry that is not on `origin/dev` also gets `pulls`: the pull requests containing the commit, newest first (at most 5), as `{ "number": 453, "index": 3, "total": 7 }`: the commit is the 3rd of the 7 commits of the PR (`origin/dev..<PR head>`); `index == total` means it is the head of the PR, open or closed. It is empty for a commit in no PR. For this, git_restapi fetches the heads of all pull requests (`refs/pull/*/head`, added to the `origin` fetch refspecs at start-up). Commits on `origin/dev` have no `pulls`: their message names the PR they merged.
 
 ### Errors
 
@@ -184,6 +187,47 @@ Each entry gets its own `base` field via a separate `git merge-base <id> origin/
 | 400 | Request body is not valid JSON, `commits` field is missing/not an array/contains a non-string, or a commit ID contains non-hex characters. |
 | 404 | `:repo` not found in configuration. |
 | 500 | The underlying `git log` subprocess failed. |
+
+---
+
+## GET /api/git/presets/:repo/:commit
+
+The vendor presets of tlspuffin at a commit (the launcher's preset picker), read by `scripts/tlspuffin_presets.sh`
+from the commit's `puffin-build/vendors/<vendor>/presets.toml` in the clone, without checking it out.
+
+### Path Parameters
+
+| Parameter | Pattern | Description |
+|---|---|---|
+| `:repo` | `[0-9a-zA-Z-_.%]+` | Repository name as defined in configuration. |
+| `:commit` | `[0-9a-fA-F]{7,40}` | Commit hash, full or abbreviated. |
+
+### Response — 200 OK
+
+```json
+{
+  "commit": "c460225ef7aa7ea3bcdd4738c1d87677178372ee",
+  "format": "presets.toml",
+  "asan_link": true,
+  "vendors": {
+    "wolfssl": [ { "name": "wolfssl540-sdos2", "version": "5.4.0", "asan": false, "sancov": true,
+                   "fix": ["CVE-2022-39173"], "postauth": false } ]
+  }
+}
+```
+
+`format` is `none` (and `vendors` empty) for commits before the presets files (2024-09-12). `asan_link`: the commit
+contains tlspuffin 854dbaa11, from which an ASAN preset links the ASAN runtime by itself (before, only with the `asan`
+cargo feature). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
+not change); an abbreviated id is answered from the cache only when it names exactly one cached commit. An unknown
+commit triggers one `git fetch --all` (a commit pushed since the last fetch) before the 404.
+
+### Errors
+
+| Code | Condition |
+|---|---|
+| 404 | `:repo` not found in configuration, or the commit is not in the repository (also after a fetch). |
+| 500 | `tlspuffin_presets.sh` failed or did not print a JSON object with `commit`. |
 
 ---
 
@@ -203,12 +247,13 @@ No body.
 
 ## Routing
 
-URL matching is performed by `RequestHandlerFactory`, first on HTTP method, then (for `GET`/`POST`) on one of two compile-time `std::regex` patterns:
+URL matching is performed by `RequestHandlerFactory`, first on HTTP method, then (for `GET`/`POST`) on compile-time `std::regex` patterns:
 
 | Method | Pattern | Handler |
 |---|---|---|
 | `OPTIONS` | *(any URI)* | `RequestHandlerCORSOptions` |
 | `GET` | `^/api/git/history/([0-9a-zA-Z-_.%]+)(\?.*)?$` | `RequestHandlerHistory` |
 | `GET` | `^/api/git/log/([0-9a-zA-Z-_.%]+)\?commit=([0-9a-fA-F]+)$` | `RequestHandlerLog` |
+| `GET` | `^/api/git/presets/([0-9a-zA-Z-_.%]+)/([0-9a-fA-F]{7,40})$` | `RequestHandlerPresets` |
 | `POST` | `^/api/git/logs/([0-9a-zA-Z-_.%]+)$` | `RequestHandlerLogs` |
 | `PATCH`, `PUT`, `DELETE`, or no match | — | `RequestHandlerError` → 404 |

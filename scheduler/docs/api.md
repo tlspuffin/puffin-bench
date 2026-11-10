@@ -208,7 +208,7 @@ See `docs/monitoring-output-cache.md` and the field table below for the complete
 GET /api/task/<taskID>/<stepUUID>/<stepID>/output/<type>/<size>/<offset>
 ```
 
-Regex: `/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr|[0-9]+)/(\d+)/(-?\d+)`
+Regex: `/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr|commands|[0-9]+)/(\d+)/(-?\d+)`
 
 **Path parameters:**
 
@@ -217,7 +217,7 @@ Regex: `/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout|stderr|[0-9]+)/(\d+)/
 | `taskID` | uint64 | Task ID |
 | `stepUUID` | uint64 | Step UUID |
 | `stepID` | string | Step logical ID, e.g. `"0-0-0"` |
-| `type` | `stdout` \| `stderr` \| integer | Which stream to read. An integer selects entry `type` (0-based) from the step's declared `streams` array in the flow JSON, for live-tailing arbitrary files the step writes |
+| `type` | `stdout` \| `stderr` \| `commands` \| integer | Which stream to read. `commands`: every command of the step (`executor.sh`, `functions.sh` `StartCommandsTrace`), `logs/commands.<stepID>.txt`, read off disk while the task runs (`live` while the step runs), from the archive after. An integer selects entry `type` (0-based) from the step's declared `streams` array in the flow JSON, for live-tailing arbitrary files the step writes |
 | `size` | uint64 | Maximum bytes to return. Capped at 64 MiB (`Schedule::GetOutput()`'s `maxRequestReadSize` constant) — a request above that cap, or a negative `size`, is rejected before any read is attempted (`state` stays `NotExecuted`, so the handler responds `500`) |
 | `offset` | int64 | Byte offset into the retained data. `offset >= 0` counts from the start. `offset < 0` counts back from the **end** instead (tail read): effective start = `filesize + offset`. If `|offset|` exceeds the current `filesize`, the effective start clamps to `0` rather than erroring |
 
@@ -225,7 +225,7 @@ Resolution order (`Schedule::GetOutput()`):
 1. If the task is still in memory (running/pending), the read is served by the executor:
    - `type == "stdout"`/`"stderr"`: reads from the step's in-memory ring buffer (`MemoryRing`, via `FDCaptureThread::Read()`), sets `partial=true`. `MemoryRing::Read()` applies the same negative-offset-from-end resolution independently (`output_ring.cxx`); if the ring has wrapped, `file_start_offset` in the response marks how much of the logical stream has already been evicted and is no longer readable even at `offset=0`.
    - `type` is numeric: resolved as an index into `Step::readable_files_` (the `streams` array); the file is read live off disk under the task's run directory, with `live=true`, `supportSeek=true`, `partial=true`.
-2. Otherwise (task not in memory) and `type` is `stdout`/`stderr`: the first existing archive among `exportPath/<taskID>.zip`, `exportPath/Canceled/<taskID>.zip`, `exportPath/<taskID>.tgz`, `exportPath/Canceled/<taskID>.tgz` is opened, and `logs/<type>.<stepID>.txt` is extracted (`FileCompressed::ExtractFileData`). Numeric `type` is not resolvable for completed tasks. The 64 MiB/negative-`size` cap is checked upfront, before either path runs, since it doesn't depend on the file. Negative-`offset` resolution, however, needs `filesize` — for this archive path that means it can only happen *after* the archive is opened and `ExtractFileData(outputFile, 0, nullptr, &data.filesize)` has located the entry and reported its size; only then is `data.startOffset = data.filesize + data.requestReadOffset` computed. (The live `MemoryRing` path resolves it immediately instead, since `virtualSize_` is already tracked in memory — no "opening" step there.)
+2. Otherwise (task not in memory) and `type` is `stdout`/`stderr`/`commands`/a stream index: the first existing archive among `exportPath/<taskID>.zip`, `exportPath/Canceled/<taskID>.zip`, `exportPath/<taskID>.tgz`, `exportPath/Canceled/<taskID>.tgz` is opened, and `logs/<type>.<stepID>.txt` is extracted (`FileCompressed::ExtractFileData`). Numeric `type` is not resolvable for completed tasks. The 64 MiB/negative-`size` cap is checked upfront, before either path runs, since it doesn't depend on the file. Negative-`offset` resolution, however, needs `filesize` — for this archive path that means it can only happen *after* the archive is opened and `ExtractFileData(outputFile, 0, nullptr, &data.filesize)` has located the entry and reported its size; only then is `data.startOffset = data.filesize + data.requestReadOffset` computed. (The live `MemoryRing` path resolves it immediately instead, since `virtualSize_` is already tracked in memory — no "opening" step there.)
 
 **Response `200 OK`:**
 ```json
@@ -336,6 +336,60 @@ Regex: `/api/task/(\d+)/priority/(-?\d+)`. `priority` is a signed integer (`int6
 { "success": true }
 ```
 **Response `500 Internal Server Error`** if no step for `taskID` was found: `{ "success": false, "error": "step cancel failed" }` (the error message is copy-pasted from the cancel-step path in the current implementation).
+
+---
+
+### Health of the Scheduler
+
+```
+GET /api/health
+```
+
+Unlike `GET /api/tasks/running`, which only reads the state file, this takes the schedule lock (what a submission
+waits for), for at most 2 s: what the status light of the top bar and the launcher probe before a submission.
+
+**Response `200 OK`:**
+
+```json
+{ "success": true, "data": { "state": "up", "stopping": false, "lock_taken": true, "lock_wait_ms": 0,
+  "lock_timeout_ms": 2000,
+  "http": { "threads": 7, "threads_max": 64, "queued": 0, "connections": 7, "connections_max": 10, "refused": 0,
+            "total": 106 } } }
+```
+
+`state`: `up`; `slow` (the lock took 500 ms or more); `busy` (not taken within 2 s, e.g. a task being archived);
+`stopping` (the scheduler is stopping: a submission would be refused). `http`: the HTTP server's threads, queued and
+open connections, refused and total connections since the start. A client should bound its own wait (the top bar
+gives up after 8 s and shows the scheduler as not answering).
+
+---
+
+### Temporary Maximum of Cores
+
+```
+PATCH /api/executor/<name>/max_cores/<max>/<seconds>
+```
+
+Regex: `/api/executor/([A-Za-z0-9_.-]+)/max_cores/(\d+)/(\d+)`. Sets a maximum of cores for the steps of an executor for `seconds` (1 s to 7 days); `max` 0 goes back to the default (`nbCores` of the configuration) at once. At most the cores of the configuration. A higher maximum lets more steps start; a lower one kills nothing: running steps keep their cores, the next ones wait until they fit. The default comes back at the end, checked at every scheduling round. The status (`GET /api/tasks/running`, `executors[]`) gives `nb_cores` (the maximum now), `nb_cores_default`, `nb_cores_until` (ms since the epoch, 0: none), `nb_cores_used` and `nb_cores_limit`.
+
+**Response `200 OK`:** `{ "success": true }`; **`400 Bad Request`** with the reason otherwise (unknown executor, more than the cores of the configuration, duration out of range).
+
+---
+
+### Folders of Tasks that No Longer Exist
+
+```
+GET /api/runs/unknown
+POST /api/runs/cleanup
+```
+
+A folder of the run path named by a task id that the task manager no longer holds is left by a stop (the tasks are not restored). The scheduler never removes such a folder on its own, since it may hold the only copy of a run that was not archived. It logs a warning for each one at start, and the Board's disk window lists them, with a button that removes the folders listed after a confirmation.
+
+`GET /api/runs/unknown` lists them. **Response `200 OK`:** `{ "success": true, "folders": [{ "id": "<task id>", "modified": <ms since the epoch, 0: unknown> }, ...] }` (the id of a task is the time of its creation, in ms).
+
+`POST /api/runs/cleanup` removes the folders named in the form field `ids` (comma separated) that are still such folders when the request comes. They are renamed and removed in the background (`FolderRemover`), under the schedule lock, so that no task is being created meanwhile. Any other name is ignored.
+
+**Response `200 OK`:** `{ "success": true, "removed": ["<task id>", ...] }`; **`400 Bad Request`** without `ids`: nothing is removed.
 
 ---
 
@@ -453,12 +507,20 @@ Entries whose task record is stale (not running, not cancelled, and no matching 
       "running": false,
       "cancelled": false,
       "publish_link": "http://publisher.example.com/files/tlspuffin#1713240000000",
-      "flag": { "color": "#6f6f00" }
+      "flag": { "color": "#6f6f00" },
+      "end_timestamp": 1713247200000,
+      "args": [ { "key": "COMMIT_ID", "value": "5c588ab11ce137d8199cfcde2897d95b83f830e1" } ],
+      "summary": {
+        "steps": { "total": 63, "ok": 61, "failed": 1, "timed_out": 1, "cancelled": 0, "other": 0 },
+        "core_hours": 18.4,
+        "start_timestamp": 1713240003000,
+        "end_steps_timestamp": 1713247190000
+      }
     }
   ]
 }
 ```
-`publish_link` is `""` when no publish server is configured for the task. `flag` is `{}` if `Flag()` was never called by the step script.
+`publish_link` is `""` when no publish server is configured for the task. `flag` is `{}` if `Flag()` was never called by the step script. `args` (task arguments) and `summary` (`Task::HistorySummaryJSON`: steps by outcome — `ok` is Done with exit code 0 —, core-hours as cores × run time of the steps, first step start and last step end, in ms) are recorded when the task is added and when it ends; entries recorded before they existed lack them. The history page (`html/board/history.js`) shows them.
 
 ---
 
@@ -564,11 +626,13 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 
 | Method | Regex | Handler |
 |--------|-------|---------|
-| GET | `/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout\|stderr\|[0-9]+)/(\d+)/(-?\d+)` | `RequestHandlerTaskOutputs` |
+| GET | `/api/task/(\d+)/(\d+)/(\d+-\d+-\d+)/output/(stdout\|stderr\|commands\|[0-9]+)/(\d+)/(-?\d+)` | `RequestHandlerTaskOutputs` |
 | GET | `/api/task/(\d+)/artefacts$` | `RequestHandlerTaskGetArtefacts` |
 | GET | `/api/task/(\d+)/final_state$` | `RequestHandlerTaskGetState(final=true)` |
 | GET | `/api/task/(\d+)/state$` | `RequestHandlerTaskGetState(final=false)` |
 | GET | `/api/tasks/running` (literal) | `RequestHandlerTasksRunning` |
+| GET | `/api/health` (literal) | `RequestHandlerHealth` |
+| GET | `/api/runs/unknown` (literal) | `RequestHandlerRunsUnknown` |
 | GET | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCacheGet` |
 | GET | `/api/users$` | `RequestHandlerUsersList` |
 | GET | `/api/user/([a-zA-Z0-9_-]+)/job_types$` | `RequestHandlerUserJobsTypeList` |
@@ -577,6 +641,8 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | POST | `/api/task/new` (literal) | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/(\d+)/priority/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/executor/([A-Za-z0-9_.-]+)/max_cores/(\d+)/(\d+)` | `RequestHandlerExecutorMaxCores` |
+| POST | `/api/runs/cleanup` (literal) | `RequestHandlerRunsCleanup` |
 | PATCH | `/api/task/(\d+)/args$` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/(\d+)/step/(\d+)` | `RequestHandlerTaskCancelStep` |

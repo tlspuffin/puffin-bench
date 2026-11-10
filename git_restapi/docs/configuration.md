@@ -17,8 +17,8 @@ A runtime snapshot of the fully-resolved configuration (with all defaults filled
 | Argument | Description |
 |---|---|
 | `<config-file>` | Path to the JSON config file. Default: `git_restapi-config.json`. Any argument not starting with `-` is treated as this path. |
-| `--force-install` | Force-reinstall the embedded `tlspuffin_history.sh` script even if it already exists on disk, then continue normal startup. |
-| `--only-install` | Run configuration validation (create storage/script directories, install the script if needed) and then exit — no repositories are cloned/fetched and the HTTP server never starts. Combine with `--force-install` to force a reinstall without touching any repository. |
+| `--force-install` | Force-reinstall the embedded scripts (`tlspuffin_history.sh`, `tlspuffin_presets.sh`) even if they already exist on disk, then continue normal startup. |
+| `--only-install` | Run configuration validation (create storage/script directories, install the scripts if needed) and then exit — no repositories are cloned/fetched and the HTTP server never starts. Combine with `--force-install` to force a reinstall without touching any repository. |
 | `--logslevel <N>` | Override the log level bitmask at runtime (see `logs_level` below). Overrides the value in the config file for this run only (not persisted). |
 
 There is no `--install` flag — earlier versions of this tool used that name; it has been split into `--force-install` and `--only-install`.
@@ -82,7 +82,7 @@ TLS uses `VERIFY_NONE` (client certificate verification is disabled) on the serv
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `storage` | path | `repo` (relative to CWD) | Directory where repositories are cloned. Each repository gets a `<name>/repo` subdirectory, plus its own cache files (see below). Must already exist — it is only canonicalized, not created. |
-| `scripts` | path | `repo/.scripts` (relative to CWD) | Directory where the embedded script is installed. Auto-created if it resolves under `storage`; otherwise it must already exist. |
+| `scripts` | path | `repo/.scripts` (relative to CWD) | Directory where the embedded scripts are installed. Auto-created if it resolves under `storage`; otherwise it must already exist. |
 | `repositories` | object | *(none — mandatory)* | Map of repository name → object with `url` and optional fields. Must be present, be a JSON object, and contain at least one valid entry — otherwise the process aborts at startup (see below). |
 
 ### Repository Entry
@@ -97,7 +97,7 @@ TLS uses `VERIFY_NONE` (client certificate verification is disabled) on the serv
 | Key | Type | Required | Description |
 |---|---|---|---|
 | `url` | string | Yes | Any URL accepted by `git clone`. Supports HTTPS and SSH remotes. |
-| `url_pr` | string | No | HTTPS URL of the GitHub REST API pull-requests endpoint (e.g. `https://api.github.com/repos/org/repo/pulls`). When present, `GET /api/git/history/:repo` responses include a `PR` field with open pull requests fetched from this endpoint, and a `PR_API_Infos` field with GitHub rate-limit metadata. PR results are cached in `<storage>/<name>/pr_cache.json`, and rate-limit state in `<storage>/<name>/pr_infos_cache.json`. |
+| `url_pr` | string | No | HTTPS URL of the GitHub REST API pull-requests endpoint (e.g. `https://api.github.com/repos/org/repo/pulls`). When present, `GET /api/git/history/:repo` responses include a `PR` field with open pull requests fetched from this endpoint, and a `PR_API_Infos` field with GitHub rate-limit metadata. PR results are cached in `<storage>/<name>/pr_cache.json`, and rate-limit state in `<storage>/<name>/pr_infos_cache.json`. It also makes git_restapi fetch the heads of all pull requests (`refs/pull/*/head`, added to the clone's `origin` fetch refspecs at startup), so that `log`/`logs` add a `pulls` field (the PRs containing each commit not on `origin/dev`). |
 
 Entries missing `url`, or whose name isn't a string, **abort startup** with an unhandled exception (`Configuration error, url attribute is invalide in repository <name>` / `Configuration error, name error in repositories`) — a single malformed entry takes down the whole server, even if the other configured repositories are valid. The repository name (`<repo-name>`) must match `[0-9a-zA-Z-_.%]+` to be reachable via the API; it becomes the `:repo` path segment in every endpoint.
 
@@ -109,8 +109,10 @@ Under `<storage>/<name>/`:
 |---|---|
 | `repo/` | The local clone (blobless: `--filter=blob:none`). |
 | `git_cache.json` | Persisted 24h history cache (merged commits/branches/PR result), reloaded at startup. |
+| `tlspuffin_history_cache.json` | Raw output of `tlspuffin_history.sh` (before the PR merge), rewritten on each history refresh. |
 | `pr_cache.json` | Persisted GitHub PR list (raw array), only when `url_pr` is configured. |
 | `pr_infos_cache.json` | Persisted GitHub rate-limit state (`<resetTS> <remaining>`), only when `url_pr` is configured. |
+| `presets_cache.json` | Answers of `GET /api/git/presets`, per full commit (kept for ever: a commit's presets never change). Delete it to force a re-read. |
 
 ### Repository Initialization
 
@@ -130,7 +132,7 @@ git clone --filter=blob:none <url> <storage>/<name>/repo
 
 ### Script Installation
 
-At startup, `ns_GIT::Config::Validate()` checks whether `tlspuffin_history.sh` exists in `scriptsPath_`. If it is missing, or `--force-install` was passed, the script is extracted from the compiled-in binary blob and written to disk with permissions `rwxr-x---`.
+At startup, `ns_GIT::Config::Validate()` checks whether each embedded script (`tlspuffin_history.sh`, `tlspuffin_presets.sh`) exists in `scriptsPath_`. If one is missing, or `--force-install` was passed, it is extracted from the compiled-in binary blob and written to disk with permissions `rwxr-x---`.
 
 ---
 

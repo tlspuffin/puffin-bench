@@ -51,6 +51,7 @@ Reading notes:
 - `Publish` is a configuration object carried by `Task`, copied passively into `ArchiveJob`; it has no independent lifecycle.
 - `Schedule` implements the `ExecutorsProvider` interface itself, and owns a map of named `Executor*` instances (currently always a single `"local"` entry, since `Local` is the only concrete `Executor`).
 - `TasksManager` is a member of `Schedule` (registry, not shown nested above for space): it owns all live `Task*` objects and assigns task IDs.
+- `FolderRemover` (background removal of the run folders of finished tasks) and `DurationHistory` (durations of the finished steps, for the estimated times) are process-wide singletons used by `Schedule`, `Task` and the executor; not shown above. See [components.md](components.md).
 
 ---
 
@@ -86,6 +87,10 @@ main()
        usersAPI_    = UsersAPI(configSchedule)
        scheduleAPI_ = ScheduleAPI(configSchedule, usersAPI_, OSAPI_, serverPort)
          → constructs Schedule, which:
+             - loads the step durations (DurationHistory::Load: step_durations.json,
+               or seeded from steps_done.json)
+             - removes the run folders a stop left being deleted, and logs the
+               folders of tasks it no longer holds (FolderRemover)
              - builds one Executor per entry in schedule.executors_ (only "local"
                by default)
              - writes an initial tasksmanager.json / status.json
@@ -95,8 +100,9 @@ main()
 
   8. Construct MyServerApp(config.server_, apis)
 
-  9. app.run() — bind plain or TLS ServerSocket, start Poco::Net::HTTPServer,
-     block on waitForTerminationRequest() (SIGINT/SIGTERM)
+  9. app.run() — bind plain or TLS ServerSocket, start Poco::Net::HTTPServer on its own
+     thread pool (server: max_threads, max_queued, keep-alive limits), block on
+     waitForTerminationRequest() (SIGINT/SIGTERM)
 ```
 
 Note: the embedded crash-recovery reload path (`TasksManager::LoadStatus`, `Task`'s JSON-loading constructor) is fully implemented but the call site in `Schedule`'s constructor is commented out — every restart starts with an empty task list. See `docs/roadmap.md`.
@@ -120,11 +126,12 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 
 | Method | Path pattern | Handler |
 |---|---|---|
-| GET | `/api/task/<id>/<uuid>/<step>/output/(stdout\|stderr\|N)/<size>/<offset>` | `RequestHandlerTaskOutputs` |
+| GET | `/api/task/<id>/<uuid>/<step>/output/(stdout\|stderr\|commands\|N)/<size>/<offset>` | `RequestHandlerTaskOutputs` |
 | GET | `/api/task/<id>/artefacts` | `RequestHandlerTaskGetArtefacts` |
 | GET | `/api/task/<id>/final_state` | `RequestHandlerTaskGetState` (final) |
 | GET | `/api/task/<id>/state` | `RequestHandlerTaskGetState` |
 | GET | `/api/tasks/running` | `RequestHandlerTasksRunning` |
+| GET | `/api/runs/unknown` | `RequestHandlerRunsUnknown` |
 | GET | `/api/cache/<id>` | `RequestHandlerCacheGet` |
 | GET | `/api/users` | `RequestHandlerUsersList` |
 | GET | `/api/user/<user>/job_types` | `RequestHandlerUserJobsTypeList` |
@@ -133,6 +140,8 @@ Routing (`server/request_handler_factory.hxx`) matches on HTTP method first, the
 | POST | `/api/task/new` | `RequestHandlerTaskNew` |
 | PUT | `/api/cache/<id>` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/<id>/priority/<priority>` | `RequestHandlerTaskUpdatePriority` |
+| PATCH | `/api/executor/<name>/max_cores/<max>/<seconds>` | `RequestHandlerExecutorMaxCores` |
+| POST | `/api/runs/cleanup` | `RequestHandlerRunsCleanup` |
 | PATCH | `/api/task/<id>/args` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/<id>` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/<id>/step/<uuid>` | `RequestHandlerTaskCancelStep` |
@@ -149,7 +158,7 @@ The board is a browser-based dashboard served as static files under `/files/boar
 ### Embedding and installation
 
 The core board files are embedded in the server binary at build time as C string literals via `EmbedTextFileScript` (`CMakeTextEmbedding.cmake`), listed in `CMakeLists.txt`:
-`board.html`, `board.css`, `board.js`, `taskcard.css`, `taskcard.js`, `logsmanager.js`, `terminal.js`, `clipboard.js`, `task.html`, `task.css`, `task.js`, `history.html`, `history.css`, `history.js`, and `launchers/launchers.css` / `launchers/launchers.js`.
+`board.html`, `board.css`, `board.js`, `taskcard.css`, `taskcard.js`, `logsmanager.js`, `terminal.js`, `clipboard.js`, `dropmenu.js`, `help.js`, `tips.js`, `task.html`, `task.css`, `task.js`, `history.html`, `history.css`, `history.js`, and `launchers/launchers.css` / `launchers/launchers.js`.
 
 On startup, `ns_Server::Config::Validate()` extracts these into `<html_>/board/` (and creates the empty `<html_>/board/custom/`, `<html_>/board/launchers/`, `<html_>/jobsscripts/` directories) if the files are absent, or unconditionally if `--force-install` was passed.
 
@@ -169,6 +178,9 @@ The board is accessible at `GET /files/board/board.html`.
 | `terminal.js` | Scrollable in-browser log viewer |
 | `logsmanager.js` | Log chunk fetching/streaming helpers (offset-based) used by the log modal |
 | `clipboard.js` | Small "copy to clipboard" helper |
+| `dropmenu.js` | Drop-down menu widget (task actions) |
+| `help.js` | Help texts of the board's hovers (`data-help` keys) |
+| `tips.js` | One look for every hover: an element's `title` is shown in a styled panel (title line, `key: value` grid, ⚠/✓ lines) instead of the browser's plain tooltip |
 | `task.html` / `task.js` / `task.css` | Single-task detail view |
 | `history.html` / `history.js` / `history.css` | Task history view: browses archived tasks per user and job type (`GET /api/user/<u>/job_types`, `GET /api/user/<u>/<t>/tasks`), renders a timeline sortable on start time (`id`) or end time (`end_timestamp`), and loads the selected task through `GET /api/task/<id>/final_state`. An extra **All** entry in the user menu aggregates every user client-side — one request per user × job\_type pair, ten in flight at a time — optionally filtered on a single job type; in that mode each card also shows which user and job type it came from. The page opens in that mode (every user, every job type). Cards get extra buttons from the optional `<html>/board/custom/task_links.json` (`{ "<task id>": [{ "label", "url" (relative to the page), "title", "level" }] }`, `"level": "warning"` drawing the button orange instead of red), each opening its URL in a new tab. See `roadmap.md` for the scaling limit this pattern carries |
 
@@ -183,6 +195,7 @@ Drift note: an earlier revision of this documentation set referenced `html/board
   <taskID>/
     logs/          stdout.<stepID>-<rankID>-<attemptID>.txt  (live, via MemoryRing)
                    stderr.<stepID>-<rankID>-<attemptID>.txt
+                   commands.<stepID>-<rankID>-<attemptID>.txt  every command of the step (executor.sh)
                    .steps.json           append-only per-task step-finish log
     output/        created but not currently archived (rename to final storage
                    is commented out in Task::FinalizeAndArchive)
@@ -195,6 +208,7 @@ Drift note: an earlier revision of this documentation set referenced `html/board
   tasksmanager.json          full task/step state, rewritten every loop iteration
   status.json                running-steps snapshot
   steps_done.json            append-only log of every step that finished
+  step_durations.json        last durations of each kind of step, for the estimated times (see task-step-lifecycle.md)
   <taskID>.zip               completed task archive (built by `zip`, moved here)
   <taskID>.json              task metadata snapshot (post-archive)
   Canceled/

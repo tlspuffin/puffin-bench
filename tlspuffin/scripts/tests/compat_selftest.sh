@@ -88,6 +88,27 @@ Check stats_monitor_heartbeat dcf9ff4e7caffbd35d6b83cfef6bac5b7f7efdc3 true
 Check stats_monitor_heartbeat 2f06dfef8b0a530e058d489ffee0179be10a3f7a false
 Check stats_monitor_heartbeat 92251a29515c05733832c67fe637a7bd54b84055^1 false
 Check stats_monitor_heartbeat origin/dev false
+Check security_claim_objective 2dad52a3c64458f446f721ef83107fa89905b8dc true
+Check security_claim_objective 2dad52a3c64458f446f721ef83107fa89905b8dc^1 false
+Check security_claim_objective 0ac66344b28143c07a2813bb743d8d374bd3a169 false
+Check security_claim_objective 0ac66344b28143c07a2813bb743d8d374bd3a169^1 true
+Check security_claim_objective origin/dev false
+Check reservoir_sample_warn ce5a15be7949c787001b657d5f891e00aa07dd5d true
+Check reservoir_sample_warn ce5a15be7949c787001b657d5f891e00aa07dd5d^1 false
+Check reservoir_sample_warn dcf9ff4e7caffbd35d6b83cfef6bac5b7f7efdc3 true
+Check reservoir_sample_warn d4455dfc7ae00994971890594c85d8fbee01c109 false
+Check reservoir_sample_warn 0cd3fed801fa4e3e7b7b22246e5b56b5dcfc91a9 false
+# logged at ERROR on that side branch: not this rule
+Check reservoir_sample_warn b27e21cb9 false
+Check reservoir_sample_warn_dev 0cd3fed801fa4e3e7b7b22246e5b56b5dcfc91a9 true
+Check reservoir_sample_warn_dev 0cd3fed801fa4e3e7b7b22246e5b56b5dcfc91a9^1 false
+Check reservoir_sample_warn_dev origin/dev true
+Check reservoir_sample_warn_dev dcf9ff4e7caffbd35d6b83cfef6bac5b7f7efdc3 false
+Check subterm_size_warn ce5a15be7949c787001b657d5f891e00aa07dd5d true
+Check subterm_size_warn ce5a15be7949c787001b657d5f891e00aa07dd5d^1 false
+Check subterm_size_warn dcf9ff4e7caffbd35d6b83cfef6bac5b7f7efdc3 true
+Check subterm_size_warn d4455dfc7ae00994971890594c85d8fbee01c109 false
+Check subterm_size_warn origin/dev false
 
 # the reference log config must be the pinned blob
 blob=$( git -C "${COMPAT_REPO}" rev-parse "${COMPAT_LOG_CONFIG_REF}:client_log_config.yml" );

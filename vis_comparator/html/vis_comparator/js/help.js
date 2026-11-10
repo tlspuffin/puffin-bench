@@ -22,7 +22,7 @@ export const HELP_HTML = `
     <tr><td><strong>New view</strong></td><td>Start a blank view. Enter a name (auto-generated if left empty).</td></tr>
     <tr><td><strong>Open template</strong></td><td>Load a template. Templates use variables as placeholders — set them in the sidebar after loading.</td></tr>
     <tr><td><strong>Save template</strong></td><td>Save the current view as a reusable template. Optionally provide a <em>title format string</em> (see <em>Title Format</em> below).</td></tr>
-    <tr><td><strong>Help</strong></td><td>Open this dialog.</td></tr>
+    <tr><td><strong>❔</strong> (top bar)</td><td>Open this help (also the <kbd>?</kbd> key).</td></tr>
   </table>
   <p>Click the pencil <strong>✏ Edit</strong> button next to the view title to rename it inline. Press <kbd>Enter</kbd> to confirm or <kbd>Escape</kbd> to cancel.</p>
 </div>

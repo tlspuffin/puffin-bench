@@ -6,16 +6,44 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif
 }
 
-.container-running-steps {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 1rem;
+/* the page is the header and one row of tasks below it: the row scrolls horizontally, each task vertically */
+html:has(body.board-page), body.board-page {
+  height: 100%;
+}
 
-  /*columns: 500px;
-  column-gap: 1rem;
-  padding: 1rem;*/
+body.board-page {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.board-page .header {
+  flex-shrink: 0;
+}
+
+.board-page .container-running-steps {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.board-page .container-running-steps > .card-task-running {
+  /* 420px (a long argument is cut with …, taskcard.css); a card never scrolls sideways: a horizontal scroll over it
+     moves the row */
+  flex: 0 0 420px;
+  min-width: 0;
+  /* as tall as its content (folded steps), at most the row: then it scrolls */
+  max-height: 100%;
+  max-width: none;
+  margin-bottom: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .header {
@@ -233,3 +261,89 @@ body {
   min-width: 3em;
 }
 
+/* board header: one compact row (counters, executors, fold buttons); the title, refresh and help are in the
+   top bar of the bench (nav.js) */
+.board-page .header {
+  padding: 4px 14px;
+  border-bottom-width: 1px;
+}
+
+.board-page .header h1:empty {
+  display: none;
+}
+
+.board-page .fold-group {
+  display: inline-flex;
+}
+
+.board-page .fold-group .refresh-button {
+  border-radius: 0;
+  margin: 0;
+}
+
+.board-page .fold-group .refresh-button:first-child { border-radius: 999px 0 0 999px; }
+.board-page .fold-group .refresh-button:last-child { border-radius: 0 999px 999px 0; }
+.board-page .fold-group .refresh-button + .refresh-button { border-left: 1px solid #ffffff33; }
+
+.board-page .header h1 {
+  font-size: 16px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.board-page .header-top {
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.board-page .stats-bar {
+  margin-top: 0;
+  gap: 14px;
+}
+
+.board-page .stat {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.board-page .stat-label {
+  font-size: 10px;
+}
+
+.board-page .stat-value {
+  font-size: 15px;
+}
+
+.board-page .executors-stats {
+  gap: 2px;
+}
+
+.board-page .header-actions {
+  gap: 6px;
+}
+
+.board-page .refresh-button {
+  padding: 2px 9px;
+  font-size: 12px;
+  box-shadow: none;
+}
+/* maximum of cores of an executor (board.js CoresMax) */
+.cores-max { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.cores-max-text { color: #ccc; }
+.cores-max-text.temporary { color: #ffb74d; font-weight: 700; }
+.cores-max-button { font-size: 11px; padding: 1px 7px; border-radius: 6px; border: 1px solid #4b6bd6; background: #1d2a52; color: #fff; cursor: pointer; }
+.cores-max-dialog { background: #151515; color: #e8e8e8; border: 1px solid #4b6bd6; border-radius: 10px; padding: 14px 18px; min-width: 340px; max-width: 460px; }
+.cores-max-dialog::backdrop { background: #0008; }
+.cores-max-dialog h3 { margin: 0 0 6px; font-size: 15px; }
+.cores-max-dialog label { display: block; margin: 8px 0; }
+.cores-max-dialog input { width: 64px; background: #1f1f1f; color: #e8e8e8; border: 1px solid #444; border-radius: 5px; padding: 2px 6px; }
+.cores-max-dialog .muted { color: #8b8b8b; font-size: 12px; }
+.cores-max-dialog .cm-error { color: #f85149; font-size: 12px; }
+.cores-max-dialog .cm-actions { display: flex; gap: 8px; margin-top: 10px; }
+.cores-max-dialog .cm-actions button { padding: 4px 12px; border-radius: 6px; border: 1px solid #444; background: #1b1b1b; color: #e8e8e8; cursor: pointer; }
+.cores-max-dialog .cm-actions button.primary { background: #1d2a52; border-color: #4b6bd6; font-weight: 700; }
+/* disk: new steps wait; the cleanup button of the disk window */
+.disk-blocked { color: #f85149; font-weight: 700; font-size: 12px; white-space: nowrap; cursor: context-menu; }
+.pb-tip .disk-cleanup { margin-top: 4px; padding: 3px 10px; border-radius: 6px; border: 1px solid #4b6bd6; background: #1d2a52; color: #fff; cursor: pointer; font-size: 12px; }
+.pb-tip .disk-cleanup-result { margin-top: 4px; color: #8b8b8b; }

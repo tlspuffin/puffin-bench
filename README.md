@@ -33,6 +33,10 @@ A suite of four C++ services — plus a bootstrapper that deploys all of them �
 | **Publisher** | [`publisher/`](publisher/) | 10083 | `publisher`, `publisher-static` |
 | **vis_comparator** | [`vis_comparator/`](vis_comparator/) | 10084 | `vis_comparator`, `vis_comparator-static` |
 
+> **Git REST API is tlspuffin-specific for now.** `/api/git/log` and `/api/git/logs` are plain git, but
+> `/api/git/history` (via `tlspuffin_history.sh`, which clones tlspuffin's repository) and `/api/git/presets`
+> (tlspuffin's vendor presets) only work for tlspuffin. The scheduler, publisher and vis_comparator stay generic.
+
 Prefer the `-static` variants for deployment (no shared-lib dependencies). A fifth project, [`installer/`](installer/) (see [installer/README.md](installer/README.md)), embeds copies of the four binaries above — dynamically-linked in `installer`, statically-linked in `installer-static` — plus every asset they need, and bootstraps a co-located deployment with a single command. The manual build/configure/start steps below are the standalone path for running (or developing) one service at a time.
 
 ---

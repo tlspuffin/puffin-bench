@@ -205,6 +205,34 @@ EndDirectChild() {
   return 1;
 }
 
+# StartCommandsTrace: every command of the step in logs/commands.<step>.txt, next to its stdout and stderr (archived
+# with them; the COMMANDS tab of its logs): first the variables of the step's shell (its environment and the settings
+# of its job), then each command run by this shell, its subshells and its monitor (bash xtrace, on a file descriptor
+# of its own: what a command prints or a command substitution captures is unchanged), with its time, its function
+# and line, one + per nested level, and the assignments that set variables. Programs started by those commands do
+# not trace their own commands (a nix-shell would add ~22,000 lines of its own setup per call): their command lines,
+# with the commands given to them, are in the trace. The values of variables named like a secret are hidden.
+StartCommandsTrace() {
+  [ -n "${THEJOB_TRACE_FD}" ] && return 0
+  [[ "${THEJOB_STDOUT_PATH}" == */stdout.* ]] || return 0
+  local file="${THEJOB_STDOUT_PATH%/*}/commands.${THEJOB_STDOUT_PATH##*/stdout.}"
+  exec {THEJOB_TRACE_FD}>> "${file}" || { THEJOB_TRACE_FD=''; return 0; }
+  {
+    echo "# $( date '+%F %T %z' ) the variables of the step (its environment and the settings of its job)"
+    ( set -o posix; set ) | sed -E 's/^([A-Za-z0-9_]*(TOKEN|SECRET|PASSW|CREDENTIAL|PRIVATE|API_?KEY)[A-Za-z0-9_]*)=.*/\1=<hidden>/I'
+    echo "# commands: + <time> <function>:<line> <command>, one + per nested level"
+  } >&${THEJOB_TRACE_FD}
+  THEJOB_TRACE_PS4='+ ${EPOCHREALTIME} ${FUNCNAME[0]:-main}:${LINENO} '
+  BASH_XTRACEFD=${THEJOB_TRACE_FD}
+  PS4="${THEJOB_TRACE_PS4}"
+  set -x
+}
+
+# the start of the command of a bash started by the step (its monitor): the same trace (StartCommandsTrace)
+TraceInChildBash() {
+  [ -n "${THEJOB_TRACE_FD}" ] && printf 'BASH_XTRACEFD=%s; PS4=%q; set -x; ' "${THEJOB_TRACE_FD}" "${THEJOB_TRACE_PS4}"
+}
+
 StartMonitor() {
   if [ -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then
     echo "No monitor entry point for this step" >&2
@@ -224,7 +252,7 @@ StartMonitor() {
       if [ -z "${monitor_timeout_s}" ]; then
         ${monitor_entry} "${monitor_output_tmp}" $@
       else
-        timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
+        timeout ${monitor_timeout_s} /bin/bash -c "$( TraceInChildBash )THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- $@;
         case $? in
           124)
             echo "monitor has timeouted" >> "${monitor_output_tmp}"
@@ -259,7 +287,7 @@ StopMonitor() {
   if [ -z "${monitor_timeout_s}" ]; then
     ${monitor_entry} "${monitor_output_tmp}" "${THEJOB_MONITOR_LAST_CALL[@]}"
   else
-    timeout ${monitor_timeout_s} /bin/bash -c "THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- "${THEJOB_MONITOR_LAST_CALL[@]}";
+    timeout ${monitor_timeout_s} /bin/bash -c "$( TraceInChildBash )THEJOB_SH_CONFIG_FILE=\"${THEJOB_SH_CONFIG_FILE}\"; source \"${THEJOB_UTILS_PATH}\"; source \"${THEJOB_FUNCTIONS_PATH}\"; ${monitor_entry} \"${monitor_output_tmp}\" \$@" -- "${THEJOB_MONITOR_LAST_CALL[@]}";
     case $? in
       124)
         echo "monitor has timeouted" >> "${monitor_output_tmp}"

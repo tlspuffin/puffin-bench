@@ -121,6 +121,7 @@ Example: `GET /files/my_project` with a `.rules` containing `"index": "summary.h
 | `path` | Relative path (automatically routed to `storagePath` or `htmlPath`) |
 
 - MIME type detected by extension (`.html`, `.css`, `.js`, `.json`, `.jpg`, `.jpeg`, `.png`, `.svg`).
+- Revalidated on every load: the response carries `Cache-Control: no-cache` and the file's modification time as `Last-Modified`; a request whose `If-Modified-Since` is not older than the file gets **304** with no body. Without these headers, browsers reused the files of an earlier version (a page script after an update) until a hard reload.
 - Returns **404** if the file does not exist.
 - Path traversal protection: the canonical path must remain within the allowed directory.
 

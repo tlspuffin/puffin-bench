@@ -1,11 +1,18 @@
+// A view of a long text (the logs of a step): only the lines in sight are in the page. Optional view (SetView): a
+// formatter that gives each line its HTML, the text it shows and what it knows of it, from the line and what it knew
+// of the line before (format(raw, previousMeta) -> { text, html, meta }: e.g. the command a line continues), and a
+// filter of the lines shown (filter({ raw, meta }) -> bool); without them, the text as it is.
 export class Terminal {
   #isScrollbarActive
   #phantomDiv;
   #listeners;
+  #format = null;
+  #filter = null;
 
   constructor(containerId) {
     this.container = document.getElementById(containerId);
-    this.lines = []; // buffered lines
+    this.lines = []; // buffered lines (shown: those the filter keeps, see #Shown)
+    this.allLines = []; // every line, filter or not
     this.visibleStartLine = 0;
     this.visibleLines = 0;
     this.charsPerLine = 0;
@@ -70,14 +77,41 @@ export class Terminal {
 
     this.charsPerLine = Math.floor(containerWidth / this.charWidth);
     this.visibleLines = Math.ceil(containerHeight / this.lineHeight);
+    // vertical padding of the text: the view shows that much less text than the container height
+    const style = getComputedStyle(this.contentPre);
+    this.verticalPadding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
   }
 
-  #PrepareText(text) {
-    const inputLines = text.split('\n');
-    return inputLines.map(line => ({
-        content: line,
-        charCount: line.length
-    }));
+  // the lines of a text, in order: each one formatted with what was known of the one before (previous)
+  #PrepareText(text, previous = null) {
+    const out = [];
+    for (const raw of text.split('\n')) {
+      previous = this.#Line(raw, previous);
+      out.push(previous);
+    }
+    return out;
+  }
+
+  #Line(raw, previous = null) {
+    const shown = this.#format ? this.#format(raw, previous?.meta ?? null) : null;
+    const content = shown ? shown.text : raw;
+    return { raw, content, html: shown?.html ?? null, meta: shown?.meta ?? null, charCount: content.length };
+  }
+
+  // the formatter and the filter of the lines (null: none); the lines are formatted and filtered again
+  SetView({ format = null, filter = null } = {}) {
+    this.#format = format;
+    this.#filter = filter;
+    this.allLines = this.#PrepareText(this.allLines.map(line => line.raw).join('\n'));
+    this.#Shown();
+    this.visibleStartLine = Math.min(this.visibleStartLine, Math.max(0, this.lines.length - 1));
+    this.#Render();
+  }
+
+  // the lines shown: those the filter keeps (the last line, possibly incomplete, is always kept)
+  #Shown() {
+    this.lines = this.#filter
+        ? this.allLines.filter((line, i) => i === this.allLines.length - 1 || this.#filter(line)) : this.allLines;
   }
 
   Destroy() {
@@ -90,16 +124,14 @@ export class Terminal {
   }
 
   AppendText(text) {
-    const newLines = this.#PrepareText(text);
-    if (newLines.length === 0) return;
-
-    if ((this.lines.length > 0) && 
-        (this.lines[this.lines.length - 1].charCount == 0)) {
-      this.lines[this.lines.length - 1] = newLines.shift();
-    }
+    if (text.length === 0) return;
+    // the last line was incomplete (no end of line yet): the new text continues it
+    const last = this.allLines.pop();
+    const newLines = this.#PrepareText((last?.raw ?? '') + text, this.allLines[this.allLines.length - 1] ?? null);
     for (const line of newLines) {
-        this.lines.push(line);
+        this.allLines.push(line);
     }
+    this.#Shown();
 
     // Auto-scroll only if already at the bottom
     const wasAtBottom = this.#IsAtBottom();
@@ -112,12 +144,14 @@ export class Terminal {
   }
 
   SetText(text) {
-    this.lines = this.#PrepareText(text);
+    this.allLines = this.#PrepareText(text);
+    this.#Shown();
     this.visibleStartLine = Math.min(this.visibleStartLine, Math.max(0, this.lines.length - 1));
     this.#Render();
   }
 
   Clear() {
+    this.allLines = [];
     this.lines = [];
     this.visibleStartLine = 0;
     this.#Render();
@@ -177,11 +211,19 @@ export class Terminal {
     const totalVisualLines = this.lines.reduce((sum, line) =>
         sum + (Math.ceil(line.charCount / this.charsPerLine) || 1), 0
     );
-    const phantomHeight = (totalVisualLines - 1) * this.lineHeight + this.container.clientHeight;
+    // scroll height of the content (plus a spare line): at the bottom, the last line is at the bottom of the
+    // view, not at its top above an empty view
+    const phantomHeight = Math.max((totalVisualLines + 1) * this.lineHeight + (this.verticalPadding ?? 0),
+        this.container.clientHeight);
     this.#phantomDiv.style.height = `${phantomHeight}px`
 
     const visibleLines = this.lines.slice(this.visibleStartLine, endLine);
-    this.contentPre.textContent = visibleLines.map(line => line.content).join('\n');
+    if (this.#format) {
+      const esc = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      this.contentPre.innerHTML = visibleLines.map(line => line.html ?? esc(line.content)).join('\n');
+    } else {
+      this.contentPre.textContent = visibleLines.map(line => line.content).join('\n');
+    }
   }
 
   ScrollToBottom() {

@@ -754,7 +754,7 @@ class GraphManager {
       const warn = document.createElement('span');
       warn.className = 'graph-title-warn-badge';
       warn.textContent = ICONS.WARN;
-      warn.title = 'Duplicate metrics — only the first occurrence is displayed';
+      warn.dataset.clickTip = 'Duplicate metrics — only the first occurrence is displayed';
       titleSpan.appendChild(warn);
     }
 
@@ -767,7 +767,7 @@ class GraphManager {
       const warn = document.createElement('span');
       warn.className = 'graph-title-warn-badge';
       warn.textContent = ICONS.WARN;
-      warn.title = `No data: ${missingExps.join(', ')}`;
+      warn.dataset.clickTip = `No data: ${missingExps.join(', ')}`;
       titleSpan.appendChild(warn);
     }
   }

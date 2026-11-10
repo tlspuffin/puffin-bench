@@ -37,7 +37,7 @@ Client / Scheduler
 
 ### HTTP Server (`src/publisher/server/`)
 
-- **`MyServerApp`** — `Poco::Util::ServerApplication` wrapper. Creates a `ServerSocket` (plain or SSL depending on config) and starts the `HTTPServer`.
+- **`MyServerApp`** — `Poco::Util::ServerApplication` wrapper. Creates a `ServerSocket` (plain or SSL depending on config) and starts the `HTTPServer` on its own `Poco::ThreadPool` (4 to 64 threads, 256 queued connections, keep-alive closed after 5 s idle or 100 requests; fixed in the code, not configurable): an open browser tab no longer holds a thread for 15 s. On stop, `stopAll(true)` also closes the open connections, and the pool's threads are joined before `main()` returns, so that no request is still served while the publisher's objects are destroyed (the publisher once aborted when stopped while a page was polling it).
 - **`RequestHandlerFactory`** — routes by URI regex to handlers.
 - **`RequestHandler`** subclasses — one handler per endpoint, created by the `REQUESTHANDLER` macro.
 - **`PartsHandler`** — multipart/form-data parsing for `POST /api/notify`.
@@ -186,6 +186,7 @@ POST /api/notify  {src: "1234.zip", dst: "project/PR/abc1234/Perf"}
 
 ## Multithreading and security
 
+- HTTP requests are served by the server's own thread pool (see `MyServerApp` above); the pool outlives the server and is joined before the rest is destroyed.
 - `Publish` runs in a dedicated thread. The queue is protected by `std::mutex` + `std::condition_variable`.
 - Project list reads: `std::shared_mutex` (shared reads, exclusive writes).
 - JSON updates are atomic: write to `.tmp`, then `rename()`.

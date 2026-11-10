@@ -73,7 +73,11 @@ For a binary-only deployment (see `docs/build.md`), also copy `html/`, `scripts/
   "key":  "security/site.key",
   "cert": "security/site.pem",
   "CA":   "security/CA.pem",
-  "html": "html"
+  "html": "html",
+  "max_threads": 64,
+  "max_queued": 256,
+  "keep_alive_timeout": 5,
+  "max_keep_alive_requests": 100
 }
 ```
 
@@ -86,6 +90,12 @@ For a binary-only deployment (see `docs/build.md`), also copy `html/`, `scripts/
 | `cert` | path | `security/site.pem` | same | Server certificate (PEM). Required (must exist) when `secure: true`. |
 | `CA` | path | `security/CA.pem` | same | CA bundle (PEM). Required (must exist) when `secure: true`. |
 | `html` | path | `html` | same | Root directory for static file serving (`GET /files/*` maps directly onto `<html>/...`, no extra `files/` segment on disk) and for the extracted board dashboard (`<html>/board/...`). Must already exist — `Validate()` calls `std::filesystem::canonical(html_)`, which throws if it doesn't. |
+| `max_threads` | uint16 | `64` | same | Maximum number of HTTP worker threads. The server has its own `Poco::ThreadPool` (4 to `max_threads` threads) instead of Poco's shared default pool of 16. |
+| `max_queued` | uint16 | `256` | same | Connections waiting for a free worker thread; beyond that, new connections are refused. |
+| `keep_alive_timeout` | uint16 (seconds) | `5` | same | Idle time after which a keep-alive connection is closed, so that an open browser tab does not hold a worker thread for long. |
+| `max_keep_alive_requests` | uint16 | `100` | same | Requests served on one keep-alive connection before it is closed. |
+
+With Poco's defaults (16 threads, unlimited keep-alive requests, 15 s idle), a few open board tabs held every worker thread; further connections were then queued and refused without an answer or a log line. The limits in effect are logged at start (`Server started on port … (max … threads, … queued, keep-alive … s / … requests)`), and `GET /api/health` reports the pool's live counters (see [api.md](api.md)).
 
 TLS uses `Poco::Net::Context::VERIFY_NONE` (client certificate verification is disabled).
 
@@ -164,7 +174,8 @@ The only supported executor `type` is `1` (Local); any other value throws `"Exec
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `nbCores` / `excludeCores` | uint / array | `1` core, `excludeCores: [0]` | Together select which cores the executor may assign: start from all cores, keep `nbCores` of them, excluding the indices in `excludeCores`. Used only when `cores` is absent. |
+| `nbCores` / `excludeCores` | uint / array | `1` core, `excludeCores: [0]` | Together select which cores the executor may assign: start from all cores, keep `nbCores` of them, excluding the indices in `excludeCores`. Used only when `cores` is absent. `nbCores` is the default maximum of cores in use at once; the board's "change max" sets a temporary one. The tlspuffin deploy script writes 80 % of the machine's cores. |
+| `diskMinimumGB` | uint | `50` | Free space (GB) needed on the run and export storage to start a step; below it new steps wait, running ones go on; 0: no check. |
 | `cores` | array of uint | — | Alternative, explicit form: the exact list of core indices the executor may use (overrides `nbCores`/`excludeCores` when present). |
 | `scriptPath` | path | `scripts` | Directory containing `executor.sh` and `functions.sh`; must already exist (`canonical()`), the two scripts themselves are auto-extracted if missing. |
 | `logsSize` | uint | `16777216` (16 MiB) | Per-step in-memory output ring buffer size in bytes. |
