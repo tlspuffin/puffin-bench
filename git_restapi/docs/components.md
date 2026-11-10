@@ -24,10 +24,12 @@ src/git_restapi/
     └── rapidjson.hxx / .cxx        Typed JSON access helpers + JSON file I/O
 
 embeded/git_restapi/scripts/
-└── tlspuffin_history_sh.h          Auto-generated at build time: script compiled into binary
+├── tlspuffin_history_sh.h          Auto-generated at build time: script compiled into binary
+└── tlspuffin_presets_sh.h          Auto-generated at build time: script compiled into binary
 
 scripts/
-└── tlspuffin_history.sh            Bash script generating commit history JSON
+├── tlspuffin_history.sh            Bash script generating commit history JSON (tlspuffin-specific)
+└── tlspuffin_presets.sh            Bash script reading tlspuffin's vendor presets at a commit
 ```
 
 ---
@@ -79,7 +81,7 @@ Header-only implementation of `Poco::Net::HTTPRequestHandlerFactory`.
 
 `createRequestHandler(request)`:
 - Any `OPTIONS` request → `RequestHandlerCORSOptions`, regardless of path.
-- `GET` requests are matched against the `history` then `log` `std::regex` patterns.
+- `GET` requests are matched against the `history`, then `log`, then `presets` `std::regex` patterns.
 - `POST` requests are matched against the `logs` pattern.
 - `PATCH`/`PUT`/`DELETE` are explicitly recognized but wired to nothing (handler stays `nullptr`).
 - Falls through to `RequestHandlerError` (HTTP 404) on no match, or if a `std::runtime_error` is thrown while matching.
@@ -106,7 +108,7 @@ Generates a concrete handler class `RequestHandler<name>` with:
 - A constructor accepting the listed argument types, stored in a `std::tuple`.
 - A `handleRequest(request, response)` override (implemented manually in the `.cxx`).
 
-This avoids virtual-function overhead while maintaining a uniform factory interface. Declared handlers: `Error`, `CORSOptions`, `History(repo, fullURI)`, `Log(repo, commitID)`, `Logs(repo)`.
+This avoids virtual-function overhead while maintaining a uniform factory interface. Declared handlers: `Error`, `CORSOptions`, `History(repo, fullURI)`, `Log(repo, commitID)`, `Logs(repo)`, `Presets(repo, commitID)`.
 
 ### `RequestHandlerError`
 
@@ -140,6 +142,13 @@ Calls `ManageCORS()` and nothing else — the entire OPTIONS preflight response.
 4. Validates `repoName` exists (404 otherwise).
 5. Calls `apis_->gitAPI_.at(repoName).Logs(commitIDs, buffer)`. 500 on failure.
 6. Writes `buffer` to the response stream.
+
+### `RequestHandlerPresets(repoName, commitID)`
+
+1. `ManageCORS()`.
+2. Validates `repoName` exists in `apis_->gitAPI_` (404 otherwise).
+3. Calls `apis_->gitAPI_.at(repoName).Presets(commitID, buffer, notFound)`. On failure: 404 if `notFound` (unknown commit, also after a fetch), else 500; the message in `buffer` is sent through `ErrorJSON()`.
+4. Writes `buffer` to the response stream.
 
 ---
 
@@ -177,7 +186,7 @@ Both defaults are **relative paths**, resolved against the process's current wor
 1. Canonicalizes `storage_` (must already exist).
 2. If `scriptsPath_` is a subdirectory of `storage_` (`IsSubDir()`), creates it with `create_directories()`; otherwise canonicalizes it (must already exist).
 3. Creates a `storage_ / <name>` directory for each configured repository (throws `std::runtime_error` if that fails for a reason other than "already exists").
-4. If `tlspuffin_history.sh` is missing in `scriptsPath_`, or `forceInstall` is true: extracts `TLSPuffinHistory_Script_data[]` from the compiled-in blob and writes it with permissions `rwxr-x---`.
+4. For each embedded script — `tlspuffin_history.sh` (`TLSPuffinHistory_Script_data[]`) and `tlspuffin_presets.sh` (`TLSPuffinPresets_Script_data[]`) — if it is missing in `scriptsPath_`, or `forceInstall` is true: extracts it from the compiled-in blob and writes it with permissions `rwxr-x---`.
 
 ---
 
@@ -201,7 +210,12 @@ git -C "<directory_>/repo" fetch --all >/dev/null 2>&1 \
 ```
 Throws `std::runtime_error` on failure.
 
-If `parameters` contains `url_pr`: parses it with `Poco::URI`, points an `HTTPSClient` at its host/port, remembers its path+query as `prURLPath_`, and reloads `<directory_>/pr_infos_cache.json` (rate-limit reset timestamp + remaining calls) if present.
+If `parameters` contains `url_pr`: parses it with `Poco::URI`, points an `HTTPSClient` at its host/port, remembers its path+query as `prURLPath_`, and reloads `<directory_>/pr_infos_cache.json` (rate-limit reset timestamp + remaining calls) if present. It then fetches the heads of all pull requests:
+```sh
+cd "<directory_>/repo" && { git config --get-all remote.origin.fetch | grep -q 'refs/pull/' ||
+  git config --add remote.origin.fetch '+refs/pull/*/head:refs/remotes/origin/pull/*'; } && git fetch origin
+```
+(with `GIT_TERMINAL_PROMPT=0`). `pullRefs_` records whether it succeeded; a failure only logs a warning, and `Logs()` then adds no `pulls`. Later `fetch --all` calls keep these refs up to date.
 
 If `<directory_>/git_cache.json` exists and parses as valid JSON, it is loaded into `historyBuffer_`; `historyBufferTS_` is backdated using the file's `last_write_time()` so the 24-hour freshness check behaves correctly across restarts. A corrupt cache file is deleted.
 
@@ -240,13 +254,30 @@ Passed to `History()` to control cache bypass — see [api.md](api.md) and [arch
     --pretty=tformat:"%H\x1F%ad\x1F%s" --date=short <id1> <id2> ... 2>&1
   ```
   via `popen()`, parsing each line on the `\x1F` (unit separator) delimiter into `(hash, date, subject)`.
-- For **each** parsed commit, additionally runs `git -C <directory_>/repo merge-base <hash> origin/dev` and, if it succeeds, attaches a `base` field.
-- Serializes with RapidJSON into `{"commits":[{"id","date","comment"[,"base"]},...]}`.
+- For **each** parsed commit, additionally runs `git -C <directory_>/repo merge-base <hash> origin/dev` and, if it succeeds, attaches a `base` field, then calls `AddPullRequests()`.
+- Serializes with RapidJSON into `{"commits":[{"id","date","comment"[,"base"][,"pulls"]},...]}`.
 - Returns `false` on subprocess or parse failure.
+
+### `void AddPullRequests(commitID, commit, alloc)`
+
+Attaches `pulls` to a commit of `Logs()`. Does nothing when `pullRefs_` is false or when the commit is on `origin/dev` (its `base` is itself). Otherwise:
+- `git for-each-ref --contains <hash> --format='%(refname:lstrip=4)' refs/remotes/origin/pull/` → the numbers of the PRs containing the commit, sorted newest (highest) first;
+- for each, until 5 are kept: `git rev-list --reverse origin/dev..refs/remotes/origin/pull/<number>`; if the commit is in that list, adds `{"number", "index", "total"}` (its 1-based position among the PR's commits, and their count).
+
+`pulls` is an empty array for a commit in no PR. The output format is described in [api.md](api.md).
+
+### `bool Presets(std::string const& commitID, std::string& result, bool& notFound)`
+
+The vendor presets of tlspuffin at a commit (`GET /api/git/presets`).
+- On the first call, loads `<directory_>/presets_cache.json` (full commit → JSON answer) into `presets_`. `presetsLock_` (a `std::mutex`, separate from the history/logs lock) guards `presets_` and `presetsLoaded_` for the whole call.
+- If `commitID` is a prefix of exactly one cached commit, returns its answer (a commit's presets never change).
+- Otherwise runs `<scriptsPath_>/tlspuffin_presets.sh "<directory_>/repo" <commitID>` via `popen()` under the shared lock. Exit status 2 (commit not in the clone) triggers one `git fetch --all` under the exclusive lock and a second run; still 2 → `notFound = true`, returns `false`.
+- Any other non-zero status, or an output that is not a JSON object with a string `commit` → returns `false` (`Error while running tlspuffin_presets.sh`).
+- On success, stores the answer under its full commit and rewrites the whole cache to `presets_cache.json` (`SaveFile()`).
 
 ### `bool SaveFile(std::string const& file, std::string const& content)` (private)
 
-Trivial `ofstream` write helper used to persist `pr_infos_cache.json`.
+Trivial `ofstream` write helper used to persist `pr_infos_cache.json` and `presets_cache.json`.
 
 ---
 
@@ -273,6 +304,22 @@ Populated by iterating a "commit folder" of named directories, only when the scr
 All remote-tracking branches not merged into `origin/main` or `origin/dev`. For each, reports the tip commit (`id`, `date`, `comment`) and the merge-base with `origin/dev` (falling back to `origin/main`) as `base`.
 
 Uses `jq` for JSON manipulation in the `standalone` and `branches` sections; raw `awk`/`sed` for the `commits` section. Note: this is a different (and independent) data source from the GitHub `PR` array added by `GitAPI::ManageExternalPR()` in the C++ layer.
+
+---
+
+## `tlspuffin_presets.sh` (`scripts/tlspuffin_presets.sh`)
+
+Bash script, tlspuffin-specific. Invoked as:
+```
+tlspuffin_presets.sh <repo_dir> <commit>
+```
+Resolves `<commit>` with `git rev-parse` (exit status **2** if it is not in the clone), then reads, without checking anything out, `puffin-build/vendors/<vendor>/presets.toml` at that commit (`git ls-tree` / `git show <sha>:<path>`), and parses each file with `awk`. Prints one JSON object on stdout:
+```
+{"commit": "<sha>", "format": "presets.toml" | "none", "asan_link": true | false,
+ "vendors": {"<vendor>": [{"name", "version", "asan", "sancov", "postauth", "fix": [...]}, ...], ...}}
+```
+- `format` is `none` (and `vendors` empty) when the commit has no `puffin-build/vendors/` (tlspuffin before 2024-09-12).
+- `asan_link` is true when the commit contains tlspuffin `854dbaa11` (`git merge-base --is-ancestor`), from which an ASAN preset links the ASAN runtime by itself. This hash is hardcoded in the script.
 
 ---
 

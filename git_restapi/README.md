@@ -2,15 +2,17 @@
 
 A lightweight, read-only C++ HTTP server that exposes Git repository data as structured JSON over a REST API.
 
-Built for Linux environments, it allows external tools — dashboards, CI visualizers, reporting pipelines — to query commit history and metadata without requiring direct Git access. The binary is self-contained: the history generation script is embedded at build time and extracted automatically on first run.
+**Currently dedicated to tlspuffin**: besides generic git endpoints, it has tlspuffin-specific ones (history, vendor presets) whose scripts are embedded in the binary. See the Scope column of the API Endpoints table below.
+
+Built for Linux environments, it allows external tools — dashboards, CI visualizers, reporting pipelines — to query commit history and metadata without requiring direct Git access. The binary is self-contained: the scripts (`tlspuffin_history.sh`, `tlspuffin_presets.sh`) are embedded at build time and extracted automatically on first run.
 
 ✨ Key Features
 
-    Read-Only REST API: Three endpoints covering full branch history, single-commit lookup, and batch commit metadata retrieval.
+    Read-Only REST API: Four endpoints covering full branch history, single-commit lookup, batch commit metadata retrieval and the vendor presets of a commit.
 
     Per-Repository Cache: History results are cached per repository with a 24-hour TTL, persisted to disk and reloaded on startup, protected by a per-instance mutex.
 
-    Self-Contained Binary: The `tlspuffin_history.sh` script is compiled into the binary and auto-installed at startup — no manual deployment of scripts required.
+    Self-Contained Binary: the scripts (`tlspuffin_history.sh`, `tlspuffin_presets.sh`) are compiled into the binary and auto-installed at startup — no manual deployment of scripts required.
 
     Optional TLS: Plain HTTP and HTTPS modes, configurable via a single JSON file.
 
@@ -26,15 +28,16 @@ Built for Linux environments, it allows external tools — dashboards, CI visual
 
     Git operations: Git CLI via subprocess (`popen` / `std::system`)
 
-    History generation: embedded Bash script (`tlspuffin_history.sh`), requires `git` and `jq` at runtime
+    tlspuffin scripts (embedded Bash): `tlspuffin_history.sh` (history, requires `git` and `jq`) and `tlspuffin_presets.sh` (vendor presets, requires `git` and `awk`) at runtime
 
 🌐 API Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/git/history/:repo` | Full branch history: dev commits, main commits, local branches, and optionally GitHub PRs |
-| GET | `/api/git/log/:repo?commit=HASH` | Metadata for a single commit |
-| POST | `/api/git/logs/:repo` | Metadata for a batch of commits |
+| Method | Path | Description | Scope |
+|---|---|---|---|
+| GET | `/api/git/history/:repo` | Full branch history: dev commits, main commits, local branches, and optionally GitHub PRs | tlspuffin (`tlspuffin_history.sh`) |
+| GET | `/api/git/log/:repo?commit=HASH` | Metadata for a single commit | generic |
+| POST | `/api/git/logs/:repo` | Metadata for a batch of commits | generic |
+| GET | `/api/git/presets/:repo/:commit` | tlspuffin's vendor presets at a commit | tlspuffin (`tlspuffin_presets.sh`) |
 
 All responses are JSON. All endpoints support CORS, including a dedicated `OPTIONS` preflight handler. See `docs/api.md` for the full reference.
 
@@ -44,7 +47,9 @@ All responses are JSON. All endpoints support CORS, including a dedicated `OPTIO
 
     History (`GET /api/git/history`): Runs the embedded `tlspuffin_history.sh` script against the local clone and caches the result for 24 hours (persisted to disk, reloaded on startup). Returns commits on `dev`, a range of `main` commits, local branches not yet merged, and optionally open GitHub pull requests when `url_pr` is configured for the repository.
 
-    Log lookup (`GET /api/git/log`, `POST /api/git/logs`): Runs `git log --no-walk` against the local clone and returns full commit hash, date, and commit message for each requested commit, plus its merge-base with `origin/dev`.
+    Log lookup (`GET /api/git/log`, `POST /api/git/logs`): Runs `git log --no-walk` against the local clone and returns full commit hash, date, and commit message for each requested commit, plus its merge-base with `origin/dev` and, when `url_pr` is configured, the pull requests containing it (`pulls`).
+
+    Presets (`GET /api/git/presets`): Runs the embedded `tlspuffin_presets.sh` against the local clone (no checkout); cached for ever per commit in `presets_cache.json`.
 
 📂 Architecture at a Glance
 
@@ -58,7 +63,7 @@ See `docs/architecture.md` for the full design documentation and `docs/component
 
 🔨 Building
 
-**Prerequisites:** CMake ≥ 3.21, Git, a C++17 compiler, and OpenSSL development headers (`libssl-dev` or equivalent). At runtime: `git` and `jq` must be on `PATH`.
+**Prerequisites:** CMake ≥ 3.21, Git, a C++17 compiler, and OpenSSL development headers (`libssl-dev` or equivalent). At runtime: `git`, `jq` and `awk` must be on `PATH`.
 
 All other dependencies (Poco, RapidJSON) are fetched from their upstream repositories and built automatically during the first CMake configuration.
 

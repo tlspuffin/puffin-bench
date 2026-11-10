@@ -78,6 +78,15 @@ Improvements identified from the current design. Items are independent unless no
 
 ---
 
+## Make the service generic again
+
+`/api/git/history` and `/api/git/presets` are tlspuffin-specific (embedded `tlspuffin_*.sh`, tlspuffin's repository
+URL hardcoded in `tlspuffin_history.sh`). Generic form: one script-extension route (e.g.
+`/api/git/ext/:name/:repo/:commit`) running a script provided by the project package, and the repository URL taken
+from the config. Worth doing once a second project needs the service.
+
+---
+
 ## Resolved since the previous revision of this document
 
 - **Per-repo response cache** is now fully implemented and consistent: a 24-hour in-memory + on-disk (`git_cache.json`) cache per repository, explicitly bypassable via `?refresh=local`/`?refresh=all`. The previous dead `?branches=` query parameter (parsed but never forwarded to the script) has been removed entirely in favor of this `refresh` mechanism.
