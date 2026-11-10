@@ -251,6 +251,8 @@ function BuildDataSet(source, json) {
         state: [], 
         success: 0, 
         cli: libraries[library]?.cli ?? 'N/A', 
+        // major version of puffin-bench's measurements that produced them (SummaryAddBench; none recorded: 1)
+        major: libraries[library]?.bench?.major ?? 1,
         trust_objective: libraries[library]?.trust_objective ?? 0,
         // set by the summary scripts when an attempt kept objectives (perf and vuln)
         flag_objective: libraries[library]?.flag_objective === true,

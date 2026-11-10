@@ -1033,7 +1033,9 @@ async function ApplyRegression(table, commit, type) {
       const cell = row.querySelector(`td[data-field="${field}"]`);
       if (!m || !cell) continue;
       const [floor, from] = RegressionFloor(floors, data.machine, type, row.dataset.library, metric);
-      const flagged = m.p !== null && m.p <= pMax && floor !== null && Math.abs(m.delta) > floor;
+      // a library not comparable with its base (⚠: another build, CPU sharing, major version) is never flagged nor
+      // counted: its change is shown faint, as runs_report.py leaves it out of the pooled change
+      const flagged = !warn.length && m.p !== null && m.p <= pMax && floor !== null && Math.abs(m.delta) > floor;
       const better = LOWER_IS_BETTER.has(metric) ? m.delta < 0 : m.delta > 0;
       if (flagged) better ? up++ : down++;
       if (flagged) changes.push({ lib: row.dataset.library, metric, delta: m.delta, better, p: m.p });
@@ -1043,6 +1045,7 @@ async function ApplyRegression(table, commit, type) {
       const pass = { p: m.p !== null && m.p <= pMax, floor: floor !== null && Math.abs(m.delta) > floor };
       const verdict = flagged
           ? `<span class="${better ? 'reg-better' : 'reg-worse'}">${better ? '▲ improvement' : '▼ regression'}</span>`
+          : warn.length ? '<span class="reg-faint">not flagged: not comparable (⚠ below)</span>'
           : `<span class="reg-faint">not flagged: ${!pass.p ? `p = ${m.p === null ? '—' : m.p.toFixed(3)} &gt; ${pMax}` : ''}${!pass.p && !pass.floor ? ' and ' : ''}${!pass.floor ? `|${Math.abs(m.delta).toFixed(1)} %| ≤ floor ${floor ?? '—'} %` : ''}</span>`;
       const label = metric.replace(/_/g, ' ');
       const title = `<div class="rd-title">${E(label)} <span class="rd-sub">vs ${E(entry.base.slice(0, 7))} · ${entry.gap} commits earlier</span></div>`

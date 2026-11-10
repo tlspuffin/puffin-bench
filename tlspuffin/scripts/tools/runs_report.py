@@ -344,6 +344,8 @@ def task_record(path_json, ctype, md5table, targets):
                     rec['load'][lib] = round(statistics.mean(l['mean'] / max(1, l.get('cores') or 1) for l in loads), 3)
             if bench:
                 rec['bench'] = {k: bench.get(k) for k in ('commit', 'branch', 'date', 'deployed')}
+                # major version of the measurements (since 2026-11; recorded before: 1)
+                rec['bench']['major'] = bench.get('major') or 1
                 if bench.get('jobscripts'):
                     rec['jobscripts'] = {**bench['jobscripts'], 'from': 'recorded'}
             if ctype == 'Perf':
@@ -485,6 +487,8 @@ def regression(groups):
                 if ca and cb and (ca['smt'], ca['shared']) != (cb['smt'], cb['shared']):
                     desc = lambda c: f"{c['smt']}{', cores shared with others' if c['shared'] else ''}"
                     warn.append(f'CPU sharing {desc(ca)} → {desc(cb)}')
+                if major(a) != major(b):
+                    warn.append(f'puffin-bench major version {major(a)} → {major(b)}')
                 la, lb_ = (a.get('load') or {}).get(lib), (b.get('load') or {}).get(lib)
                 if la is not None and lb_ is not None and abs(lb_ - la) > max_load_diff:
                     warn.append(f'machine load per core {la:.2f} → {lb_:.2f}')
@@ -501,6 +505,12 @@ def regression(groups):
                 libs[lib] = {'warn': warn, 'metrics': metrics, 'runs': vb[lib]['_runs'], 'runs_base': va[lib]['_runs']}
             out.setdefault(c, {})[f'{category}/{ctype}'] = {'base': base, 'gap': gap, 'task': b['id'], 'base_task': a['id'], 'notes': notes, 'libs': libs}
     return out
+
+
+def major(task):
+    """the major version of puffin-bench's measurements a task ran with (PB_MAJOR_VERSION of the job scripts; tasks
+    without it: 1): tasks of two major versions are not comparable"""
+    return (task.get('bench') or {}).get('major') or 1
 
 
 def measured_floors(groups):
@@ -523,6 +533,8 @@ def measured_floors(groups):
                     # the same CPU sharing, when both recorded it (as the regressions: another mode is not comparable)
                     ca, cb = (a.get('cpus') or {}).get(lib), (b.get('cpus') or {}).get(lib)
                     if ca and cb and (ca['smt'], ca['shared']) != (cb['smt'], cb['shared']):
+                        continue
+                    if major(a) != major(b):
                         continue
                     for key, x in va[lib].items():
                         if key.startswith('_'):
