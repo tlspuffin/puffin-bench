@@ -10,13 +10,15 @@ mismatch is called out explicitly.
 
 | Thread | Owner class | Started | Purpose |
 |--------|------------|---------|---------|
-| Poco HTTP worker pool | `Poco::Net::HTTPServer` (`ns_Server::MyServerApp::main`) | `server.start()` | Accept and serve HTTP requests |
+| HTTP worker pool | own `Poco::ThreadPool` (4 to `max_threads`) of the `Poco::Net::HTTPServer` (`ns_Server::MyServerApp::main`) | `server.start()` | Accept and serve HTTP requests |
 | Schedule loop | `ns_Schedule::Schedule` | `Schedule` constructor (member of `ScheduleAPI`) | Dispatch steps, detect completion, manage resources |
 | inotify monitor | `ns_Monitor::Monitor` | `Monitor` constructor (member of `Schedule`) | Watch step monitor files for updates |
 | Archiver | `ns_Schedule::Archiver` | `Archiver` constructor (member of `Schedule`) | Build `.zip` archives and publish results |
 | FD capture (pooled) | `ns_Executor::FDCaptureThread::FDCaptureThreadImpl` | lazily, first `Local::Execute()` needing a fresh slot | epoll over step stdout/stderr pipes; instances pooled and shared across up to ~4 concurrent steps each |
 | System monitor | `ns_System::Linux` | `Linux` constructor | Periodic `/proc/stat` / `/proc/meminfo` sampling |
 | Cache worker | `ns_Cache::Cache` | `Cache` constructor | Copy files into cache storage, compute MD5s, persist the mapping |
+| Folder remover | `ns_Schedule::FolderRemover` (singleton) | first `FolderRemover::Instance()` (the `Schedule` constructor) | Delete the run folders of finished tasks in the background |
+| Step shutdowns at exit | `ns_Schedule::Schedule::ShutdownAtExit` | end of `ScheduleLoop()`, one temporary thread per running step | Shut the running steps down in parallel when the scheduler stops |
 
 There is no single "main scheduling lock held for the whole loop body" — `Schedule::ScheduleLoop()`
 takes and releases `lockThread_` multiple times per iteration, deliberately keeping fork/exec,
@@ -26,11 +28,16 @@ takes and releases `lockThread_` multiple times per iteration, deliberately keep
 
 ## Thread Details
 
-### 1. Poco HTTP Worker Pool
+### 1. HTTP Worker Pool
 
-- Standard `Poco::Net::HTTPServer` with its default thread pool; each connection is served by a
-  pool thread running `RequestHandlerFactory::createRequestHandler()` → a `RequestHandler` that
-  dispatches into `ScheduleAPI` / `CacheAPI` / `UsersAPI`.
+- `Poco::Net::HTTPServer` with its own `Poco::ThreadPool` (4 to `max_threads` threads, declared
+  before the server so that it outlives it) and bounded keep-alive (`keep_alive_timeout`,
+  `max_keep_alive_requests`, `max_queued`; see [configuration.md](configuration.md)). Each
+  connection is served by a pool thread running `RequestHandlerFactory::createRequestHandler()` → a
+  `RequestHandler` that dispatches into `ScheduleAPI` / `CacheAPI` / `UsersAPI`.
+- The running server is registered in an `std::atomic<Poco::Net::HTTPServer*>`
+  (`SetRunningServer()`), so that `GET /api/health` can read its counters (`GetHTTPStats()`:
+  threads, queued and refused connections).
 - These handlers take whichever locks the target subsystem defines (`Schedule::lockThread_`,
   `TasksManager::lock_`, `Cache::dataLock_`/`cacheThreadLock_`, `UsersAPI::lockDB_`) — there is no
   additional HTTP-layer lock.
@@ -74,7 +81,17 @@ subprocess and HTTP publish happen later, entirely on the Archiver thread, never
 `lockThread_`.
 
 `AddTask()` (HTTP thread) takes `lockThread_` to insert the new task's root steps into `steps_` in
-priority order and to restart the loop thread if needed.
+priority order and to restart the loop thread if needed. It first checks `stopping_`
+(`std::atomic<bool>`, set as the very first action of `~Schedule()`): a submission still in flight
+when the stop begins is refused ("The scheduler is stopping…") instead of adding a task to a
+scheduler that is going away.
+
+`lockThread_` is a `std::timed_mutex`, so that `ProbeLock(timeoutMs, waitedMs)` can measure how
+long a submission would wait for it: `GET /api/health` calls it with a 2 s limit
+(`try_lock_for`), releases it at once, and reports the wait (or that the lock could not be taken).
+
+`ExecutorSetMaxCores()` (HTTP thread, `PATCH /api/executor/<name>/max_cores/...`) also takes
+`lockThread_` before calling `Executor::SetMaxCores()`.
 
 `CancelStep()`, `CancelTask()`, and `TaskUpdatePriority()` (HTTP thread, called from the API layer)
 **do take `lockThread_`** (`std::lock_guard`) before scanning `steps_` and mutating
@@ -83,8 +100,19 @@ earlier design note claiming these were lock-free — in the current code they a
 contend with the schedule loop's own locked sections, but never block on the unlocked
 fork/exec/waitpid sections in between.
 
-`Schedule::~Schedule()` takes `lockThread_`, clears `threadRunning_`, releases the lock to `join()`
-the loop thread, re-acquires it to call `tasksManager_.DeleteTasks()` and delete every executor.
+`Schedule::~Schedule()` sets `stopping_`, takes `lockThread_`, clears `threadRunning_`, releases
+the lock to `join()` the loop thread, re-acquires it to call `tasksManager_.DeleteTasks()` and
+delete every executor.
+
+On its way out, `ScheduleLoop()` calls `ShutdownAtExit()` with `lockThread_` held: it collects the
+running steps (when `shutdownTasksAtExit__` is set), **releases** `lockThread_`, shuts them down in
+parallel (one `std::thread` per step, each costing the kill grace of its session plus its shutdown
+script), joins them, waits for the archiver (`WaitForCompletion()`), then re-takes the lock. The
+shutdowns used to run one after the other with the lock held.
+
+`ManageEndOfStep()` (under `lockThread_`) records the step's duration with
+`DurationHistory::Add()`, and `Executor::EstimatedStepsStartTime()` (also under `lockThread_`)
+reads the estimates; `DurationHistory` guards its data with its own `lock_` (see the inventory).
 
 ### 3. inotify Monitor (`Monitor::Main`)
 
@@ -239,6 +267,26 @@ void Cache::CacheLoop() {
   there is no shared/upgrade dance here, just plain mutual exclusion for writers against readers).
 - `~Cache()` sets `threadRunning_ = false` under `cacheThreadLock_`, notifies, joins.
 
+### 8. Folder Remover (`FolderRemover::ThreadLoop`)
+
+The run folder of a finished task (checkouts and builds, several GB) used to be removed in place,
+under `lockThread_`, which held up the schedule loop and the submissions waiting for it for
+minutes.
+
+- `Remove(path)` (called by `Task` when it deletes its run folder, under `lockThread_`) renames the
+  folder next to itself (`.<name>.deleting`, instant), then pushes it onto `queue_` under `lock_`
+  and notifies `cv_`. If the rename fails, it returns false and the caller removes the folder
+  itself.
+- The thread waits on `cv_` for a queued folder and deletes it entry by entry, outside `lock_`,
+  checking `running_` (`std::atomic<bool>`) between two files: a stop does not wait for the end of
+  a removal of several GB. What is left is removed at the next start (`RemoveLeftovers()`, called
+  from the `Schedule` constructor).
+- `UnknownFolders()` / `RemoveUnknown()` (`GET /api/runs/unknown`, `POST /api/runs/cleanup`, HTTP
+  threads) list and remove the folders of tasks the scheduler no longer holds; they compare with
+  `TasksManager::TaskIDs()` (under `TasksManager::lock_`).
+- `~FolderRemover()` (static singleton, at process exit) clears `running_` under `lock_`, notifies,
+  joins.
+
 ---
 
 ## Full Lock / Atomic Inventory
@@ -247,7 +295,14 @@ Built from the grep above plus reading every call site — not carried over from
 
 | Symbol | Type | Owning class | Protects | Contention pattern |
 |--------|------|---------------|----------|---------------------|
-| `lockThread_` | `std::mutex` | `Schedule` | `steps_`, `stepsRunning_`, `stepsDone_`, `tasksManager_` mutations, `threadRunning_` | HTTP threads (`AddTask`, `CancelStep`, `CancelTask`, `TaskUpdatePriority`) vs. the schedule loop's own locked sections |
+| `lockThread_` | `std::timed_mutex` | `Schedule` | `steps_`, `stepsRunning_`, `stepsDone_`, `tasksManager_` mutations, `threadRunning_` | HTTP threads (`AddTask`, `CancelStep`, `CancelTask`, `TaskUpdatePriority`, `ExecutorSetMaxCores`; `ProbeLock` for `/api/health`, which only tries it for up to 2 s) vs. the schedule loop's own locked sections |
+| `Schedule::stopping_` | `std::atomic<bool>` | `Schedule` | "The stop has begun" | Set by `~Schedule()`, read by `AddTask()` (HTTP thread) without the lock |
+| `DurationHistory::lock_` | `mutable std::mutex` | `DurationHistory` (singleton) | `durations_` (the samples) and the writes of `step_durations.json` | `Add()` from `ManageEndOfStep()` vs. `Estimate()` / `EstimatedEnd()` from `EstimatedStepsStartTime()`, both under `lockThread_` |
+| `Local::coresLock_` | `std::mutex` | `ns_Executor::Local` | Cores bookkeeping (`nbCoresUsed_`, the temporary maximum) and the `user.slice` cpuset derived from it | Schedule loop (`AssignCores`, `ReAssignCores`, `ReleaseCores`, `CheckMaxCoresExpiry`) vs. HTTP thread (`SetMaxCores`) vs. the step shutdowns running in parallel at exit (`ReleaseCores`) |
+| `FolderRemover::lock_` | `std::mutex` | `FolderRemover` (singleton) | `queue_` | `Remove()` (schedule loop) vs. the remover thread |
+| `FolderRemover::cv_` | `std::condition_variable` | `FolderRemover` | Wakes the remover thread when a folder is queued or on shutdown | `Remove()`/destructor notify vs. `ThreadLoop()` wait |
+| `FolderRemover::running_` | `std::atomic<bool>` | `FolderRemover` | Loop continuation flag, also read between two files of a removal | Destructor vs. `ThreadLoop()` / `RemoveTree()` |
+| `runningServer__` | `std::atomic<Poco::Net::HTTPServer*>` | `ns_Server` (file scope) | The running HTTP server, for its counters | `MyServerApp::main()` (set/clear) vs. `/api/health` handler (`GetHTTPStats()`) |
 | `TasksManager::lock_` | `std::mutex` | `TasksManager` | `tasks_` list, `next_task_id_` | HTTP thread (`CreateTask`, `GetTaskState`) vs. schedule loop (`DeleteTask`/`TaskEnded` via `ManageEndOfStep`, `LoadStatus` — currently unused) |
 | `Task::metadata_index_lock_` | `std::mutex` | `Task` | Appends to `<artefacts_path_>/metadata.json` | Multiple steps of the same task finishing concurrently (`Local::SaveArtefacts`) |
 | `Monitor::lock_` | `std::mutex` | `Monitor` | `stepsList_`, `monitorsMessage_`, `running_` | inotify thread vs. schedule loop (`Add`, `Remove`, `GetChange`) |
@@ -291,18 +346,26 @@ Built from the grep above plus reading every call site — not carried over from
   takes `Linux::lock_` then calls into `cores_.CoresValuesRatio()`/`memory_.Stats()`, which take
   their own inner locks) — this is a single consistent outer→inner order used everywhere those
   types are touched, so it does not create a cycle.
+- `DurationHistory::lock_`, `Local::coresLock_` and `FolderRemover::lock_` are leaf locks: taken
+  under `lockThread_` (or alone), never the other way round, and the code holding them calls no
+  other subsystem.
 
 ---
 
 ## Shutdown Sequence
 
 ```
-1. Poco HTTPServer stops accepting connections (server.stop(), triggered by waitForTerminationRequest())
+1. Poco HTTPServer stops (server.stopAll(true), after waitForTerminationRequest()): it stops
+   accepting connections and also closes the open keep-alive ones; a plain stop() left them
+   served, and the pool's destructor then waited up to 10 s for each busy thread
 2. ~ScheduleAPI() -> ~Schedule():
+     stopping_ = true (submissions still in flight are refused);
      lockThread_.lock(); threadRunning_ = false; unlock(); thread_.join();
      -- ScheduleLoop(), upon seeing threadRunning_ == false, exits its while loop, and before
-        returning: SaveStatus(true); if shutdownTasksAtExit__ (toggled by SIGUSR1), Shutdown()
-        every still-running step; archiver_.WaitForCompletion() (busy-wait poll, see above)
+        returning: SaveStatus(true); ShutdownAtExit(): releases lockThread_, and if
+        shutdownTasksAtExit__ (toggled by SIGUSR1) shuts every still-running step down in
+        parallel (one thread each); archiver_.WaitForCompletion() (busy-wait poll, see above);
+        re-takes lockThread_
      lockThread_.lock(); tasksManager_.DeleteTasks(); delete every executor; unlock()
      -- ~Monitor() (member of Schedule, destroyed after Schedule's own body): Shutdown() -> join
      -- ~Archiver() (member of Schedule): sets threadRunning_ = false, notifies, joins
@@ -311,6 +374,8 @@ Built from the grep above plus reading every call site — not carried over from
 4. ~Linux(): threadRunning_.store(false), join (loop wakes within at most 1s via ThreadWaitOrStop)
 5. Any still-referenced LocalData objects' ~FDCaptureThread() decrement the shared pool's load;
    the last user of a given FDCaptureThreadImpl triggers its destructor (eventfd write + join)
+6. At process exit, the static FolderRemover singleton: running_ = false, notify, join (a removal
+   in progress stops after its current file; the rest is removed at the next start)
 ```
 
 `Schedule::HandlerUSR1` (installed once via `sigaction(SIGUSR1, ...)`) flips a static

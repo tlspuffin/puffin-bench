@@ -16,6 +16,9 @@ html/
 │   ├── terminal.js                           In-browser log viewer (stdout/stderr streaming)
 │   ├── logsmanager.js                        Log chunk streaming helpers
 │   ├── clipboard.js                          Copy-to-clipboard helper
+│   ├── dropmenu.js                           Drop-down menu widget (task actions)
+│   ├── help.js                               Help texts of the board's hovers
+│   ├── tips.js                               One look for every hover: titles shown in a styled panel
 │   └── launchers/
 │       ├── launchers.css / launchers.js      Generic launcher menu; reads project list from
 │       │                                     ./config.js, dynamically imports
@@ -43,6 +46,8 @@ src/scheduler/
 │   ├── step_configurations.hxx/cxx  StepConfigurations / GroupStepConfigurations
 │   ├── config.hxx/cxx          Schedule::Config (paths, executors_, publishers_)
 │   ├── archiver.hxx/cxx        Archiver     — background archive-creation thread (shells out to `zip`)
+│   ├── folder_remover.hxx/cxx  FolderRemover — background removal of the run folders of finished tasks
+│   ├── duration_history.hxx/cxx DurationHistory — durations of the finished steps, for the estimated times
 │   ├── publish.hxx/cxx         Publish      — local move/symlink or HTTP upload to remote server
 │   ├── ressources_summary.hxx  SRessourcesSummary — helper for picking which task to kill under load
 │   ├── monitor/
@@ -173,7 +178,25 @@ Single executable unit with a private state machine: `Pending → Running → Do
 
 ## `TasksManager` (`schedule/tasksmanager.hxx` / `.cxx`)
 
-Task registry, guarded by its own `std::mutex lock_` (independent of `Schedule::lockThread_`). `CreateTask()` assigns the millisecond-timestamp ID, writes the uploaded functions script and `files[]` uploads to `<userPath>/<id>/`, computes per-file and aggregate MD5s, then constructs the `Task`. `LoadStatus()` (rebuild tasks from a serialized `tasksmanager.json`) exists and compiles, but is not merely unused — its call site in the `Schedule` constructor (`schedule.cxx`) is explicitly commented out, with the comment "step group not managed by Executor::Local reload system": the reload path predates step groups and was never updated to reattach them correctly, so it is disabled on purpose rather than dormant (see `docs/task-step-lifecycle.md`, "State Persistence and Reload", and `docs/roadmap.md`). `ToJSON()` / `GetTaskState()` serialize live task state for the API and dashboard.
+Task registry, guarded by its own `std::mutex lock_` (independent of `Schedule::lockThread_`). `CreateTask()` assigns the millisecond-timestamp ID, writes the uploaded functions script and `files[]` uploads to `<userPath>/<id>/`, computes per-file and aggregate MD5s, then constructs the `Task`. `LoadStatus()` (rebuild tasks from a serialized `tasksmanager.json`) exists and compiles, but is not merely unused — its call site in the `Schedule` constructor (`schedule.cxx`) is explicitly commented out, with the comment "step group not managed by Executor::Local reload system": the reload path predates step groups and was never updated to reattach them correctly, so it is disabled on purpose rather than dormant (see `docs/task-step-lifecycle.md`, "State Persistence and Reload", and `docs/roadmap.md`). `ToJSON()` / `GetTaskState()` serialize live task state for the API and dashboard. `TaskIDs()` returns the ids of the tasks it holds (pending, running, ending), used to tell which run folders belong to no task (`FolderRemover`).
+
+---
+
+## `FolderRemover` (`schedule/folder_remover.hxx` / `.cxx`)
+
+Process-wide singleton (`Instance()`) with its own thread, which removes the run folders of finished tasks in the background: a run folder holds the task's checkouts and builds (several GB), and removing it in place blocked the schedule loop for minutes.
+
+- `Remove(path)` — renames the folder to `.<name>.deleting` next to itself (instant) and queues it; `false` if the rename fails (the caller then removes it).
+- `RemoveLeftovers(root)` — at start (from the `Schedule` constructor): queues the `.*.deleting` folders a stop left behind.
+- `UnknownFolders(root, known)` — the folders of `root` named by a task id that is not in `known` (tasks are not restored across a restart), with their last change time; never removed on their own, since one may hold the only copy of a run that was not archived. `RemoveUnknown(root, known, names)` removes those of them chosen by a person. Exposed as `GET /api/runs/unknown` and `POST /api/runs/cleanup` (see [api.md](api.md)).
+
+The removal goes entry by entry and stops between two files when the process exits; the rest is removed at the next start. See [threading-synchronization.md](threading-synchronization.md).
+
+---
+
+## `DurationHistory` (`schedule/duration_history.hxx` / `.cxx`)
+
+Process-wide singleton (`Instance()`) that learns how long each kind of step takes, for the estimated start and end times of the board. `Load(exportPath)` reads `<exportPath>/step_durations.json` at start (from the `Schedule` constructor), or seeds it from `steps_done.json`; `Add(step)` records each finished step (from `ManageEndOfStep()`); `Estimate(step)` and `EstimatedEnd(step, now)` are used by `Executor::EstimatedStepsStartTime()`. The rules (kinds of steps, medians, timeouts) are in [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times".
 
 ---
 
