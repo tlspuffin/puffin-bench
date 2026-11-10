@@ -1023,17 +1023,26 @@ FuzzerExcerpt() {
   done
 }
 
+# Major version of puffin-bench's measurements, recorded with every result (bench.major; results without it: 1).
+# Raise it with any change that makes new results incomparable with older ones (how the runs are placed, built or
+# measured), and say why here.
+#   1: until 2026-11; Perf with 3 clients per run on 2 physical cores, one build per run.
+PB_MAJOR_VERSION=1
+
 # SummaryAddBench <summary.json>: the puffin-bench version that produced the results (version.json, written by
 # deploy.sh next to the board, beside the tools of the job), recorded in each library of the summary: the publisher
 # merges the results per library (the newest task of each), so a commit's results can come from several versions.
 # Shown by the Results page ("run on … · bench d10↗"). Leaves the summary as it is when anything is missing.
+# major: PB_MAJOR_VERSION below; the graphs of Results color the commits whose results come from an older one.
 SummaryAddBench() {
   local summary="$1" version="${THEJOB_TOOLS_PATH}/../html/board/version.json";
   [ -s "${summary}" ] && [ -r "${version}" ] || return 0;
   # bench: the deployed version (services, board); jobscripts: the commit of these job scripts (build.sh), which a
   # hot copy can change without a deploy
   jq --slurpfile v "${version}" --arg jc "${PB_JOBSCRIPTS_COMMIT:-}" --arg jd "${PB_JOBSCRIPTS_DATE:-}" --arg jdirty "${PB_JOBSCRIPTS_DIRTY:-}" \
+      --argjson major "${PB_MAJOR_VERSION}" \
       '($v[0] | {commit, branch, date, deployed, repository}
+        + { major: $major }
         + (if $jc != "" then { jobscripts: { commit: $jc, date: $jd, dirty: ($jdirty == "true") } } else {} end)) as $b
       | if (.libraries | type) == "object" then .libraries |= with_entries(.value.bench = $b) else . end' \
       "${summary}" > "${summary}.tmp" 2> /dev/null && [ -s "${summary}.tmp" ] && mv "${summary}.tmp" "${summary}" || rm -f "${summary}.tmp";
