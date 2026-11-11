@@ -1854,6 +1854,39 @@ CleanAllRepo() {
   rm -rf "${THEJOB_OUT_PATH}/repo*"
 }
 
+# ObjectivesPlaceholders: as soon as a run has an objective, the two objectives pages of the task exist, as placeholders
+# until the tools of the bench write them (the board and the run's monitor link them at once): live-<task>.html (its
+# first replays: objectives_live.sh, every OBJECTIVES_LIVE_EVERY seconds, at most OBJECTIVES_LIVE_BUDGET of replays)
+# and <task>.html (the final report: objectives_report.sh, every OBJECTIVES_REPORT_EVERY seconds once the task ended;
+# meanwhile the last live page). Never over a page already there; nothing when the pages' folder is not there.
+ObjectivesPlaceholders() {
+  local dir="${OBJECTIVES_PAGES_DIR:-${THEJOB_TOOLS_PATH}/../html/objectives}" task="${THEJOB_TASK_ID:-}";
+  [ -n "${task}" ] && [ -d "${dir}" ] && [ -w "${dir}" ] || return 0;
+  local board; board="http://$( hostname -f 2> /dev/null || hostname ):10082/files/board/task.html?id=${task}";
+  local json name kind;
+  for kind in live final; do
+    if [ "${kind}" == live ]; then name="live-${task}"; else name="${task}"; fi
+    [ -e "${dir}/${name}.json" ] || [ -e "${dir}/${name}.html" ] && continue;
+    json=$( jq -n --arg task "${task}" --arg commit "${COMMIT_ID:-}" --arg kind "${kind}" --arg board "${board}" \
+        --argjson first "$( date +%s )" --argjson live "${OBJECTIVES_LIVE_EVERY:-300}" \
+        --argjson budget "${OBJECTIVES_LIVE_BUDGET:-240}" --argjson report "${OBJECTIVES_REPORT_EVERY:-600}" \
+        '{ task: $task, commit: $commit, task_url: $board, placeholder: $kind, first_objective: $first,
+           refresh: { live_every_s: $live, live_budget_s: $budget, report_every_s: $report }, runs: [] }
+         + (if $kind == "live" then { live: true } else { pending_final: true, live_page: ("live-" + $task + ".html") } end)' ) || continue;
+    printf '%s\n' "${json}" > "${dir}/.${name}.json.$$" && mv -n "${dir}/.${name}.json.$$" "${dir}/${name}.json";
+    rm -f "${dir}/.${name}.json.$$";
+    cat > "${dir}/.${name}.html.$$" <<EOF_HTML
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Objectives ${task}</title><link rel="stylesheet" href="report.css"></head>
+<body><div id="report" data-json="${name}.json"><p style="padding:20px">Loading the objectives of task ${task}…</p></div>
+<script type="module" src="report.js"></script></body></html>
+EOF_HTML
+    mv -n "${dir}/.${name}.html.$$" "${dir}/${name}.html"; rm -f "${dir}/.${name}.html.$$";
+  done
+  return 0;
+}
+
 MonitorExperiment() {
   local outfile="$1";
   if [ -z "${outfile}" ]; then
@@ -1994,6 +2027,8 @@ MonitorExperiment() {
             sort -nr | head -n 5 | while read -r objective_time objective_name; do
               echo "$(( (now - ${objective_time%.*}) / 60 )) ${objective_name}"; done )
         liveURL="http://$( hostname -f 2> /dev/null || hostname ):10083/html/objectives/live-${THEJOB_TASK_ID}.html"
+        # the pages it names exist from now on, as placeholders until the bench's tools write them
+        ObjectivesPlaceholders;
         echo "        (live, grouped by bug: page objectives/live-${THEJOB_TASK_ID}.html of the publisher, ${liveURL}; at the end of the run: 🐞 on the dashboard)" >> ${outfile}
       else
         echo "    No objective yet ✓" >> ${outfile}

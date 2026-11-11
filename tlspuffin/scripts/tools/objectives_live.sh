@@ -13,12 +13,16 @@
 #   PB_PUBLIC_URL   base URL of the publisher (default http://<host>:10083)
 #   PB_LIVE_BUDGET  seconds of replays per call (default 240)
 #   PB_LIVE_TIMEOUT timeout of a replay in seconds (default 60)
+#   PB_LIVE_EVERY   seconds between two calls, the cron period (default 300): the pages say when the next update comes
+#   PB_REPORT_EVERY seconds between two calls of objectives_report.sh --all (default 600), for the same
 
 set -u
 PB_ROOT="${PB_ROOT:-/srv/puffin-bench}"
 URL="${PB_PUBLIC_URL:-http://$( hostname -f 2> /dev/null || hostname ):10083}"
 BOARD_URL="${PB_BOARD_URL:-http://$( hostname -f 2> /dev/null || hostname ):10082}"
 BUDGET="${PB_LIVE_BUDGET:-240}"
+EVERY="${PB_LIVE_EVERY:-300}"
+REPORT_EVERY="${PB_REPORT_EVERY:-600}"
 REPLAY_TIMEOUT="${PB_LIVE_TIMEOUT:-60}"
 # a replay that ends without confirming a bug is tried again, up to this many times: a memory corruption in a library
 # built without ASAN crashes or not depending on the memory layout
@@ -317,6 +321,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
   [ "$( jq length <<< "${runs}" )" -gt 0 ] || continue;
   IFS=$'\t' read -r commit name <<< "$( TaskInfo "${taskJSON}" )";
   jq --arg task "${task}" --arg name "${name}" --arg commit "${commit}" --arg updated "$( date '+%F %T' )" \
+      --argjson refresh "$( jq -n --argjson e "${EVERY}" --argjson b "${BUDGET}" --argjson r "${REPORT_EVERY}" --argjson now "$( date +%s )" \
+          '{ live_every_s: $e, live_budget_s: $b, report_every_s: $r, updated_epoch: $now }' )" \
       --arg taskUrl "${BOARD_URL}/files/board/task.html?id=${task}" \
       --arg jobType "$( jq -r '.task.job_type // ""' <<< "${taskJSON}" 2> /dev/null )" \
       --argjson nt "$( NotTargetedJSON )" \
@@ -327,6 +333,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
           | select(.name | IN("ExperimentWithCargo", "TwinExperiment"))] | group_by(.id)
           | map({ library: .[0].id, runs: (map(if .name == "TwinExperiment" then 2 else 1 end) | add) })' <<< "${taskJSON}" 2> /dev/null || echo '[]' )" \
       '{ task: $task, task_url: $taskUrl, commit: $commit, name: $name, job_type: $jobType, live: true, updated: $updated,
+         # when the next update comes (the page says it): the cron period, the replays of a call, this update
+         refresh: $refresh,
          not_targeted: (if $jobType | test("^vuln-") then $nt else {} end), targets: $targets, cves: $cves,
          # every configuration with its number of runs, also the runs without objective yet (the 🎯 count: k/runs)
          libraries: $libraries,

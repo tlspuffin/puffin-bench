@@ -467,6 +467,50 @@ async function SaveOffline(report, link) {
   }
 }
 
+// When the bench's tools update a page: the round of the cron after a moment (every everyS seconds, at multiples of
+// it), and the time its work may take (budgetS); null without the schedule (pages written before it was recorded)
+function NextRound(afterS, everyS) { return Math.floor(afterS / everyS) * everyS + everyS; }
+const Clock = (epochS) => new Date(epochS * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function NextLiveUpdate(refresh, nowS = Date.now() / 1000) {
+  if (!refresh?.live_every_s) return null;
+  const from = Math.max(nowS, refresh.updated_epoch ?? nowS);
+  return NextRound(from, refresh.live_every_s) + (refresh.live_budget_s ?? 0);
+}
+
+// A placeholder (ObjectivesPlaceholders, PR_common.sh): the run's monitor wrote it at the first objective, so that its
+// links lead somewhere; the bench's tools replace it. live: the first replays (objectives_live.sh); final: the report
+// of the ended task (objectives_report.sh), the live page meanwhile. Reloads every minute until replaced.
+async function RenderPlaceholder(root, report) {
+  const nowS = Date.now() / 1000, r = report.refresh ?? {};
+  const first = report.first_objective ? `first objective at ${esc(Clock(report.first_objective))}` : 'objectives found';
+  const scheduler = `${location.protocol}//${location.hostname}:10082`;
+  let body;
+  if (report.placeholder === 'live') {
+    const by = NextLiveUpdate({ ...r, updated_epoch: nowS }, nowS);
+    body = `<p class="note">⏳ The task has objectives (${first}). Their first replays are in progress: objectives_live.sh replays new
+      objectives every ${Math.round((r.live_every_s ?? 300) / 60)} minutes on core 0, outside the fuzzing cores, and replaces this page
+      ${by ? `by about <b>${esc(Clock(by))}</b>` : 'within minutes'}. The page reloads every minute.</p>`;
+  } else {
+    // running or ended: the scheduler says (a task it no longer knows has ended)
+    const state = await fetch(`${scheduler}/api/task/${encodeURIComponent(report.task)}/state`, { cache: 'no-store' })
+        .then(response => response.ok ? response.json() : null).catch(() => null);
+    const running = [...JSON.stringify(state ?? {}).matchAll(/"state":"(Running|Pending)"/g)].length > 0;
+    const live = report.live_page ? `<a href="${esc(report.live_page)}">its live objectives page</a>` : 'its live objectives page';
+    const every = r.report_every_s ?? 600;
+    body = running
+      ? `<p class="note">⏳ The task is running (${first}): ${live} shows them, replayed and grouped by bug. This page becomes
+          its final report within ${Math.round(every / 60)} minutes of the end of the task.</p>`
+      : `<p class="note pending-final">⏳ The task ended (${first}). Its final report (objectives_report.sh, every ${Math.round(every / 60)}
+          minutes: every objective replayed and classified) is being written: the round of about <b>${esc(Clock(NextRound(nowS, every)))}</b>
+          writes it, in a few minutes. Meanwhile: ${live}. The page reloads every minute.</p>`;
+  }
+  root.innerHTML = `<div class="top"><h1>Objectives of task ${esc(report.task)}${report.commit ? ` · <span class="mono">${esc(String(report.commit).slice(0, 10))}</span>` : ''}</h1>
+      <div class="meta">${report.task_url ? `<a href="${esc(report.task_url)}" target="_blank" rel="noopener">task on the board</a>` : ''}</div></div>
+    <div class="wrap">${body}</div>`;
+  document.title = `Objectives · task ${report.task} · being written`;
+  setInterval(() => { if (!document.querySelector('.pb-help.open')) location.reload(); }, 60000);
+}
+
 async function Render() {
   const root = document.getElementById('report');
   const source = root.dataset.json;
@@ -479,6 +523,7 @@ async function Render() {
     root.innerHTML = `<div class="wrap"><p class="unconf">Cannot read ${esc(source)}: ${esc(error.message)}</p></div>`;
     return;
   }
+  if (report.placeholder) { await RenderPlaceholder(root, report); return; }
   const runs = report.runs ?? [];
   const bugs = Bugs(runs, report.not_targeted, report.targets);
   REPORT_LIBRARIES = report.libraries ?? [];
@@ -537,7 +582,7 @@ async function Render() {
       <div class="meta">${esc(report.name)}${report.user ? ` · ${esc(report.user)}` : ''}
         ${report.started ? ` · ran ${esc(DateTime(report.started))}${report.ended ? ` → ${esc(DateTime(report.ended))}` : ''}${span ? ` (${span})` : ''}` : ''}
         ${report.cancelled ? ' · <span class="bad">cancelled</span>' : ''}
-        ${report.live ? ` · <span class="live">● live · updated ${esc(report.updated)}</span>` : ''} · ${links}</div>
+        ${report.live ? ` · <span class="live">● live · updated ${esc(report.updated)}${(n => n ? ` · next update by about ${esc(Clock(n))}` : '')(NextLiveUpdate(report.refresh))}</span>` : ''} · ${links}</div>
       <div class="tiles">
         ${ExpectedBanner(expectedRuns, report.libraries)}
         <div class="tile ${confirmed.length && celebrate ? 'gold' : ''}"><b>${count(confirmed.length)}</b><span>distinct bug${confirmed.length === 1 ? '' : 's'} (confirmed)</span></div>
