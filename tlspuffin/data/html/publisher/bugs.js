@@ -262,8 +262,10 @@ function everyBugSection() {
 // ---- the configurations of Vuln group A and B: each experiment, its expected bug, how it stops, and its build checked
 // against the catalogue (dev's, or the commit's shown): every patch of its version but its bug's
 const catalogueEntryOf = (lib, alias) => Object.entries(catalogue?.vendors?.[lib]?.entries ?? {}).find(([, e]) => e.alias === alias)?.[0] ?? null;
-function expectedBugOf(name, vendorName) {
+function expectedBugOf(name, vendorName, declared) {
   const target = targets?.[vendorName];
+  // the bug the configuration names (target_bug), with the rule of its preset when there is one
+  if (declared) return { id: declared, rule: target?.cve === declared ? target : null };
   if (target?.cve) return { id: target.cve, rule: target };
   const lib = vendorName.split(':')[0];
   const id = catalogueEntryOf(lib, name) ?? Object.entries(targets?._cves ?? {}).find(([cve, c]) => !cve.startsWith('_') && c?.alias === name)?.[0] ?? null;
@@ -297,12 +299,12 @@ function vulnConfigsSection() {
       <table class="configs"><tr><th>experiment</th><th>vendor</th><th>expected bug</th><th>stops on</th><th>build</th><th>vs ${where}</th><th>run with</th></tr>
       ${configs.map(([name, c]) => {
         const vendorName = c.args?.vendor ?? '';
-        const bug = expectedBugOf(name, vendorName);
+        const bug = expectedBugOf(name, vendorName, c.args?.target_bug);
         const check = buildCheck(vendorName, bug.id);
         const p = check.preset;
         return `<tr><td><b>${esc(name)}</b></td><td class="mono">${esc(vendorName)}</td>
           <td>${bug.id ? (Object.values(catalogue?.vendors ?? {}).some(v => v.entries?.[bug.id]) ? bugLink(bug.id) : cveLink(bug.id)) : '<span class="muted">—</span>'}</td>
-          <td>${bug.rule ? rule(bug.rule) : '<span class="muted">no target declared: its first objective that is not set apart</span>'}</td>
+          <td>${bug.rule ? rule(bug.rule) : c.args?.target_bug ? '<span class="muted">its first objective that is not set apart</span>' : '<span class="muted">no target declared: its first objective that is not set apart</span>'}${c.args?.target_bug ? `<br><span class="muted">confirmed as ${esc(bug.id)} during the attempt (patch differential, else its signature on the build with every patch), on commits with the catalogue; otherwise as before</span>` : ''}</td>
           <td>${p ? `${esc(p.version)}${p.asan ? ', ASan' : ''}${p.postauth === false ? ', postauth off' : ''}<br><span class="muted">fix: ${esc((p.fix ?? []).map(eid => catalogue?.vendors?.[vendorName.split(':')[0]]?.entries?.[eid]?.alias ?? eid).join(', ') || 'none')}</span>` : '<span class="muted">—</span>'}</td>
           <td>${check.html}</td>
           <td>${c.args?.extra_flags ? `<code>${esc(c.args.extra_flags)}</code>` : '<span class="muted">—</span>'}</td></tr>`;

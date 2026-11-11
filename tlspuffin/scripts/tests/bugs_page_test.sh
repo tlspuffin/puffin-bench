@@ -22,6 +22,8 @@ echo '{ "type": "module" }' > "${work}/package.json"
 "${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${commit}" > "${work}/catalogue.json"
 "${bench}/git_restapi/scripts/tlspuffin_presets.sh" "${clone}" "${commit}" > "${work}/presets.json"
 command cp -f "${bench}/tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json" "${work}/vuln_targets.json"
+# the job configurations of Vuln group A and B the page reads (run.mjs serves them from there)
+export JOBS_DIR="${bench}/tlspuffin/data/html/jobsscripts/tlspuffin"
 # a registry of the bugs found so far (known_bugs.json): the same crash in two configurations of wolfSSL (HEAP of the
 # catalogue, by its ASan report type and top frame), a crash of LibreSSL none of the known bugs, a claim set apart
 cat > "${work}/known_bugs.json" <<'JSON'
@@ -131,10 +133,11 @@ check dev 'the catalogue commit is linked' "tree/$( jq -r .commit "${work}/catal
 check dev 'the configurations of Vuln group A and B' 'The configurations of Vuln group A and B'
 check dev 'the _cves table is gone' 'The CVEs of the Vuln jobs' absent
 configs=$( grep -o '<table class="configs">.*' <<< "$( tr '\n' ' ' <<< "${out}" )" )
-row() { grep -o "<td><b>$1</b></td>.\{0,1800\}" <<< "${configs}" | head -1 | sed 's|</tr>.*||'; }
+row() { awk -v k="<td><b>$1</b></td>" '{ i = index($0, k); if (i) { r = substr($0, i); j = index(r, "</tr>"); print (j ? substr(r, 1, j - 1) : r); exit } }' <<< "${configs}"; }
 grep -q "every patch but its bug" <<< "$( row BUF )" && grep -q '✓' <<< "$( row BUF )" && echo "ok   (configs): BUF's preset is every patch but its bug's" || { echo "FAIL (configs): BUF"; fail=1; }
 grep -q '≠' <<< "$( row SDOS2 )" && grep -q 'not patched: HEAP' <<< "$( row SDOS2 )" && echo "ok   (configs): SDOS2's preset leaves HEAP unpatched (it has a patch at 5.4.0)" || { echo "FAIL (configs): SDOS2"; fail=1; }
-grep -q 'CVE-2021-3449' <<< "$( row SDOS1 )" && grep -q 'no target declared' <<< "$( row SDOS1 )" && echo "ok   (configs): VulnB's SDOS1, CVE-2021-3449, no target declared" || { echo "FAIL (configs): SDOS1"; fail=1; }
+grep -q 'CVE-2021-3449' <<< "$( row SDOS1 )" && grep -q 'confirmed as CVE-2021-3449 during the attempt' <<< "$( row SDOS1 )" && echo "ok   (configs): VulnB's SDOS1 names CVE-2021-3449, confirmed during the attempt" || { echo "FAIL (configs): SDOS1"; fail=1; }
+grep -q 'confirmed as CVE-2022-39173 during the attempt' <<< "$( row BUF )" && grep -q 'RefineSuites' <<< "$( row BUF )" && echo "ok   (configs): VulnA's BUF keeps its rule and is confirmed during the attempt" || { echo "FAIL (configs): BUF confirmation"; fail=1; }
 check dev 'the differences of _cves with the catalogue' 'CVE-2023-6936</a> <span class="muted">CALLB</span>: not in the catalogue'
 check dev 'the claim set apart agrees with the catalogue' '✓ agrees'
 check commit 'a commit asked with ?commit= is named' 'catalogue of tlspuffin commit deadbeef'

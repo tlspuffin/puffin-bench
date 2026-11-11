@@ -8,7 +8,7 @@
 #   - ObjectiveTargeted from fuzzer records (FuzzerRecords lines -> FuzzerVerdict): the expected bug, another bug;
 #   - KnownVendorBuild: presets and builds derived from the catalogue, with the clone's presets.toml and
 #     vulnerabilities.toml;
-#   - CustomExperimentJSON: what cli-<step>.json records.
+#   - CustomExperimentJSON: what cli-<step>.json records (null for Vuln group A and B, which name their bug too).
 set -uo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 clone="${1:?usage: custom_target_test.sh <tlspuffin clone>}"
@@ -80,6 +80,12 @@ expect '<preset>-fix-all'                        0 KnownVendorBuild wolfssl wolf
 expect 'no such entry'                           1 KnownVendorBuild wolfssl CVE-2099-0001
 expect 'no such preset under -only-'             1 KnownVendorBuild wolfssl wolfssl999-only-CVE-2022-39173
 expect 'no such library'                         1 KnownVendorBuild nosuchlib CVE-2022-39173
+
+echo "--- Vuln group A and B: their bug named, their rule kept"
+unset benchmark target_oracle; target_bug=CVE-2022-39173
+same 'a VulnA configuration naming its bug: the frame rule of its preset' "$( ExpectedTarget wolfssl:wolfssl540-buf )" 'CVE-2022-39173|crash|RefineSuites'
+same 'it is not a custom experiment' "$( CustomExperimentJSON )" null
+unset target_bug
 
 echo "--- CustomExperimentJSON"
 same 'not a custom experiment' "$( CustomExperimentJSON )" null

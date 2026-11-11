@@ -262,7 +262,11 @@ ExperimentEnd() {
     local targeted excluded first unexpected;
     read -r targeted excluded first unexpected <<< "$( ObjectiveCounts "${experiment_base}" )";
     [ "${first}" == - ] && first='';
-    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/vuln_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${errorFilePresent}" "${experimentUUID}" "${outFile}" "${targeted:-${objective_count}}" "${excluded:-0}" "${first}" "${unexpected:-0}" "$( ExpectedTarget "${vendor:-}" | cut -d'|' -f1 )" >> "${THEJOB_USER_STATE_FILE}"
+    # how the run's end was decided: on a find validation confirmed during the run (an experiment naming its bug, the
+    # validation prepared: commits with the catalogue), else on the fuzzer's record
+    local confirmation='';
+    [ -n "${target_bug:-}" ] && [ "$( jq -r .status ./validation/state.json 2> /dev/null )" == ready ] && confirmation=validation;
+    "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/vuln_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${errorFilePresent}" "${experimentUUID}" "${outFile}" "${targeted:-${objective_count}}" "${excluded:-0}" "${first}" "${unexpected:-0}" "$( ExpectedTarget "${vendor:-}" | cut -d'|' -f1 )" "${confirmation}" >> "${THEJOB_USER_STATE_FILE}"
     RecordLoad "${outFile}"
   else
     echo '{ "error": "stats.json not found" }' > "${outFile}"
