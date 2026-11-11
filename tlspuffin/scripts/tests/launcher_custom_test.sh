@@ -70,10 +70,13 @@ try {
   launcher.open({ jobType: 'vuln-custom', commit: SHA });
   check(await until(() => document.querySelectorAll('.jl-custom-bugs tr[data-id]').length > 0), 'the custom panel lists the bugs of the commit');
   check(await until(() => $('.jl-custom-saved').value === 'VulnT'), 'VulnT among the saved benchmarks');
+  // the task's name: "Vuln C - <commit>" while the benchmark has the default name
+  check(/^Vuln C - /.test($('.jl-task-name').value), `the task is named Vuln C until the benchmark has a name (${$('.jl-task-name').value})`);
   $('.jl-custom-open').click();
   await settle();
   const ticked = [...document.querySelectorAll('.jl-custom-bugs tr[data-id]')].filter(r => r.querySelector('input').checked).map(r => r.dataset.id);
   check(ticked.sort().join() === 'CVE-2021-3336,CVE-2021-3449', `Load ticks its bugs (${ticked.join(', ')})`);
+  check(/^Vuln VulnT - /.test($('.jl-task-name').value), `then after its name (${$('.jl-task-name').value})`);
   check($('.jl-custom-attempts').value === '2' && $('.jl-custom-cores').value === '7',
     `Load sets attempts and cores per attempt (${$('.jl-custom-attempts').value} × ${$('.jl-custom-cores').value})`);
   check(timeout() === '0:1:5', `Load sets the launcher's timeout (${timeout()})`);
