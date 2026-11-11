@@ -183,7 +183,7 @@ Report() {
         '. + [{ library: $lib, attempt: $a, found: $found, replayed: $replayed, traces_dir: $traces,
           fuzzer_logs: { files: $logFiles, records: $recordCount },
           reports: ([$groups[] | select(.type != "no-crash" and .type != "replay-error" and .type != "not-replayed") | .count] | add // 0), groups: $groups,
-          cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities}), asan: $cli.asan.instrumented }]' <<< "${libs}" );
+          cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities, custom}), asan: $cli.asan.instrumented }]' <<< "${libs}" );
   # (a twin step, TwinExperimentEnd of PR_perf.sh, ends the two runs 2k and 2k+1 of its attempt k: its output has both,
   # each line prefixed with its run, so their replays are counted from their reports)
   done < <( jq -r '.task.steps[] | select(.name == "ExperimentEnd" or .name == "TwinExperimentEnd")
@@ -222,7 +222,7 @@ Report() {
                   # how the scheduler ended each run (attempt: Done, TimedOut, Failed, Cancelled…): a run that found its
                   # bug and did not end Done is counted, without a time to find (untimed, Results says why)
                   ends: ($runs | sort_by(.attempt_id) | map({ key: (.attempt_id | tostring), value: .state }) | from_entries),
-                  cli: ($cli // {} | {build, cputs, vendor, features, library, vulnerabilities}) }))
+                  cli: ($cli // {} | {build, cputs, vendor, features, library, vulnerabilities, custom}) }))
           # the errors of the end-of-run summaries (vuln_experiment_end.js, in the run state of its step, e.g. "Error
           # with stats.json"), per configuration and attempt: a run without summary has no metrics, Results says why (not
           # for twin steps: the state of a TwinExperimentEnd holds both runs; their summaries keep their own errors)
@@ -267,7 +267,8 @@ CveSignatures() {
 # Render <json> <html>: page of the objectives of a task ({task, commit, name, live?, updated?, user?, job_type?,
 # started?, ended?, cancelled?, task_url?, libraries?, runs: [...]}): a small page that loads report.js and report.css
 # (objectives_page/, copied next to the pages), which render the JSON in the browser, organized by bug.
-# Each run may carry cli ({build, cputs, vendor, features, library, vulnerabilities} of cli-<library>.json) and asan.
+# Each run may carry cli ({build, cputs, vendor, features, library, vulnerabilities, custom: a custom benchmark's target} of
+# cli-<library>.json) and asan.
 Render() {
   local dir; dir="$( dirname "$2" )";
   local asset;

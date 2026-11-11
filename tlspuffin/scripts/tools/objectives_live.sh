@@ -316,7 +316,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
         --argjson cli "${cli}" --arg traces "live-${task}-traces/${library}/${attempt}" \
         '. + [{ library: $lib, attempt: $a, found: $found, replayed: ([$g[] | select(.type != "not-replayed") | .count] | add // 0), traces_dir: $traces,
                 reports: ([$g[] | select(.type != "no-crash" and .type != "replay-error" and .type != "not-replayed") | .count] | add // 0), groups: $g,
-                cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities}), asan: $cli.asan.instrumented }]' <<< "${runs}" );
+                cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities, custom}), asan: $cli.asan.instrumented }]' <<< "${runs}" );
   done
   [ "$( jq length <<< "${runs}" )" -gt 0 ] || continue;
   IFS=$'\t' read -r commit name <<< "$( TaskInfo "${taskJSON}" )";
