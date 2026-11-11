@@ -445,7 +445,8 @@ function registrySection() {
   for (const [key, value] of Object.entries(known ?? {})) {
     const [config, kind, ...rest] = key.split('|');
     const b = { config, kind, sig: rest.join('|'), ...value };
-    const vendor = vendorOf(config);
+    // the library its configuration built (recorded since custom benchmarks: custom2_SKIP), else from its name
+    const vendor = value?.vendor ?? vendorOf(config);
     const id = `${vendor ?? config}|${kind}|${b.sig}`;
     if (!groups.has(id)) groups.set(id, { vendor, kind, sig: b.sig, seen: [] });
     groups.get(id).seen.push(b);
@@ -453,8 +454,11 @@ function registrySection() {
   const bugs = [...groups.values()].map(g => {
     g.seen.sort((x, y) => String(x.started ?? '').localeCompare(String(y.started ?? '')));
     const first = g.seen[0];
-    const rules = g.seen.map(b => ({ config: b.config, ...(CveOf(b.config, b) ?? {}) })).filter(r => r.cve);
     const ids = g.vendor ? catalogueMatch(g.vendor, first) : [];
+    // the expected bug of its configuration: a rule of vuln_targets.json (VulnA/VulnB), or a custom experiment's target
+    // when the catalogue has the bug with that signature
+    const rules = g.seen.map(b => ({ config: b.config, ...(CveOf(b.config, b) ?? (b.target && ids.includes(b.target) ? { cve: b.target, how: 'expected' } : {})) }))
+      .filter(r => r.cve);
     return { ...g, first, rules, ids, known: rules.length > 0 || ids.length > 0 };
   }).sort((x, y) => (x.known - y.known) || String(x.vendor ?? '').localeCompare(String(y.vendor ?? ''))
     || String(x.first.started ?? '').localeCompare(String(y.first.started ?? '')));

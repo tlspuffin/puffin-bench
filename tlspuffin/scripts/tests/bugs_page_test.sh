@@ -35,7 +35,8 @@ cat > "${work}/known_bugs.json" <<'JSON'
   "wolfssl540-asan|crash|AddPacketInfo": { "task": "1791638282947", "started": "2026-10-10T08:00:00Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
   "LibreSSL|crash|tls13_hkdf_expand_label_with_length": { "task": "1790851749055", "started": "2026-10-01T11:00:00Z", "what": "global-buffer-overflow: MemcmpInterceptorCommon < tls13_hkdf_expand_label_with_length" },
   "BUF|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237378849", "started": "2026-10-05T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
-  "CDOS|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237386132", "started": "2026-10-06T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" } }
+  "CDOS|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237386132", "started": "2026-10-06T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
+  "custom2_SKIP|claim|Authentication bypass": { "task": "1794327919866", "started": "2026-11-10T16:39:18Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "target": "CVE-2022-25640" } }
 JSON
 
 cat > "${work}/run.mjs" <<'EOF'
@@ -132,6 +133,9 @@ first_row=$( grep -o '<tr class="[^"]*">' <<< "${registry}" | head -1 )
 [ "${first_row}" == '<tr class="unknown-bug">' ] && grep -q 'tls13_hkdf_expand_label_with_length' <<< "$( grep -o '<tr class="unknown-bug">.\{0,400\}' <<< "${registry}" | head -1 )" &&
   echo "ok   (registry): the bug none of the known ones (LibreSSL) first" || { echo "FAIL (registry): the unknown bug is not first"; fail=1; }
 grep -q 'set apart' <<< "$( grep -o "<code>Negotiated cipher.\{0,600\}" <<< "${registry}" )" && echo "ok   (registry): the claim set apart" || { echo "FAIL (registry): claim not set apart"; fail=1; }
+skip=$( grep -o '<code>Authentication bypass</code>.\{0,900\}' <<< "${registry}" | head -1 )
+grep -q 'custom2_SKIP' <<< "${skip}" && grep -q '🎯 expected' <<< "${skip}" && grep -q 'CVE-2022-25640' <<< "${skip}" && ! grep -q 'not a known bug' <<< "${skip}" &&
+  echo "ok   (registry): a custom experiment's claim is its target, expected (its library and target recorded)" || { echo "FAIL (registry): custom2_SKIP"; fail=1; }
 check dev 'the TOML text of an entry is shown' 'TOML source, with its comments'
 check dev 'the notes heading a file are shown' 'About this file'
 check dev 'the reload button on dev' 'id="reload-dev"'

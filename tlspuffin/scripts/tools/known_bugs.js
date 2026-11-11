@@ -1,5 +1,7 @@
 // known_bugs.js <objectives dir>: the registry of the bugs found so far, per library, for the "🚨 new bug" alerts
 // (objectives_page/bugs.js NewBugs): "<library>|<signature>" (BugSignature: the claim, or the top function of the crash) -> { task, started, what } of the first task that had it,
+// with the library its configuration built (vendor: wolfssl…, from its run's record) and a custom experiment's target
+// (target: the catalogue entry it looked for), which the Bugs reference needs (a configuration named custom2_SKIP),
 // from every final report (<task>.json) of the objectives pages, oldest first. Run by objectives_report.sh --all with
 // the qjs of the bench: qjs --std -m known_bugs.js <dir>
 import { Bugs, BugSignature } from './objectives_page/bugs.js';
@@ -24,8 +26,11 @@ for (const r of reports) {
     const sig = BugSignature(bug);
     if (!sig) continue;  // a crash without location: not comparable across tasks
     for (const lib of new Set(bug.runs.map(run => run.library))) {
+      const cli = bug.runs.find(run => run.library === lib)?.cli ?? r.runs.find(run => run.library === lib)?.cli ?? {};
+      const vendor = String(cli.vendor ?? '').split(':')[0] || cli.library?.name || null;
       known[`${lib}|${sig}`] ??= { task: String(r.task), started: r.started ?? null,
-        what: `${bug.type}: ${(bug.frames ?? []).join(' < ') || bug.summary || ''}`.slice(0, 200) };
+        what: `${bug.type}: ${(bug.frames ?? []).join(' < ') || bug.summary || ''}`.slice(0, 200),
+        ...(vendor ? { vendor: vendor.toLowerCase() } : {}), ...(cli.custom?.target ? { target: cli.custom.target } : {}) };
     }
   }
 }
