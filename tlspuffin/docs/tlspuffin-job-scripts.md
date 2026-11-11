@@ -152,7 +152,12 @@ catalogue (`puffin-build/vendors/<vendor>/vulnerabilities.toml`), by patch diffe
    (`VALIDATION_CATALOGUE=commit`, for a bug added by a PR).
 2. `mk_vendor list <vendor> --json` gives the entries of the campaign's preset and its validation set: F
    (`<preset>-fix-all`, every active bug with a patch patched) and one V_X (`<preset>-only-<X>`) per such bug. They are
-   built with ASan, and bundled into one tlspuffin binary, cached per commit, catalogue hash and preset. A build derived
+   built with ASan into a folder shared by the tasks (`data/validation-libs/<hash>`, `VALIDATION_LIBS_ROOT`), named after
+   what they are made from (puffin-build's build code, the vendor's files with the catalogue and its patches,
+   `shell.nix`, the set): built once, reused by every later commit that changes none of them; puffin-build locks each
+   library while it builds or reads it; a folder no task used for 30 days goes. They are bundled into one tlspuffin
+   binary, cached per what it is made from (the content of the crates and build files, the toolchain, the set), not per
+   commit: a commit that only changes documentation, CI or tools reuses it (`validation_cache_test.sh`). A build derived
    from the catalogue (a custom benchmark's `<preset>-only-<ID>`) is validated on the set of its base preset. The binary
    reads its catalogue at run time from the step's own checkout (`PUFFIN_BUILD_DIR`): a cached binary was built in
    another task's.
