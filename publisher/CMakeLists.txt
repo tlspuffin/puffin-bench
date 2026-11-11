@@ -182,6 +182,8 @@ target_include_directories(publisher.lib PRIVATE ${CMAKE_SOURCE_DIR})
 add_dependencies(publisher.lib generate_version)
 
 add_executable(publisher src/publisher/main.cxx)
+# the file a URL names (a query or a fragment is not part of it): build/publisher/testFilePath
+add_executable(testFilePath src/test_file_path.cxx)
 target_link_libraries(publisher PRIVATE publisher.lib)
 
 add_executable(publisher-static src/publisher/main.cxx)
