@@ -324,7 +324,8 @@ SetupEnv() {
 
   if [ -r "${THEJOB_PARAMETERS_PATH}" ]; then
     THEJOB_RUNPARMS=$( cat "${THEJOB_PARAMETERS_PATH}" )
-    eval ${THEJOB_RUNPARMS}
+    # the step's arguments: <name>='<value>' each, written by the executor (utils/shell.hxx); quoted, so a value is kept as is
+    eval "${THEJOB_RUNPARMS}"
   fi
 
   if [ ! -z "${THEJOB_MONITOR_PARAMETERS_PATH}" ]; then

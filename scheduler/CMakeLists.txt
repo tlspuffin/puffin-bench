@@ -208,3 +208,6 @@ add_executable(testOutputRing src/test_output_ring.cxx src/scheduler/schedule/ex
 add_executable(testCpuTopology src/test_cpu_topology.cxx src/scheduler/system/cpu_topology.cxx)
 # the CPUs the scheduler keeps its own threads and the other processes on: build/scheduler/testCpuset
 add_executable(testCpuset src/test_cpuset.cxx src/scheduler/system/cpuset.cxx)
+# the step arguments as the executor writes them and functions.sh reads them: build/scheduler/testStepParameters
+add_executable(testStepParameters src/test_step_parameters.cxx)
+target_compile_definitions(testStepParameters PRIVATE FUNCTIONS_SH="${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh")
