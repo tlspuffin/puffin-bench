@@ -4,6 +4,7 @@
 // and the registry of the bugs found so far per library (known_bugs.json, written by tools/known_bugs.js)
 import '../board/nav.js';
 import { urls } from './summary_config.js';
+import { presentOn, patchedAt } from '../common/catalogue.js';
 
 const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TARGETS = '/html/jobsscripts/tlspuffin/vuln_targets.json';
@@ -16,19 +17,21 @@ const load = url => fetch(url, { cache: 'no-store' }).then(r => r.ok ? r.json() 
 const askedCommit = new URLSearchParams(window.location.search).get('commit') ?? '';
 const catalogueRef = /^[0-9a-f]{7,40}$/i.test(askedCommit) ? askedCommit : 'dev';
 const CATALOGUE = `${urls.git_restapi}/api/git/catalogue/tlspuffin/${catalogueRef}`;
-const [targets, known, version, firstCatalogue] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/version.json'), load(CATALOGUE)]);
+// the configurations of Vuln group A and B, as deployed with the bench
+const JOBS = [['Vuln group A', 'vuln-a', '/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json'],
+              ['Vuln group B', 'vuln-b', '/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo.json']];
+const [targets, known, version, firstCatalogue, ...jobConfigs] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/version.json'),
+  load(CATALOGUE), ...JOBS.map(([, , url]) => load(url))]);
 let catalogue = firstCatalogue;
+// the presets of the catalogue's commit (git_restapi), to check the builds of the configurations against the catalogue
+const loadPresets = c => (c?.format === 'vulnerabilities.toml' && /^[0-9a-f]{40}$/.test(c.commit ?? '')) ? load(`${urls.git_restapi}/api/git/presets/tlspuffin/${c.commit}`) : Promise.resolve(null);
+let presetsAt = await loadPresets(catalogue);
 // "Reload from the latest dev": when it last fetched, or why it failed
 let reloaded = null, reloadError = null;
 const REPO = `${version?.repository ?? 'https://github.com/tlspuffin/puffin-bench'}/blob/${/^[0-9a-f]{40}$/.test(version?.commit ?? '') ? version.commit : 'main'}/${REPO_FILE}`;
 
 const presets = Object.entries(targets ?? {}).filter(([key]) => !key.startsWith('_'));
 const apart = Object.entries(targets?._not_targeted ?? {});
-const byLibrary = {};
-for (const [key, value] of Object.entries(known ?? {})) {
-  const [library, kind, ...rest] = key.split('|');
-  (byLibrary[library] ??= []).push({ kind, sig: rest.join('|'), ...value });
-}
 const cveTable = Object.entries(targets?._cves ?? {}).filter(([key]) => !key.startsWith('_'));
 const NVD = cve => `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve)}`;
 const cveLink = cve => `<a href="${NVD(cve)}" target="_blank" rel="noopener">${esc(cve)}</a>${targets?._cves?.[cve]?.alias ? ` <span class="muted">${esc(targets._cves[cve].alias)}</span>` : ''}`;
@@ -45,16 +48,6 @@ function CveOf(library, b) {
   return null;
 }
 const rule = t => t.kind === 'claim' ? `claim <code>${esc(t.match)}</code>` : `crash with <code>${esc(t.match)}</code> among the top 3 frames`;
-// how a CVE is recognised (as objectives_page/cve_signatures.jq): its own kind/match, else the target naming it, else
-// its claim set apart; null: it cannot be recognised
-const signatureOf = cve => {
-  const own = targets?._cves?.[cve];
-  if (own?.kind && own?.match) return own;
-  const target = presets.find(([, t]) => t.cve === cve)?.[1];
-  if (target?.kind && target?.match) return target;
-  const claim = Object.entries(targets?._not_targeted ?? {}).find(([, v]) => (v.cve ?? v) === cve)?.[0];
-  return claim ? { kind: 'claim', match: claim } : null;
-};
 
 // ---- tlspuffin's catalogue: an overview, then every entry in full (its fields: puffin-build/README.md of tlspuffin)
 const TLSPUFFIN = 'https://github.com/tlspuffin/tlspuffin';
@@ -188,16 +181,15 @@ function entryCard(vendor, id, e) {
     ['category', esc(e.category)],
   ]);
   const references = (e.references ?? []).length ? `<ul class="refs">${e.references.map(url => `<li>${external(url, shortUrl(url))}</li>`).join('')}</ul>` : '<p class="muted">—</p>';
-  return `<section class="entry${e.bug_in_harness ? ' harness' : ''}" id="${esc(id)}">
-    <header>
+  return `<details class="entry${e.bug_in_harness ? ' harness' : ''}" id="${esc(id)}">
+    <summary class="entry-head"><div class="head-line">
       <a class="eid" href="#${esc(id)}" title="Link to this bug">${esc(id)}</a>${e.alias ? `<b class="alias">${esc(e.alias)}</b>` : ''}${f.by_puffin ? '<span class="star" title="first found by puffin">★</span>' : ''}
       <span class="tag">${esc(libraryName(vendor))}</span><span class="tag">${esc(e.category)}</span>
       ${e.cvss ? `<span class="sev sev-${severity}" title="CVSS ${esc(e.cvss.version)}">CVSS ${esc(e.cvss.score)} · ${severity}</span>` : '<span class="sev">no CVSS</span>'}
       ${patches.length ? `<span class="badge b-exp" title="validated by patch differential">✓ patch ${patches.map(p => esc(p.versions ?? p.commits ?? '')).join(' · ')}</span>` : '<span class="badge b-unexp">no patch</span>'}
       ${e.no_witness ? '<span class="badge b-unexp">no witness</span>' : '<span class="badge b-exp">✓ witness</span>'}${e.replayable === false ? ' <span class="badge b-apart">does not replay</span>' : ''}${e.bug_in_harness ? ' <span class="badge b-apart">🔧 harness</span>' : ''}
       <span class="spacer"></span>${id.startsWith('CVE-') ? external(NVD(id), 'NVD ↗') : ''}
-    </header>
-    <p class="lead">${esc(e.summary)}</p>
+    </div><p class="lead">${esc(e.summary)}</p></summary>
     <div class="grid">
       ${box('Where it is', where)}
       ${box('What it needs', needs)}
@@ -212,7 +204,7 @@ function entryCard(vendor, id, e) {
     <div class="foot muted">fingerprint <code title="${esc(e.fingerprint ?? '')}">${esc(String(e.fingerprint ?? '').slice(0, 16))}</code> (its fields and patch files: the bench compares an entry between commits with it)
       · ${external(`${TLSPUFFIN}/blob/${catalogue.commit}/puffin-build/vendors/${vendor}/vulnerabilities.toml`, `puffin-build/vendors/${vendor}/vulnerabilities.toml`)}</div>
     ${e.toml ? `<details class="toml"><summary>TOML source, with its comments</summary><pre>${esc(e.toml)}</pre></details>` : ''}
-  </section>`;
+  </details>`;
 }
 
 const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <b>${esc(e.alias)}</b>` : ''}${e.find?.by_puffin ? ' <span class="star" title="first found by puffin">★</span>' : ''}</td>
@@ -246,13 +238,190 @@ function catalogueSection() {
       <p class="muted">${catalogueRef === 'dev' ? 'Another commit (e.g. a PR adding a bug): <code>?commit=&lt;sha&gt;</code>. ' : ''}One bug: <code>#&lt;ID&gt;</code>. ★ first found by puffin.</p>
       ${overviewTable(library)}
       ${harness.length ? `<h3>🔧 Bugs of the fuzzing harness</h3><p class="muted">Validated the same way, never counted as a vulnerability of the library.</p>${overviewTable(harness)}` : ''}
-    </div>
-    <h2>📖 Every bug in full</h2>
+      <p class="muted">Every field of a bug: click it (its card at the end of the page, <a href="#every-bug">📖 Every bug in full</a>).</p>
+    </div>`;
+}
+
+// every bug in full, one folded card each, in a section folded too (the end of the page): a link to a bug (#<ID>, the
+// tables above, the URL) opens its card
+function everyBugSection() {
+  if (!catalogue || catalogue.format === 'none') return '';
+  const entries = Object.entries(catalogue.vendors ?? {}).flatMap(([vendor, v]) => Object.entries(v.entries ?? {}).map(([id, e]) => ({ vendor, id, e })));
+  const library = entries.filter(x => !x.e.bug_in_harness), harness = entries.filter(x => x.e.bug_in_harness);
+  const vendors = Object.entries(catalogue.vendors ?? {}).filter(([, v]) => Object.values(v.entries ?? {}).some(e => !e.bug_in_harness));
+  return `<details class="every-bug" id="every-bug">
+    <summary><h2>📖 Every bug in full <span class="muted">— ${entries.length} bugs, every field of vulnerabilities.toml: open one here, or click a bug above</span></h2></summary>
     ${vendors.map(([vendor, v]) => `<h3 class="library" id="library-${esc(vendor)}">${esc(libraryName(vendor))} — ${Object.values(v.entries ?? {}).filter(e => !e.bug_in_harness).length} bug(s)
         · ${external(`${TLSPUFFIN}/blob/${catalogue.commit}/puffin-build/vendors/${vendor}/vulnerabilities.toml`, `puffin-build/vendors/${vendor}/vulnerabilities.toml`)}</h3>
       ${v.preamble ? `<details class="preamble"><summary>About this file</summary><pre>${preambleText(v.preamble)}</pre></details>` : ''}
       ${library.filter(x => x.vendor === vendor).map(x => entryCard(x.vendor, x.id, x.e)).join('')}`).join('')}
-    ${harness.length ? `<h3 class="library">🔧 Bugs of the fuzzing harness</h3>${harness.map(x => entryCard(x.vendor, x.id, x.e)).join('')}` : ''}`;
+    ${harness.length ? `<h3 class="library">🔧 Bugs of the fuzzing harness</h3>${harness.map(x => entryCard(x.vendor, x.id, x.e)).join('')}` : ''}
+  </details>`;
+}
+
+// ---- the configurations of Vuln group A and B: each experiment, its expected bug, how it stops, and its build checked
+// against the catalogue (dev's, or the commit's shown): every patch of its version but its bug's
+const catalogueEntryOf = (lib, alias) => Object.entries(catalogue?.vendors?.[lib]?.entries ?? {}).find(([, e]) => e.alias === alias)?.[0] ?? null;
+function expectedBugOf(name, vendorName) {
+  const target = targets?.[vendorName];
+  if (target?.cve) return { id: target.cve, rule: target };
+  const lib = vendorName.split(':')[0];
+  const id = catalogueEntryOf(lib, name) ?? Object.entries(targets?._cves ?? {}).find(([cve, c]) => !cve.startsWith('_') && c?.alias === name)?.[0] ?? null;
+  return { id, rule: null };
+}
+function buildCheck(vendorName, id) {
+  const [lib, presetName] = vendorName.split(':');
+  const preset = (presetsAt?.vendors?.[lib] ?? []).find(p => p.name === presetName);
+  const entries = catalogue?.vendors?.[lib]?.entries;
+  if (!preset || !entries) return { preset, html: '<span class="muted">— (no catalogue or presets to check against)</span>' };
+  const bare = { ...preset, fix: [] };
+  const present = Object.entries(entries).filter(([eid, e]) => presentOn(eid, e, bare)).map(([eid]) => eid);
+  const should = present.filter(eid => eid !== id && patchedAt(entries[eid], preset.version));
+  const actual = preset.fix ?? [];
+  const missing = should.filter(eid => !actual.includes(eid)), extra = actual.filter(eid => !should.includes(eid));
+  const left = present.filter(eid => eid !== id && !patchedAt(entries[eid], preset.version)).map(eid => entries[eid].alias ?? eid);
+  const alias = eid => esc(entries[eid]?.alias ?? eid);
+  const ok = missing.length === 0 && extra.length === 0;
+  const html = (ok ? `<span class="badge b-exp">✓ every patch but its bug's</span>`
+      : `<span class="badge b-unexp">≠ every patch but its bug's</span>`
+        + (missing.length ? `<br>not patched: ${missing.map(alias).join(', ')} <span class="muted">(${missing.length > 1 ? 'they have' : 'it has'} a patch at ${esc(preset.version)})</span>` : '')
+        + (extra.length ? `<br>patched although ${extra.includes(id) ? 'it is its own bug' : 'not expected'}: ${extra.map(alias).join(', ')}` : ''))
+    + (left.length ? `<br><span class="muted">left, no patch at ${esc(preset.version)}: ${esc(left.join(', '))}</span>` : '');
+  return { preset, html, ok };
+}
+function vulnConfigsSection() {
+  const where = catalogueRef === 'dev' ? "dev's catalogue" : `the catalogue of ${esc(catalogueRef)}`;
+  return JOBS.map(([label, jobType, url], i) => {
+    const configs = Object.entries(jobConfigs[i]?.configurations ?? {});
+    return `<h3>${esc(label)} <span class="muted">(job type <code>${esc(jobType)}</code>, <a href="${esc(url)}" target="_blank">its configuration ↗</a>)</span></h3>
+      <table class="configs"><tr><th>experiment</th><th>vendor</th><th>expected bug</th><th>stops on</th><th>build</th><th>vs ${where}</th><th>run with</th></tr>
+      ${configs.map(([name, c]) => {
+        const vendorName = c.args?.vendor ?? '';
+        const bug = expectedBugOf(name, vendorName);
+        const check = buildCheck(vendorName, bug.id);
+        const p = check.preset;
+        return `<tr><td><b>${esc(name)}</b></td><td class="mono">${esc(vendorName)}</td>
+          <td>${bug.id ? (Object.values(catalogue?.vendors ?? {}).some(v => v.entries?.[bug.id]) ? bugLink(bug.id) : cveLink(bug.id)) : '<span class="muted">—</span>'}</td>
+          <td>${bug.rule ? rule(bug.rule) : '<span class="muted">no target declared: its first objective that is not set apart</span>'}</td>
+          <td>${p ? `${esc(p.version)}${p.asan ? ', ASan' : ''}${p.postauth === false ? ', postauth off' : ''}<br><span class="muted">fix: ${esc((p.fix ?? []).map(eid => catalogue?.vendors?.[vendorName.split(':')[0]]?.entries?.[eid]?.alias ?? eid).join(', ') || 'none')}</span>` : '<span class="muted">—</span>'}</td>
+          <td>${check.html}</td>
+          <td>${c.args?.extra_flags ? `<code>${esc(c.args.extra_flags)}</code>` : '<span class="muted">—</span>'}</td></tr>`;
+      }).join('') || `<tr><td colspan="7" class="muted">its configuration is not available (${esc(url)})</td></tr>`}</table>`;
+  }).join('') + `<p class="muted">The configurations are the bench's (its job configurations, deployed with it): they change with puffin-bench, not
+    with tlspuffin. Their builds are tlspuffin's presets at the commit run, with the fixes of each preset; the check above uses ${where}: a bug added to
+    the catalogue with a patch at a configuration's version shows here as not patched, until the preset is changed. A build derived from the catalogue
+    (<code>&lt;preset&gt;-only-&lt;ID&gt;</code>, custom benchmarks) follows the catalogue by itself.</p>`;
+}
+
+// a claim set apart (vuln_targets.json _not_targeted) against the catalogue: the entry of that CVE has that claim as
+// oracle, and its affected versions are those the rule sets the claim apart on
+function apartAgainstCatalogue(claim, v) {
+  const cve = v.cve ?? v;
+  const vendor = v.library ?? null;
+  const e = vendor ? catalogue?.vendors?.[vendor]?.entries?.[cve] : Object.values(catalogue?.vendors ?? {}).map(x => x.entries?.[cve]).find(Boolean);
+  if (!e) return '<span class="muted">not in the catalogue</span>';
+  const sameClaim = e.oracle?.kind === 'claim' && e.oracle.violation === claim;
+  const sameRange = !v.below || (e.affected ?? '').replace(/\s+/g, '') === `<${v.below}`;
+  return `affected <code>${esc(e.affected ?? '')}</code>, oracle ${sameClaim ? 'this claim' : `<b>another</b> (${esc(e.oracle?.violation ?? e.oracle?.kind ?? 'none')})`}`
+    + `<br>${sameClaim && sameRange ? '<span class="badge b-exp">✓ agrees</span>' : '<span class="badge b-unexp">≠ differs from the rule</span>'}`;
+}
+
+// the differences between vuln_targets.json's _cves (the CVEs of the Vuln jobs from before the catalogue, still read to
+// recognise the bugs of runs built before puffin-build) and the catalogue
+function cvesDifferences() {
+  const all = Object.fromEntries(Object.values(catalogue?.vendors ?? {}).flatMap(v => Object.entries(v.entries ?? {})));
+  if (!Object.keys(all).length) return '';
+  const lines = cveTable.flatMap(([cve, c]) => {
+    const e = all[cve];
+    if (!e) return [`${cveLink(cve)}: not in the catalogue`];
+    const out = [];
+    if ((c.alias ?? null) !== (e.alias ?? null)) out.push(`${bugLink(cve)}: alias ${esc(c.alias ?? 'none')} here, ${esc(e.alias ?? 'none')} in the catalogue`);
+    if (c.cvss !== undefined && e.cvss && Number(c.cvss) !== Number(e.cvss.score)) out.push(`${bugLink(cve)}: CVSS ${esc(c.cvss)} here, ${esc(e.cvss.score)} in the catalogue`);
+    return out;
+  });
+  return lines.length ? `<p>Its <code>_cves</code> table (the CVEs of the Vuln jobs, from before the catalogue: still read to recognise the bugs of runs
+    built before puffin-build) differs from the catalogue:</p><ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul>`
+    : '<p class="muted">Its <code>_cves</code> table (from before the catalogue, still read for runs built before puffin-build) agrees with the catalogue.</p>';
+}
+
+// ---- the registry of the bugs found so far (known_bugs.json, written by tools/known_bugs.js from every final objectives
+// report: "<configuration or library>|<kind>|<signature>" -> { task, started, what }), one row per bug (its signature in
+// a library), with what it is and every configuration that found it
+const VENDORS = ['wolfssl', 'openssl', 'libressl', 'boringssl', 'libssh', 'wolfssh'];
+// the library of a configuration or library of the registry: WolfSSL, wolfssl540-asan: its name; BUF, SDOS1: the
+// library of the CVE with that alias (vuln_targets.json _cves)
+const vendorOf = name => {
+  const lower = String(name ?? '').toLowerCase();
+  return VENDORS.find(v => lower.startsWith(v)) ?? Object.values(targets?._cves ?? {}).find(c => c?.alias === name)?.library ?? null;
+};
+// a crash's report type, from its description ("heap-buffer-overflow: AddPacketInfo < ..."; "crash: ..." without ASan)
+const reportType = b => b.kind === 'claim' ? null : (/^([a-z][a-z-]*):/.exec(b.what ?? '')?.[1] ?? null);
+// the bugs of the catalogue a bug of the registry is, for people: those of its library with its claim, or with its top
+// function among their top frames and the same ASan report type (when it has one)
+function catalogueMatch(vendor, b) {
+  const entries = Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {});
+  if (b.kind === 'claim') return entries.filter(([, e]) => e.oracle?.kind === 'claim' && e.oracle.violation === b.sig).map(([id]) => id);
+  const type = reportType(b);
+  return entries.filter(([, e]) => e.oracle?.kind === 'crash' && (e.top_frames ?? []).includes(b.sig)
+    && (!type || type === 'crash' || !e.oracle.asan || e.oracle.asan === type)).map(([id]) => id);
+}
+const bugLink = id => {
+  const e = Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean);
+  return `<a class="mono" href="#${esc(id)}" title="its card: every field">${esc(id)}</a>${e?.alias ? ` <b>${esc(e.alias)}</b>` : ''}`;
+};
+function registrySection() {
+  const groups = new Map();
+  for (const [key, value] of Object.entries(known ?? {})) {
+    const [config, kind, ...rest] = key.split('|');
+    const b = { config, kind, sig: rest.join('|'), ...value };
+    const vendor = vendorOf(config);
+    const id = `${vendor ?? config}|${kind}|${b.sig}`;
+    if (!groups.has(id)) groups.set(id, { vendor, kind, sig: b.sig, seen: [] });
+    groups.get(id).seen.push(b);
+  }
+  const bugs = [...groups.values()].map(g => {
+    g.seen.sort((x, y) => String(x.started ?? '').localeCompare(String(y.started ?? '')));
+    const first = g.seen[0];
+    const rules = g.seen.map(b => ({ config: b.config, ...(CveOf(b.config, b) ?? {}) })).filter(r => r.cve);
+    const ids = g.vendor ? catalogueMatch(g.vendor, first) : [];
+    return { ...g, first, rules, ids, known: rules.length > 0 || ids.length > 0 };
+  }).sort((x, y) => (x.known - y.known) || String(x.vendor ?? '').localeCompare(String(y.vendor ?? ''))
+    || String(x.first.started ?? '').localeCompare(String(y.first.started ?? '')));
+  // a CVE of the catalogue: its card (every field); else NVD
+  const inCatalogue = id => Object.values(catalogue?.vendors ?? {}).some(v => v.entries?.[id]);
+  const cve = id => inCatalogue(id) ? bugLink(id) : cveLink(id);
+  const whatItIs = bug => {
+    const parts = [];
+    const expected = bug.rules.filter(r => r.how === 'expected'), apart = bug.rules.filter(r => r.how !== 'expected');
+    if (expected.length) parts.push(`<span class="badge b-exp">🎯 expected</span> ${cve(expected[0].cve)} <span class="muted">in ${esc([...new Set(expected.map(r => r.config))].join(', '))}</span>`);
+    if (apart.length) parts.push(`<span class="badge b-apart">⦸ ${esc(apart[0].how)}</span> ${cve(apart[0].cve)}`);
+    // the catalogue, when no rule of vuln_targets.json tells (a configuration without target, another library)
+    const more = bug.rules.length ? [] : bug.ids;
+    if (more.length) parts.push(`📚 ${more.map(bugLink).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
+      : 'its top function among the bug\'s top frames, same report type'})</span>`);
+    return parts.join('<br>') || '<span class="badge b-new">🚨 not a known bug</span>';
+  };
+  const task = b => `<a href="/html/objectives/${esc(b.task)}.html">task ${esc(b.task)}</a>`;
+  const date = b => esc(String(b.started ?? '').slice(0, 10));
+  return `<div class="card">
+    <p>One row per bug (its signature in a library), rebuilt from every final objectives report (<a href="${KNOWN}" target="_blank">known_bugs.json ↗</a>,
+      <code>tools/known_bugs.js</code>, run by <code>objectives_report.sh --all</code>): what it is, and every configuration that found it.
+      The bugs that are none of the known ones come first.</p>
+    <details class="howto"><summary>When a bug is 🚨 new on a report</summary><p class="muted">A bug is identified by its claim, or by the top function of its
+      crash. A real bug (fuzzer record or replay), neither expected nor set apart, is <span class="badge b-new">🚨 NEW BUG</span> on its report and 🚨🚨🚨 on Results:
+      in a configuration with a target (BUF, SKIP…), when no earlier task had its signature there; in a plain version (e.g. Perf's wolfSSL 5.8.0), when it
+      is none of the CVEs tlspuffin declares for that build (its vendorinfo: known minus fixed vulnerabilities) recognised by vuln_targets.json, which are shown
+      as 📋 known; it is then new on every task until it is added there. A crash without location cannot be told apart: it never counts as new.
+      📚 here: the catalogue's bug with that claim, or with that function among its top frames (shown to people; validation decides by patch differential).</p></details>
+    <table class="registry"><tr><th>bug</th><th>what it is</th><th>found in</th><th>first seen</th><th>first report</th></tr>
+    ${bugs.map(bug => `<tr class="${bug.known ? '' : 'unknown-bug'}">
+      <td><span class="kind kind-${esc(bug.kind)}">${esc(bug.kind)}</span> <code>${esc(bug.sig)}</code>${reportType(bug.first) && reportType(bug.first) !== 'crash' ? ` <span class="muted">${esc(reportType(bug.first))}</span>` : ''}
+        <div class="muted">${esc(bug.vendor ? libraryName(bug.vendor) : '?')}</div></td>
+      <td>${whatItIs(bug)}</td>
+      <td>${bug.seen.map(b => `<span class="seen" title="first seen there: task ${esc(b.task)}, ${date(b)}">${esc(b.config)}</span>`).join(' ')}</td>
+      <td class="nowrap">${date(bug.first)}<br>${task(bug.first)}</td>
+      <td class="muted">${esc(bug.first.what)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">no registry yet</td></tr>'}
+    </table></div>`;
 }
 
 function render() {
@@ -267,49 +436,45 @@ document.getElementById('bugsref').innerHTML = `<div class="wrap">
   <h2>The file to edit</h2>
   <div class="card edit">
     <p><code>tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json</code> in puffin-bench
-      (<a href="${REPO}" target="_blank" rel="noopener">on GitHub ↗</a>, <a href="${TARGETS}" target="_blank">as deployed ↗</a>). Both tables below come from it.</p>
+      (<a href="${REPO}" target="_blank" rel="noopener">on GitHub ↗</a>, <a href="${TARGETS}" target="_blank">as deployed ↗</a>): the expected bug of each
+      Vuln group A configuration and the claims set apart, below.</p>
     <ul>${(Array.isArray(targets?._doc) ? targets._doc : [targets?._doc ?? '']).map(line => `<li>${esc(line)}</li>`).join('')}</ul>
+    ${cvesDifferences()}
     <p class="muted">After an edit: <code>tlspuffin/scripts/build.sh</code>, then copy <code>vuln_targets.json</code> and the <code>*_full.sh</code> to
       <code>/srv/puffin-bench/data/html/jobsscripts/tlspuffin/</code> (the deploy does it). Running tasks keep the rules they started with.</p>
   </div>
 
-  <h2>🎯 Expected bug of each configuration (VulnA)</h2>
-  <div class="card"><table><tr><th>preset</th><th>CVE</th><th>recognised by</th><th>note</th></tr>
-    ${presets.map(([key, t]) => `<tr><td class="mono">${esc(key)}</td><td>${cveLink(t.cve)}</td>
-      <td>${rule(t)}</td><td class="muted">${esc(t.note ?? '')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">none declared</td></tr>'}
-  </table>
-  <p class="muted">The experiment of such a configuration ends on its expected bug only. A replay or the fuzzer's own log (backtrace, claim) can recognise it.
-    <b>VulnB</b> and any preset not listed: no target, the experiment ends on its first objective that is not set apart.</p></div>
-
-  <h2>📚 The CVEs of the Vuln jobs (vuln_targets.json, until the job scripts read the catalogue)</h2>
-  <div class="card"><table><tr><th>CVE</th><th>alias</th><th>library</th><th>CVSS</th><th>type</th><th>1st found by puffin</th><th>version</th><th>TLS</th><th>recognised by</th></tr>
-    ${cveTable.map(([cve, c]) => `<tr><td><a href="${NVD(cve)}" target="_blank" rel="noopener">${esc(cve)}</a></td><td><b>${esc(c.alias)}</b></td><td>${esc(c.library ?? '')}</td><td>${esc(c.cvss)}</td><td>${esc(c.type)}</td><td>${c.found_by_puffin === true ? '✓' : c.found_by_puffin === false ? '✗' : esc(c.new ?? '')}</td><td>${esc(c.version)}</td><td>${esc(c.tls)}</td><td>${signatureOf(cve) ? rule(signatureOf(cve)) : '<span class="muted">no signature: not recognised</span>'}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">none declared (_cves)</td></tr>'}
-  </table><p class="muted">${esc(targets?._cves?._doc ?? '')}</p></div>
+  <h2>🎯 The configurations of Vuln group A and B</h2>
+  <div class="card">${vulnConfigsSection()}
+  <p class="muted">An experiment with an expected bug ends on it only; a replay or the fuzzer's own log (backtrace, claim) can recognise it.</p></div>
 
   <h2>⦸ Known CVEs set apart (never a target)</h2>
-  <div class="card"><table><tr><th>claim of the security oracle</th><th>CVE</th><th>set apart on</th><th>note</th></tr>
-    ${apart.map(([claim, v]) => `<tr><td><code>${esc(claim)}</code></td><td><a href="https://nvd.nist.gov/vuln/detail/${esc(v.cve ?? v)}" target="_blank" rel="noopener">${esc(v.cve ?? v)}</a></td><td>${v.library ? `<b>${esc(v.library)} &lt; ${esc(v.below)}</b> only` : 'everywhere'}</td><td class="muted">${esc(v.note ?? '')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">none</td></tr>'}
+  <div class="card"><table><tr><th>claim of the security oracle</th><th>CVE</th><th>set apart on</th><th>in the catalogue</th><th>note</th></tr>
+    ${apart.map(([claim, v]) => `<tr><td><code>${esc(claim)}</code></td><td>${(c => Object.values(catalogue?.vendors ?? {}).some(x => x.entries?.[c]) ? bugLink(c) : cveLink(c))(v.cve ?? v)}</td><td>${v.library ? `<b>${esc(v.library)} &lt; ${esc(v.below)}</b> only` : 'everywhere'}</td>
+      <td>${apartAgainstCatalogue(claim, v)}</td><td class="muted">${esc(v.note ?? '')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">none</td></tr>'}
   </table>
   <p class="muted">Only on the library and versions of its scope (what the run built: “C harness, wolfssl540-buf” is wolfSSL 5.4.0): such an objective does not end the experiment and does not count in the 🎯; it is shown as <b>+n ⦸</b>. On any other library or version the same claim is a bug like any other (⚠ unexpected, 🚨 new).
     Any other bug of a configuration with a target is <span class="badge b-unexp">⚠ unexpected</span>: a new finding, or a rule to add here.</p></div>
 
-  <h2>🚨 Bugs found so far, per library</h2>
-  <div class="card">
-    <p class="muted">Not edited by hand: rebuilt from every final objectives report (<a href="${KNOWN}" target="_blank">known_bugs.json ↗</a>, <code>tools/known_bugs.js</code>, run by <code>objectives_report.sh --all</code>).
-      A bug is identified by its claim, or by the top function of its crash. A real bug (fuzzer record or replay), neither expected nor set apart, is
-      <span class="badge b-new">🚨 NEW BUG</span> on its report and 🚨🚨🚨 on Results: in a configuration with a target (BUF, SKIP…), when no earlier
-      task had its signature there (this table); in a plain version (e.g. Perf's wolfSSL 5.8.0), when it is none of the CVEs tlspuffin declares for
-      that build (the build's vendorinfo: known minus fixed vulnerabilities) recognised as above, which are shown as 📋 known; it is then new on every
-      task until it is added to the file. A crash without location cannot be told apart: it never counts as new.</p>
-    <table><tr><th>library / configuration</th><th>signature</th><th>CVE</th><th>first seen</th><th>what</th></tr>
-    ${Object.keys(byLibrary).sort().map(library => byLibrary[library].map((b, i) => `<tr>${i === 0 ? `<td rowspan="${byLibrary[library].length}"><b>${esc(library)}</b></td>` : ''}
-      <td>${esc(b.kind)}: <code>${esc(b.sig)}</code></td>
-      <td>${(c => c ? `${cveLink(c.cve)}<br><span class="badge ${c.how === 'expected' ? 'b-exp' : 'b-apart'}">${c.how === 'expected' ? '🎯 expected' : '⦸ ' + esc(c.how)}</span>` : '<span class="muted">—</span>')(CveOf(library, b))}</td>
-      <td><a href="/html/objectives/${esc(b.task)}.html">task ${esc(b.task)}</a> <span class="muted">${esc((b.started ?? '').slice(0, 10))}</span></td>
-      <td class="muted">${esc(b.what)}</td></tr>`).join('')).join('') || '<tr><td colspan="5" class="muted">no registry yet</td></tr>'}
-    </table></div>
+  <h2>🚨 Bugs found so far</h2>
+  ${registrySection()}
+
+  ${everyBugSection()}
 </div>`;
   document.getElementById('reload-dev')?.addEventListener?.('click', () => reload());
+}
+
+// openBug <ID>: its card, unfolded with its section, scrolled to (false: no such card)
+function openBug(id) {
+  const card = document.getElementById(id);
+  if (!card?.matches?.('details.entry')) return false;
+  const section = card.closest?.('details.every-bug');
+  if (section) section.open = true;
+  card.open = true;
+  document.querySelectorAll?.('.entry.targeted').forEach(e => e.classList.remove('targeted'));
+  card.classList?.add('targeted');
+  card.scrollIntoView?.({ block: 'start' });
+  return true;
 }
 
 // "Reload from the latest dev": git_restapi fetches tlspuffin, then answers dev's catalogue again
@@ -317,17 +482,21 @@ async function reload() {
   const button = document.getElementById('reload-dev');
   if (button) { button.disabled = true; button.textContent = '⟳ Fetching the latest dev…'; }
   const fresh = await load(`${CATALOGUE}?refresh=fetch`);
-  if (fresh) { catalogue = fresh; reloaded = new Date().toLocaleTimeString(); reloadError = null; } else { reloadError = 'the reload failed: dev as last fetched'; }
+  if (fresh) { catalogue = fresh; presetsAt = await loadPresets(fresh); reloaded = new Date().toLocaleTimeString(); reloadError = null; } else { reloadError = 'the reload failed: dev as last fetched'; }
   render();
 }
 
 render();
 // the navigation bar's refresh does the same (on dev's catalogue)
 window.addEventListener?.('pb-refresh', event => { if (catalogueRef === 'dev') { event.preventDefault(); reload(); } });
-// #<ID>: that bug, once the page is written
-const wanted = decodeURIComponent(String(window.location?.hash ?? '').slice(1));
-if (wanted) {
-  const element = document.getElementById(wanted);
-  element?.classList?.add('targeted');
-  element?.scrollIntoView?.({ block: 'start' });
-}
+// #<ID>: that bug's card, unfolded: the URL, a link of the page (its tables, a card's own id)
+const hashBug = () => decodeURIComponent(String(window.location?.hash ?? '').slice(1));
+if (hashBug()) openBug(hashBug());
+window.addEventListener?.('hashchange', () => openBug(hashBug()));
+document.getElementById('bugsref')?.addEventListener?.('click', event => {
+  const link = event.target?.closest?.('a[href^="#"]');
+  if (!link) return;
+  const id = decodeURIComponent(link.getAttribute('href').slice(1));
+  if (id === 'every-bug') { document.getElementById('every-bug').open = true; return; }
+  if (openBug(id)) { event.preventDefault(); history.replaceState(null, '', `#${encodeURIComponent(id)}`); }
+});
