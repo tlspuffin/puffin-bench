@@ -93,6 +93,7 @@
       "label":    "Perf",
       "job_type": "perf",
       "color":    "#4CAF50",
+      "cpu_sharing": "twin, two one-client runs on the 2 threads of each physical core",
       "campaign": false,
       "package":  ["tlspuffin", "sshpuffin"],
       "config":   "/files/jobsscripts/tlspuffin/PR_perf_cargo.json",

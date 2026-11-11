@@ -539,6 +539,19 @@ ExperimentReport() {
     return 1
   fi
 
+  # one of the runs of a step that holds several (TwinExperiment, PR_perf.sh; ./.step_run: <run> <clients>): the state
+  # read by the end scripts shows its step as this run, with its own run number and clients, and its own end when it
+  # ended before the step (./.run_ended: its exit status; Done or Failed, as a step of its own would have)
+  if [ -r ./.step_run ]; then
+    local run clients ended='';
+    read -r run clients < ./.step_run;
+    [ -r ./.run_ended ] && ended=$( < ./.run_ended );
+    jq --arg u "${ref_experimentUUID}" --argjson a "${run}" --argjson c "${clients}" --arg ended "${ended}" \
+        '(.. | objects | select(has("uuid") and ((.uuid | tostring) == $u))) |= (.attempt_id = $a | .nb_cores = $c
+            | if $ended == "" then . else .state = (if $ended == "0" then "Done" else "Failed" end) end)' \
+        task.json > task.json.run && mv task.json.run task.json || return 1;
+  fi
+
   local tlspuffin_outpath=$( ls experiments/ )
   ref_experiment_base="./experiments/${tlspuffin_outpath}"
 
@@ -1023,24 +1036,28 @@ FuzzerExcerpt() {
   done
 }
 
-# Major version of puffin-bench's measurements, recorded with every result (bench.major; results without it: 1).
-# Raise it with any change that makes new results incomparable with older ones (how the runs are placed, built or
-# measured), and say why here.
-#   1: until 2026-11; Perf with 3 clients per run on 2 physical cores, one build per run.
-PB_MAJOR_VERSION=1
+# Major version of puffin-bench's measurements, per kind of job (TYPE of its flow), recorded with every result
+# (bench.major; results without it: 1). Raise the one of a kind with any change that makes its new results
+# incomparable with its older ones (how the runs are placed, built or measured), and say why here.
+#   perf  1: until 2026-11, 3 clients per run on 2 physical cores, one build per run.
+#         2: from 2026-11, two one-client runs per physical core (twin: 20 runs of each library on 10 physical cores),
+#            one build per library (PR_perf.sh TwinExperiment).
+#   vuln, campaign  1.
+declare -gA PB_MAJOR_VERSION=( [perf]=2 )
 
 # SummaryAddBench <summary.json>: the puffin-bench version that produced the results (version.json, written by
 # deploy.sh next to the board, beside the tools of the job), recorded in each library of the summary: the publisher
 # merges the results per library (the newest task of each), so a commit's results can come from several versions.
 # Shown by the Results page ("run on … · bench d10↗"). Leaves the summary as it is when anything is missing.
-# major: PB_MAJOR_VERSION below; the graphs of Results color the commits whose results come from an older one.
+# major: PB_MAJOR_VERSION above, of the job's TYPE; the graphs of Results color the commits whose results come from an
+# older one.
 SummaryAddBench() {
   local summary="$1" version="${THEJOB_TOOLS_PATH}/../html/board/version.json";
   [ -s "${summary}" ] && [ -r "${version}" ] || return 0;
   # bench: the deployed version (services, board); jobscripts: the commit of these job scripts (build.sh), which a
   # hot copy can change without a deploy
   jq --slurpfile v "${version}" --arg jc "${PB_JOBSCRIPTS_COMMIT:-}" --arg jd "${PB_JOBSCRIPTS_DATE:-}" --arg jdirty "${PB_JOBSCRIPTS_DIRTY:-}" \
-      --argjson major "${PB_MAJOR_VERSION}" \
+      --argjson major "${PB_MAJOR_VERSION[${TYPE:-none}]:-1}" \
       '($v[0] | {commit, branch, date, deployed, repository}
         + { major: $major }
         + (if $jc != "" then { jobscripts: { commit: $jc, date: $jd, dirty: ($jdirty == "true") } } else {} end)) as $b
@@ -1216,9 +1233,12 @@ ExperimentReplayObjectives() {
   return 0;
 }
 
-# Saved by the experiment step before the launch, for ExperimentEnd: where the step writes its stderr (read by
-# ExperimentCrashStats: with LibAFL launchers that do not redirect the clients' stderr, their crash reports end up
-# there), and the start time and fuzzing cores of the run (read by ExperimentLogStats).
+# CargoAsanOptions <repository>: the ASAN_OPTIONS of the [env] of its .cargo/config.toml, which cargo run gives the
+# fuzzer when the variable is not set (empty: none)
+CargoAsanOptions() {
+  sed -n 's/^ *ASAN_OPTIONS *= *"\(.*\)".*/\1/p' "$1/.cargo/config.toml" 2> /dev/null | head -1;
+}
+
 # Record how the fuzzer is launched (.currentlaunch, sourced by the objective replays: ExperimentReplayObjectives
 # and tools/objectives_live.sh), for replays with exactly the same binary, options, prefixes and ASAN_OPTIONS:
 #   <binary> <fuzzer options> <via cargo: true|false>
@@ -1231,7 +1251,7 @@ ExperimentSaveExecution() {
   if [ -n "${ASAN_OPTIONS+x}" ]; then
     asanSet=true; asan="${ASAN_OPTIONS}";
   elif [ "${viaCargo}" == true ]; then
-    asan=$( sed -n 's/^ *ASAN_OPTIONS *= *"\(.*\)".*/\1/p' .cargo/config.toml 2> /dev/null | head -1 );
+    asan=$( CargoAsanOptions . );
     [ -n "${asan}" ] && asanSet=true;
   fi
   local sha='';
@@ -1247,6 +1267,9 @@ ExperimentSaveExecution() {
   } > .currentlaunch
 }
 
+# Saved by the experiment step before the launch, for ExperimentEnd: where the step writes its stderr (read by
+# ExperimentCrashStats: with LibAFL launchers that do not redirect the clients' stderr, their crash reports end up
+# there), and the start time and fuzzing cores of the run (read by ExperimentLogStats).
 ExperimentSaveLaunchInfo() {
   echo "${THEJOB_STDERR_PATH:-}" > ./.experiment_stderr_path
   echo "$( date +%s ) ${THEJOB_NB_CORES:-1}" > ./.experiment_launch

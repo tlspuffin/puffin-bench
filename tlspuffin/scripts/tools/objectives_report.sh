@@ -184,8 +184,11 @@ Report() {
           fuzzer_logs: { files: $logFiles, records: $recordCount },
           reports: ([$groups[] | select(.type != "no-crash" and .type != "replay-error" and .type != "not-replayed") | .count] | add // 0), groups: $groups,
           cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities}), asan: $cli.asan.instrumented }]' <<< "${libs}" );
-  done < <( jq -r '.task.steps[] | select(.name == "ExperimentEnd")
-      | [.id, .attempt_id, (.executor_data.launcher_file // "" | sub(".*/"; "") | sub("-launcher$"; ""))] | @tsv' "${J}" | sort -k1,1 -k2,2n )
+  # (a twin step, TwinExperimentEnd of PR_perf.sh, ends the two runs 2k and 2k+1 of its attempt k: its output has both,
+  # each line prefixed with its run, so their replays are counted from their reports)
+  done < <( jq -r '.task.steps[] | select(.name == "ExperimentEnd" or .name == "TwinExperimentEnd")
+      | (if .name == "TwinExperimentEnd" then [.attempt_id * 2, .attempt_id * 2 + 1] else [.attempt_id] end)[] as $run
+      | [.id, $run, (.executor_data.launcher_file // "" | sub(".*/"; "") | sub("-launcher$"; ""))] | @tsv' "${J}" | sort -k1,1 -k2,2n )
   rm -rf "${tmp}";
 
   # the task: user, type, times, every configuration with its runs, build and ASAN (also those without objective)
@@ -209,16 +212,20 @@ Report() {
           started: (if ($times | length) > 0 then ($times | min / 1000 | floor | todate) else null end),
           ended: (if ($times | length) > 0 then ($times | max / 1000 | floor | todate) else null end),
           task_url: "\($board)/files/board/task.html?id=\(.task.id // "")",
-          libraries: ([.task.steps[] | select(.name == "ExperimentWithCargo")] | group_by(.id)
+          # the runs of each configuration: one per experiment step, two per twin step (TwinExperiment: runs 2k, 2k+1)
+          libraries: ([.task.steps[] | select(.name == "ExperimentWithCargo" or .name == "TwinExperiment")] | group_by(.id)
             | map((first(.[] | .user_run_state // "" | split("\n")[] | (try fromjson catch null)
                   | select(type == "object" and has("cputs"))) // null) as $cli
-              | { library: .[0].id, runs: length, asan: $cli.asan.instrumented,
+              | [.[] | if .name == "TwinExperiment" then (.attempt_id * 2, .attempt_id * 2 + 1) as $run | .attempt_id = $run
+                       else . end] as $runs
+              | { library: .[0].id, runs: ($runs | length), asan: $cli.asan.instrumented,
                   # how the scheduler ended each run (attempt: Done, TimedOut, Failed, Cancelled…): a run that found its
                   # bug and did not end Done is counted, without a time to find (untimed, Results says why)
-                  ends: (sort_by(.attempt_id) | map({ key: (.attempt_id | tostring), value: .state }) | from_entries),
+                  ends: ($runs | sort_by(.attempt_id) | map({ key: (.attempt_id | tostring), value: .state }) | from_entries),
                   cli: ($cli // {} | {build, cputs, vendor, features, library, vulnerabilities}) }))
           # the errors of the end-of-run summaries (vuln_experiment_end.js, in the run state of its step, e.g. "Error
-          # with stats.json"), per configuration and attempt: a run without summary has no metrics, Results says why
+          # with stats.json"), per configuration and attempt: a run without summary has no metrics, Results says why (not
+          # for twin steps: the state of a TwinExperimentEnd holds both runs; their summaries keep their own errors)
           | map(.library as $lib | . + { end_errors: ([$steps[] | select(.name == "ExperimentEnd" and .id == $lib)
               | { key: (.attempt_id | tostring), value: first(.user_run_state // "" | split("\n")[]
                   | (try fromjson catch null) | select(type == "object" and (.error | type) == "string") | .error) }]

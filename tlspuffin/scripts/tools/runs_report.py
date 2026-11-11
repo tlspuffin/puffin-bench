@@ -22,6 +22,10 @@ CACHE = f'{PB_ROOT}/data/runs-cache'
 HERE = os.path.dirname(os.path.realpath(__file__))
 CHECKOUT = os.path.realpath(f'{HERE}/../../..')
 CACHE_VERSION = 11
+# the steps that run the experiments of a task, and how many runs each holds (TwinExperiment, PR_perf.sh: two
+# one-client runs, on the two threads of one physical core)
+EXPERIMENT_STEPS = ('ExperimentWithCargo', 'Experiment', 'TwinExperiment')
+RUNS_PER_STEP = {'TwinExperiment': 2}
 # the expected bugs and the claims set apart (vuln_targets.json, the one file to edit; read by main)
 TARGETS_FILE = f'{CHECKOUT}/tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json'
 # claim -> {cve, library, below}: set apart only on that library below that version, everywhere without library
@@ -307,12 +311,12 @@ def task_record(path_json, ctype, md5table, targets):
     steps = steps_of(task)
     times = [t for s in steps for t in (s.get('time_points_ms') or []) if t]
     args = {a.get('key'): a.get('value') for a in (task.get('args') or []) if isinstance(a, dict)}
-    exp = [s for s in steps if s.get('name') in ('ExperimentWithCargo', 'Experiment')]
+    exp = [s for s in steps if s.get('name') in EXPERIMENT_STEPS]
     vendors = {s.get('id'): (s.get('args') or {}).get('vendor', '') for s in exp}
     rec = {'stamp': stamp, 'id': tid, 'name': task.get('name', ''), 'user': task.get('user', ''), 'job_type': task.get('job_type', ''),
            'start': min(times) / 1000 if times else None, 'end': max(times) / 1000 if times else None,
            'settings': {'timeout': sorted({s.get('timeout') for s in exp if s.get('timeout')}),
-                        'cores': sorted({s.get('nb_cores') for s in exp if s.get('nb_cores')}),
+                        'cores': sorted({s.get('nb_cores') // RUNS_PER_STEP.get(s.get('name'), 1) for s in exp if s.get('nb_cores')}),
                         'compat': args.get('COMPAT_APPLIED', ''), 'libafl': args.get('LIBAFL_VERSION', '')},
            'jobscript_md5': (task.get('md5') or {}).get('.', ''), 'bench': None, 'jobscripts': None, 'metrics': None}
     m = md5table.get(rec['jobscript_md5'])
