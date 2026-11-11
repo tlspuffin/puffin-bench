@@ -231,6 +231,71 @@ commit triggers one `git fetch --all` (a commit pushed since the last fetch) bef
 
 ---
 
+## GET /api/git/catalogue/:repo/:commit
+
+The vulnerability catalogue of tlspuffin at a commit, read by `scripts/tlspuffin_catalogue.sh` from the commit's
+`puffin-build/vendors/<vendor>/vulnerabilities.toml` and patch files, without checking it out: the known bugs the bench
+validates objectives against (dev's head commit), or those of a PR's commit ("Load bugs from this commit").
+
+### Path Parameters
+
+| Parameter | Pattern | Description |
+|---|---|---|
+| `:repo` | `[0-9a-zA-Z-_.%]+` | Repository name as defined in configuration. |
+| `:commit` | `[0-9a-fA-F]{7,40}`, `dev`, `main` | Commit hash, full or abbreviated, or the head of `dev` or `main` as last fetched. |
+
+### Query Parameters
+
+| Parameter | Values | Description |
+|---|---|---|
+| `refresh` | `fetch` | Optional. For `dev` and `main`: `git fetch --all` first, so that they name their latest heads (the Bugs reference page's "Reload from the latest dev"). No GitHub API call. Ignored for a commit hash (an unknown one is fetched anyway). |
+
+Any other parameter or value returns HTTP 400.
+
+### Response — 200 OK
+
+```json
+{
+  "commit": "cc1f8d01cd5e7e959617ac9f89b70688d6afe010",
+  "date": "2026-11-09T22:54:19+01:00",
+  "subject": "[catalogue] ...",
+  "format": "vulnerabilities.toml",
+  "vendors": {
+    "wolfssl": {
+      "fingerprint": "<sha256>",
+      "repository": "https://github.com/wolfSSL/wolfssl",
+      "preamble": "# Known vulnerabilities of wolfSSL: ...",
+      "entries": {
+        "CVE-2022-39173": { "alias": "BUF", "summary": "...", "affected": "< 5.5.1",
+                            "oracle": { "kind": "crash", "asan": "stack-buffer-overflow" }, "patches": [...],
+                            "fingerprint": "<sha256>",
+                            "patch_hashes": { "patches/fix-CVE-2022-39173.patch": "<sha256>" },
+                            "toml": "[CVE-2022-39173]\nalias = \"BUF\"\n..." }
+      }
+    }
+  }
+}
+```
+
+The entries are the TOML tables as JSON (fields: puffin-build/README.md of tlspuffin), plus `fingerprint`, a hash of the
+entry's fields and patch files: two commits have the same entry when their fingerprints are equal; `patch_hashes`, the
+sha256 of each patch file; `toml`, the entry's text in the file with its comments (its tables, and the comment lines
+right above its first header), for people: not part of the fingerprint. Per vendor: `repository`, the `sources.repo` of
+its presets.toml (links to upstream fixes), and `preamble`, the comments heading the file. `date` and `subject`: the
+commit's committer date and subject. `format` is `none`
+(and `vendors` empty) for commits without catalogue. Cached per full commit in `<storage>/<name>/catalogue_cache.json`,
+like the presets (same rules for abbreviated ids and unknown commits); `dev` and `main` are resolved on every request
+(the answer of the commit they name is then cached as any other).
+
+### Errors
+
+| Code | Condition |
+|---|---|
+| 404 | `:repo` not found in configuration, or the commit is not in the repository (also after a fetch). |
+| 500 | `tlspuffin_catalogue.sh` failed (e.g. a catalogue that is not valid TOML) or did not print a JSON object with `commit`. |
+
+---
+
 ## OPTIONS (any path)
 
 CORS preflight, handled at the routing level before any path pattern is checked — matches regardless of URI. Returns HTTP 200 with:

@@ -24,8 +24,20 @@ public:
   // The vendor presets at a commit (tlspuffin_presets.sh), cached for ever per commit (presets_cache.json): false
   // with notFound when the commit is unknown, even after a fetch
   bool Presets(std::string const& commitID, std::string& result, bool& notFound);
+  // The vulnerability catalogue at a commit (tlspuffin_catalogue.sh), cached the same way (catalogue_cache.json);
+  // fetch: fetch the repository first, for dev or main (their latest heads)
+  bool Catalogue(std::string const& commitID, std::string& result, bool& notFound, bool fetch = false);
 
 private:
+  // What a script prints for a commit, cached for ever per full commit in `<storage>/<name>/<cacheName>`
+  struct PerCommitCache {
+    std::mutex lock;
+    bool loaded = false;
+    std::unordered_map<std::string, std::string> answers;  // full commit -> JSON
+  };
+  bool PerCommit(std::string const& script, std::string const& cacheName, PerCommitCache& cache,
+    std::string const& commitID, std::string& result, bool& notFound, bool fetch = false);
+
   bool SaveFile(std::string const& file, std::string const& content);
   void AddPullRequests(std::string const& commitID, rapidjson::Value& commit,
     rapidjson::MemoryPoolAllocator<>& alloc);
@@ -37,9 +49,8 @@ private:
   std::shared_mutex lock_;
   bool pullRefs_;  // the PR heads are fetched (refs/remotes/origin/pull/<number>): see AddPullRequests
 
-  std::mutex presetsLock_;
-  bool presetsLoaded_ = false;
-  std::unordered_map<std::string, std::string> presets_;  // full commit -> JSON
+  PerCommitCache presets_;
+  PerCommitCache catalogue_;
 
   std::chrono::steady_clock::time_point historyBufferTS_;
   std::string historyBuffer_;

@@ -211,19 +211,32 @@ void ns_Server::RequestHandlerLogs::handleRequest(Poco::Net::HTTPServerRequest& 
   out.flush();
 }
 
-void ns_Server::RequestHandlerPresets::handleRequest(Poco::Net::HTTPServerRequest& request,
-    Poco::Net::HTTPServerResponse& response) {
-  if (ManageCORS(request, response)) {
-    return;
-  }
-
-  std::string const repo = std::get<0>(args_);
-  std::string const& commitid = std::get<1>(args_);
-
+// The answer of a per-commit query of the git API (presets, catalogue): 404 for an unknown repository or commit.
+// Query parameter refresh=fetch (when allowed): fetch the repository first, so that dev and main name their latest
+// heads; any other parameter: 400.
+template <typename Query>
+static void PerCommitAnswer(Poco::Net::HTTPServerRequest& request, Poco::Net::HTTPServerResponse& response,
+    ns_API::APIS* apis, std::string const& repo, std::string const& commitid, Query query, bool fetchAllowed = false) {
   response.setChunkedTransferEncoding(true);
   response.setContentType("application/json; charset=utf-8");
 
-  if (apis_->gitAPI_.find(repo) == apis_->gitAPI_.end()) {
+  bool fetch = false;
+  for (auto const& param : Poco::URI(request.getURI()).getQueryParameters()) {
+    if (fetchAllowed && (param.first == "refresh") && (param.second == "fetch")) {
+      fetch = true;
+    } else {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+      std::ostream& out = response.send();
+      out << ErrorJSON("Invalid parameters");
+      out.flush();
+      return;
+    }
+  }
+  if (fetch) {
+    response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  }
+
+  if (apis->gitAPI_.find(repo) == apis->gitAPI_.end()) {
     response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
     std::ostream& out = response.send();
     out << ErrorJSON("Unknown repository " + repo);
@@ -233,7 +246,7 @@ void ns_Server::RequestHandlerPresets::handleRequest(Poco::Net::HTTPServerReques
 
   std::string buffer;
   bool notFound = false;
-  if (!apis_->gitAPI_.at(repo).Presets(commitid, buffer, notFound)) {
+  if (!query(apis->gitAPI_.at(repo), commitid, buffer, notFound, fetch)) {
     response.setStatus(notFound ? Poco::Net::HTTPResponse::HTTP_NOT_FOUND
                                 : Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
     std::ostream& out = response.send();
@@ -244,4 +257,26 @@ void ns_Server::RequestHandlerPresets::handleRequest(Poco::Net::HTTPServerReques
   std::ostream& out = response.send();
   out << buffer;
   out.flush();
+}
+
+void ns_Server::RequestHandlerPresets::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  PerCommitAnswer(request, response, apis_, std::get<0>(args_), std::get<1>(args_),
+      [](ns_GIT::GitAPI& git, std::string const& commit, std::string& result, bool& notFound, bool) {
+        return git.Presets(commit, result, notFound);
+      });
+}
+
+void ns_Server::RequestHandlerCatalogue::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  PerCommitAnswer(request, response, apis_, std::get<0>(args_), std::get<1>(args_),
+      [](ns_GIT::GitAPI& git, std::string const& commit, std::string& result, bool& notFound, bool fetch) {
+        return git.Catalogue(commit, result, notFound, fetch);
+      }, true);
 }

@@ -4,6 +4,7 @@
 #include "../../utils/dir.hxx"
 #include "embeded/git_restapi/scripts/tlspuffin_history_sh.h"
 #include "embeded/git_restapi/scripts/tlspuffin_presets_sh.h"
+#include "embeded/git_restapi/scripts/tlspuffin_catalogue_sh.h"
 #include <iostream>
 #include <fstream>
 
@@ -81,6 +82,7 @@ void ns_GIT::Config::Validate(bool forceInstall) const {
   for(auto const& [ file, data, size ] : {
       std::tuple{ "tlspuffin_history.sh", TLSPuffinHistory_Script_data, TLSPuffinHistory_Script_size },
       std::tuple{ "tlspuffin_presets.sh", TLSPuffinPresets_Script_data, TLSPuffinPresets_Script_size },
+      std::tuple{ "tlspuffin_catalogue.sh", TLSPuffinCatalogue_Script_data, TLSPuffinCatalogue_Script_size },
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(scriptsPath_ / file);
