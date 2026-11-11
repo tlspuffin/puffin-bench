@@ -142,6 +142,34 @@ export function AttachObjectives(libResult, attempt, library, attemptID, outPath
   libResult.objectives = merged;
 }
 
+// Validation of the objectives of an attempt against tlspuffin's catalogue (validation-<library>-<attempt>.json, see
+// ValidateObjectives): the attempt keeps its counts per verdict, the library merges them, with the entries confirmed,
+// the known bugs without patch named, the controls and the catalogue the verdicts rest on; byTrace gives the verdict
+// of each validated objective, by "<attempt>/<trace>" (the pages show it beside the replay groups).
+export function AttachValidation(libResult, attempt, library, attemptID, outPath) {
+  const validation = ReadJSON(`${outPath}/validation-${library}-${attemptID}.json`, {});
+  if (validation === null) {
+    return;
+  }
+  const verdicts = {};
+  (validation.objectives ?? []).forEach(o => { verdicts[o.verdict] = (verdicts[o.verdict] ?? 0) + 1; });
+  attempt.validation = { verdicts, controls_ok: validation.controls_ok ?? null,
+                         unsupported: validation.unsupported ?? null, error: validation.error ?? null };
+  const merged = libResult.validation ?? { verdicts: {}, confirmed: {}, known_unpatched: {}, controls_failed: [],
+                                           unsupported: null, errors: [], catalogue: null, byTrace: {} };
+  Object.entries(verdicts).forEach(([verdict, count]) => { merged.verdicts[verdict] = (merged.verdicts[verdict] ?? 0) + count; });
+  (validation.objectives ?? []).forEach(o => {
+    (o.entries ?? []).forEach(id => { merged.confirmed[id] = (merged.confirmed[id] ?? 0) + 1; });
+    (o.known_unpatched ?? []).forEach(id => { merged.known_unpatched[id] = (merged.known_unpatched[id] ?? 0) + 1; });
+    merged.byTrace[`${attemptID}/${o.trace}`] = { verdict: o.verdict, entries: o.entries ?? [], known_unpatched: o.known_unpatched ?? [] };
+  });
+  if (validation.controls_ok === false) merged.controls_failed.push(attemptID);
+  if (validation.unsupported) merged.unsupported = validation.unsupported;
+  if (validation.error) merged.errors.push({ attempt: attemptID, error: validation.error });
+  if (validation.catalogue) merged.catalogue = validation.catalogue;
+  libResult.validation = merged;
+}
+
 function Utf8ByteLength(str) {
   let bytes = 0;
   for (let i = 0; i < str.length; i++) {

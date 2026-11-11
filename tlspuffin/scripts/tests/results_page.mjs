@@ -56,7 +56,7 @@ export function Prepare(root, repo) {
   must("import { GraphCompare } from './summary_graphcompare.js';", 'const GraphCompare = class {};');
   must("import { MetricsCampaign } from './summary_metricscampaign.js';", 'const MetricsCampaign = { GetMetrics: () => null };');
   must("import('/html/objectives/bugs.js')", "import(new URL('../objectives/bugs.js', import.meta.url).href)");
-  src += '\nexport { RegressionFloor, ApplyRegression, ShowReportBugs, GetObjectivesButton };\n';
+  src += '\nexport { RegressionFloor, ApplyRegression, ShowReportBugs, ValidationLine, GetObjectivesButton };\n';
   writeFileSync(join(html, 'publisher/summary_render.test.js'), src);
   return new URL(`file://${join(html, 'publisher/summary_render.test.js')}`).href;
 }

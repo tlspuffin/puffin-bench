@@ -1264,6 +1264,12 @@ a.lib-objectives { margin-left: 4px; text-decoration: none; }
   font-size: 0.85em;
 }
 .lib-objectives-info { margin-bottom: 4px; color: var(--color-text-light); }
+.lib-validation { margin-bottom: 6px; }
+.lib-validation.muted { color: var(--color-text-light); }
+.validation-confirmed { color: #7ee787; } .validation-not-patched { color: #ff9b95; }
+.validation-other-signature { color: #d29922; } .validation-inconclusive { color: var(--color-text-light); }
+.validation-controls-failed { color: #f85149; }
+.objective-validation { margin-left: 8px; font-size: 0.9em; }
 .lib-objective summary { cursor: pointer; }
 .lib-objective .objective-type { font-family: monospace; color: #ff9b95; }
 .lib-objective .objective-frames { font-family: monospace; }
