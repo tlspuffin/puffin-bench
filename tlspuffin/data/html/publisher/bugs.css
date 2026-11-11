@@ -19,7 +19,14 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .reload { white-space: nowrap; padding-top: 2px; }
 .reload button { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 4px 12px; font: inherit; cursor: pointer; }
 .reload button:disabled { background: #30363d; cursor: wait; }
-.overview td.summary { color: #cfcfcf; max-width: 560px; }
+.overview .summary { color: #cfcfcf; max-width: 560px; font-size: 12px; }
+.overview .tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 4px; background: #262626; color: #bbb; font-size: 11px; }
+.overview td.runon { font-size: 12px; white-space: nowrap; }
+.overview .run-first { font-weight: 600; }
+.overview details.more summary { cursor: pointer; color: var(--muted, #8b8b8b); font-size: 11px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 6px 0; font-size: 13px; }
+.filters select { background: #1f1f1f; color: inherit; border: 1px solid #3a3a3a; border-radius: 4px; padding: 2px 6px; }
+.fallback { border-left: 3px solid var(--orange, #d29922); background: #1f1a12; padding: 4px 10px; }
 .star { color: #e3b341; margin-left: 3px; }
 .sev { display: inline-block; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 700; border: 1px solid #444; color: #bbb; white-space: nowrap; }
 .sev-critical { background: #8e1519; border-color: #da3633; color: #fff; } .sev-high { border-color: var(--red); color: #ff9b95; }

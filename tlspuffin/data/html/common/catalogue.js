@@ -55,3 +55,20 @@ export function needsAsan(entry) { return !!(entry.oracle?.asan || entry.find?.a
 // whether a bug has a patch at a version (its finds are then validated by patch differential)
 export function patchedAt(entry, version) { return (entry.patches ?? []).some(p => p.versions && inRange(p.versions, version)); }
 
+// the presets of a commit a bug can run on (activeOn), the safest first: a version where it has a patch (its finds
+// validated by patch differential), then the newest, ASan first, the fewest fixes, the shortest name; each with
+// patched (it has a patch there) and witness (its witness reaches that version, witness_versions)
+export function runOptions(id, entry, presets) {
+  return (presets ?? []).filter(p => activeOn(id, entry, p))
+    .map(p => ({ ...p, patched: patchedAt(entry, p.version), witness: !entry.witness_versions || inRange(entry.witness_versions, p.version) }))
+    .sort((a, b) => (b.patched ? 1 : 0) - (a.patched ? 1 : 0) || compareVersions(b.version, a.version) || (b.asan ? 1 : 0) - (a.asan ? 1 : 0)
+                   || (a.fix?.length ?? 0) - (b.fix?.length ?? 0) || a.name.length - b.name.length);
+}
+// how a find of a bug is confirmed: by its patch (patch differential), by its signature only (no patch), the fuzzer's
+// own record (its objectives do not replay), or not at all (no oracle); text: what the pages show
+export function confirmation(entry) {
+  if (!entry.oracle) return { kind: 'none', text: 'no oracle: cannot be recognised' };
+  if (entry.replayable === false) return { kind: 'record', text: 'the fuzzer\'s record only: not replayable' };
+  if ((entry.patches ?? []).length) return { kind: 'patch', text: `its patch (${entry.patches.map(p => p.versions ?? p.commits ?? '').join(' · ')})` };
+  return { kind: 'signature', text: 'signature only: no patch' };
+}
