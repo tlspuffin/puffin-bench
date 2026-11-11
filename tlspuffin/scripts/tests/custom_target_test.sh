@@ -1,5 +1,5 @@
 #!/bin/bash
-# custom_target_test.sh <tlspuffin clone with the catalogue (pr/vuln-catalogue)>: the experiments of custom benchmarks
+# custom_target_test.sh <tlspuffin clone> [<commit with the catalogue> (default HEAD)]: the experiments of custom benchmarks
 # in the job scripts (PR_common.sh), on synthetic records in the fuzzer's own format:
 #   - OracleMatches: a catalogue entry's oracle against a fuzzer's record (claim message; crash signal and ASan report
 #     type) and against a replay ("ASan <type>");
@@ -11,7 +11,7 @@
 #   - CustomExperimentJSON: what cli-<step>.json records (null for Vuln group A and B, which name their bug too).
 set -uo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-clone="${1:?usage: custom_target_test.sh <tlspuffin clone>}"
+clone="${1:?usage: custom_target_test.sh <tlspuffin clone> [<commit>]}"; commit="${2:-HEAD}"
 # shellcheck source=../PR_common.sh
 source "${here}/../PR_common.sh"
 
@@ -69,9 +69,9 @@ unset target_bug target_oracle
 echo "--- KnownVendorBuild"
 THEJOB_OUT_PATH=$( mktemp -d ); trap 'rm -rf "${THEJOB_OUT_PATH}"' EXIT
 mkdir -p "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/wolfssl"
-# the clone's head, and the commit before presets.toml format 2 when the head has it
-v2=$( git -C "${clone}" log -1 --format=%H -G'^format = 2' -- puffin-build/vendors/wolfssl/presets.toml )
-for ref in HEAD ${v2:+${v2}^}; do
+# the commit, and the commit before presets.toml format 2 when the commit has it
+v2=$( git -C "${clone}" log -1 --format=%H -G'^format = 2' "${commit}" -- puffin-build/vendors/wolfssl/presets.toml )
+for ref in "${commit}" ${v2:+${v2}^}; do
   for f in presets.toml vulnerabilities.toml; do
     git -C "${clone}" show "${ref}:puffin-build/vendors/wolfssl/${f}" > "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/wolfssl/${f}" || { echo "FAIL: ${clone} has no ${f}"; exit 1; }
   done

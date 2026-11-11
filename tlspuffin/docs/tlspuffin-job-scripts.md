@@ -143,7 +143,9 @@ For tasks that finished before this feature (or to share a link), `scripts/tools
 ## Objectives: Validation Against tlspuffin's Catalogue
 
 `ValidateObjectives` (`PR_validate.sh`, in every `*_full.sh`) runs after `ExperimentEnd`, in the same working directory,
-with its own cores (`nb_cores` of the step, 4 in the job configurations). It tells, for each objective (at most
+with its own cores (`nb_cores` of the step, 4 in the job configurations); in Perf, whose steps run two fuzzers (twin),
+`TwinValidateObjectives` (`PR_perf.sh`) runs it for each of the two runs in turn, in its folder and under its run
+number. It tells, for each objective (at most
 `VALIDATION_MAX`, 20 by default: the targeted ones first, then the first objective of each bug by the fuzzer's record — its claim, or the top frame of its crash, `ValidationChoice` — then the others by time, so that each distinct bug of a campaign gets a verdict), whether it is a known bug of tlspuffin's vulnerability
 catalogue (`puffin-build/vendors/<vendor>/vulnerabilities.toml`), by patch differential:
 
@@ -232,3 +234,17 @@ LibAFL writes `stats.json` as a stream of back-to-back JSON objects (`}{`-separa
 
 - **`shell.nix`** (`data/html/jobsscripts/tlspuffin/`) — the nix-shell environment (`cargo`, toolchain, `libfaketime` when patched in by `Init`) used by every `nix-shell --run "..."` invocation in the step functions. `Init` copies this in only if the checked-out commit doesn't already ship its own.
 - **`wolfssl_put.c.patch`** — a 60-line patch adding `MyTimeoutCallBack` to the WolfSSL harness, applied conditionally by `Init` (see above).
+
+## Tests
+
+`scripts/tests/run_tests.sh <tlspuffin clone> [<commit>]` runs the quick tests one after the other and sums them up: the
+scheduler's and the publisher's unit tests and a throwaway scheduler (`scheduler/tests/history_cancelled_test.sh`, from
+the CMake build folder: `BUILD_DIR`, default `build/`), and the tests of this folder on a commit of a tlspuffin clone
+with the catalogue: the Bugs reference, the launcher's custom benchmarks and saved benchmarks, the objectives pages
+(placeholders, validation verdicts), the matching of targets, the choice of the objectives validated and the cache of the
+validation builds. Nothing real is built or run (a few minutes on one core). A test that lacks what it needs (Chrome, node,
+QuickJS, a binary) says SKIP; `MK_VENDOR` and `QJS` give `mk_vendor` and QuickJS when they are not where the tests look.
+
+The tests that build tlspuffin and libraries and execute real traces run by hand: `tests/validate_step_test.sh` (the
+ValidateObjectives step on a simulated task), `tests/inrun_confirm_test.sh` (a custom benchmark's experiment confirmed by
+validation during its run), `tests/compat_selftest.sh` (every compat rule on the history of dev).

@@ -1,12 +1,25 @@
 #!/bin/bash
-# attach_validation_test.sh <validation-<library>-<attempt>.json> [<qjs>]: merges a validation file into a run summary
+# attach_validation_test.sh [<validation-<library>-<attempt>.json> [<qjs>]]: merges a validation file into a run summary
 # the way the summary scripts do (data/tools/js/utils.js AttachValidation, under QuickJS) and checks the result: the
-# counts per verdict, the confirmed entries and the verdict of each validated trace.
+# counts per verdict, the confirmed entries and the verdict of each validated trace. Without a file (or ""): one with
+# every verdict.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-file="$1"; qjs="${2:-/srv/puffin-bench/data/tools/qjs}"
+file="${1:-}"; qjs="${2:-/srv/puffin-bench/data/tools/qjs}"
 [ -x "${qjs}" ] || { echo "SKIP: no qjs at ${qjs}"; exit 0; }
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
+if [ -z "${file}" ]; then
+  file="${work}/given.json"
+  cat > "${file}" <<'JSON'
+{ "vendor": "wolfssl:wolfssl540-asan", "objectives": [
+  { "trace": "a", "verdict": "confirmed", "entries": ["CVE-2022-39173"] },
+  { "trace": "b", "verdict": "confirmed", "entries": ["CVE-2022-39173"] },
+  { "trace": "c", "verdict": "not-patched", "entries": [], "known_unpatched": ["CVE-2024-5814"] },
+  { "trace": "d", "verdict": "other-signature", "entries": [], "other_signature": ["CVE-2022-42905"] },
+  { "trace": "e", "verdict": "inconclusive", "entries": [] },
+  { "trace": "f", "verdict": "not-validated", "entries": [] } ] }
+JSON
+fi
 command cp -f "${file}" "${work}/validation-lib-0.json"
 cat > "${work}/run.js" <<JS
 import * as Utils from '${here}/../../data/tools/js/utils.js';

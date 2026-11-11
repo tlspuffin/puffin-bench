@@ -15,7 +15,8 @@
 # ValidationPrepare: the checkout (validation/tree), the builds (the libraries in a folder shared by the tasks, one
 # binary cached by the scheduler, both named after what they are made from rather than the commit) and
 # the controls, recorded in validation/state.json, once per attempt: by PrepareValidation, a step before the experiment
-# (custom benchmarks: the monitor then confirms the experiment's objectives during the attempt, ConfirmObjective), else
+# (experiments naming their bug, target_bug: custom benchmarks, Vuln group A and B; the monitor then confirms the
+# experiment's objectives during the attempt, ConfirmObjective), else
 # by ValidateObjectives. ValidationVerdict: the verdict of one objective, kept in validation/verdicts/.
 # ValidateObjectives, after ExperimentEnd: the verdicts of the attempt's objectives (the targeted ones first, at most
 # VALIDATION_MAX, within VALIDATION_BUDGET seconds of executions: the others are "not-validated"), recorded in
@@ -30,6 +31,10 @@ VALIDATION_JQ='def matches($o): . as $out | $o != null
   and ($o.violation == null or $o.violation == $out.violation)
   and ($o.panic == null or $o.panic == $out.panic);
 def objective: .outcome == "crash" or .outcome == "claim";'
+
+# ASan options of the executions: an ASan report aborts at once (its type is the oracle's), no leak report; those of the
+# campaign's launch when it set them (ValidationEnv)
+VALIDATION_ASAN_DEFAULT="verify_asan_link_order=1:detect_leaks=0:abort_on_error=1"
 
 # ValidationOverlayDev <tree> <repository>: dev's catalogue files in <tree>; prints dev's commit
 ValidationOverlayDev() {
@@ -141,7 +146,8 @@ ValidationPrepare() {
     ValidationState unsupported "${unsupported}"; ValidationCleanup; return 0;
   fi
 
-  # the validation set and the binary bundling it
+  # the validation set and the binary bundling it (mk_vendor list builds nothing: an empty vendor folder until the
+  # libraries' folder is known, below)
   export VENDOR_DIR="${VALIDATION_WORK}/vendor";
   ( cd "${tree}" && nix-shell --run "./tools/mk_vendor list '${vendor}' --json" ) > "${VALIDATION_WORK}/list.json" ||
     { ValidationFail "mk_vendor list ${vendor} failed"; return 0; };
@@ -192,8 +198,7 @@ ValidationPrepare() {
 
   # controls: each candidate's witness, when this commit has one (the binary reads the catalogue of this checkout)
   local -x PUFFIN_BUILD_DIR="${tree}/puffin-build";
-  local asanOptions="verify_asan_link_order=1:detect_leaks=0:abort_on_error=1";
-  local witnesses; witnesses=$( ASAN_OPTIONS="${asanOptions}" "${binary}" catalogue --json 2> /dev/null | jq -c '[.witnesses[].entry] | unique' ) || witnesses='[]';
+  local witnesses; witnesses=$( ASAN_OPTIONS="${VALIDATION_ASAN_DEFAULT}" "${binary}" catalogue --json 2> /dev/null | jq -c '[.witnesses[].entry] | unique' ) || witnesses='[]';
   local controls='[]' id;
   for id in $( jq -r '.[].id' <<< "${candidates}" ); do
     if ! jq -e --arg id "${id}" 'index($id) != null' <<< "${witnesses}" > /dev/null; then
@@ -201,7 +206,7 @@ ValidationPrepare() {
     fi
     local put good bad;
     for put in "${preset}-only-${id}" "${fixAll}"; do
-      ASAN_OPTIONS="${asanOptions}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" "${binary}" --put "${put}" witness "${id}" \
+      ASAN_OPTIONS="${VALIDATION_ASAN_DEFAULT}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" "${binary}" --put "${put}" witness "${id}" \
         --runs "${VALIDATION_RUNS:-3}" --outcome "${VALIDATION_WORK}/runs/control-${id}-${put}.json" \
         < /dev/null > "${VALIDATION_WORK}/runs/control-${id}-${put}.log" 2>&1;
     done
@@ -235,7 +240,7 @@ ValidationEnv() {
   LAUNCH_FLAGS=''; LAUNCH_NOASLR=''; LAUNCH_ASAN_SET=false; LAUNCH_ASAN_OPTIONS='';
   # shellcheck disable=SC1091
   [ -r .currentlaunch ] && source .currentlaunch;
-  VALIDATION_ASAN_OPTIONS="verify_asan_link_order=1:detect_leaks=0:abort_on_error=1";
+  VALIDATION_ASAN_OPTIONS="${VALIDATION_ASAN_DEFAULT}";
   [ "${LAUNCH_ASAN_SET}" == true ] && [ -n "${LAUNCH_ASAN_OPTIONS}" ] && VALIDATION_ASAN_OPTIONS="${LAUNCH_ASAN_OPTIONS}";
   return 0;
 }
@@ -272,7 +277,7 @@ ValidationVerdict() {
   echo "${result}";
 }
 
-# ConfirmObjective <trace>: whether an objective of a custom benchmark's experiment is its target (target_bug), by its
+# ConfirmObjective <trace>: whether an objective of an experiment naming its bug is that bug (target_bug), by its
 # verdict: 0 confirmed, by patch differential when the target has a patch at this version, else by its signature on the
 # build with every patch (verdict not-patched, the target named); 1 not confirmed (another bug, not reproduced); 2 not
 # decided by validation (not prepared: unsupported or error; the target's objectives do not replay): the caller keeps
@@ -298,8 +303,9 @@ ConfirmObjective() {
   return 1;
 }
 
-# PrepareValidation: a step before the experiment (custom benchmarks): the validation ready, so that the monitor can
-# confirm the experiment's objectives before it ends the attempt (ConfirmObjective), with the cores of this step
+# PrepareValidation: a step before the experiment (custom benchmarks, Vuln group A and B): the validation ready, so that
+# the monitor can confirm the experiment's objectives before it ends the attempt (ConfirmObjective), with the cores of
+# this step
 PrepareValidation() {
   [ -s ./.unsupported ] && return 0;
   [ "${VALIDATION:-on}" == off ] && return 0;

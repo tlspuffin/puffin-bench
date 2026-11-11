@@ -55,6 +55,7 @@ Prefer the `-static` variants for deployment (no shared-lib dependencies). A fif
 | **Nix** | required at runtime by the job scripts |
 | `git`, `jq` on `PATH` | required at runtime by the Git REST API |
 | an `awk` (gawk or mawk) and `jq` ≥ 1.6 | required at runtime by the job scripts and the cron tools (both run on mawk 1.3.4 and jq 1.6, Debian 12's) |
+| Python ≥ 3.11 (`python3`) | its `tomllib` reads tlspuffin's `presets.toml` and `vulnerabilities.toml`: the Git REST API's catalogue and presets scripts, the job scripts (`KnownVendorBuild`, the validation of objectives) |
 
 ```bash
 sudo apt install cmake git g++ libssl-dev xxd zip   # Debian/Ubuntu — a C/C++ toolchain normally ships an assembler already

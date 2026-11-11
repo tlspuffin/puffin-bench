@@ -532,12 +532,14 @@ export function BugValidation(bug, libraries, catalogue = null) {
   // its objectives by what validation says of each (one claim can be several bugs: CVE-2021-3336 and SIG, SKIP on
   // 4.4.0 share "Authentication bypass"), strongest first
   const strength = ['patch', 'signature', 'unpatched', 'new', 'other', 'inconclusive', 'not-validated'];
-  const known0 = new Set(verdicts.flatMap(v => v.known_unpatched ?? []));
-  const patchedCandidates = candidates.filter(id => !known0.has(id));
+  // the catalogue's bugs with its signature that have a patch here (those without are named by the verdicts)
+  const known = new Set(verdicts.flatMap(v => v.known_unpatched ?? []));
+  const patchedCandidates = candidates.filter(id => !known.has(id));
   const partOf = v => v.verdict === 'confirmed' ? ['patch', v.entries ?? []]
       : v.verdict === 'not-patched' ? ((v.known_unpatched ?? []).length ? ['signature', v.known_unpatched]
                                        : patchedCandidates.length ? ['unpatched', patchedCandidates] : ['new', []])
-      : v.verdict === 'other-signature' ? ['other', v.other_signature ?? []] : [v.verdict, []];
+      : v.verdict === 'other-signature' ? ['other', v.other_signature ?? []]
+      : v.verdict === 'inconclusive' ? ['inconclusive', []] : ['not-validated', []];
   const parts = [];
   for (const v of verdicts) {
     const [kind, ids] = partOf(v);
@@ -545,18 +547,7 @@ export function BugValidation(bug, libraries, catalogue = null) {
     if (part) part.count += 1; else parts.push({ kind, ids, count: 1 });
   }
   parts.sort((a, b) => strength.indexOf(a.kind) - strength.indexOf(b.kind) || b.count - a.count);
-  base.parts = parts;
-  const union = (list, field) => [...new Set(list.flatMap(v => v[field] ?? []))];
-  const confirmed = verdicts.filter(v => v.verdict === 'confirmed');
-  if (confirmed.length) return { ...base, kind: 'patch', ids: union(confirmed, 'entries') };
-  const notPatched = verdicts.filter(v => v.verdict === 'not-patched');
-  const known = union(notPatched, 'known_unpatched');
-  if (known.length) return { ...base, kind: 'signature', ids: known };
-  if (notPatched.length) {
-    const patched = candidates.filter(id => !known.includes(id));
-    return patched.length ? { ...base, kind: 'unpatched', ids: patched } : { ...base, kind: 'new', ids: [] };
-  }
-  const other = verdicts.filter(v => v.verdict === 'other-signature');
-  if (other.length) return { ...base, kind: 'other', ids: union(other, 'other_signature') };
-  return { ...base, kind: counts.inconclusive ? 'inconclusive' : 'not-validated', ids: [] };
+  // the bug's verdict: its strongest part, with the bugs of every part of that kind
+  const kind = parts[0].kind;
+  return { ...base, parts, kind, ids: [...new Set(parts.filter(p => p.kind === kind).flatMap(p => p.ids))] };
 }
