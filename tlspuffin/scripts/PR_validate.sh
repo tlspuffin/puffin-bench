@@ -19,7 +19,8 @@
 # experiment's objectives during the attempt, ConfirmObjective), else
 # by ValidateObjectives. ValidationVerdict: the verdict of one objective, kept in validation/verdicts/.
 # ValidateObjectives, after ExperimentEnd: the verdicts of the attempt's objectives (the targeted ones first, at most
-# VALIDATION_MAX, within VALIDATION_BUDGET seconds of executions: the others are "not-validated"), recorded in
+# VALIDATION_MAX, within VALIDATION_BUDGET seconds of executions, and not past VALIDATION_DEADLINE when given (a value of
+# $SECONDS: the end of PerfObjectives' budget): the others are "not-validated"), recorded in
 # ${THEJOB_OUT_PATH}/validation-<step>-<attempt>.json, every execution as an artefact (<step>/<attempt>-validation); it
 # removes the checkout. Commits without the catalogue are recorded as unsupported.
 
@@ -94,6 +95,8 @@ ValidationFail() {
 # ValidationCleanup: the checkout of the attempt goes (the binary first in the cache, when built here: it copies in
 # the background)
 ValidationCleanup() {
+  # (VALIDATION_KEEP_CHECKOUT=1: the checkout is shared by several validations, removed by the caller once they ended)
+  [ "${VALIDATION_KEEP_CHECKOUT:-}" == 1 ] && return 0;
   local state="${PWD}/validation/state.json" tree="${PWD}/validation/tree";
   if [ "$( jq -r '.cached // false' "${state}" 2> /dev/null )" == true ]; then
     local wait cacheId; cacheId=$( jq -r .cacheId "${state}" );
@@ -362,12 +365,16 @@ ValidateObjectives() {
   fi
   ValidationEnv;
 
-  # the verdict of each objective (those of the monitor kept), within the budget of executions
-  local budgetStart=${SECONDS} results='[]' trace result name;
+  # the verdict of each objective (those of the monitor kept), within the budget of executions, counted from now (the
+  # validation prepared), and not past the deadline of the caller
+  local budgetStart=${SECONDS} budget="${VALIDATION_BUDGET:-1800}" results='[]' trace result name;
+  if [ -n "${VALIDATION_DEADLINE:-}" ] && (( VALIDATION_DEADLINE - SECONDS < budget )); then
+    budget=$(( VALIDATION_DEADLINE - SECONDS )); (( budget < 0 )) && budget=0;
+  fi
   for trace in "${traces[@]}"; do
     name=$( basename "${trace}" .trace );
-    if [ ! -s "${VALIDATION_WORK}/verdicts/${name}.json" ] && (( SECONDS - budgetStart >= ${VALIDATION_BUDGET:-1800} )); then
-      echo "Validation: ${name}: not validated (budget of ${VALIDATION_BUDGET:-1800} s spent)";
+    if [ ! -s "${VALIDATION_WORK}/verdicts/${name}.json" ] && (( SECONDS - budgetStart >= budget )); then
+      echo "Validation: ${name}: not validated (budget of ${budget} s spent)";
       results=$( jq -c --arg t "${name}" '. + [{ trace: $t, verdict: "not-validated", entries: [], note: "validation budget spent" }]' <<< "${results}" );
       continue;
     fi

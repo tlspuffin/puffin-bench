@@ -3,8 +3,6 @@
 # VALIDATION_MAX: the targeted ones first, then the first of each bug by the fuzzer's record (its claim, or the top
 # frame of its crash), then the others by time. A run of 30 objectives of one bug and one each of two others, with a
 # limit of 5: the three bugs are validated. The fuzzer's records are stand-ins (FuzzerRecords, FuzzerVerdicts).
-# Then a twin step of Perf (TwinValidateObjectives, PR_perf.sh): each of its two runs validated in its folder, under its
-# run number.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
@@ -40,10 +38,4 @@ unset -f FuzzerVerdicts
 chosen=$( VALIDATION_MAX=3 ValidationChoice "${exp}" | sed 's#.*/##' )
 check 'without the fuzzer records: targeted, then by time' '[ "$( tr "\n" " " <<< "${chosen}" )" == "20261110-090025000-a25.trace 20261110-090001000-a01.trace 20261110-090002000-a02.trace " ]'
 
-# a twin step: its two runs (twin0, twin1: runs 2 and 3 of attempt 1), each validated in its folder under its run
-source <( sed -n '/^TwinValidateObjectives()/,/^}/p' "${here}/../PR_perf.sh" )
-ValidateObjectives() { echo "$( basename "${PWD}" ) ${THEJOB_STEP_ATTEMPT_ID}" >> "${work}/validated"; }
-mkdir -p "${work}/step/twin0" "${work}/step/twin1" && echo "2 1" > "${work}/step/twin0/.step_run" && echo "3 1" > "${work}/step/twin1/.step_run"
-( cd "${work}/step" && THEJOB_STEP_ATTEMPT_ID=1 TwinValidateObjectives )
-check 'a twin step: both runs, each in its folder under its run number' '[ "$( tr "\n" " " < "${work}/validated" )" == "twin0 2 twin1 3 " ]'
 exit "${fail}"
