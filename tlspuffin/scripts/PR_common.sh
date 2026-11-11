@@ -384,7 +384,7 @@ ExperimentSetupForCargo() {
   echo "${build}" > ./.build_info;
   echo "Build: ${build}";
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities} }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -537,6 +537,19 @@ ExperimentReport() {
   else
     echo '{"error": "missing or invalid .thejob_uuid"}' | tee -a "${THEJOB_USER_STATE_FILE}" >&2
     return 1
+  fi
+
+  # one of the runs of a step that holds several (TwinExperiment, PR_perf.sh; ./.step_run: <run> <clients>): the state
+  # read by the end scripts shows its step as this run, with its own run number and clients, and its own end when it
+  # ended before the step (./.run_ended: its exit status; Done or Failed, as a step of its own would have)
+  if [ -r ./.step_run ]; then
+    local run clients ended='';
+    read -r run clients < ./.step_run;
+    [ -r ./.run_ended ] && ended=$( < ./.run_ended );
+    jq --arg u "${ref_experimentUUID}" --argjson a "${run}" --argjson c "${clients}" --arg ended "${ended}" \
+        '(.. | objects | select(has("uuid") and ((.uuid | tostring) == $u))) |= (.attempt_id = $a | .nb_cores = $c
+            | if $ended == "" then . else .state = (if $ended == "0" then "Done" else "Failed" end) end)' \
+        task.json > task.json.run && mv task.json.run task.json || return 1;
   fi
 
   local tlspuffin_outpath=$( ls experiments/ )
@@ -909,7 +922,8 @@ NotTargetedCVE() {
 RecordLoad() {
   local summary="$1";
   [ -s "${summary}" ] && [ -s ./.load_samples ] || return 0;
-  local load; load=$( awk 'NF >= 3 { n++; s += $2; if ($2 > m) m = $2; c = $3 } END { if (n) printf "{\"mean\":%.2f,\"max\":%.2f,\"cores\":%d,\"samples\":%d,\"cores_of\":\"machine\"}", s / n, m, c, n }' ./.load_samples );
+  # (LC_ALL=C: under a locale with a decimal comma, e.g. fr_FR with mawk, the numbers were written 2,50: no JSON)
+  local load; load=$( LC_ALL=C awk 'NF >= 3 { n++; s += $2; if ($2 > m) m = $2; c = $3 } END { if (n) printf "{\"mean\":%.2f,\"max\":%.2f,\"cores\":%d,\"samples\":%d,\"cores_of\":\"machine\"}", s / n, m, c, n }' ./.load_samples );
   [ -n "${load}" ] || return 0;
   jq --argjson load "${load}" '.load = $load' "${summary}" > "${summary}.tmp" 2> /dev/null && [ -s "${summary}.tmp" ] && mv "${summary}.tmp" "${summary}" || rm -f "${summary}.tmp";
   return 0;
@@ -1023,17 +1037,30 @@ FuzzerExcerpt() {
   done
 }
 
+# Major version of puffin-bench's measurements, per kind of job (TYPE of its flow), recorded with every result
+# (bench.major; results without it: 1). Raise the one of a kind with any change that makes its new results
+# incomparable with its older ones (how the runs are placed, built or measured), and say why here.
+#   perf  1: until 2026-11, 3 clients per run on 2 physical cores, one build per run.
+#         2: from 2026-11, two one-client runs per physical core (twin: 20 runs of each library on 10 physical cores),
+#            one build per library (PR_perf.sh TwinExperiment).
+#   vuln, campaign  1.
+declare -gA PB_MAJOR_VERSION=( [perf]=2 )
+
 # SummaryAddBench <summary.json>: the puffin-bench version that produced the results (version.json, written by
 # deploy.sh next to the board, beside the tools of the job), recorded in each library of the summary: the publisher
 # merges the results per library (the newest task of each), so a commit's results can come from several versions.
 # Shown by the Results page ("run on … · bench d10↗"). Leaves the summary as it is when anything is missing.
+# major: PB_MAJOR_VERSION above, of the job's TYPE; the graphs of Results color the commits whose results come from an
+# older one.
 SummaryAddBench() {
   local summary="$1" version="${THEJOB_TOOLS_PATH}/../html/board/version.json";
   [ -s "${summary}" ] && [ -r "${version}" ] || return 0;
   # bench: the deployed version (services, board); jobscripts: the commit of these job scripts (build.sh), which a
   # hot copy can change without a deploy
   jq --slurpfile v "${version}" --arg jc "${PB_JOBSCRIPTS_COMMIT:-}" --arg jd "${PB_JOBSCRIPTS_DATE:-}" --arg jdirty "${PB_JOBSCRIPTS_DIRTY:-}" \
+      --argjson major "${PB_MAJOR_VERSION[${TYPE:-none}]:-1}" \
       '($v[0] | {commit, branch, date, deployed, repository}
+        + { major: $major }
         + (if $jc != "" then { jobscripts: { commit: $jc, date: $jd, dirty: ($jdirty == "true") } } else {} end)) as $b
       | if (.libraries | type) == "object" then .libraries |= with_entries(.value.bench = $b) else . end' \
       "${summary}" > "${summary}.tmp" 2> /dev/null && [ -s "${summary}.tmp" ] && mv "${summary}.tmp" "${summary}" || rm -f "${summary}.tmp";
@@ -1207,9 +1234,12 @@ ExperimentReplayObjectives() {
   return 0;
 }
 
-# Saved by the experiment step before the launch, for ExperimentEnd: where the step writes its stderr (read by
-# ExperimentCrashStats: with LibAFL launchers that do not redirect the clients' stderr, their crash reports end up
-# there), and the start time and fuzzing cores of the run (read by ExperimentLogStats).
+# CargoAsanOptions <repository>: the ASAN_OPTIONS of the [env] of its .cargo/config.toml, which cargo run gives the
+# fuzzer when the variable is not set (empty: none)
+CargoAsanOptions() {
+  sed -n 's/^ *ASAN_OPTIONS *= *"\(.*\)".*/\1/p' "$1/.cargo/config.toml" 2> /dev/null | head -1;
+}
+
 # Record how the fuzzer is launched (.currentlaunch, sourced by the objective replays: ExperimentReplayObjectives
 # and tools/objectives_live.sh), for replays with exactly the same binary, options, prefixes and ASAN_OPTIONS:
 #   <binary> <fuzzer options> <via cargo: true|false>
@@ -1222,7 +1252,7 @@ ExperimentSaveExecution() {
   if [ -n "${ASAN_OPTIONS+x}" ]; then
     asanSet=true; asan="${ASAN_OPTIONS}";
   elif [ "${viaCargo}" == true ]; then
-    asan=$( sed -n 's/^ *ASAN_OPTIONS *= *"\(.*\)".*/\1/p' .cargo/config.toml 2> /dev/null | head -1 );
+    asan=$( CargoAsanOptions . );
     [ -n "${asan}" ] && asanSet=true;
   fi
   local sha='';
@@ -1238,6 +1268,9 @@ ExperimentSaveExecution() {
   } > .currentlaunch
 }
 
+# Saved by the experiment step before the launch, for ExperimentEnd: where the step writes its stderr (read by
+# ExperimentCrashStats: with LibAFL launchers that do not redirect the clients' stderr, their crash reports end up
+# there), and the start time and fuzzing cores of the run (read by ExperimentLogStats).
 ExperimentSaveLaunchInfo() {
   echo "${THEJOB_STDERR_PATH:-}" > ./.experiment_stderr_path
   echo "$( date +%s ) ${THEJOB_NB_CORES:-1}" > ./.experiment_launch
@@ -1343,6 +1376,31 @@ DetectVendorVulnerabilities() {
   jq -cn --arg k "${known}" --arg f "${fixed}" '($k | split(" ") | map(select(. != ""))) as $known
       | ($f | split(" ") | map(select(. != ""))) as $fixed
       | { known: $known, fixed: $fixed, declared: ($known - $fixed) }' 2> /dev/null || echo null;
+}
+
+# CpusInfo: the CPUs of the step as JSON, for the comparability of runs (Results): the CPUs given (THEJOB_CORES), the
+# other threads of their physical cores reserved and idle (THEJOB_CORES_IDLE), how they were chosen (THEJOB_SMT_MODE:
+# pairs, one, any; schedulers before 2026-10-09 give none: any), their NUMA nodes, and how many of the CPUs given have
+# a thread of their core outside the step (shared_twins: another run or another process may use it)
+CpusInfo() {
+  local cores="${THEJOB_CORES:-}" idle="${THEJOB_CORES_IDLE:-}" mode="${THEJOB_SMT_MODE:-any}";
+  local -A mine=(); local cpu nodes='' shared=0;
+  for cpu in ${cores//,/ } ${idle//,/ }; do mine[${cpu}]=1; done
+  for cpu in ${cores//,/ }; do
+    # its physical core: "3,23" or "0-1"
+    local part twin lo hi outside=0;
+    for part in $( tr ',' ' ' < /sys/devices/system/cpu/cpu${cpu}/topology/thread_siblings_list 2> /dev/null ); do
+      lo=${part%-*}; hi=${part#*-};
+      for (( twin = lo; twin <= hi; twin++ )); do
+        [ -n "${mine[${twin}]:-}" ] || outside=1;
+      done
+    done
+    shared=$(( shared + outside ));
+    nodes+=" $( ls -d /sys/devices/system/cpu/cpu${cpu}/node* 2> /dev/null | head -1 | sed 's/.*node//' )";
+  done
+  jq -cn --arg c "${cores}" --arg i "${idle}" --arg m "${mode}" --arg n "${nodes}" --argjson s "${shared}" \
+      '{ cores: ($c | split(",") | map(select(. != "") | tonumber)), idle: ($i | split(",") | map(select(. != "") | tonumber)),
+         smt: $m, nodes: ($n | split(" ") | map(select(. != "") | tonumber) | unique), shared_twins: $s }' 2> /dev/null || echo null;
 }
 
 ExperimentEndCommon() {

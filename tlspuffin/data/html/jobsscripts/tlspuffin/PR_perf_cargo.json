@@ -45,34 +45,45 @@
   "flow" : [
     {
       "step": "Init"
-    }, 
+    },
     [
       {
         "run": [ ],
         "configuration": {
-          "nb_retry": 5,
-          "nb_cores": 3
+          "nb_retry": 1,
+          "nb_cores": 8
+        }
+      },
+      {
+        "step": "BuildOnce"
+      }
+    ],
+    [
+      {
+        "run": [ ],
+        "configuration": {
+          "nb_retry": 10,
+          "nb_cores": 2
         },
         "streams": [
-          { "name": "error", "path": "current_log/error.log" }
+          { "name": "error", "path": "twin0/current_log/error.log" },
+          { "name": "error (second run)", "path": "twin1/current_log/error.log" }
         ]
       },
       {
-        "step": "ForcedBuild"
-      },
-      {
-        "step": "ExperimentWithCargo",
+        "step": "TwinExperiment",
         "configuration": {
-          "timeout": "70m"
+          "timeout": "70m",
+          "args": { "SMT_MODE": "pairs" }
         },
         "monitor": {
-          "entry_point": "MonitorExperiment",
+          "entry_point": "TwinExperimentMonitor",
           "delay_start": "10s",
           "interval": "60s"
         }
       },
       {
-        "step": "ExperimentEnd"
+        "step": "TwinExperimentEnd"
       }
     ],
     {
@@ -83,4 +94,3 @@
     }
   ]
 }
-

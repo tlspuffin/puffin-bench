@@ -59,7 +59,8 @@ function Phi(z) { // normal CDF (Abramowitz-Stegun 7.1.26)
 
 function Version(task) {
   const js = task.jobscripts;
-  const deployed = task.bench?.commit ? ` · deployed ${task.bench.commit.slice(0, 7)}` : '';
+  const deployed = (task.bench?.commit ? ` · deployed ${task.bench.commit.slice(0, 7)}` : '')
+      + ` · major version ${task.bench?.major ?? 1}`;
   if (js?.commit) {
     const how = js.from === 'md5' ? 'its job script matched to this commit (md5)' : 'recorded by the run';
     return `<a class="mono" href="${REPO}/commit/${esc(js.commit)}" target="_blank" rel="noopener" title="job scripts ${esc(js.commit)} (${esc(how)})${esc(deployed)}">${esc(js.commit.slice(0, 7))}</a>`
@@ -78,6 +79,9 @@ function SettingChanges(a, b) {
   if (JSON.stringify(s1.cores) !== JSON.stringify(s2.cores)) out.push(`cores ${(s1.cores ?? []).join(',')} → ${(s2.cores ?? []).join(',')}`);
   if ((s1.compat ?? '') !== (s2.compat ?? '')) out.push(`compat rules “${esc(s1.compat || 'none')}” → “${esc(s2.compat || 'none')}”`);
   if ((s1.libafl ?? '') !== (s2.libafl ?? '')) out.push(`LibAFL ${esc(s1.libafl || '?')} → ${esc(s2.libafl || '?')}`);
+  // the major version of puffin-bench's measurements (tasks without it: 1): two of them don't compare
+  const major = (t) => t.bench?.major ?? 1;
+  if (major(a) !== major(b)) out.push(`puffin-bench major version ${major(a)} → ${major(b)} (not comparable)`);
   return out;
 }
 

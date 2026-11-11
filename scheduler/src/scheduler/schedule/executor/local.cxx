@@ -49,6 +49,23 @@ static bool WriteCGroup(std::string const& filename, T const& value, bool inMain
   return false;
 }
 
+// "3,4,17": CPUs as the steps get them (THEJOB_CORES) and as systemctl takes them (AllowedCPUs)
+static std::string CpuList(std::vector<uint64_t> const& cpus) {
+  std::string list;
+  for (uint64_t cpu : cpus) {
+    list += (list.empty() ? "" : ",") + std::to_string(cpu);
+  }
+  return list;
+}
+
+// restricts the processes of a systemd slice to those CPUs (its sudo rule: scheduler configuration doc); false when
+// refused
+static bool SetSliceCpus(std::string const& slice, std::string const& cpus) {
+  std::string const cmd = "sudo -n systemctl set-property " + slice + " AllowedCPUs=" + cpus + " 2>/dev/null";
+  LOGD << cmd << Log::Flags::End;
+  return std::system(cmd.c_str()) == 0;
+}
+
 ns_Executor::LocalTaskData::LocalTaskData() : cgroupPath_(), 
     os_memory_load_(-1), os_cores_load_(-1), 
     os_memory_max_load_(-1), os_cores_max_load_(-1), run_path_(), flag_file_()
@@ -115,6 +132,17 @@ ns_Executor::LocalData::LocalData(rapidjson::Value const& config)
     }
     cores_.push_back(coresArray[i].GetUint64());
   }
+  // (records of earlier versions have neither: logical CPUs, nothing idle)
+  if (config.HasMember("idle_cores") && config["idle_cores"].IsArray()) {
+    for (auto const& core : config["idle_cores"].GetArray()) {
+      if (core.IsUint64()) {
+        idle_cores_.push_back(core.GetUint64());
+      }
+    }
+  }
+  if (config.HasMember("smt_mode") && config["smt_mode"].IsString()) {
+    smt_mode_ = config["smt_mode"].GetString();
+  }
   run_path_ = Get<std::string>(config, "run_path");
   pid_ = Get<uint64_t>(config, "pid");
 
@@ -157,6 +185,12 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
     cores.PushBack(core, alloc);
   }
   out.AddMember("cores", cores, alloc);
+  rapidjson::Value idle(rapidjson::kArrayType);
+  for (auto core : idle_cores_) {
+    idle.PushBack(core, alloc);
+  }
+  out.AddMember("idle_cores", idle, alloc);
+  out.AddMember("smt_mode", rapidjson::Value(smt_mode_.c_str(), alloc), alloc);
   out.AddMember("run_path", rapidjson::Value(run_path_.c_str(), alloc), alloc);
   out.AddMember("pid", static_cast<uint64_t>(pid_), alloc);
 
@@ -188,7 +222,7 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
     : Executor(name), config_(config), os_(os), nbCoresUsed_(0), 
       nbCoresMax_(config_.nbCores_), coresFree_(config_.cores_), nbChild_(0), 
       serverPort_(serverPort), cgroupRoot_(config.cgroupPath_), 
-      cgroupRootCapabilities_(0), cgroupDisableUpdateSliceUser_(false), 
+      cgroupRootCapabilities_(0),
       cpuMaxLoad_(config_.cpuMaxLoad_), memMinAllowed_(0)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
@@ -201,21 +235,38 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
   cgroupRootCapabilities_ = DetectCGroupSupport(cgroupRoot_, cgroupRootCapabilitiesString_);
   LOGI << "CGroup are " << (cgroupRoot_.empty() ? "des" : "") << "activated" << Log::Flags::End;
 
-  cgroupDisableUpdateSliceUser_ = (!(cgroupRootCapabilities_ & 2)) ||
-      (cgroupRoot_.string().find("/user.slice/") != std::string::npos);
-  if (!cgroupDisableUpdateSliceUser_) {
-    std::string allCores;
-    for (size_t i = 0; i < coresFree_.size(); ++i) {
-      if (!allCores.empty()) allCores += ',';
-      allCores += std::to_string(i);
-    }
-    std::string cmd = "sudo -n systemctl set-property user.slice AllowedCPUs=" 
-        + allCores + " 2>/dev/null";
-    cgroupDisableUpdateSliceUser_ = std::system(cmd.c_str()) != 0;
-    if (cgroupDisableUpdateSliceUser_) {
-      LOGW <<"sudo systemctl set-property user.slice not available, CPU reservation disabled" << Log::Flags::End;
-    } else {
-      LOGI << "user.slice CPU reservation enabled" << Log::Flags::End;
+  // the layout of the CPUs, for the choice of whole physical cores (smt)
+  topology_ = ns_System::CpuTopology::Read(config_.cores_.size());
+  if (!ns_System::ParseSmtMode(config_.smt_, smtMode_)) {
+    smtMode_ = ns_System::SmtMode::Pairs;
+  }
+  LOGI << "CPUs: " << static_cast<uint64_t>(topology_.coreCpus_.size()) << " physical cores of up to " <<
+      topology_.ThreadsPerCore() << " threads; steps get " << ns_System::SmtModeName(smtMode_) <<
+      " (smt) unless their task asks otherwise (SMT_MODE)" << Log::Flags::End;
+
+  // The CPUs of the steps are kept from the other processes of the machine: users (user.slice), services and their
+  // containers (system.slice: e.g. Docker's), virtual machines and containers of systemd-machined (machine.slice), by
+  // restricting those slices to the CPUs no step holds (sudo systemctl set-property, see UpdateSlicesCpuset). A slice
+  // the scheduler runs in is left alone, as is one whose update is refused (no sudo rule for it).
+  // At start every slice gets all the CPUs back.
+  if (cgroupRootCapabilities_ & 2) {
+    std::string const allCpus = "0-" + std::to_string(coresFree_.size() - 1);
+    for (std::string const slice : { "user.slice", "system.slice", "machine.slice" }) {
+      if (cgroupRoot_.string().find("/" + slice + "/") != std::string::npos) {
+        LOGI << slice << ": the scheduler runs in it, CPU reservation not applied to it" << Log::Flags::End;
+        continue;
+      }
+      std::error_code ec;
+      if ((slice != "user.slice") && !std::filesystem::exists("/sys/fs/cgroup/" + slice, ec)) {
+        continue;
+      }
+      if (SetSliceCpus(slice, allCpus)) {
+        slicesRestricted_.push_back(slice);
+        LOGI << slice << " CPU reservation enabled" << Log::Flags::End;
+      } else {
+        LOGW << "sudo systemctl set-property " << slice << " not available: its processes may run on the CPUs of the "
+             << "steps (a sudo rule for it enables the reservation)" << Log::Flags::End;
+      }
     }
   }
 
@@ -250,7 +301,7 @@ ns_Executor::Local::~Local() {
 
  bool ns_Executor::Local::CanRun(ns_Schedule::Step* step) const {
   // what the executor can run at all: a temporary maximum only delays a step
-  return step->nb_cores_ <= std::max(nbCoresDefault_, nbCoresMax_);
+  return CpusConsumed(*step) <= std::max(nbCoresDefault_, nbCoresMax_);
 }
 
 bool ns_Executor::Local::SetMaxCores(uint64_t maxCores, uint64_t durationSec, std::string& error) {
@@ -368,6 +419,11 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
 
   uint64_t freeMemory = stats_.freeMemory;
   uint64_t nbCoresFree = FreeCores();
+  std::vector<bool> freeMap;
+  {
+    std::lock_guard<std::mutex> lock(coresLock_);
+    freeMap = coresFree_;
+  }
 
   if (stats_.cores > cpuMaxLoad_) {
   //if ((!(cgroupRootCapabilities_ & 2)) && (stats_.cores > cpuMaxLoad_)) {
@@ -399,10 +455,31 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
       priority = curPriority;
     }
 
-    uint64_t nbCoresRequired = step->nb_cores_;
+    // the CPUs it consumes (with the idle threads of its physical cores), and whether they can be found: the
+    // allocations of the steps accepted before it are played on a copy of the free CPUs
+    ns_System::SmtMode const mode = StepSmtMode(*step);
+    uint64_t nbCoresRequired = ns_System::CpusConsumed(topology_, step->nb_cores_, mode);
     uint64_t memoryRequired = step->memory_max_;
-    if ((!step->IsReady()) || (nbCoresRequired > nbCoresFree) || 
-        ((memoryRequired > 0) && (memoryRequired > freeMemory))) {
+    bool placed = step->IsReady() && (nbCoresRequired <= nbCoresFree) &&
+        !((memoryRequired > 0) && (memoryRequired > freeMemory));
+    if (placed) {
+      if (mode != ns_System::SmtMode::Any) {
+        ns_System::CpuAllocation allocation;
+        placed = ns_System::AllocatePhysicalCores(topology_, freeMap, step->nb_cores_, mode, allocation);
+        for (uint64_t core : allocation.cpus_) freeMap[core] = false;
+        for (uint64_t core : allocation.idle_) freeMap[core] = false;
+      } else {
+        uint64_t marked = 0;
+        for (size_t i = 0; (i < freeMap.size()) && (marked < step->nb_cores_); ++i) {
+          if (freeMap[i]) {
+            freeMap[i] = false;
+            ++marked;
+          }
+        }
+        placed = (marked == step->nb_cores_);
+      }
+    }
+    if (!placed) {
       stepSkiped |= step->IsPending();
       continue;
     }
@@ -451,7 +528,7 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       continue;
     }
     if (step->IsPending()) {
-      if (step->nb_cores_ > nbCoresMax_) {
+      if (CpusConsumed(*step) > nbCoresMax_) {
         for(auto step : steps) {
           if (step->task_->executor_ != this) {
             continue;
@@ -470,7 +547,10 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       }
     } else {
       if (step->IsRunning()) {
-        if (step->nb_cores_ > freeCores) {
+        // what it holds: its given and idle CPUs
+        LocalData const* held = dynamic_cast<LocalData const*>(step->executor_data_);
+        uint64_t const consumed = held ? held->cores_.size() + held->idle_cores_.size() : CpusConsumed(*step);
+        if (consumed > freeCores) {
           for(auto step : steps) {
             if (step->task_->executor_ != this) {
               continue;
@@ -488,10 +568,10 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
           step->task_->estimatedEndTime_ = endTime;
         }
         cores[freeCores-1] = endTime;
-        for(uint64_t i=1; i<step->nb_cores_; ++i) {
+        for(uint64_t i=1; i<consumed; ++i) {
           cores[(freeCores-1)-i] = endTime;
         }
-        freeCores -= step->nb_cores_;
+        freeCores -= consumed;
       }
 
       for(ns_Schedule::Step* child: step->dependencies_) {
@@ -584,7 +664,8 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
     for (ns_Schedule::Step* parent : step.depend_from_) {
       notStartBefore = std::max(notStartBefore, EstimatedFinishTime(parent));
     }
-    if ((step.nb_cores_ <= freeCores) && (minTime >= notStartBefore)) {
+    uint64_t const consumed = CpusConsumed(step);
+    if ((consumed <= freeCores) && (minTime >= notStartBefore)) {
       step.estimatedStartTime_ = minTime;
       uint64_t const stepDuration = ns_Schedule::DurationHistory::Instance().Estimate(step);
       // the task ends with its last steps: their estimated end, not their start
@@ -619,10 +700,10 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       }
 
       uint64_t endTime = minTime + stepDuration;
-      for(uint64_t i=0; i<step.nb_cores_; ++i) {
+      for(uint64_t i=0; i<consumed; ++i) {
         cores[indexFreeCores[(freeCores - 1) - i]] = endTime;
       }
-      freeCores -= step.nb_cores_;
+      freeCores -= consumed;
       if (freeCores == 0) {
         if (!advance()) {
           return;
@@ -744,7 +825,13 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
     localData->cgroup_path_ = cgroupRoot_ / std::to_string(step.TaskID()) / step.ID();
   }
 
-  localData->cores_ = AssignCores(step.nb_cores_);
+  {
+    ns_System::SmtMode mode = StepSmtMode(step);
+    ns_System::CpuAllocation const allocation = AssignCores(step, mode);
+    localData->cores_ = allocation.cpus_;
+    localData->idle_cores_ = allocation.idle_;
+    localData->smt_mode_ = ns_System::SmtModeName(mode);
+  }
 
   pid_t pid = fork();
   if (pid == 0) {
@@ -755,11 +842,9 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
       umask(0022);
 #endif
 
-      std::string cores;
-      for(uint64_t core: localData->cores_) {
-        cores += std::to_string(core) + ',';
-      }
-      cores.pop_back();
+      std::string const cores = CpuList(localData->cores_);
+      // the other threads of its physical cores, reserved and idle (smt pairs, one)
+      std::string const idleCores = CpuList(localData->idle_cores_);
 
       if (!cgroupRoot_.empty()) {
         std::filesystem::create_directories(localData->cgroup_path_);
@@ -828,6 +913,8 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
           << "THEJOB_STEP_ATTEMPT_ID=" << step.attempt_id_ << "\n"
           << "THEJOB_RUN_ID=" << step.run_id_ << "\n"
           << "THEJOB_CORES=\"" << cores << "\"\n"
+          << "THEJOB_CORES_IDLE=\"" << idleCores << "\"\n"
+          << "THEJOB_SMT_MODE=\"" << localData->smt_mode_ << "\"\n"
           << "THEJOB_ENTRYPOINT=\"" << step.function_ << "\"\n"
           << "THEJOB_PARAMETERS_PATH=\"" << localData->step_parameters_file_ << "\"\n"
           << "THEJOB_STDOUT_PATH=\"" << step.stdout_ << "\"\n"
@@ -897,6 +984,7 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   if (pid == -1) {
     int errnoSaved = errno;
     ReleaseCores(localData->cores_);
+    ReleaseCores(localData->idle_cores_);
     throw std::runtime_error("Local Executor failed to fork " + 
         std::to_string(step.step_id_) + " : " + std::strerror(errnoSaved));
   }
@@ -1047,6 +1135,7 @@ void ns_Executor::Local::CheckReloadRunning(ns_Schedule::Step& step) {
       LOGD << "Step " << step.ID() << " process still running, re-reserving " << 
           localData->cores_.size() << " cores" << Log::Flags::End;
       ReAssignCores(localData->cores_);
+      ReAssignCores(localData->idle_cores_);
       ++nbChild_;
       return;
     }
@@ -1246,6 +1335,15 @@ void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAll
   root.AddMember("nb_cores_until", temporary ? nbCoresUntilMs_ : 0, alloc);
   root.AddMember("nb_cores_used", nbCoresUsed_, alloc);
   root.AddMember("nb_cores_limit", nbCoresLimit_, alloc);
+  // how the CPUs of the steps are chosen (smt), the cores of the machine, and the slices kept off the steps' CPUs
+  root.AddMember("smt", rapidjson::Value(ns_System::SmtModeName(smtMode_).c_str(), alloc), alloc);
+  root.AddMember("threads_per_core", topology_.ThreadsPerCore(), alloc);
+  root.AddMember("physical_cores", static_cast<uint64_t>(topology_.coreCpus_.size()), alloc);
+  rapidjson::Value slices(rapidjson::kArrayType);
+  for (auto const& slice : slicesRestricted_) {
+    slices.PushBack(rapidjson::Value(slice.c_str(), alloc), alloc);
+  }
+  root.AddMember("slices_restricted", slices, alloc);
   // free disk needed to start a step (bytes), and whether new steps wait for it
   root.AddMember("disk_minimum", config_.diskMinimumGB_ * 1024 * 1024 * 1024, alloc);
   root.AddMember("disk_blocked", diskBlocked_, alloc);
@@ -1491,6 +1589,7 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
 
   if (releaseCores) {
     ReleaseCores(localData->cores_);
+    ReleaseCores(localData->idle_cores_);
   }
 
   std::error_code ec;
@@ -1507,33 +1606,78 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
   std::filesystem::remove(localData->fatalerror_file_, ec);
 }
 
-std::vector<uint64_t> ns_Executor::Local::AssignCores(uint64_t nbCores) {
-  std::lock_guard<std::mutex> lock(coresLock_);
-  std::vector<uint64_t> result;
-  if (config_.nbCores_ == 0) {
-    for (size_t i=0; i<coresFree_.size(); ++i) {
-      if (coresFree_[i]) {
-        coresFree_[i] = false;
-        result.push_back(i);
-        if (--nbCores == 0) {
-          break;
-        };
-      }
+ns_System::SmtMode ns_Executor::Local::StepSmtMode(ns_Schedule::Step const& step) const {
+  ns_System::SmtMode mode = smtMode_;
+  // the step's own (its job's flow, configuration args: a job whose runs need a mode), else its task's (launch)
+  auto asked = [&mode](std::unordered_map<std::string, std::string> const& args) {
+    auto it = args.find("SMT_MODE");
+    ns_System::SmtMode parsed;
+    if ((it != args.end()) && ns_System::ParseSmtMode(it->second, parsed)) {
+      mode = parsed;
+      return true;
     }
-  } else {
-    result = os_.Cores().SelectMostIdleCores(nbCores, &coresFree_);
-    for (size_t i=0; i<result.size(); ++i) {
-      coresFree_[result[i]] = false;
+    return false;
+  };
+  if (!asked(step.args_) && (step.task_ != nullptr)) {
+    asked(step.task_->args_);
+  }
+  // a pool without enough whole physical cores for the step (e.g. only the second threads of cores): logical CPUs
+  if ((mode != ns_System::SmtMode::Any) && !PoolCanPlace(mode, step.nb_cores_)) {
+    mode = ns_System::SmtMode::Any;
+  }
+  return mode;
+}
+
+bool ns_Executor::Local::PoolCanPlace(ns_System::SmtMode mode, uint64_t nbCpus) const {
+  ns_System::CpuAllocation allocation;
+  return ns_System::AllocatePhysicalCores(topology_, config_.cores_, nbCpus, mode, allocation);
+}
+
+uint64_t ns_Executor::Local::CpusConsumed(ns_Schedule::Step const& step) const {
+  return ns_System::CpusConsumed(topology_, step.nb_cores_, StepSmtMode(step));
+}
+
+ns_System::CpuAllocation ns_Executor::Local::AssignCores(ns_Schedule::Step const& step, ns_System::SmtMode& mode) {
+  std::lock_guard<std::mutex> lock(coresLock_);
+  ns_System::CpuAllocation result;
+  uint64_t nbCores = step.nb_cores_;
+  if (mode != ns_System::SmtMode::Any) {
+    if (!ns_System::AllocatePhysicalCores(topology_, coresFree_, nbCores, mode, result)) {
+      // checked by FindRunnableSteps: not reached, unless the cores changed in between; logical CPUs then
+      LOGW << "Step " << step.ID() << ": no " << nbCores << " CPUs on whole physical cores (" <<
+          ns_System::SmtModeName(mode) << "), logical CPUs instead" << Log::Flags::End;
+      result = ns_System::CpuAllocation();
+      mode = ns_System::SmtMode::Any;
     }
   }
-  nbCoresUsed_ += result.size();
+  if (mode == ns_System::SmtMode::Any) {
+    if (config_.nbCores_ == 0) {
+      for (size_t i=0; i<coresFree_.size(); ++i) {
+        if (coresFree_[i]) {
+          result.cpus_.push_back(i);
+          if (--nbCores == 0) {
+            break;
+          };
+        }
+      }
+    } else {
+      result.cpus_ = os_.Cores().SelectMostIdleCores(nbCores, &coresFree_);
+    }
+  }
+  for (uint64_t core : result.cpus_) {
+    coresFree_[core] = false;
+  }
+  for (uint64_t core : result.idle_) {
+    coresFree_[core] = false;
+  }
+  nbCoresUsed_ += result.cpus_.size() + result.idle_.size();
 
-  UpdateUserSliceCpuset();
+  UpdateSlicesCpuset();
 
   return result;
 }
 
-void ns_Executor::Local::ReAssignCores(std::vector<uint64_t>& cores) {
+void ns_Executor::Local::ReAssignCores(std::vector<uint64_t> const& cores) {
   std::lock_guard<std::mutex> lock(coresLock_);
   uint64_t nbCores = 0;
   for (uint64_t core: cores) {
@@ -1545,40 +1689,40 @@ void ns_Executor::Local::ReAssignCores(std::vector<uint64_t>& cores) {
 
   nbCoresUsed_ += nbCores;
 
-  UpdateUserSliceCpuset();
+  UpdateSlicesCpuset();
 }
 
-inline void ns_Executor::Local::ReleaseCores(std::vector<uint64_t>& cores) {
+void ns_Executor::Local::ReleaseCores(std::vector<uint64_t> const& cores) {
   std::lock_guard<std::mutex> lock(coresLock_);
   for(uint64_t core: cores) {
-    coresFree_[core] = true;
+    if (core < coresFree_.size()) {
+      coresFree_[core] = true;
+    }
   }
   nbCoresUsed_ = nbCoresUsed_ > cores.size() ? nbCoresUsed_ - cores.size() : 0;
 
-  UpdateUserSliceCpuset();
+  UpdateSlicesCpuset();
 }
 
-void ns_Executor::Local::UpdateUserSliceCpuset() {
-  if (cgroupDisableUpdateSliceUser_) {
+void ns_Executor::Local::UpdateSlicesCpuset() {
+  if (slicesRestricted_.empty()) {
     return;
   }
-
-  std::string cpuList;
+  // the CPUs no step holds: free ones and those outside the executor's (given and idle CPUs of the steps excluded)
+  std::vector<uint64_t> cpus;
   for (size_t i=0; i<coresFree_.size(); ++i) {
     if (coresFree_[i] || !config_.cores_[i]) {
-      if (!cpuList.empty()) {
-        cpuList += ',';
-      }
-      cpuList += std::to_string(i);
+      cpus.push_back(i);
     }
   }
-  if (cpuList.empty()) {
+  if (cpus.empty()) {
     return;
   }
-  std::string cmd = "sudo -n systemctl set-property user.slice AllowedCPUs=" + cpuList + " 2>/dev/null";
-  LOGD << cmd << Log::Flags::End;;
-  if (std::system(cmd.c_str()) != 0) {
-    LOGE << "Failed to update user.slice AllowedCPUs to " << cpuList << Log::Flags::End;;
+  std::string const cpuList = CpuList(cpus);
+  for (auto const& slice : slicesRestricted_) {
+    if (!SetSliceCpus(slice, cpuList)) {
+      LOGE << "Failed to update " << slice << " AllowedCPUs to " << cpuList << Log::Flags::End;
+    }
   }
 }
 
