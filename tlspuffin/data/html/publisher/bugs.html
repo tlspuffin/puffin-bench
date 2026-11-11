@@ -4,7 +4,27 @@
 <body><div id="bugsref"><p style="padding:20px">Loading…</p></div>
 <template id="help-panel">
   <h2>Bugs reference</h2>
-  <p>What the pages use to call a bug <b>🎯 expected</b>, <b>⦸ set apart</b>, <b>⚠ unexpected</b> or <b>🚨 new</b>. The first two come from one file to edit, the last from the reports themselves.</p>
+  <p>Everything the bench knows about bugs, from top to bottom:</p>
+  <ul>
+    <li><b>📚 Known vulnerabilities</b>: tlspuffin's catalogue (<code>puffin-build/vendors/&lt;library&gt;/vulnerabilities.toml</code>),
+      dev's by default; <b>⟳ Reload from the latest dev</b> (or the 🔄 of the top bar) has git_restapi fetch tlspuffin first;
+      <code>?commit=&lt;sha&gt;</code> shows another commit's (e.g. a PR adding a bug). One row per bug: versions affected,
+      patches, witness, oracle. A bug opens its card at the end of the page.</li>
+    <li><b>The file to edit</b>: <code>vuln_targets.json</code> of puffin-bench (the expected bug of each Vuln group A
+      configuration, the claims set apart), and where its older table of CVEs differs from the catalogue.</li>
+    <li><b>🎯 Vuln group A and B</b>: each configuration as deployed: its vendor, expected bug, what ends it, its build,
+      and whether that build is every patch of its version but its bug's, checked against the catalogue shown.</li>
+    <li><b>⦸ Known CVEs set apart</b>: claims of a known bug that do not end an experiment on the versions it affects,
+      each checked against its catalogue entry.</li>
+    <li><b>🚨 Bugs found so far</b>: one row per bug (its claim, or the top function of its crash, in a library) of every
+      final objectives report: what it is (🎯 expected, ⦸ set apart, 📚 a bug of the catalogue) or 🚨 not a known bug
+      (first), and every configuration that found it.</li>
+    <li><b>📖 Every bug in full</b> (folded): one card per bug with every field of its entry, its patches and their upstream
+      fix, its CVSS vector, its TOML text with its comments. A link <code>#&lt;ID&gt;</code> (the tables above, the address)
+      unfolds it.</li>
+  </ul>
+  <p>The pages call a bug <b>🎯 expected</b>, <b>⦸ set apart</b>, <b>⚠ unexpected</b> or <b>🚨 new</b>; the validation of
+    the objectives (✔ confirmed…) is explained in the guide of the bench (tab “puffin-bench guide”).</p>
   <p>Press <b>?</b> to toggle this panel.</p>
 </template>
 <script type="module" src="bugs.js"></script></body></html>
