@@ -60,7 +60,7 @@ export const PackageOf = (task) => packages.get(String(task?.id)) ?? null;
 const LinksOf = (task) => links[task?.id] ?? [];
 
 // objectives of VulnA/VulnB tasks are their expected outcome: their button is plain, not gold
-const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b'].includes(task.type);
+const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b', 'vuln-custom'].includes(task.type);
 
 export const history = {
   async load(tasks) {
