@@ -169,7 +169,8 @@ scheduling round).
 **Physical cores.** At start the executor reads the layout of the CPUs (`ns_System::CpuTopology`, sysfs: the
 threads of each physical core, `topology/thread_siblings_list`, and the NUMA node of each CPU). With hardware threads
 (SMT) a fuzzer client runs slower when the other thread of its physical core is busy (measured on cassis: ~22 %
-fewer execs/s for wolfSSL), so the mode of a step (`StepSmtMode()`: the task argument `SMT_MODE`, else the
+fewer execs/s for wolfSSL), so the mode of a step (`StepSmtMode()`: the argument `SMT_MODE` of the step, from its
+configuration args in the job's flow, for a job whose runs need a mode; else the task argument `SMT_MODE`; else the
 configuration's `smt`) decides how its CPUs are chosen:
 - `pairs` (default): whole physical cores, all their threads to the step, until it has its CPUs; the thread left by an
   odd number of CPUs is reserved and idle. A 3-CPU step consumes 4 CPUs.

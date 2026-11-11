@@ -1608,12 +1608,18 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
 
 ns_System::SmtMode ns_Executor::Local::StepSmtMode(ns_Schedule::Step const& step) const {
   ns_System::SmtMode mode = smtMode_;
-  if (step.task_ != nullptr) {
-    auto it = step.task_->args_.find("SMT_MODE");
-    ns_System::SmtMode asked;
-    if ((it != step.task_->args_.end()) && ns_System::ParseSmtMode(it->second, asked)) {
-      mode = asked;
+  // the step's own (its job's flow, configuration args: a job whose runs need a mode), else its task's (launch)
+  auto asked = [&mode](std::unordered_map<std::string, std::string> const& args) {
+    auto it = args.find("SMT_MODE");
+    ns_System::SmtMode parsed;
+    if ((it != args.end()) && ns_System::ParseSmtMode(it->second, parsed)) {
+      mode = parsed;
+      return true;
     }
+    return false;
+  };
+  if (!asked(step.args_) && (step.task_ != nullptr)) {
+    asked(step.task_->args_);
   }
   // a pool without enough whole physical cores for the step (e.g. only the second threads of cores): logical CPUs
   if ((mode != ns_System::SmtMode::Any) && !PoolCanPlace(mode, step.nb_cores_)) {

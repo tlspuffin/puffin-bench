@@ -157,8 +157,9 @@ private:
   // the layout of the CPUs (physical cores, NUMA nodes) and the mode of the configuration (smt: pairs by default)
   ns_System::CpuTopology topology_;
   ns_System::SmtMode smtMode_ = ns_System::SmtMode::Pairs;
-  // the mode of a step: its task argument SMT_MODE (pairs, one, any), else the configuration's; a mode the pool can
-  // never satisfy (not enough whole physical cores in it, e.g. a pool of the second threads of cores) falls back to any
+  // the mode of a step: SMT_MODE (pairs, one, any) of the step (its job's flow) or of its task, else the
+  // configuration's; a mode the pool can never satisfy (not enough whole physical cores in it, e.g. a pool of the
+  // second threads of cores) falls back to any
   ns_System::SmtMode StepSmtMode(ns_Schedule::Step const& step) const;
   // the CPUs a step consumes (given and idle): what it counts against the maximum of cores
   uint64_t CpusConsumed(ns_Schedule::Step const& step) const;
