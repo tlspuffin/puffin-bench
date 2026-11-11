@@ -922,7 +922,8 @@ NotTargetedCVE() {
 RecordLoad() {
   local summary="$1";
   [ -s "${summary}" ] && [ -s ./.load_samples ] || return 0;
-  local load; load=$( awk 'NF >= 3 { n++; s += $2; if ($2 > m) m = $2; c = $3 } END { if (n) printf "{\"mean\":%.2f,\"max\":%.2f,\"cores\":%d,\"samples\":%d,\"cores_of\":\"machine\"}", s / n, m, c, n }' ./.load_samples );
+  # (LC_ALL=C: under a locale with a decimal comma, e.g. fr_FR with mawk, the numbers were written 2,50: no JSON)
+  local load; load=$( LC_ALL=C awk 'NF >= 3 { n++; s += $2; if ($2 > m) m = $2; c = $3 } END { if (n) printf "{\"mean\":%.2f,\"max\":%.2f,\"cores\":%d,\"samples\":%d,\"cores_of\":\"machine\"}", s / n, m, c, n }' ./.load_samples );
   [ -n "${load}" ] || return 0;
   jq --argjson load "${load}" '.load = $load' "${summary}" > "${summary}.tmp" 2> /dev/null && [ -s "${summary}.tmp" ] && mv "${summary}.tmp" "${summary}" || rm -f "${summary}.tmp";
   return 0;
