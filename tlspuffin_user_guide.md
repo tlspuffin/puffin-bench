@@ -366,6 +366,13 @@ failed". The verdicts show in the 🐞 panel of Results. To add a known bug: an 
 tlspuffin (see its puffin-build/README.md); the bench reads dev's catalogue, or the commit's with
 `VALIDATION_CATALOGUE=commit`.
 
+The **Bugs reference** page shows dev's catalogue; while dev has none, that of the open pull request updated last that
+has one (said so at the top), and `?commit=<sha>` any commit's. Its overview gives each bug as the launcher's custom
+benchmarks do: the presets of the catalogue's commit it can run on (the first: the one the launcher picks), the bench's
+time to find it (Vuln group A/B, `runs/bench_times.json`), how a find is confirmed (its patch, its signature only, the
+fuzzer's record) and the bugs with the same oracle; filters by library, category, ★ first found by puffin, bugs without
+witness. Every field of a bug: its card at the end of the page.
+
 ## Custom Vuln benchmarks
 
 The launcher's **Vuln — custom** job builds a benchmark from tlspuffin's vulnerability catalogue (the bugs of

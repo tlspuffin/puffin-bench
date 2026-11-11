@@ -22,6 +22,10 @@ echo '{ "type": "module" }' > "${work}/package.json"
 "${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${commit}" > "${work}/catalogue.json"
 "${bench}/git_restapi/scripts/tlspuffin_presets.sh" "${clone}" "${commit}" > "${work}/presets.json"
 command cp -f "${bench}/tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json" "${work}/vuln_targets.json"
+# the bench's times to find (runs/bench_times.json), for the mode "times"
+cat > "${work}/bench_times.json" <<'JSON'
+{ "source": "Vuln group A and B (test)", "bugs": { "BUF": { "median_s": 1013, "found": 5, "runs": 5, "commit": "edbdb8e7d", "date": "2026-09-15", "task": 1, "job": "vuln-a", "cores": 4, "budget_s": 4200 } } }
+JSON
 # the job configurations of Vuln group A and B the page reads (run.mjs serves them from there)
 export JOBS_DIR="${bench}/tlspuffin/data/html/jobsscripts/tlspuffin"
 # a registry of the bugs found so far (known_bugs.json): the same crash in two configurations of wolfSSL (HEAP of the
@@ -44,6 +48,21 @@ globalThis.window = { location: { hostname: 'localhost', search: mode === 'commi
 globalThis.document = { getElementById: () => ({ set innerHTML(v) { html = v; } }) };
 const json = file => ({ ok: true, json: async () => JSON.parse(readFileSync(file, 'utf8')) });
 globalThis.fetch = async url => {
+  url = String(url);
+  // dev without catalogue: the open pull requests of git_restapi's history, the one updated last first (none-pr)
+  const OPEN_NEW = '1'.repeat(40), OPEN_OLD = '2'.repeat(40), CLOSED = '3'.repeat(40);
+  if (url.includes('/api/git/history/')) {
+    if (mode !== 'none-pr') return { ok: false };
+    return { ok: true, json: async () => ({ PR: [
+      { number: 500, state: 'closed', branch: 'pr/closed', id: CLOSED, updated_at: '2026-11-11T00:00:00Z' },
+      { number: 562, state: 'open', branch: 'pr/no-catalogue', id: OPEN_NEW, updated_at: '2026-11-10T13:00:00Z' },
+      { number: 563, state: 'open', branch: 'pr/vuln-catalogue', id: OPEN_OLD, updated_at: '2026-11-10T12:00:00Z' } ] }) };
+  }
+  if (url.endsWith('bench_times.json')) return mode === 'times' ? json(`${work}/bench_times.json`) : { ok: false };
+  if (mode === 'none-pr' && url.includes('/api/git/catalogue/')) {
+    if (url.includes(OPEN_OLD) || url.includes(CLOSED)) return json(`${work}/catalogue.json`);
+    return { ok: true, json: async () => ({ commit: 'a'.repeat(40), format: 'none', vendors: {} }) };
+  }
   if (url.includes('/api/git/catalogue/')) {
     if (mode === 'unavailable') return { ok: false };
     if (mode === 'none') return { ok: true, json: async () => ({ commit: 'a'.repeat(40), format: 'none', vendors: {} }) };
@@ -143,5 +162,29 @@ check dev 'the claim set apart agrees with the catalogue' '✓ agrees'
 check commit 'a commit asked with ?commit= is named' 'catalogue of tlspuffin commit deadbeef'
 check unavailable 'an unavailable catalogue is said' 'is not available'
 check none 'a commit without catalogue is said' 'has no vulnerability catalogue yet'
+# dev without catalogue: the open pull request updated last that has one (not the closed one, not one without)
+check none-pr 'dev without catalogue: the pull request with one is shown' 'this is the catalogue of pull request <a href="[^"]*/pull/563"'
+check none-pr 'not a closed pull request' '/pull/500"' absent
+check none-pr 'not an open pull request without catalogue' '/pull/562"' absent
+for id in $( jq -r '.vendors[].entries | keys[]' "${work}/catalogue.json" ); do
+  check none-pr "entry ${id} shown from the pull request" ">${id}</a>"
+done
+# the overview as the launcher shows the bugs: where each can run, the bench's time, how a find is confirmed
+overview=$( grep -o '<table class="overview">.*' <<< "$( tr '\n' ' ' <<< "${out}" )" | sed 's|</table>.*||' )
+first_preset=$( node --input-type=module -e "
+  const { runOptions } = await import('${work}/html/common/catalogue.js');
+  const c = JSON.parse((await import('node:fs')).readFileSync('${work}/catalogue.json', 'utf8'));
+  const p = JSON.parse((await import('node:fs')).readFileSync('${work}/presets.json', 'utf8'));
+  const [vendor, id, e] = Object.entries(c.vendors).flatMap(([v, x]) => Object.entries(x.entries).map(([i, e]) => [v, i, e]))
+    .find(([v, i, e]) => runOptions(i, e, p.vendors[v]).length);
+  console.log(id + ' ' + runOptions(id, e, p.vendors[vendor])[0].name);" )
+grep -q "<span class=\"run-first\" title=\"${first_preset#* }\">" <<< "${overview}" && echo "ok   (overview): run on: ${first_preset% *} first on ${first_preset#* }, the launcher's pick" || { echo "FAIL (overview): run on ${first_preset}"; fail=1; }
+check dev 'a bug with a patch: confirmed by it' 'its patch \('
+if jq -e '[.vendors[].entries[] | select(.oracle and ((.patches // []) | length == 0) and .replayable != false)] | length > 0' "${work}/catalogue.json" > /dev/null; then
+  check dev 'a bug without patch: its signature only' 'signature only: no patch</span>'
+fi
+for filter in lib cat puffin nowitness; do check dev "the filter ${filter} of the overview" "data-filter=\"${filter}\""; done
+check dev 'no time without the measurements of the bench' 'none yet; hover for the task'
+check times 'the time to find a bug on the bench' '16 min 53 s · 5/5'
 
 exit ${fail}

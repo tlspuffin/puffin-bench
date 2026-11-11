@@ -1,10 +1,13 @@
 // Bugs reference: tlspuffin's vulnerability catalogue in full, generated from the vulnerabilities.toml files of dev
 // (git_restapi; "Reload from the latest dev" has it fetch GitHub first; ?commit=<sha>: another commit's; #<ID>: one
-// entry), the expected bug of each Vuln configuration and the CVEs set apart (vuln_targets.json, the file to edit),
-// and the registry of the bugs found so far per library (known_bugs.json, written by tools/known_bugs.js)
+// entry; while dev has none, that of the open pull request updated last that has one), the expected bug of each Vuln
+// configuration and the CVEs set apart (vuln_targets.json, the file to edit), and the registry of the bugs found so
+// far per library (known_bugs.json, written by tools/known_bugs.js). The overview shows each bug as the launcher's
+// custom benchmarks do: where it can run (the presets of the catalogue's commit), the bench's time to find it
+// (runs/bench_times.json, written by runs_report.py), how a find is confirmed; with filters.
 import '../board/nav.js';
 import { urls } from './summary_config.js';
-import { presentOn, patchedAt } from '../common/catalogue.js';
+import { presentOn, patchedAt, runOptions, confirmation, needsAsan } from '../common/catalogue.js';
 
 const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TARGETS = '/html/jobsscripts/tlspuffin/vuln_targets.json';
@@ -23,6 +26,24 @@ const JOBS = [['Vuln group A', 'vuln-a', '/html/jobsscripts/tlspuffin/PR_vulnera
 const [targets, known, version, firstCatalogue, ...jobConfigs] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/version.json'),
   load(CATALOGUE), ...JOBS.map(([, , url]) => load(url))]);
 let catalogue = firstCatalogue;
+// dev without catalogue (before tlspuffin pr/vuln-catalogue is merged): the catalogue of the open pull request updated
+// last that has one (git_restapi's history of tlspuffin), said so on the page
+let shownPR = null, devCatalogue = null;
+async function fallbackCatalogue() {
+  if (catalogueRef !== 'dev' || catalogue?.format !== 'none') return;
+  const history = await load(`${urls.git_restapi}/api/git/history/tlspuffin`);
+  const open = (history?.PR ?? []).filter(pr => pr.state === 'open' && /^[0-9a-f]{40}$/.test(pr.id ?? ''))
+    .sort((a, b) => String(b.updated_at ?? b.date ?? '').localeCompare(String(a.updated_at ?? a.date ?? ''))).slice(0, 10);
+  for (const pr of open) {
+    const c = await load(`${urls.git_restapi}/api/git/catalogue/tlspuffin/${pr.id}`);
+    if (c?.format === 'vulnerabilities.toml') { devCatalogue = catalogue; catalogue = c; shownPR = pr; return; }
+  }
+}
+await fallbackCatalogue();
+// the bench's time to find each bug (Vuln group A and B), as the launcher shows it
+const benchTimes = await load(new URL('../runs/bench_times.json', import.meta.url).href);
+// the overview's filters
+const filters = { lib: '', cat: '', puffin: false, nowitness: true };
 // the presets of the catalogue's commit (git_restapi), to check the builds of the configurations against the catalogue
 const loadPresets = c => (c?.format === 'vulnerabilities.toml' && /^[0-9a-f]{40}$/.test(c.commit ?? '')) ? load(`${urls.git_restapi}/api/git/presets/tlspuffin/${c.commit}`) : Promise.resolve(null);
 let presetsAt = await loadPresets(catalogue);
@@ -207,15 +228,54 @@ function entryCard(vendor, id, e) {
   </details>`;
 }
 
-const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <b>${esc(e.alias)}</b>` : ''}${e.find?.by_puffin ? ' <span class="star" title="first found by puffin">★</span>' : ''}</td>
-  <td>${esc(libraryName(vendor))}</td><td class="summary">${esc(e.summary)}</td><td>${esc(e.category)}</td>
+// the presets of the catalogue's commit a bug can run on, as the launcher offers them (the first: the one it picks)
+const runOn = (vendor, id, e) => {
+  if (!presetsAt) return '<span class="muted">—</span>';
+  const options = runOptions(id, e, presetsAt.vendors?.[vendor]);
+  if (!options.length) return '<span class="muted">no preset of this commit has it</span>';
+  const one = (p, i) => `<span class="${i === 0 ? 'run-first' : ''}" title="${esc(p.name)}">${esc(p.version)}${p.asan ? ' · ASan' : needsAsan(e) ? ' · + ASan' : ''} · <code>${esc(p.name)}</code>`
+    + `${p.patched ? '' : ' <span class="muted">(no patch)</span>'}${p.witness ? '' : ' <span class="muted">(witness does not reach it)</span>'}</span>`;
+  const shown = options.slice(0, 3).map(one).join('<br>');
+  return options.length > 3 ? `${shown}<details class="more"><summary>${options.length - 3} more</summary>${options.slice(3).map((p, i) => one(p, i + 3)).join('<br>')}</details>` : shown;
+};
+const timeToFind = (id, e) => {
+  const t = benchTimes?.bugs?.[e.alias ?? id] ?? benchTimes?.bugs?.[id];
+  if (!t) return '<span class="muted" title="Vuln group A and B have no run of it">—</span>';
+  return `<span title="${esc(`task ${t.task} (${t.job}) at tlspuffin ${String(t.commit ?? '').slice(0, 9)} of ${String(t.date ?? '').slice(0, 10)}: ${t.cores} cores per attempt, ${duration(t.budget_s)} budget`)}">`
+    + `${t.found ? duration(t.median_s) : 'not found'} · ${esc(t.found)}/${esc(t.runs)}</span>`;
+};
+// the other bugs of the same library with the same oracle: a stop on one of them may be taken for this one
+const sameOracle = (vendor, id, e) => e.oracle ? Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {})
+  .filter(([other, o]) => other !== id && o.oracle && JSON.stringify(o.oracle) === JSON.stringify(e.oracle)).map(([other, o]) => o.alias ?? other) : [];
+const confirmedBy = (vendor, id, e) => {
+  const how = confirmation(e);
+  const twins = sameOracle(vendor, id, e);
+  return `<span class="badge ${how.kind === 'patch' ? 'b-exp' : 'b-unexp'}"${how.kind === 'signature' && e.no_patch ? ` title="${esc(e.no_patch)}"` : ''}>${esc(how.text)}</span>`
+    + (twins.length ? `<br><span class="muted">same oracle as ${esc(twins.join(', '))}</span>` : '');
+};
+const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <b>${esc(e.alias)}</b>` : ''}${e.find?.by_puffin ? ' <span class="star" title="first found by puffin">★</span>' : ''}
+    <span class="tag">${esc(e.category)}</span><div class="summary">${esc(e.summary)}</div></td>
+  <td>${esc(libraryName(vendor))}</td>
   <td>${e.cvss ? `<span class="sev sev-${SEVERITY(Number(e.cvss.score))}">${esc(e.cvss.score)}</span>` : '<span class="muted">—</span>'}</td>
-  <td><code>${esc(e.affected ?? e.affected_commits ?? '')}</code></td>
-  <td class="nowrap">${(e.patches ?? []).length ? e.patches.map(p => `<code>${esc(p.versions ?? p.commits ?? '')}</code>`).join('<br>') : `<span class="badge b-unexp" title="${esc(e.no_patch ?? '')}">no patch</span>`}</td>
+  <td class="runon">${runOn(vendor, id, e)}<div class="muted">affected <code>${esc(e.affected ?? e.affected_commits ?? '')}</code></div></td>
+  <td class="nowrap">${timeToFind(id, e)}</td>
+  <td>${confirmedBy(vendor, id, e)}</td>
   <td>${e.no_witness ? `<span class="badge b-unexp" title="${esc(e.no_witness)}">no witness</span>` : '<span class="badge b-exp">✓</span>'}</td>
   <td>${oracleText(e.oracle)}${e.replayable === false ? '<br><span class="muted">does not replay</span>' : ''}</td></tr>`;
-const OVERVIEW_HEAD = '<tr><th>bug</th><th>library</th><th>summary</th><th>category</th><th>CVSS</th><th>affected</th><th>patch</th><th>witness</th><th>oracle</th></tr>';
-const overviewTable = list => `<table class="overview">${OVERVIEW_HEAD}${list.map(overviewRow).join('') || '<tr><td colspan="9" class="muted">none</td></tr>'}</table>`;
+const OVERVIEW_HEAD = '<tr><th>bug</th><th>library</th><th>CVSS</th><th>run on <span class="muted">(presets of the commit)</span></th>'
+  + '<th>time to find on the bench ⁽ᵗ⁾</th><th>a find is confirmed by</th><th>witness</th><th>oracle</th></tr>';
+const overviewTable = list => `<table class="overview">${OVERVIEW_HEAD}${list.map(overviewRow).join('') || '<tr><td colspan="8" class="muted">none</td></tr>'}</table>`;
+// the filters of the overview: library, category, first found by puffin, bugs without witness
+const kept = list => list.filter(x => (!filters.lib || x.vendor === filters.lib) && (!filters.cat || x.e.category === filters.cat)
+  && (!filters.puffin || x.e.find?.by_puffin) && (filters.nowitness || !x.e.no_witness));
+const filterRow = entries => {
+  const libs = [...new Set(entries.map(x => x.vendor))], cats = [...new Set(entries.map(x => x.e.category).filter(Boolean))].sort();
+  const select = (name, values, label, show = v => v) => `<select data-filter="${name}"><option value="">${label}</option>`
+    + values.map(v => `<option value="${esc(v)}"${filters[name] === v ? ' selected' : ''}>${esc(show(v))}</option>`).join('') + '</select>';
+  return `<div class="filters">Show ${select('lib', libs, 'all libraries', libraryName)} ${select('cat', cats, 'all categories')}
+    <label><input type="checkbox" data-filter="puffin"${filters.puffin ? ' checked' : ''}> ★ first found by puffin only</label>
+    <label><input type="checkbox" data-filter="nowitness"${filters.nowitness ? ' checked' : ''}> bugs without witness</label></div>`;
+};
 // the comments heading a vulnerabilities.toml, without their '#'
 const preambleText = text => esc(String(text ?? '').split('\n').map(line => line.replace(/^\s*# ?/, '')).join('\n').trim());
 
@@ -229,16 +289,24 @@ function catalogueSection() {
   const at = `<a href="${TLSPUFFIN}/tree/${esc(catalogue.commit)}/puffin-build/vendors" target="_blank" rel="noopener">${esc(catalogue.commit.slice(0, 10))}</a>`
     + (catalogue.date ? ` <span class="muted">(${esc(catalogue.date.slice(0, 10))}${catalogue.subject ? `: ${esc(catalogue.subject)}` : ''})</span>` : '');
   if (catalogue.format === 'none') return `<div class="card"><div class="row"><p class="muted">tlspuffin ${where} (${at}) has no vulnerability catalogue yet (puffin-build/vendors/*/vulnerabilities.toml).</p>${reload}</div></div>`;
+  const fallback = shownPR ? `<p class="fallback">dev (<a href="${TLSPUFFIN}/commit/${esc(devCatalogue?.commit ?? '')}" target="_blank" rel="noopener">${esc(String(devCatalogue?.commit ?? '').slice(0, 10))}</a>) has no vulnerability catalogue yet:
+      this is the catalogue of pull request <a href="${TLSPUFFIN}/pull/${esc(shownPR.number)}" target="_blank" rel="noopener">#${esc(shownPR.number)}</a> <code>${esc(shownPR.branch)}</code>
+      at its head (the open pull request updated last that has one), what validation will trust once it is merged. Another commit: <code>?commit=&lt;sha&gt;</code>.</p>` : '';
   const entries = Object.entries(catalogue.vendors ?? {}).flatMap(([vendor, v]) => Object.entries(v.entries ?? {}).map(([id, e]) => ({ vendor, id, e })));
   const library = entries.filter(x => !x.e.bug_in_harness), harness = entries.filter(x => x.e.bug_in_harness);
   const vendors = Object.entries(catalogue.vendors ?? {}).filter(([, v]) => Object.values(v.entries ?? {}).some(e => !e.bug_in_harness));
+  const shownWhere = shownPR ? `PR #${esc(shownPR.number)}` : where;
   return `<div class="card">
-      <div class="row"><p>The catalogue of tlspuffin ${where} at ${at}, generated from <code>puffin-build/vendors/&lt;vendor&gt;/vulnerabilities.toml</code>: the only source of what builds, tests and
+      ${fallback}
+      <div class="row"><p>The catalogue of tlspuffin ${shownWhere} at ${at}, generated from <code>puffin-build/vendors/&lt;vendor&gt;/vulnerabilities.toml</code>: the only source of what builds, tests and
         validation know about a bug. Each entry has a patch per version range and a witness trace; tlspuffin's catalogue test checks every witness with and without its patch.</p>${reload}</div>
       <p class="muted">${catalogueRef === 'dev' ? 'Another commit (e.g. a PR adding a bug): <code>?commit=&lt;sha&gt;</code>. ' : ''}One bug: <code>#&lt;ID&gt;</code>. ★ first found by puffin.</p>
-      ${overviewTable(library)}
-      ${harness.length ? `<h3>🔧 Bugs of the fuzzing harness</h3><p class="muted">Validated the same way, never counted as a vulnerability of the library.</p>${overviewTable(harness)}` : ''}
-      <p class="muted">Every field of a bug: click it (its card at the end of the page, <a href="#every-bug">📖 Every bug in full</a>).</p>
+      ${filterRow(entries)}
+      ${overviewTable(kept(library))}
+      ${harness.length ? `<h3>🔧 Bugs of the fuzzing harness</h3><p class="muted">Validated the same way, never counted as a vulnerability of the library.</p>${overviewTable(kept(harness))}` : ''}
+      <p class="muted">⁽ᵗ⁾ ${esc(benchTimes?.source ?? 'the bench\'s own measurements (Vuln group A and B), when there are')}${benchTimes ? '' : ': none yet'}; hover for the task.
+        Run on: the presets of the catalogue's commit the launcher's custom benchmarks offer for the bug, the first the one it picks (a version with its patch first, then the newest, ASan).
+        Every field of a bug: click it (its card at the end of the page, <a href="#every-bug">📖 Every bug in full</a>).</p>
     </div>`;
 }
 
@@ -484,7 +552,11 @@ async function reload() {
   const button = document.getElementById('reload-dev');
   if (button) { button.disabled = true; button.textContent = '⟳ Fetching the latest dev…'; }
   const fresh = await load(`${CATALOGUE}?refresh=fetch`);
-  if (fresh) { catalogue = fresh; presetsAt = await loadPresets(fresh); reloaded = new Date().toLocaleTimeString(); reloadError = null; } else { reloadError = 'the reload failed: dev as last fetched'; }
+  if (fresh) {
+    catalogue = fresh; shownPR = null; devCatalogue = null;
+    await fallbackCatalogue();
+    presetsAt = await loadPresets(catalogue); reloaded = new Date().toLocaleTimeString(); reloadError = null;
+  } else { reloadError = 'the reload failed: dev as last fetched'; }
   render();
 }
 
@@ -495,6 +567,12 @@ window.addEventListener?.('pb-refresh', event => { if (catalogueRef === 'dev') {
 const hashBug = () => decodeURIComponent(String(window.location?.hash ?? '').slice(1));
 if (hashBug()) openBug(hashBug());
 window.addEventListener?.('hashchange', () => openBug(hashBug()));
+document.getElementById('bugsref')?.addEventListener?.('change', event => {
+  const name = event.target?.dataset?.filter;
+  if (!name) return;
+  filters[name] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+  render();
+});
 document.getElementById('bugsref')?.addEventListener?.('click', event => {
   const link = event.target?.closest?.('a[href^="#"]');
   if (!link) return;

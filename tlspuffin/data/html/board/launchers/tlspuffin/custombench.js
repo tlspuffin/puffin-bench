@@ -19,8 +19,8 @@ const libraryName = vendor => LIBRARY[vendor] ?? vendor;
 const MARKS = ['*', '†', '‡', '§', '¶', '‖', '**', '††', '‡‡'];
 
 // versions, ranges, where a bug is and has a patch: the catalogue's rules (common/catalogue.js), also for the tests
-import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt } from '../../../common/catalogue.js';
-export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt };
+import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation } from '../../../common/catalogue.js';
+export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation };
 
 // the scheduler's store of saved benchmarks (scheduler/src/scheduler/api/benchmarks_api.hxx)
 const SAVED_API = '/api/benchmarks/tlspuffin';
@@ -43,7 +43,7 @@ export class CustomBenchmark {
   #presets = null;              // { vendors: { <lib>: [ { name, version, asan, postauth, fix, ... } ] } } of the commit
   #catalogues = { commit: null, dev: null };
   #source = 'dev';              // the catalogue the bugs come from: 'dev' or 'commit'
-  #times = null;                // the bench's times to find (/html/runs/bench_times.json), when there are
+  #times = null;                // the bench's times to find (runs/bench_times.json of the data folder), when there are
   #picked = new Map();          // ID -> { preset } of the ticked bugs
   #saved = {};                  // the saved benchmarks: name -> { saved_at, definition }
   #savedError = '';
@@ -149,7 +149,8 @@ export class CustomBenchmark {
       }
       this.#renderRuns();
     });
-    fetch('/html/runs/bench_times.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null)
+    // the data folder: /files/ on the scheduler's board, /html/ on the publisher; the module is in board/launchers/tlspuffin
+    fetch(new URL('../../../runs/bench_times.json', import.meta.url), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null)
       .then(times => { this.#times = times; if (this.#sha) this.#render(); });
   }
 
@@ -321,18 +322,13 @@ export class CustomBenchmark {
     const catalogue = this.#catalogue();
     if (!catalogue || catalogue.format !== 'vulnerabilities.toml') return [];
     return Object.entries(catalogue.vendors ?? {}).flatMap(([lib, v]) => Object.entries(v.entries ?? {}).map(([id, entry]) => {
-      const presets = (this.#presets?.vendors?.[lib] ?? []).filter(p => this.#active(id, entry, p));
-      const options = presets.map(p => ({ ...p, patched: this.#patchedAt(entry, p.version),
-                                          witness: !entry.witness_versions || inRange(entry.witness_versions, p.version) }))
-        // the safest first: a version where the bug has a patch (finds validated by patch differential), then the newest, ASan
-        .sort((a, b) => (b.patched ? 1 : 0) - (a.patched ? 1 : 0) || compareVersions(b.version, a.version) || (b.asan ? 1 : 0) - (a.asan ? 1 : 0)
-                       || (a.fix?.length ?? 0) - (b.fix?.length ?? 0) || a.name.length - b.name.length);
+      // the safest first: a version where the bug has a patch (finds validated by patch differential), then the newest, ASan
+      const options = runOptions(id, entry, this.#presets?.vendors?.[lib]);
       const reference = options.find(p => p.name === entry.reference) ?? options[0] ?? null;
       return { lib, id, entry, options, reference };
     }));
   }
 
-  #active(id, entry, preset) { return activeOn(id, entry, preset); }
   #patchedAt(entry, version) { return patchedAt(entry, version); }
 
   // the ticked bugs, as experiments
@@ -440,10 +436,8 @@ export class CustomBenchmark {
       const options = x.options.map(p => `<option value="${esc(p.name)}"${(picked?.preset ?? x.reference?.name) === p.name ? ' selected' : ''}>`
         + `${esc(p.version)} · ${p.asan ? 'ASan · ' : ''}${esc(p.name)}${!p.asan && needsAsan(x.entry) ? ' + ASan' : ''}`
         + `${p.patched ? '' : ' (no patch: signature only)'}${p.witness ? '' : ' (witness does not reach it)'}</option>`).join('');
-      const confirm = !x.entry.oracle ? '<span class="jl-badge warn">no oracle: cannot be recognised</span>'
-        : x.entry.replayable === false ? '<span class="jl-badge warn">the fuzzer\'s record only: not replayable</span>'
-        : (x.entry.patches ?? []).length ? `<span class="jl-badge ok">its patch (${(x.entry.patches ?? []).map(p => esc(p.versions ?? p.commits ?? '')).join(' · ')})</span>`
-        : '<span class="jl-badge warn">signature only: no patch</span>';
+      const how = confirmation(x.entry);
+      const confirm = `<span class="jl-badge ${how.kind === 'patch' ? 'ok' : 'warn'}">${esc(how.text)}</span>`;
       const twins = this.#sameOracle(x).map(y => esc(y.entry.alias ?? y.id));
       const vs = versus(x);
       return `<tr data-id="${esc(x.id)}" class="${picked ? 'picked' : ''}${x.options.length ? '' : ' na'}">
