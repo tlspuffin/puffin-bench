@@ -23,7 +23,7 @@
     "CVE-2022-25638": { "library": "wolfssl", "alias": "SIG",   "cvss": 6.5, "type": "Auth. Bypass, P", "found_by_puffin": false, "version": "5.1.0", "tls": "1.3" },
     "CVE-2022-25640": { "library": "wolfssl", "alias": "SKIP",  "cvss": 7.5, "type": "Auth. Bypass, P", "found_by_puffin": false, "version": "5.1.0", "tls": "1.3" },
     "CVE-2022-38152": { "library": "wolfssl", "alias": "SDOS2", "cvss": 7.5, "type": "Server DoS, M", "found_by_puffin": true, "version": "5.4.0", "tls": "1.3" },
-    "CVE-2022-38153": { "library": "wolfssl", "alias": "CDOS",  "cvss": 5.9, "type": "Client DoS, M", "found_by_puffin": true, "version": "5.3.0", "tls": "1.2" },
+    "CVE-2022-38153": { "library": "wolfssl", "alias": "CDOS",  "cvss": 5.9, "type": "Client DoS, M", "found_by_puffin": true, "version": "5.3.0", "tls": "1.2", "replayable": false },
     "CVE-2022-39173": { "library": "wolfssl", "alias": "BUF",   "cvss": 7.5, "type": "Server DoS, M", "found_by_puffin": true, "version": "5.5.0", "tls": "1.3" },
     "CVE-2022-42905": { "library": "wolfssl", "alias": "HEAP",  "cvss": 9.1, "type": "Info. Leak, M", "found_by_puffin": true, "version": "5.5.0", "tls": "1.3" },
     "CVE-2023-6936":  { "library": "wolfssl", "alias": "CALLB", "cvss": 5.3, "type": "Info. Leak, M", "found_by_puffin": true, "version": "5.6.4", "tls": "1.3" }

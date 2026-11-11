@@ -11,13 +11,17 @@
 // page. The experiments are the task's configurations (runtime RUNTIME_RUN_CONFIG, see runConfig), named
 // <benchmark>_<alias or ID>, and the definition is recorded in the task (definition) so that it can be launched again.
 // Saved benchmarks: definitions kept by the scheduler under their name (/api/benchmarks/tlspuffin, shared by every
-// user of the board), saved with 💾 Save, loaded on any commit, removed.
+// user of the board), saved with 💾 Save, loaded on any commit, removed; and built in, first, never removed: Vuln group A
+// and B as configured (jobsconfig.json builtin_benchmarks: their bugs, presets, attempts, cores and timeout).
+// The panel shows nothing but a prompt until a commit is chosen; the launcher puts its Timeout and CPU sharing in its
+// slots (timeoutSlot, sharingSlot), below the saved benchmarks, as a saved benchmark keeps them.
 
 const MARKS = ['*', '†', '‡', '§', '¶', '‖', '**', '††', '‡‡'];
 
 // versions, ranges, where a bug is and has a patch: the catalogue's rules (common/catalogue.js), also for the tests
 import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation } from '../../../common/catalogue.js';
 import { esc, libraryName, duration } from '../../../common/format.js';
+import { TERMS, SignatureText } from '../../../common/verdicts.js';
 export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation };
 
 // the scheduler's store of saved benchmarks (scheduler/src/scheduler/api/benchmarks_api.hxx)
@@ -37,9 +41,12 @@ export class CustomBenchmark {
   #times = null;                // the bench's times to find (runs/bench_times.json of the data folder), when there are
   #picked = new Map();          // ID -> { preset } of the ticked bugs
   #saved = {};                  // the saved benchmarks: name -> { saved_at, definition }
+  #builtins = {};               // the built-in ones: name -> { builtin: true, definition } (setBuiltins)
   #savedError = '';
   #pending = null;              // a definition to apply once the commit's catalogue and presets are there
   #settings;                    // the launcher's own fields a benchmark keeps (timeout, CPU sharing): get() and set()
+                                // (set returns what it had to say: a definition saved without timeout)
+  #restoreNote = '';            // that note, shown once the definition is applied
   #error = '';
   #loading = false;
   #els = {};
@@ -49,8 +56,10 @@ export class CustomBenchmark {
     this.#onChange = onChange ?? (() => {});
     this.#settings = { get: () => ({}), set: () => {}, ...settings };
     this.node = document.createElement('div');
-    this.node.className = 'jl-custom';
+    this.node.className = 'jl-custom no-commit';
     this.node.innerHTML = `
+      <div class="jl-custom-first">Choose a commit first: the saved benchmarks, the bugs of its catalogue and the presets it can build come from it.</div>
+      <div class="jl-custom-main">
       <div class="jl-custom-row jl-custom-savedrow">
         <span class="jl-label" title="Saved benchmarks: kept by the scheduler under their name, for every user of the board; Load ticks the same bugs with the same settings on the commit chosen">Saved benchmarks</span>
         <select class="jl-select jl-custom-saved"><option value="">none saved yet</option></select>
@@ -58,6 +67,13 @@ export class CustomBenchmark {
         <button type="button" class="jl-custom-load jl-custom-remove" title="No longer among the saved benchmarks (the tasks it launched and their results stay)">🗑 Remove</button>
         <span class="jl-custom-savedinfo"></span>
       </div>
+      <div class="jl-custom-slot jl-custom-timeoutslot"></div>
+      <div class="jl-custom-row">
+        <span class="jl-label" title="Attempts: runs of each experiment, each until it finds its bug (recognised by validation) or times out">Attempts</span><input type="number" class="jl-commit-input jl-custom-attempts" min="1" max="100" value="5">
+        <span class="jl-label" title="Cores per attempt: fuzzer clients of each attempt, one core each">Cores per attempt</span><input type="number" class="jl-commit-input jl-custom-cores" min="1" max="64" value="4">
+        <span class="jl-custom-cost"></span>
+      </div>
+      <div class="jl-custom-slot jl-custom-sharingslot"></div>
       <div class="jl-custom-row">
         <span class="jl-label" title="Catalogue: where the bugs come from: dev's (what validation trusts) or the chosen commit's (a PR adding a bug)">Catalogue</span>
         <label><input type="radio" name="jl-custom-source" value="dev"> <span class="jl-custom-dev">dev's</span></label>
@@ -68,52 +84,48 @@ export class CustomBenchmark {
         <span class="jl-custom-about">ⓘ how it works</span>
       </div>
       <div class="jl-custom-row">
-        <span class="jl-label" title="Show: only the bugs of a library or a category; ★ the bugs first found by puffin; the bugs without witness (never targets) are hidden unless ticked">Show</span>
+        <span class="jl-label" title="Show: only the bugs of a library or a category; ★ the bugs first found by puffin; the bugs without witness hidden (untick to see them)">Show</span>
         <select class="jl-select jl-custom-lib"><option value="">all libraries</option></select>
         <select class="jl-select jl-custom-cat"><option value="">all categories</option></select>
         <label><input type="checkbox" class="jl-custom-puffin"> ★ first found by puffin only</label>
-        <label><input type="checkbox" class="jl-custom-nowitness"> bugs without witness</label>
+        <label title="Bugs without a witness trace in tlspuffin: nothing shows the fuzzer can reach them; those with a patch and a signature can be ticked (validation still confirms a find by patch differential, a warning says what is missing), the others cannot"><input type="checkbox" class="jl-custom-hidewitness" checked> hide bugs without witness</label>
       </div>
       <div class="jl-custom-status"></div>
       <table class="jl-custom-bugs"></table>
       <div class="jl-custom-footnotes"></div>
       <div class="jl-custom-row">
-        <span class="jl-label" title="Other known bugs: the known bugs of each experiment's build other than its own: patched where a patch exists (it can only stop on its own bug), or left as in the preset">Other known bugs</span>
-        <label><input type="radio" name="jl-custom-others" value="patched" checked> patched where a patch exists (recommended: an experiment can only stop on its own bug)</label>
-        <label title="The chosen preset as it is: only the fixes of its own fix list (none for wolfssl540-asan, HEAP for wolfssl540-buf); every other known bug stays in the build, and the fuzzer may find one of them first (the attempt then goes on)"><input type="radio" name="jl-custom-others" value="preset"> only the preset's own fixes (the other known bugs stay in the build)</label>
+        <span class="jl-label" title="The known bugs of each experiment's build other than the one it looks for">Other known bugs in the build</span>
+        <label title="Each experiment's build is its preset with every other known bug patched (<preset>-only-<bug>): only its own bug is left, besides the known bugs that have no patch at that version"><input type="radio" name="jl-custom-others" value="patched" checked> patch them (recommended): the build keeps only the bug looked for</label>
+        <label title="Each experiment's build is the chosen preset unchanged: it fixes only the bugs of its own fix list (none for wolfssl540-asan, HEAP for wolfssl540-buf); the fuzzer may find one of the other known bugs first, which does not end the attempt"><input type="radio" name="jl-custom-others" value="preset"> keep the preset as it is: the other known bugs stay in the build</label>
       </div>
       <h4 class="jl-custom-h">What will run</h4>
       <table class="jl-custom-runs"></table>
       <div class="jl-custom-warnings"></div>
-      <div class="jl-custom-note">An attempt stops only on a confirmed find: an objective with the bug's signature is first replayed on the
+      <div class="jl-custom-note">An attempt stops only on a find validation recognises: an objective with the bug's signature is first replayed on the
         validation builds, prepared before the attempt, while the fuzzer goes on (patch differential; a bug without patch: its signature on the
-        build with every patch); one validation does not confirm leaves the attempt going. The time to find is when the fuzzer saved the
-        confirmed objective.</div>
-      <div class="jl-custom-row">
-        <span class="jl-label" title="Attempts: runs of each experiment, each until it finds its bug (confirmed) or times out">Attempts</span><input type="number" class="jl-commit-input jl-custom-attempts" min="1" max="50" value="5">
-        <span class="jl-label" title="Cores per attempt: fuzzer clients of each attempt, one core each">Cores per attempt</span><input type="number" class="jl-commit-input jl-custom-cores" min="1" max="64" value="4">
-        <span class="jl-custom-cost"></span>
-      </div>
+        build with every patch); one validation does not recognise leaves the attempt going. The time to find is when the fuzzer saved the
+        recognised objective.</div>
       <div class="jl-custom-row">
         <span class="jl-label" title="Benchmark: its name (letters, digits, -): the experiments are named <benchmark>_<bug>, followed across commits on Results">Benchmark</span><input type="text" class="jl-commit-input jl-custom-name" value="custom" maxlength="24" spellcheck="false"
           title="Its name (letters, digits, -): the experiments are named <benchmark>_<bug>; launching it again with the same name continues its series on Results">
         <input type="text" class="jl-commit-input jl-custom-description" placeholder="description (optional)" maxlength="200">
         <button type="button" class="jl-custom-load jl-custom-save" title="Save: keep this benchmark under its name, for every user of the board, to Load it again later on any commit (Saved benchmarks, above); launching does not save it">💾 Save</button>
         <span class="jl-custom-savestatus"></span>
+      </div>
       </div>`;
     const $ = selector => this.node.querySelector(selector);
     this.#els = {
       badge: $('.jl-custom-badge'), details: $('.jl-custom-details'), status: $('.jl-custom-status'), bugs: $('.jl-custom-bugs'),
       footnotes: $('.jl-custom-footnotes'), runs: $('.jl-custom-runs'), lib: $('.jl-custom-lib'), cat: $('.jl-custom-cat'),
-      puffin: $('.jl-custom-puffin'), nowitness: $('.jl-custom-nowitness'), attempts: $('.jl-custom-attempts'),
+      puffin: $('.jl-custom-puffin'), hidewitness: $('.jl-custom-hidewitness'), attempts: $('.jl-custom-attempts'),
       cores: $('.jl-custom-cores'), cost: $('.jl-custom-cost'), name: $('.jl-custom-name'), description: $('.jl-custom-description'),
-      dev: $('.jl-custom-dev'), load: $('.jl-custom-loadcommit'),
+      dev: $('.jl-custom-dev'), load: $('.jl-custom-loadcommit'), timeoutSlot: $('.jl-custom-timeoutslot'), sharingSlot: $('.jl-custom-sharingslot'),
       warnings: $('.jl-custom-warnings'), saved: $('.jl-custom-saved'), open: $('.jl-custom-open'), remove: $('.jl-custom-remove'),
       about: $('.jl-custom-about'), savedinfo: $('.jl-custom-savedinfo'), save: $('.jl-custom-save'), savestatus: $('.jl-custom-savestatus'),
     };
     this.#els.saved.addEventListener('change', () => this.#renderSavedInfo());
     this.#els.open.addEventListener('click', () => {
-      const saved = this.#saved[this.#els.saved.value];
+      const saved = this.#listed()[this.#els.saved.value];
       if (saved) this.restore(saved.definition);
     });
     this.#els.remove.addEventListener('click', () => this.#remove(this.#els.saved.value));
@@ -122,7 +134,7 @@ export class CustomBenchmark {
     this.node.querySelectorAll('input[name="jl-custom-source"]').forEach(radio =>
       radio.addEventListener('change', () => { this.#source = radio.value; this.#picked.clear(); this.#render(); }));
     this.#els.load.addEventListener('click', () => { this.#source = 'commit'; this.#picked.clear(); this.#render(); });
-    for (const el of [this.#els.lib, this.#els.cat, this.#els.puffin, this.#els.nowitness]) el.addEventListener('change', () => this.#render());
+    for (const el of [this.#els.lib, this.#els.cat, this.#els.puffin, this.#els.hidewitness]) el.addEventListener('change', () => this.#render());
     this.node.querySelectorAll('input[name="jl-custom-others"]').forEach(radio => radio.addEventListener('change', () => this.#render()));
     for (const el of [this.#els.attempts, this.#els.cores]) el.addEventListener('input', () => this.#renderRuns());
     this.#els.name.addEventListener('input', () => {
@@ -149,8 +161,31 @@ export class CustomBenchmark {
 
   show(visible) { this.node.classList.toggle('visible', visible); }
 
-  // where the launcher puts the help of the panel (its "ⓘ how it works")
+  // where the launcher puts the help of the panel (its "ⓘ how it works"), its Timeout and its CPU sharing
   get helpAnchor() { return this.#els.about; }
+  get timeoutSlot() { return this.#els.timeoutSlot; }
+  get sharingSlot() { return this.#els.sharingSlot; }
+
+  // the built-in benchmarks: the jobs given (Vuln group A and B, jsonconfig builtin_benchmarks) as configured: each
+  // configuration's bug (target_bug) on its preset, the preset as it is (the job's build), the job's attempts and cores
+  // (its run's nb_retry and nb_cores) and default timeout; named after the job (VulnA, VulnB)
+  async setBuiltins(jobs, names = {}) {
+    const read = url => fetch(url, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
+    const out = {};
+    for (const job of jobs ?? []) {
+      const config = job?.config ? await read(job.config) : null;
+      if (!config?.configurations) continue;
+      const name = names[job.value] ?? job.value;
+      const run = (config.flow ?? []).find(Array.isArray)?.find(step => Array.isArray(step?.run))?.configuration ?? {};
+      const experiments = Object.entries(config.configurations).filter(([, c]) => c?.args?.target_bug && c.args.vendor)
+        .map(([experiment, c]) => ({ name: `${name}_${experiment}`, bug: c.args.target_bug, preset: String(c.args.vendor).split(':')[1] }));
+      if (!experiments.length) continue;
+      out[name] = { builtin: true, definition: { name, description: `${job.label} as configured`, others: 'preset',
+        catalogue: { source: 'dev' }, attempts: run.nb_retry ?? 5, cores: run.nb_cores ?? 4, timeout: job.timeout_default, smt: '', experiments } };
+    }
+    this.#builtins = out;
+    this.#refreshSaved();
+  }
 
   reset() {
     this.#picked.clear();
@@ -228,10 +263,11 @@ export class CustomBenchmark {
     this.#els.cores.value = definition.cores ?? 4;
     const others = this.node.querySelector(`input[name="jl-custom-others"][value="${definition.others === 'preset' ? 'preset' : 'patched'}"]`);
     if (others) others.checked = true;
-    this.#settings.set({ timeout: definition.timeout, smt: definition.smt });
+    // its timeout and CPU sharing; one saved before the launcher kept them: the job's default, said
+    this.#restoreNote = this.#settings.set({ timeout: definition.timeout, smt: definition.smt }) || '';
     if (!this.#sha || this.#loading) {
       this.#pending = definition;
-      this.#saveStatus(`${definition.name ?? 'the benchmark'}: its bugs are ticked once a commit is chosen`, '');
+      this.#saveStatus([`${definition.name ?? 'the benchmark'}: its bugs are ticked once a commit is chosen`, this.#restoreNote].filter(Boolean).join(' · '), '');
       return;
     }
     this.#apply(definition);
@@ -249,29 +285,39 @@ export class CustomBenchmark {
     for (const id of missing) this.#picked.delete(id);
     if (missing.length) {
       this.#renderRuns();
-      this.#saveStatus(`not in this catalogue, left out: ${missing.join(', ')}`, 'warn');
+      this.#saveStatus([`not in this catalogue, left out: ${missing.join(', ')}`, this.#restoreNote].filter(Boolean).join(' · '), 'warn');
     } else {
-      this.#saveStatus('', '');
+      this.#saveStatus(this.#restoreNote, this.#restoreNote ? 'warn' : '');
     }
+    this.#restoreNote = '';
   }
 
   // ── saved benchmarks ──
+  // the benchmarks offered: the built-in ones first (they win over a saved one of the same name), then the saved ones
+  #listed() { return { ...this.#builtins, ...Object.fromEntries(Object.entries(this.#saved).filter(([n]) => !this.#builtins[n])) }; }
+
   async #refreshSaved(select = null) {
     const { ok, body } = await answer(fetch(SAVED_API, { cache: 'no-store' }));
     this.#saved = ok && body.success ? (body.data ?? {}) : {};
     this.#savedError = ok && body.success ? '' : `the scheduler did not list them${body.error ? ` (${body.error})` : ''}`;
-    const names = Object.keys(this.#saved).sort((a, b) => a.localeCompare(b));
+    const listed = this.#listed();
+    const builtins = Object.keys(this.#builtins);
+    const names = [...builtins, ...Object.keys(listed).filter(n => !this.#builtins[n]).sort((a, b) => a.localeCompare(b))];
     const keep = select ?? this.#els.saved.value;
     this.#els.saved.innerHTML = names.length
-      ? names.map(n => `<option value="${esc(n)}">${esc(n)}${this.#saved[n].definition?.description ? ` — ${esc(this.#saved[n].definition.description)}` : ''}</option>`).join('')
+      ? names.map(n => `<option value="${esc(n)}">${esc(n)}${listed[n].definition?.description ? ` — ${esc(listed[n].definition.description)}` : ''}${listed[n].builtin ? ' (built in)' : ''}</option>`).join('')
       : '<option value="">none saved yet</option>';
     this.#els.saved.value = names.includes(keep) ? keep : (names[0] ?? '');
-    this.#els.open.disabled = this.#els.remove.disabled = !names.length;
+    this.#els.open.disabled = !names.length;
     this.#renderSavedInfo();
   }
 
   #renderSavedInfo() {
-    const saved = this.#saved[this.#els.saved.value];
+    const saved = this.#listed()[this.#els.saved.value];
+    // a built-in benchmark is never removed
+    this.#els.remove.disabled = !saved || !!saved.builtin;
+    this.#els.remove.title = saved?.builtin ? 'Built in: Vuln group A and B as configured are always offered'
+        : 'No longer among the saved benchmarks (the tasks it launched and their results stay)';
     if (!saved) { this.#els.savedinfo.textContent = this.#savedError; return; }
     const d = saved.definition ?? {};
     const bugs = (d.experiments ?? []).map(x => String(x.name ?? '').startsWith(`${d.name}_`) ? x.name.slice(`${d.name}_`.length) : x.bug);
@@ -279,7 +325,8 @@ export class CustomBenchmark {
     const timeout = d.timeout ? ` · timeout ${d.timeout.d ? `${d.timeout.d} d ` : ''}${d.timeout.h ?? 0} h ${String(d.timeout.m ?? 0).padStart(2, '0')}` : '';
     const smt = d.smt === undefined ? '' : ` · CPU sharing ${d.smt || 'default'}`;
     this.#els.savedinfo.textContent = `${bugs.length} bug(s): ${bugs.join(', ') || 'none'} · ${d.attempts ?? '?'} attempt(s) × ${d.cores ?? '?'} core(s)`
-      + `${timeout}${smt} · other known bugs ${d.others === 'preset' ? 'as in the preset' : 'patched'} · saved ${when} UTC`;
+      + `${timeout}${smt} · other known bugs ${d.others === 'preset' ? 'as in the preset' : 'patched'}`
+      + (saved.builtin ? ' · built in: the job\'s own configurations' : ` · saved ${when} UTC`);
   }
 
   #saveStatus(text, kind) {
@@ -291,6 +338,10 @@ export class CustomBenchmark {
   async save() {
     if (!this.#experiments().length) { this.#saveStatus('nothing to save: tick at least one bug', 'warn'); return false; }
     const definition = this.definition();
+    if (this.#builtins[definition.name]) {
+      this.#saveStatus(`not saved: ${definition.name} is built in; give the benchmark another name`, 'warn');
+      return false;
+    }
     if (this.#saved[definition.name] && !window.confirm(`Replace the saved benchmark ${definition.name}?`)) return false;
     const { ok, body } = await answer(fetch(`${SAVED_API}/${encodeURIComponent(definition.name)}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(definition) }));
@@ -304,7 +355,7 @@ export class CustomBenchmark {
   }
 
   async #remove(name) {
-    if (!name || !window.confirm(`Remove the saved benchmark ${name}? The tasks it launched and their results stay.`)) return;
+    if (!name || this.#builtins[name] || !window.confirm(`Remove the saved benchmark ${name}? The tasks it launched and their results stay.`)) return;
     const { ok, body } = await answer(fetch(`${SAVED_API}/${encodeURIComponent(name)}`, { method: 'DELETE' }));
     this.#saveStatus(ok && body.success !== false ? `${name} removed` : `not removed: ${body.error ?? 'refused by the scheduler'}`, ok ? 'ok' : 'warn');
     await this.#refreshSaved();
@@ -382,6 +433,8 @@ export class CustomBenchmark {
   // ── rendering ──
   #render() {
     const els = this.#els;
+    // nothing but the prompt until a commit is chosen
+    this.node.classList.toggle('no-commit', !this.#sha);
     const dev = this.#catalogues.dev, commit = this.#catalogues.commit;
     const devRadio = this.node.querySelector('input[name="jl-custom-source"][value="dev"]');
     const devHas = dev?.format === 'vulnerabilities.toml';
@@ -418,13 +471,26 @@ export class CustomBenchmark {
     keep(els.lib, libs, 'all libraries', libraryName);
     keep(els.cat, cats, 'all categories');
     const shown = entries.filter(x => (!els.lib.value || x.lib === els.lib.value) && (!els.cat.value || x.entry.category === els.cat.value)
-      && (!els.puffin.checked || x.entry.find?.by_puffin) && (els.nowitness.checked || !x.entry.no_witness));
-    const hidden = entries.filter(x => x.entry.no_witness && !els.nowitness.checked);
+      && (!els.puffin.checked || x.entry.find?.by_puffin) && !(els.hidewitness.checked && x.entry.no_witness));
+    const hidden = entries.filter(x => x.entry.no_witness && els.hidewitness.checked);
 
     // footnote marks, in table order
     const marks = new Map();
     for (const x of shown) { const needs = this.#needs(x.entry); if (needs && !marks.has(needs)) marks.set(needs, MARKS[marks.size] ?? `(${marks.size + 1})`); }
     const timeOf = x => this.#times?.bugs?.[x.entry.alias ?? x.id] ?? this.#times?.bugs?.[x.id];
+    // a bug can be looked for when a preset of the commit has it and it has a signature; without witness (nothing shows
+    // the fuzzer can reach it: CALLB), only when it has a patch, whose differential still confirms a find (Heartbleed,
+    // FREAK: neither)
+    const Tickable = x => x.options.length > 0 && !!x.entry.oracle && (!x.entry.no_witness || (x.entry.patches ?? []).length > 0);
+    // whether the bench's time was measured with ASan, flagged when the build chosen here differs (ASan is slower)
+    const AsanOfTime = (t, x, picked) => {
+      if (t.asan == null) return '';
+      const preset = x.options.find(p => p.name === (picked?.preset ?? x.reference?.name));
+      const here = preset ? !!preset.asan || needsAsan(x.entry) : null;
+      const differs = here != null && here !== t.asan;
+      return ` <span class="jl-badge${differs ? ' warn' : ''}" title="${esc(`measured on a build ${t.asan ? 'with' : 'without'} ASan`
+          + (differs ? `; this experiment's build is ${here ? 'with' : 'without'} ASan${here && needsAsan(x.entry) && !preset.asan ? ' (its signature is an ASan report)' : ''}: expect another time (ASan slows the fuzzer)` : ''))}">${t.asan ? 'ASan' : 'no ASan'}</span>`;
+    };
     const harness = shown.filter(x => x.entry.bug_in_harness), library = shown.filter(x => !x.entry.bug_in_harness);
     const row = x => {
       const picked = this.#picked.get(x.id);
@@ -435,10 +501,10 @@ export class CustomBenchmark {
         + `${p.patched ? '' : ' (no patch: signature only)'}${p.witness ? '' : ' (witness does not reach it)'}</option>`).join('');
       const how = confirmation(x.entry);
       const confirm = `<span class="jl-badge ${how.kind === 'patch' ? 'ok' : 'warn'}">${esc(how.text)}</span>`;
-      const twins = this.#sameOracle(x).map(y => esc(y.entry.alias ?? y.id));
+      const twins = this.#sameSignature(x).map(y => esc(y.entry.alias ?? y.id));
       const vs = versus(x);
       return `<tr data-id="${esc(x.id)}" class="${picked ? 'picked' : ''}${x.options.length ? '' : ' na'}">
-        <td><input type="checkbox"${picked ? ' checked' : ''}${x.options.length && !x.entry.no_witness && x.entry.oracle ? '' : ' disabled'}></td>
+        <td><input type="checkbox"${picked ? ' checked' : ''}${Tickable(x) ? '' : ' disabled'}${!Tickable(x) && x.options.length && x.entry.oracle && x.entry.no_witness ? ' title="no witness and no patch: nothing would check a find of it"' : ''}></td>
         <td><a class="jl-custom-id" href="${esc(els.details.href)}#${esc(x.id)}" target="_blank" rel="noopener" title="Every field of this bug (Bugs reference)">${esc(x.id)} ↗</a>`
         + `${x.entry.alias ? ` <b>${esc(x.entry.alias)}</b>` : ''}${needs ? `<span class="jl-custom-mark">${esc(marks.get(needs))}</span>` : ''}`
         + `${x.entry.find?.by_puffin ? ' <span class="jl-custom-star" title="first found by puffin">★</span>' : ''} <span class="jl-tag">${esc(x.entry.category)}</span>`
@@ -447,29 +513,30 @@ export class CustomBenchmark {
         <td class="num">${x.entry.cvss ? esc(x.entry.cvss.score) : '—'}</td>
         <td>${x.options.length ? `<select class="jl-select">${options}</select>` : '<span class="jl-muted">no preset of this commit has it</span>'}
           <div class="jl-muted">affected ${esc(x.entry.affected ?? x.entry.affected_commits ?? '—')}</div></td>
-        <td>${t ? `<span title="${esc(`task ${t.task} (${t.job}) at tlspuffin ${String(t.commit ?? '').slice(0, 9)} of ${String(t.date ?? '').slice(0, 10)}: ${t.cores} cores per attempt, ${duration(t.budget_s)} budget`)}">`
-          + `${t.found ? duration(t.median_s) : 'not found'} · ${esc(t.found)}/${esc(t.runs)}</span>` : '<span class="jl-muted">—</span>'}</td>
-        <td>${confirm}${twins.length ? `<br><span class="jl-badge warn">same oracle as ${twins.join(', ')}</span>` : ''}</td></tr>`;
+        <td>${t ? `<span title="${esc(`task ${t.task} (${t.job}) at tlspuffin ${String(t.commit ?? '').slice(0, 9)} of ${String(t.date ?? '').slice(0, 10)}: ${t.cores} cores per attempt, ${duration(t.budget_s)} budget`
+              + (t.asan == null ? '' : `, a build ${t.asan ? 'with' : 'without'} ASan`))}">`
+          + `${t.found ? duration(t.median_s) : 'not found'} · ${esc(t.found)}/${esc(t.runs)}</span>${AsanOfTime(t, x, picked)}` : '<span class="jl-muted">—</span>'}</td>
+        <td>${confirm}${twins.length ? `<br><span class="jl-badge warn">same signature as ${twins.join(', ')}</span>` : ''}</td></tr>`;
     };
     const group = (title, list) => list.length ? `<tr class="group"><td colspan="6">${title}</td></tr>${list.map(row).join('')}` : '';
     els.bugs.innerHTML = `<tr><th></th><th title="bug: its ID (↗ every field, Bugs reference), alias, category and summary">bug</th>`
       + '<th title="CVSS: the base score of the bug">CVSS</th>'
       + '<th title="run on: the presets of the commit that have the bug (version, build options, ASan); the safest first: a version where it has a patch">run on</th>'
       + `<th title="time to find on the bench: median of the Vuln group A/B attempts that found it, found/attempts; hover a value for its task">time to find on the bench${this.#times ? ' ⁽ᵗ⁾' : ''}</th>`
-      + '<th title="a find is confirmed by: how validation recognises a find of this bug (its patch: patch differential; else its signature only)">a find is confirmed by</th></tr>'
+      + '<th title="a find is recognised by: how validation recognises a find of this bug (✔ confirmed by its patch: patch differential; else ≈ by its signature only: weak, the oracle alone decides during the run, without stack)">a find is recognised by</th></tr>'
       + libs.filter(lib => library.some(x => x.lib === lib)).map(lib => group(`${esc(libraryName(lib))} — ${library.filter(x => x.lib === lib).length} bug(s)`,
           library.filter(x => x.lib === lib))).join('')
       + group('🔧 Bugs of the fuzzing harness', harness)
       + (shown.length ? '' : '<tr><td colspan="6" class="jl-muted">no bug to show</td></tr>');
     els.footnotes.innerHTML = [...marks].map(([needs, mark]) => `<div><span class="jl-custom-mark">${esc(mark)}</span> ${needs}.</div>`).join('')
       + (this.#times ? `<div><span class="jl-custom-mark">⁽ᵗ⁾</span> ${esc(this.#times.source ?? 'the bench\'s own measurements')}.</div>` : '')
-      + (hidden.length ? `<div class="jl-muted">${hidden.length} bug(s) without witness hidden (${hidden.map(x => esc(x.entry.alias ?? x.id)).join(', ')}): cannot be checked, never targets.</div>` : '')
+      + (hidden.length ? `<div class="jl-muted">${hidden.length} bug(s) without witness hidden (${hidden.map(x => esc(x.entry.alias ?? x.id)).join(', ')}): untick "hide bugs without witness" to see them.</div>` : '')
       + '<div class="jl-muted">★ first found by puffin · ↗ every field of the bug: Bugs reference page.</div>';
     this.#renderRuns();
   }
 
-  // known bugs left in the same build with the same oracle: a stop on them is not a find (validation tells)
-  #sameOracle(x) {
+  // known bugs left in the same build with the same signature: a stop on them is not a find (validation tells)
+  #sameSignature(x) {
     const preset = this.#picked.get(x.id)?.preset ? x.options.find(p => p.name === this.#picked.get(x.id).preset) : x.reference;
     if (!preset || !x.entry.oracle) return [];
     return this.#entries().filter(y => y.lib === x.lib && y.id !== x.id && presentOn(y.id, y.entry, preset)
@@ -479,39 +546,42 @@ export class CustomBenchmark {
 
   #renderRuns() {
     const experiments = this.#experiments();
-    const oracle = o => !o ? '—' : o.kind === 'claim' ? `claim <code>${esc(o.violation ?? '')}</code>`
-      : `crash${o.signal ? ` <code>${esc(o.signal)}</code>` : ''}${o.asan ? `, ASan <code>${esc(o.asan)}</code>` : ''}${o.panic ? `, panic <code>${esc(o.panic)}</code>` : ''}`;
+    // weak where the signature alone decides (no patch at that version: during the run, the oracle, no stack)
+    const signature = (o, x) => !o ? '—' : `${esc(SignatureText(o))}${!x.preset.patched ? ` <span class="jl-badge warn" title="${esc(TERMS.find(t => t[0] === 'weak signature')[1])}">weak</span>` : ''}`;
     this.#els.runs.innerHTML = '<tr><th title="experiment: <benchmark>_<bug>, its name on Results">experiment</th>'
       + '<th title="vendor: the build given to mk_vendor (<preset>-only-<ID>: every other bug with a patch patched)">vendor</th>'
       + '<th title="build: library, version, ASan and the bugs patched">build</th>'
       + '<th title="run with: the fuzzer flags and cargo features the bug needs">run with</th>'
-      + '<th title="stops on its oracle: the objectives that end an attempt, once validation confirms them">stops on its oracle</th>'
+      + '<th title="stops on its signature: the objectives that end an attempt, once validation recognises them">stops on its signature</th>'
       + '<th title="known bugs left in the build: other known bugs the fuzzer may find first (an attempt goes on after them)">known bugs left in the build</th></tr>'
       + (experiments.map(x => {
         const { patched, left } = this.#neighbours(x);
         const find = x.entry.find ?? {};
-        const twins = this.#sameOracle(x).map(y => esc(y.entry.alias ?? y.id));
+        const twins = this.#sameSignature(x).map(y => esc(y.entry.alias ?? y.id));
         return `<tr><td><b>${esc(x.name)}</b></td><td><code>${esc(x.args.vendor)}</code></td>
-          <td>${esc(libraryName(x.lib))} ${esc(x.preset.version)}${x.preset.asan ? ', ASan' : needsAsan(x.entry) ? ', + ASan (its oracle is an ASan report)' : ''}${patched.length ? `, ${esc(patched.join(', '))} patched` : ''}</td>
+          <td>${esc(libraryName(x.lib))} ${esc(x.preset.version)}${x.preset.asan ? ', ASan' : needsAsan(x.entry) ? ', + ASan (its signature is an ASan report)' : ''}${patched.length ? `, ${esc(patched.join(', '))} patched` : ''}</td>
           <td>${[...(find.flags ?? []).map(f => `<code>${esc(f)}</code>`), ...(find.features ?? []).map(f => `feature <code>${esc(f)}</code>`)].join(' ') || '<span class="jl-muted">—</span>'}</td>
-          <td>${oracle(x.entry.oracle)}</td>
+          <td>${signature(x.entry.oracle, x)}</td>
           <td>${left.length ? esc(left.join(', ')) : 'none'}${twins.length ? `<br><span class="jl-badge warn">a stop on ${twins.join(' or ')} is not a find</span>` : ''}</td></tr>`;
       }).join('') || '<tr><td colspan="6" class="jl-muted">Tick the bugs to look for above: one experiment each.</td></tr>');
     // the experiments whose finds cannot be validated by patch differential, and how they will be confirmed
-    const describe = o => !o ? 'none' : o.kind === 'claim' ? `the claim "${o.violation ?? ''}"`
-      : `a crash${o.signal ? ` (${o.signal})` : ''}${o.asan ? ` with an ASan report ${o.asan}` : ''}${o.panic ? ` (panic ${o.panic})` : ''}`;
+    const describe = o => !o ? 'none' : SignatureText(o);
     this.#els.warnings.innerHTML = experiments.flatMap(x => {
       const label = esc(x.entry.alias ?? x.id), version = esc(x.preset.version);
-      const twins = this.#sameOracle(x).map(y => esc(y.entry.alias ?? y.id));
+      const twins = this.#sameSignature(x).map(y => esc(y.entry.alias ?? y.id));
+      const noWitness = x.entry.no_witness ? [`⚠ <b>${label}</b> has no witness: nothing shows the fuzzer can reach it on this build (an attempt that
+          times out says nothing about the bug); a find is still confirmed by its patch (patch differential), without the
+          control a witness gives (that the builds with and without its patch differ where they should).`] : [];
       if (x.entry.replayable === false) {
-        return [`⚠ <b>${label}</b>: its objectives do not replay on their own: a find is the fuzzer's own record of ${esc(describe(x.entry.oracle))}, not validated.`];
+        return [...noWitness, `⚠ <b>${label}</b>: its objectives do not replay on their own: a find is the fuzzer's own record of ${esc(describe(x.entry.oracle))}, not validated.`];
       }
       if (!x.preset.patched) {
-        return [`⚠ <b>${label}</b> has no patch at ${version}: a find is confirmed by its signature only: the objective must reproduce, with
-          ${esc(describe(x.entry.oracle))}, on the build with every other patch${twins.length ? `; ${twins.join(', ')}, left in that build with the same
-          signature, would be taken for it` : ''}. A patch for it in tlspuffin's catalogue would make it a patch differential.`];
+        return [`⚠ <b>${label}</b> has no patch at ${version}: a find is recognised by its signature only: the objective must reproduce, with
+          ${esc(describe(x.entry.oracle))}, on the build with every other patch (a weak signature: ${x.entry.oracle?.kind === 'claim'
+          ? 'any objective with this claim' : 'any such failure'} there is taken for it, whatever its stack)${twins.length ? `; ${twins.join(', ')}, left in that build with the same
+          signature, would be taken for it` : ''}. A patch for it in tlspuffin's catalogue would make it a patch differential.`, ...noWitness];
       }
-      return [];
+      return noWitness;
     }).map(w => `<div>${w}</div>`).join('');
     const n = experiments.length;
     this.#els.cost.textContent = n ? `${n} experiment(s) × ${this.attempts} attempt(s) × ${this.cores} core(s), until each attempt finds its bug or times out` : '';

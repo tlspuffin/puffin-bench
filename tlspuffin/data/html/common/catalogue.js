@@ -65,11 +65,14 @@ export function runOptions(id, entry, presets) {
     .sort((a, b) => (b.patched ? 1 : 0) - (a.patched ? 1 : 0) || compareVersions(b.version, a.version) || (b.asan ? 1 : 0) - (a.asan ? 1 : 0)
                    || (a.fix?.length ?? 0) - (b.fix?.length ?? 0) || a.name.length - b.name.length);
 }
-// how a find of a bug is confirmed: by its patch (patch differential), by its signature only (no patch), the fuzzer's
-// own record (its objectives do not replay), or not at all (no oracle); text: what the pages show
+// how validation recognises a find of a bug: confirmed by its patch (patch differential), by its signature only (no
+// patch; weak: during the run the oracle alone decides, no stack), the fuzzer's own record (its objectives do not
+// replay), or not at all (no signature); text: what the pages show, in the words of verdicts.js
 export function confirmation(entry) {
-  if (!entry.oracle) return { kind: 'none', text: 'no oracle: cannot be recognised' };
+  if (!entry.oracle) return { kind: 'none', text: 'no signature: cannot be recognised' };
   if (entry.replayable === false) return { kind: 'record', text: 'the fuzzer\'s record only: not replayable' };
-  if ((entry.patches ?? []).length) return { kind: 'patch', text: `its patch (${entry.patches.map(p => p.versions ?? p.commits ?? '').join(' · ')})` };
-  return { kind: 'signature', text: 'signature only: no patch' };
+  if ((entry.patches ?? []).length) return { kind: 'patch', text: `✔ confirmed by its patch (${entry.patches.map(p => p.versions ?? p.commits ?? '').join(' · ')})` };
+  // during the run, the oracle alone (no stack): weak, whatever its kind
+  const any = entry.oracle.kind === 'claim' ? 'any objective with this claim' : entry.oracle.kind === 'panic' ? 'any such panic' : 'any such crash';
+  return { kind: 'signature', weak: true, text: `≈ by its signature only: no patch (weak: ${any})` };
 }

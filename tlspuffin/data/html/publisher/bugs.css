@@ -80,3 +80,25 @@ table.registry tr.unknown-bug td { background: #1f1416; }
 .kind-crash { border-color: #8e1519; color: #ff9b95; } .kind-claim { border-color: #6e40c9; color: #d2a8ff; }
 .seen { display: inline-block; padding: 0 6px; margin: 1px 0; border-radius: 999px; font-size: 11px; background: #1b1b1b; border: 1px solid #333; }
 details.howto summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+
+/* the words section: the badges as the objectives pages show them (objectives_page/report.css), the levels as History */
+.words .val { display: inline-block; padding: 1px 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.words .val-patch { background: #12361f; border-color: #3fb950; color: #7ee787; font-weight: 700; }
+.words .val-signature { background: #173a1f; border-color: #2ea043; color: #aff5b4; }
+.words .val-unpatched, .words .val-other { background: #2e220f; border-color: #f08c00; color: #ffb74d; }
+.words .val-new { background: #3a1212; border-color: #da3633; color: #ff8a80; font-weight: 700; }
+.words .val-error { background: #2b1d2e; border-color: #b07cc6; color: #e2b6f2; }
+.words .val-inconclusive, .words .val-not-validated, .words .val-none { border-color: #6e7681; color: #a0a6ad; }
+.words .val-no-replay { border-color: #6e7681; color: #c9d1d9; border-style: dotted; }
+.words .expected, .words .not-target, .words .known-cve, .words .unexpected, .words .new-bug-badge {
+  display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.words .expected { border-color: #3fb950; color: #7ee787; }
+.words .not-target { border-style: dashed; border-color: #8b8b8b; color: #8b8b8b; }
+.words .known-cve { border-color: #6e7681; color: #c9d1d9; }
+.words .unexpected { border-color: #f08c00; color: #ffb74d; }
+.words .new-bug-badge { background: #da3633; border-color: #da3633; color: #fff; font-weight: 800; }
+.words .lvl { display: inline-block; padding: 1px 8px; border-radius: 6px; border: 1px solid #30363d; white-space: nowrap; }
+.words .lvl-new { background: #d32f2f; border-color: #ff5252; color: #fff; font-weight: 700; }
+.words .lvl-unexpected { background: #ffc400; border-color: #ffc400; color: #1a1a1a; font-weight: 600; }
+.words .lvl-known { background: #30363d; color: #c9d1d9; }
+.words .lvl-unclear { background: transparent; border-color: #ffb74d; color: #ffb74d; }
