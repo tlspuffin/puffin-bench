@@ -230,6 +230,8 @@ export function Bugs(runs, notTargeted = {}, targets = {}) {
       } else {
         bug.declared = false;
       }
+      // its objectives, by run and trace (the validation's verdicts are by "<attempt>/<trace>")
+      for (const name of group.traces ?? []) (bug.objectives ??= []).push({ library: run.library, attempt: run.attempt, name });
       // its objectives kept next to the report page (objectives_report.sh: <task>-traces/<library>/<run>/)
       if (run.traces_dir) {
         for (const name of group.traces ?? []) {
@@ -474,4 +476,87 @@ export function LoadCves() {
   cvesLoading ??= fetch(new URL('../jobsscripts/tlspuffin/vuln_targets.json', import.meta.url), { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null).then(json => json?._cves ?? null).catch(() => null);
   return cvesLoading;
+}
+
+// ---- Validation against tlspuffin's catalogue (PR_validate.sh): what the verdicts of a bug's objectives say ----
+
+// The signature of a bug, as the catalogue's oracles say it: a claim, or a crash with its report type and top frame
+export function BugSignatureOf(bug) {
+  const claim = bug.fuzzer?.kind === 'claim' ? bug.fuzzer.detail : (bug.type === 'security-violation' ? bug.frames?.[0] : null);
+  if (claim) return { kind: 'claim', violation: claim };
+  return { kind: 'crash', type: bug.type, top: LocationFrames(bug.frames)[0] ?? null };
+}
+// whether a catalogue entry's oracle is that signature: the claim; or a crash with its ASan report type (when the oracle
+// names one) and, when the entry gives its top frames, the bug's top frame among them
+export function OracleMatchesBug(entry, signature) {
+  const o = entry?.oracle;
+  if (!o) return false;
+  if (signature.kind === 'claim') return o.kind === 'claim' && o.violation === signature.violation;
+  if (o.kind !== 'crash') return false;
+  if (o.asan && o.asan !== signature.type) return false;
+  const tops = entry.top_frames ?? [];
+  return !tops.length || (signature.top != null && tops.some(f => FrameName(f) === signature.top));
+}
+// the catalogue's bugs of a library with the signature of a bug (catalogue: git_restapi's, vendors.<lib>.entries)
+export function SignatureEntries(bug, catalogue, vendor) {
+  const signature = BugSignatureOf(bug);
+  return Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {}).filter(([, e]) => OracleMatchesBug(e, signature)).map(([id]) => id);
+}
+// the library a configuration built (its run's record: wolfssl:wolfssl540-asan…), lower case
+export function VendorOfRun(run) {
+  return (String(run?.cli?.vendor ?? '').split(':')[0] || run?.cli?.library?.name || '').toLowerCase() || null;
+}
+
+// The verdict of a bug from those of its validated objectives (report.libraries[].validation.byTrace, by
+// "<attempt>/<trace>"), strongest first:
+//   patch       confirmed by patch differential: the bug is ids (the full green)
+//   signature   on the build with every patch, with the signature of known bugs without patch there (ids): one of them
+//   unpatched   on the build with every patch, with the signature of bugs that have a patch there (ids): their patch
+//               does not remove it: not them, or an incomplete patch (⚠)
+//   new         on the build with every patch, the signature of no known bug: a new bug, or one missing from the
+//               catalogue (🚨)
+//   other       removed by the patch of ids, with another signature: to review (⚠)
+//   inconclusive, not-validated
+// with counts: validated / objectives, per verdict. null: none of its objectives was validated (then candidates: the
+// catalogue's bugs with its signature, for "has the signature of X")
+export function BugValidation(bug, libraries, catalogue = null) {
+  const byLib = Object.fromEntries((libraries ?? []).filter(l => l.validation).map(l => [l.library, l.validation]));
+  const objectives = bug.objectives ?? [];
+  const verdicts = objectives.map(o => byLib[o.library]?.byTrace?.[`${o.attempt}/${o.name}`]).filter(Boolean);
+  const vendor = VendorOfRun(bug.run) ?? VendorOfRun(bug.runs?.[0]);
+  const candidates = catalogue && vendor ? SignatureEntries(bug, catalogue, vendor) : [];
+  const counts = verdicts.reduce((c, v) => ({ ...c, [v.verdict]: (c[v.verdict] ?? 0) + 1 }), {});
+  const base = { validated: verdicts.length, objectives: objectives.length || bug.count, counts, candidates,
+                 during: verdicts.some(v => v.during_attempt) };
+  if (!verdicts.length) return candidates.length || Object.keys(byLib).length ? { ...base, kind: null, ids: [], parts: [] } : null;
+  // its objectives by what validation says of each (one claim can be several bugs: CVE-2021-3336 and SIG, SKIP on
+  // 4.4.0 share "Authentication bypass"), strongest first
+  const strength = ['patch', 'signature', 'unpatched', 'new', 'other', 'inconclusive', 'not-validated'];
+  const known0 = new Set(verdicts.flatMap(v => v.known_unpatched ?? []));
+  const patchedCandidates = candidates.filter(id => !known0.has(id));
+  const partOf = v => v.verdict === 'confirmed' ? ['patch', v.entries ?? []]
+      : v.verdict === 'not-patched' ? ((v.known_unpatched ?? []).length ? ['signature', v.known_unpatched]
+                                       : patchedCandidates.length ? ['unpatched', patchedCandidates] : ['new', []])
+      : v.verdict === 'other-signature' ? ['other', v.other_signature ?? []] : [v.verdict, []];
+  const parts = [];
+  for (const v of verdicts) {
+    const [kind, ids] = partOf(v);
+    const part = parts.find(p => p.kind === kind && p.ids.join() === ids.join());
+    if (part) part.count += 1; else parts.push({ kind, ids, count: 1 });
+  }
+  parts.sort((a, b) => strength.indexOf(a.kind) - strength.indexOf(b.kind) || b.count - a.count);
+  base.parts = parts;
+  const union = (list, field) => [...new Set(list.flatMap(v => v[field] ?? []))];
+  const confirmed = verdicts.filter(v => v.verdict === 'confirmed');
+  if (confirmed.length) return { ...base, kind: 'patch', ids: union(confirmed, 'entries') };
+  const notPatched = verdicts.filter(v => v.verdict === 'not-patched');
+  const known = union(notPatched, 'known_unpatched');
+  if (known.length) return { ...base, kind: 'signature', ids: known };
+  if (notPatched.length) {
+    const patched = candidates.filter(id => !known.includes(id));
+    return patched.length ? { ...base, kind: 'unpatched', ids: patched } : { ...base, kind: 'new', ids: [] };
+  }
+  const other = verdicts.filter(v => v.verdict === 'other-signature');
+  if (other.length) return { ...base, kind: 'other', ids: union(other, 'other_signature') };
+  return { ...base, kind: counts.inconclusive ? 'inconclusive' : 'not-validated', ids: [] };
 }

@@ -308,6 +308,26 @@ PrepareValidation() {
   return 0;
 }
 
+# ValidationChoice <experiment dir>: the objectives to validate, in order, at most VALIDATION_MAX (20): the targeted
+# ones first (ExperimentEnd's .targeted-names), then the first of each bug (the fuzzer's record of the objective: its
+# claim, or the top frame of its crash; FuzzerVerdicts, when the job script has it), then the others by time. A campaign
+# saves hundreds of objectives, often of one bug: each distinct bug gets a verdict before the many of one.
+ValidationChoice() {
+  local experiment="$1" all firstOfEach='';
+  all=$( find "${experiment}objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2- );
+  if [ -n "${all}" ] && declare -F FuzzerVerdicts > /dev/null && declare -F FuzzerRecords > /dev/null; then
+    local records; records=$( FuzzerRecords "$( FuzzerLogDir "${experiment}" 2> /dev/null )" 2> /dev/null ) || records='';
+    firstOfEach=$( sed 's#.*/##; s/\.trace$//' <<< "${all}" | FuzzerVerdicts "${records}" 2> /dev/null |
+        awk -F'\t' '$2 != "" { split($4, frames, " < "); key = $2 "|" ($2 == "claim" ? $3 : frames[1]);
+                                if (!(key in seen)) { seen[key] = 1; print $1 } }' |
+        sed "s|^|${experiment}objective/|; s|$|.trace|" );
+  fi
+  { [ -s "${experiment}.targeted-names" ] && sed "s|^|${experiment}objective/|; s|$|.trace|" "${experiment}.targeted-names";
+    [ -n "${firstOfEach}" ] && echo "${firstOfEach}"; echo "${all}"; } |
+    awk 'NF && !seen[$0]++' | while read -r t; do [ -f "${t}" ] && echo "${t}"; done |
+    awk -v max="${VALIDATION_MAX:-20}" 'NR <= max';  # (reads all: no broken pipe under pipefail)
+}
+
 ValidateObjectives() {
   local out="${THEJOB_OUT_PATH}/validation-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
   if [ "${VALIDATION:-on}" == off ]; then
@@ -316,11 +336,8 @@ ValidateObjectives() {
   local experiment; experiment=$( ls -d ./experiments/*/ 2> /dev/null | head -1 );
   local -a traces=();
   if [ -n "${experiment}" ] && [ -d "${experiment}objective" ]; then
-    # the targeted objectives first (ExperimentEnd's .targeted-names), then by time, at most VALIDATION_MAX
-    mapfile -t traces < <(
-      { [ -s "${experiment}.targeted-names" ] && sed "s|^|${experiment}objective/|; s|$|.trace|" "${experiment}.targeted-names";
-        find "${experiment}objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2-; } |
-      awk '!seen[$0]++' | while read -r t; do [ -f "${t}" ] && echo "${t}"; done | head -n "${VALIDATION_MAX:-20}" );
+    # the targeted objectives first, then the first of each bug, then the others by time (ValidationChoice)
+    mapfile -t traces < <( ValidationChoice "${experiment}" );
   fi
   if (( ${#traces[@]} == 0 )); then
     jq -n '{ objectives: [], note: "no objective" }' > "${out}"; ValidationCleanup; return 0;

@@ -140,3 +140,15 @@ a.type.letter.not-target-letter:hover { opacity:.8 }
 .libtable .runs-failed { color:#e3b341; font-weight:600; cursor:context-menu }
 .exp-chip { padding:0 7px; border-radius:999px; font-size:11.5px; font-weight:600; cursor:context-menu }
 .exp-chip.exp-all { background:#238636; color:#fff } .exp-chip.exp-partial { background:#9e6a03; color:#fff } .exp-chip.exp-none { background:#b62324; color:#fff }
+/* validation against tlspuffin's catalogue (bugs.js BugValidation): patch-confirmed full green, signature only lighter
+   (yellow-green), the signature of a patched bug or another signature amber, no known signature red, the rest grey */
+.validation { margin-top:3px; display:flex; flex-wrap:wrap; gap:4px; align-items:center; font-size:11px }
+.val { display:inline-block; padding:1px 7px; border-radius:999px; border:1px solid; white-space:nowrap }
+.val a { color:inherit; text-decoration:underline dotted }
+.val-patch { background:#12361f; border-color:#3fb950; color:#7ee787; font-weight:700 }
+.val-signature { background:#262a10; border-color:#a3b832; color:#d4e157 }
+.val-unpatched, .val-other { background:#2e220f; border-color:#f08c00; color:#ffb74d }
+.val-new { background:#3a1212; border-color:#da3633; color:#ff8a80; font-weight:700 }
+.val-inconclusive, .val-not-validated, .val-none { border-color:#6e7681; color:#a0a6ad }
+.val-note { color:var(--muted, #8b8b8b) }
+.tile.val-tile b { color:#7ee787 } .tile.val-new-tile b { color:#ff8a80 }
