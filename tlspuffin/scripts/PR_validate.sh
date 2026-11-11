@@ -6,10 +6,14 @@
 # catalogue is dev's (the default: the vulnerabilities.toml files of origin/dev and the patches they name replace the
 # commit's) or the commit's (VALIDATION_CATALOGUE=commit, else the experiment's catalogue_source). An objective runs up to
 # VALIDATION_RUNS times (3) on F, then on each V_X, with the campaign's flags:
-#   - an objective on F: "not-patched" (a new bug, or a known bug without patch, named when its oracle matches);
+#   - an objective on F: "not-patched" (a new bug, or a known bug without patch, named when its oracle matches:
+#     known_unpatched; or the claim or panic of a bug with a patch here, which does not remove it: signature_of_patched,
+#     to review; a crash oracle is too weak to name such a bug: any crash of its type would);
 #   - else an objective on V_X matching X's oracle: "confirmed" X;
 #   - else an objective on V_X with another signature: "other-signature" (removed by X's patch, to review, never X);
-#   - else "inconclusive".
+#   - else, when an execution could not run (no outcome: the binary refused its command line, crashed before the trace,
+#     timed out): "error", with what failed (no replay result, never read as "not reproduced");
+#   - else "inconclusive" (not reproduced on the validation builds).
 # Controls: the witness of each X must give X's oracle on V_X and not on F (`tlspuffin witness`).
 #
 # ValidationPrepare: the checkout (validation/tree), the builds (the libraries in a folder shared by the tasks, one
@@ -31,7 +35,8 @@ VALIDATION_JQ='def matches($o): . as $out | $o != null
   and ($o.asan == null or $o.asan == ($out.asan.type // null))
   and ($o.violation == null or $o.violation == $out.violation)
   and ($o.panic == null or $o.panic == $out.panic);
-def objective: .outcome == "crash" or .outcome == "claim";'
+def objective: .outcome == "crash" or .outcome == "claim";
+def failed: .outcome == "failed";'
 
 # ASan options of the executions: an ASan report aborts at once (its type is the oracle's), no leak report; those of the
 # campaign's launch when it set them (ValidationEnv)
@@ -57,10 +62,12 @@ for entry in tomllib.load(open(sys.argv[1], "rb")).values():
   echo "${dev}";
 }
 
-# ValidationExecute <binary> <put> <trace> <tag>: one execution of an objective; prints its outcome (one JSON line)
+# ValidationExecute <binary> <put> <trace> <tag>: one execution of an objective; prints its outcome (one JSON line):
+# tlspuffin's (`execute --outcome`: crash, claim, error of the PUT, none), else {"outcome": "failed", "message": …}
+# when the execution gave none (it could not run: its exit status or timeout, and the first error line of its log)
 ValidationExecute() {
   local binary="$1" put="$2" trace="$3" tag="$4";
-  local file="${VALIDATION_WORK}/runs/${tag}.json";
+  local file="${VALIDATION_WORK}/runs/${tag}.json" log="${VALIDATION_WORK}/runs/${tag}.log" status=0;
   # the flags as the fuzzer's command line had them: a fragment of shell, which nix-shell --run read again (the job
   # configurations quote them: '--put-use-clear'): its words
   local -a flags=();
@@ -68,19 +75,25 @@ ValidationExecute() {
   # shellcheck disable=SC2086 # LAUNCH_NOASLR is a word list
   ASAN_OPTIONS="${VALIDATION_ASAN_OPTIONS}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" ${LAUNCH_NOASLR:-} \
     "${binary}" --put "${put}" "${flags[@]}" execute --outcome "${file}" "${trace}" \
-    < /dev/null > "${VALIDATION_WORK}/runs/${tag}.log" 2>&1;
-  jq -c '.[0].outcome // empty' "${file}" 2> /dev/null | grep . ||
-    echo '{"outcome":"error","message":"no outcome (see the log of the execution)"}';
+    < /dev/null > "${log}" 2>&1 || status=$?;
+  jq -c '.[0].outcome // empty' "${file}" 2> /dev/null | grep . && return 0;
+  local why;
+  case "${status}" in
+    124|137) why="timed out after ${VALIDATION_TIMEOUT:-120} s";;
+    *) why="exit status ${status}: $( { grep -m1 -iE 'error|not found|no such|denied|panicked' "${log}" || grep -m1 . "${log}" || true; } 2> /dev/null |
+                                       sed 's/^[0-9T:.+-]*[[:space:]]*//' | cut -c1-200 )";;
+  esac
+  jq -nc --arg m "no outcome, ${why}" '{ outcome: "failed", message: $m }';
 }
 
-# ValidationRuns <binary> <put> <trace> <tag>: up to VALIDATION_RUNS executions, until one gives an objective; prints
-# the outcomes as a JSON array
+# ValidationRuns <binary> <put> <trace> <tag>: up to VALIDATION_RUNS executions, until one gives an objective or one
+# could not run (it would not the next time either); prints the outcomes as a JSON array
 ValidationRuns() {
   local outcomes='[]' run outcome;
   for (( run = 1; run <= ${VALIDATION_RUNS:-3}; run++ )); do
     outcome=$( ValidationExecute "$1" "$2" "$3" "$4-${run}" );
     outcomes=$( jq -c --argjson o "${outcome}" '. + [$o]' <<< "${outcomes}" );
-    jq -e "${VALIDATION_JQ} objective" <<< "${outcome}" > /dev/null && break;
+    jq -e "${VALIDATION_JQ} objective or failed" <<< "${outcome}" > /dev/null && break;
   done
   echo "${outcomes}";
 }
@@ -265,19 +278,30 @@ ValidationVerdict() {
   local onF; onF=$( ValidationRuns "${VALIDATION_BINARY}" "${fixAll}" "${trace}" "${name}-F" );
   local result id;
   if jq -e "${VALIDATION_JQ} any(.[]; objective)" <<< "${onF}" > /dev/null; then
-    result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson unpatched "${unpatched}" "${VALIDATION_JQ}
+    result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson unpatched "${unpatched}" --argjson candidates "${candidates}" "${VALIDATION_JQ}
       ([\$f[] | select(objective)][0]) as \$o
-      | { trace: \$t, verdict: \"not-patched\", entries: [], known_unpatched: [\$unpatched[] | select(.oracle as \$or | \$o | matches(\$or)) | .id], f: \$f }" <<< 'null' );
+      | { trace: \$t, verdict: \"not-patched\", entries: [], known_unpatched: [\$unpatched[] | select(.oracle as \$or | \$o | matches(\$or)) | .id],
+          signature_of_patched: [\$candidates[] | select(.oracle.kind != \"crash\") | select(.oracle as \$or | \$o | matches(\$or)) | .id], f: \$f }" <<< 'null' );
+  elif jq -e "${VALIDATION_JQ} any(.[]; failed)" <<< "${onF}" > /dev/null; then
+    # F could not run it: nothing to compare the builds without a patch with
+    result=$( jq -c --arg t "${name}" --argjson f "${onF}" "${VALIDATION_JQ}
+      { trace: \$t, verdict: \"error\", entries: [], known_unpatched: [],
+        failure: { build: \"F\", message: ([\$f[] | select(failed) | .message][0]) }, f: \$f }" <<< 'null' );
   else
     local onV='{}';
     for id in $( jq -r '.[].id' <<< "${candidates}" ); do
       onV=$( jq -c --arg id "${id}" --argjson runs "$( ValidationRuns "${VALIDATION_BINARY}" "${preset}-only-${id}" "${trace}" "${name}-${id}" )" '. + { ($id): $runs }' <<< "${onV}" );
     done
+    # confirmed, else another signature, else an error when a build could not run it (that bug was not checked), else
+    # inconclusive
     result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson v "${onV}" --argjson candidates "${candidates}" "${VALIDATION_JQ}
       [\$candidates[] | .id as \$id | .oracle as \$or | select(any(\$v[\$id][]?; matches(\$or))) | \$id] as \$confirmed
       | [\$candidates[] | .id as \$id | .oracle as \$or | select((any(\$v[\$id][]?; matches(\$or)) | not) and any(\$v[\$id][]?; objective)) | \$id] as \$other
-      | { trace: \$t, verdict: (if (\$confirmed | length) > 0 then \"confirmed\" elif (\$other | length) > 0 then \"other-signature\" else \"inconclusive\" end),
-          entries: \$confirmed, other_signature: \$other, f: \$f, v: \$v }" <<< 'null' );
+      | [\$v | to_entries[] | .key as \$id | .value[] | select(failed) | { build: \$id, message }] as \$failed
+      | { trace: \$t, verdict: (if (\$confirmed | length) > 0 then \"confirmed\" elif (\$other | length) > 0 then \"other-signature\"
+                               elif (\$failed | length) > 0 then \"error\" else \"inconclusive\" end),
+          entries: \$confirmed, other_signature: \$other, f: \$f, v: \$v }
+      + (if (\$confirmed | length) == 0 and (\$other | length) == 0 and (\$failed | length) > 0 then { failure: \$failed[0] } else {} end)" <<< 'null' );
   fi
   [ "${2:-}" == during ] && result=$( jq -c '. + { during_attempt: true }' <<< "${result}" );
   echo "${result}" > "${file}";
@@ -287,15 +311,16 @@ ValidationVerdict() {
 # ConfirmObjective <trace>: whether an objective of an experiment naming its bug is that bug (target_bug), by its
 # verdict: 0 confirmed, by patch differential when the target has a patch at this version, else by its signature on the
 # build with every patch (verdict not-patched, the target named); 1 not confirmed (another bug, not reproduced); 2 not
-# decided by validation (not prepared: unsupported or error; the target's objectives do not replay): the caller keeps
-# the fuzzer's record. Prints why, in a few words. The executions run in a subshell (the monitor's globals stay).
+# decided by validation (not prepared: unsupported or error; the target's objectives do not replay; its replays could not
+# run: verdict "error"): the caller keeps the fuzzer's record. Prints why, in a few words. The executions run in a
+# subshell (the monitor's globals stay).
 ConfirmObjective() {
   local trace="$1" state="${PWD}/validation/state.json";
   if [ "$( jq -r .status "${state}" 2> /dev/null )" != ready ]; then
     echo "no validation: $( jq -r '.message // empty' "${state}" 2> /dev/null || true )"; return 2;
   fi
   local target; target=$( jq -c --arg id "${target_bug:-}" '{ candidate: ([.candidates[].id] | index($id) != null),
-      replayable: ([.entries[] | select(.id == $id) | .replayable][0] // true) }' "${state}" );
+      replayable: ([.entries[] | select(.id == $id) | .replayable][0] | . != false) }' "${state}" );
   jq -e '.replayable == false' <<< "${target}" > /dev/null && { echo "its objectives do not replay: the fuzzer's record"; return 2; };
   local verdict; verdict=$( ValidationEnv && ValidationVerdict "${trace}" during ) || { echo "the validation failed"; return 2; };
   if jq -e '.candidate' <<< "${target}" > /dev/null; then
@@ -305,6 +330,8 @@ ConfirmObjective() {
     jq -e --arg id "${target_bug}" '.verdict == "not-patched" and ((.known_unpatched // []) | index($id) != null)' <<< "${verdict}" > /dev/null &&
       { echo "its signature on the build with every patch (no patch for it)"; return 0; };
   fi
+  jq -e '.verdict == "error"' <<< "${verdict}" > /dev/null &&
+    { echo "the replays could not run ($( jq -r '.failure.message // "no outcome"' <<< "${verdict}" )): the fuzzer's record"; return 2; };
   jq -r '"validation: " + .verdict + (if (.entries | length) > 0 then " " + (.entries | join(", ")) else "" end)
     + (if ((.known_unpatched // []) | length) > 0 then " (" + (.known_unpatched | join(", ")) + ")" else "" end)' <<< "${verdict}";
   return 1;
@@ -388,14 +415,18 @@ ValidateObjectives() {
   done
 
   local lib preset; lib=$( jq -r .lib "${state}" ); preset=$( jq -r .preset "${state}" );
-  jq -n --arg commit "${COMMIT_ID}" --arg vendor "${vendor}" --arg source "$( jq -r .source "${state}" )" --arg catalogueCommit "$( jq -r .catalogueCommit "${state}" )" \
+  # the bench that validated: the deployed version (version.json of deploy.sh) and the commit of these job scripts
+  # (build.sh), which a hot copy can change without a deploy: the pages say which code made the verdicts
+  local deployed; deployed=$( jq -r '.commit // empty' "${THEJOB_TOOLS_PATH:-/nonexistent}/../html/board/version.json" 2> /dev/null || true );
+  jq -n --arg commit "${COMMIT_ID}" --arg deployed "${deployed}" --arg jobscripts "${PB_JOBSCRIPTS_COMMIT:-}" --arg vendor "${vendor}" --arg source "$( jq -r .source "${state}" )" --arg catalogueCommit "$( jq -r .catalogueCommit "${state}" )" \
     --argjson total "$( find "${experiment}objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' | wc -l )" \
     --slurpfile list "${VALIDATION_WORK}/list.json" --slurpfile build "${VALIDATION_WORK}/list-build.json" \
     --arg validatedOn "${lib}:${preset}" --argjson controls "$( jq -c .controls "${state}" )" --argjson results "${results}" \
-    '{ commit: $commit, vendor: $vendor, catalogue: { source: $source, commit: $catalogueCommit, hash: $list[0].catalogue },
+    'def orNull: if . == "" then null else . end;
+     { commit: $commit, bench: { commit: ($deployed | orNull), jobscripts: ($jobscripts | orNull) }, vendor: $vendor, catalogue: { source: $source, commit: $catalogueCommit, hash: $list[0].catalogue },
        build: { name: $build[0].name, derived: $build[0].derived, fix: $build[0].fix, asan: $build[0].asan,
                 states: ($build[0].entries | map({ (.id): .state }) | add) },
-       validated_on: $validatedOn, builds: $list[0].validation_set, entries: ($list[0].entries | map({ (.id): { state, patchable, hash, build_hash, alias, oracle } }) | add),
+       validated_on: $validatedOn, builds: $list[0].validation_set, entries: ($list[0].entries | map({ (.id): { state, patchable, replayable, hash, build_hash, alias, oracle } }) | add),
        controls: $controls, controls_ok: ([$controls[].ok | select(. != null)] | all), total: $total, objectives: $results }' > "${out}" || return 1;
   CreateArtefact "${VALIDATION_WORK}/runs" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-validation" "commit_id:${COMMIT_ID}";
   ValidationCleanup;

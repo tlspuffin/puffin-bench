@@ -90,9 +90,12 @@ async function LoadTasks() {
 }
 
 // Optional extension point (like custom/header.html on the board): custom/task_links.json maps a task id to
-// buttons of the task, [{ "label": "…", "url": "…" (relative to this page), "title": "…", "level": "warning"
-// (optional: outlined), "count": objectives (optional), "bugs": distinct bugs (optional), "new": new bugs and
-// "headline": the title of the objectives report (optional: the task is highlighted, the title before the button) }].
+// buttons of the task, [{ "label": "…", "url": "…" (relative to this page), "title": "…", "level": (optional) "new"
+// (red: a new bug), "unexpected" (gold: objectives where no known bug is expected, or bugs other than those expected),
+// "warning" (outlined), "expected-all|partial|none|provisional" (🎯), "count": objectives (optional), "bugs":
+// distinct bugs (optional), "new": new bugs and "headline": the title of the objectives report (optional: the task is
+// highlighted, the title before the button) }]. The levels are decided by the objectives report (report_verdicts.js:
+// the same as its page): a button of the objectives report without level is plain; one of another source, gold.
 // Absent = none.
 async function LoadTaskLinks() {
   try {
@@ -170,9 +173,6 @@ function SearchText(task) {
 
 const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' })[type] ?? type;
 
-// objectives of VulnA/VulnB tasks are their expected outcome: their button is plain, not gold
-const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b', 'vuln-custom'].includes(task.type);
-
 // a task whose objectives report found new bugs (task_links.json "new"): highlighted, with the title of the report
 const HasNewBugs = task => (state.taskLinks[task.id] ?? []).some(link => link.new > 0);
 
@@ -180,9 +180,10 @@ function LinkButtons(task, cls) {
   return (state.taskLinks[task.id] ?? []).map(link => {
     const count = link.count != null ? `${link.label} ${Number(link.count).toLocaleString('en-US')}` : link.label;
     const label = link.new > 0 && link.headline ? `${link.headline} · ${count}` : count;
-    // level: warning, or expected-all / expected-partial / expected-none (🎯: green, amber, red, never plain)
-    const level = link.level === 'warning' ? 'warning' : /^expected-(all|partial|none|provisional)$/.test(link.level ?? '') ? link.level : '';
-    const plain = (ObjectivesExpected(task, link) && !level.startsWith('expected-')) ? 'plain' : '';
+    // level: new (red), unexpected (gold), warning, or expected-all / expected-partial / expected-none (🎯: green,
+    // amber, red); without level, the objectives report's buttons are plain (known bugs), the others gold
+    const level = /^(new|unexpected|warning|expected-(all|partial|none|provisional))$/.test(link.level ?? '') ? link.level : '';
+    const plain = (link.source === 'objectives_report' && !level) ? 'plain' : '';
     return `<a class="${cls} ${plain} ${level} ${link.new > 0 ? 'new-bugs' : ''}" href="${esc(new URL(link.url, window.location.href))}"
         target="_blank" rel="noopener" title="${esc(link.title ?? '')}">${esc(label)}</a>`;
   }).join('');

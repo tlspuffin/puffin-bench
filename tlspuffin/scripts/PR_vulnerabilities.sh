@@ -1,7 +1,3 @@
-# VulnA/VulnB look for known bugs: an objective is the expected outcome, not news (no 🎉 in the monitor message,
-# see PR_common.sh; the board, the History and the objectives pages follow the job type)
-OBJECTIVES_EXPECTED=true
-
 CheckObjectif() {
   local -n ref_status=$1; shift
   local tlspuffin_pid="$1"; shift;

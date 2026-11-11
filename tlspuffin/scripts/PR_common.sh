@@ -1036,13 +1036,16 @@ TargetMatches() {
 
 # ObjectiveTargeted <records (FuzzerRecords)> <objective name> [<expected target>]: from the fuzzer's record of the
 # objective, 0 targeted (the expected bug; without target declared: any bug but OBJECTIVES_NOT_TARGETED), 1 not
-# targeted (OBJECTIVES_NOT_TARGETED), 2 no record of it in the fuzzer's logs (yet), 3 another bug than the expected one
+# targeted (OBJECTIVES_NOT_TARGETED, but in an experiment looking for that very bug: target_bug), 2 no record of it in
+# the fuzzer's logs (yet), 3 another bug than the expected one
 ObjectiveTargeted() {
   local verdict; verdict=$( FuzzerVerdict "$1" "$2" );
   [ -n "${verdict}" ] || return 2;
-  local kind detail frames; IFS=$'\t' read -r kind detail frames _ <<< "${verdict}";
-  # a claim set apart for what this run built (./.build_info, written by the experiment step)
-  [ "${kind}" == claim ] && NotTargetedCVE "${detail}" "$( cat ./.build_info 2> /dev/null )" > /dev/null && return 1;
+  local kind detail frames apart=''; IFS=$'\t' read -r kind detail frames _ <<< "${verdict}";
+  # a claim set apart for what this run built (./.build_info, written by the experiment step), unless it is the bug the
+  # experiment names (a custom benchmark of CVE-2024-5814 on wolfSSL < 5.7.2)
+  if [ "${kind}" == claim ]; then apart=$( NotTargetedCVE "${detail}" "$( cat ./.build_info 2> /dev/null )" ) || apart=''; fi
+  [ -n "${apart}" ] && [ "${apart}" != "${target_bug:-}" ] && return 1;
   [ -z "${3:-}" ] && return 0;
   TargetMatches "$3" "${kind}" "${detail}" "${frames}" && return 0;
   return 3;
@@ -2038,8 +2041,8 @@ MonitorExperiment() {
         local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" ! -name ".*" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
         local now=$(date +%s)
         last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-        local mark='🎉 '; [ "${OBJECTIVES_EXPECTED:-false}" == true ] && mark='';  # expected in VulnA/VulnB
-        echo "    ==> ${mark}Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> ${outfile}
+        # counted, not judged: whether they are news is their objectives report's (its level, on the board and History)
+        echo "    ==> 🐞 Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> ${outfile}
         # newest objectives; they are replayed and grouped by bug at the end of the run (ExperimentReplayObjectives)
         find "$objective_dir" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %f\n' | sort -nr | head -n 5 |
         while read -r objective_time objective_name; do

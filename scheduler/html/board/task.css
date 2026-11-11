@@ -49,6 +49,7 @@ a.task-btn:not([href]) { cursor: default; color: var(--t-muted); }
 .att.cancelled, .att.failed { background: #2e1414; border-color: #f44336; color: #ff9b9b; }
 .att .obj { color: #1a1a1a; background: #ffb74d; border-radius: 4px; padding: 0 4px; font-size: 10.5px; }
 .att.highlight-objective { box-shadow: 0 0 0 1px #ffc400; }
+.att.highlight-new { box-shadow: 0 0 0 1px #ff5252; }
 
 .task-classic { margin-top: 18px; }
 .task-classic > summary { cursor: pointer; font-size: 13px; color: #ddd; font-weight: 700; margin-bottom: 6px; }

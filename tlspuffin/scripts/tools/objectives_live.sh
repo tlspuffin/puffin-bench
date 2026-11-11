@@ -127,7 +127,7 @@ Replay() {
 TaskActive() {
   local state rc;
   state=$( curl -s --max-time 20 "${API}/api/task/$1/state" ) && [ -n "${state}" ] || return 2;
-  jq -e '((.success // true) != false) and ([.. | objects | .state? | strings] | any(. == "Running" or . == "Pending"))' \
+  jq -e '(.success != false) and ([.. | objects | .state? | strings] | any(. == "Running" or . == "Pending"))' \
       <<< "${state}" > /dev/null 2>&1;
   rc=$?;
   (( rc <= 1 )) && return "${rc}" || return 2;
@@ -146,7 +146,8 @@ StepLibrary() {
 # LiveValidation <task dir> <state JSON>: the validation of the task's objectives so far, per configuration, in the
 # shape of the final report's (the summary scripts' AttachValidation): the verdicts of the attempts that ended
 # (output/validation-<library>-<attempt>.json, ValidateObjectives) and those given during the running attempts
-# (executor/<step>/validation/verdicts/, ConfirmObjective), each by "<attempt>/<trace>", with the catalogue they rest on
+# (executor/<step>/validation/verdicts/, ConfirmObjective), each by "<attempt>/<trace>", with the catalogue they rest on,
+# the bugs it knew (entries: alias, signature), the bench that validated and the errors of the ended attempts
 LiveValidation() {
   local taskDir="$1" taskJSON="$2" out='{}' file base lib attempt dir key;
   for file in "${taskDir}"/output/validation-*-*.json; do
@@ -154,9 +155,14 @@ LiveValidation() {
     base=$( basename "${file}" .json ); base="${base#validation-}"; attempt="${base##*-}"; lib="${base%-*}";
     out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --slurpfile v "${file}" '
         .[$lib] = ((.[$lib] // {}) | .catalogue = ($v[0].catalogue // .catalogue)
+          | .entries = ((.entries // {}) + ($v[0].entries // {} | map_values({ alias, oracle, replayable })))
+          | .bench = ((.bench // []) + (if $v[0].bench then [$v[0].bench | { commit, jobscripts }] else [] end) | unique)
+          | .errors = ((.errors // []) + (if $v[0].error then [{ attempt: ($a | tonumber? // $a), error: $v[0].error }] else [] end))
           | .byTrace = ((.byTrace // {}) + ([$v[0].objectives[]? | { key: ($a + "/" + .trace),
               value: ({ verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
-                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)) }] | from_entries)))' \
+                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)
+                + (if (.signature_of_patched // []) | length > 0 then { signature_of_patched } else {} end)
+                + (if .failure then { failure } else {} end)) }] | from_entries)))' \
         <<< "${out}" 2> /dev/null ) || out='{}';
   done
   # the verdicts being given (custom benchmarks, VulnA/B: during the run; any flow: while ValidateObjectives runs), in
@@ -182,7 +188,9 @@ LiveValidation() {
             | .catalogue = (.catalogue // ($s[0] | if .catalogueCommit then { source, commit: .catalogueCommit } else null end))
             | .byTrace[$a + "/" + $v[0].trace] //= ($v[0] | { verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
                 + (if $during then { during_attempt: true } else {} end)
-                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)))' \
+                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)
+                + (if (.signature_of_patched // []) | length > 0 then { signature_of_patched } else {} end)
+                + (if .failure then { failure } else {} end)))' \
           <<< "${out}" 2> /dev/null ) || continue;
     done
   done
@@ -389,6 +397,9 @@ for taskDir in "${RUNS}"/[0-9]*; do
          libraries: ($libraries | map(. + (if $validation[.library] then { validation: $validation[.library] } else {} end))),
          runs: sort_by(.library, .attempt) }' \
       <<< "${runs}" > "${OUT}/live-${task}.json";
+  # the verdicts of the pages (report_verdicts.js with bugs.js): the level of the task for the pill of the top bar, as
+  # History has it for a finished task (a failure leaves the report without them: the pill falls back to its counts)
+  bash "${TOOLS}/objectives_report.sh" --verdicts "${OUT}/live-${task}.json" 2> /dev/null || true;
   bash "${TOOLS}/objectives_report.sh" --render "${OUT}/live-${task}.json" "${OUT}/live-${task}.html";
   # row of live.html and of the top bar pill (nav.js): counts of the task; configurations = its experiment steps
   nconf=$( jq '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment")) | .id] | unique | length' \
@@ -402,6 +413,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
                found: ([$l.runs[].found] | add // 0), replayed: ([$l.runs[].replayed] | add // 0),
                reproduced: ([$l.runs[].reports] | add // 0),
                bugs: ($confirmed | unique | length),
+               # the level of the task (report_verdicts.js): new, unexpected, known, unclear; null without verdicts
+               level: ($l.verdicts.headline.level // null), new: ($l.verdicts.headline.new // 0),
                hit: ([$l.runs[] | select(any(.groups[]; .type != "no-crash" and .type != "replay-error")) | .library] | unique),
                configurations: ([$nconf, ([$l.runs[].library] | unique | length)] | max) }]' <<< "${liveTasks}" ) ||
       liveTasks='[]';

@@ -33,17 +33,23 @@ are made comparable by the <i>compat rules</i> (see below).</p>
 <h2>Known bugs: the catalogue, validation, custom benchmarks</h2>
 <p>tlspuffin's <b>vulnerability catalogue</b> (<code>puffin-build/vendors/&lt;library&gt;/vulnerabilities.toml</code>, shown on
 the Bugs reference page) lists the known bugs: the versions they affect, a patch per version range, their
-<i>oracle</i> (the signature of their objectives: a claim, or a crash and its ASan report) and a witness trace that
-triggers them.</p>
+<i>signature</i> (their oracle: a claim, or a crash and its ASan report, for some bugs with their top frames) and a
+witness trace that triggers them.</p>
 <p>After each attempt, the <b>validation</b> step replays the attempt's objectives on its library rebuilt with ASan, once
-with every known bug patched and once per bug with all of them but that one (a <i>patch differential</i>): <b>✔ confirmed</b>
-(the bug named), <b>✗ not patched</b> (a new bug, or a known one without patch), <b>⚠ other signature</b> (to review),
-<b>? inconclusive</b> (not reproduced), <b>… not validated</b> (its time budget spent). Results shows them in the 🐞
-panel of each configuration.</p>
+with every known bug patched and once per bug with all of them but that one (a <i>patch differential</i>): <b>✔ confirmed
+by patch</b> (the bug named, certain), <b>≈ by its signature</b> (a known bug without patch: strong, green, when its
+stack has the top frames the catalogue gives for that bug; weak, yellow, otherwise: a claim, a panic, a crash type alone), <b>🚨 no known bug's signature</b>, <b>⚠</b> to review, <b>⛔ could not replay</b> (a validation build could not
+run it), <b>? not reproduced on the validation builds</b>, <b>… not validated</b> (its time budget spent), <b>○ no
+verdict</b> (and why). An objective is <i>reproduced</i> by a replay on its own build, <i>validated</i> by these
+replays; <i>confirmed</i> is said only of patch differential. The words of every page: the last section of the Bugs
+reference. Results shows the verdicts in the 🐞 panel of each configuration; History colours a task's 🐞 by what its
+report found: <b>red 🚨</b> a new bug, <b>gold</b> unexpected (objectives where no known bug is expected), plain known
+bugs.</p>
 <p><b>Custom benchmarks</b> (launcher, job <b>Vuln — custom</b>): tick known bugs; each becomes an experiment built to
-look for it (every other bug patched, its build options, ASan when its oracle needs it) that ends only on a find
-validation confirms during the attempt; its time to find is when the fuzzer saved that objective. A bug without patch is
-confirmed by its signature only (the launcher warns). Results shows each benchmark in a block of its own.</p>
+look for it (every other bug patched, its build options, ASan when its signature needs it) that ends only on a find
+validation recognises during the attempt; its time to find is when the fuzzer saved that objective. A bug without patch
+is recognised by its signature only (the launcher warns). Results shows each benchmark in a block of its own, and each
+experiment gets its 🎯 like Vuln group A.</p>
 <p>The <b>package</b> selector chooses the fuzzer shown by Results and Analyzer. The short hash after
 <b>puffin-bench</b> is the deployed version of the bench (link to the commit). <b>🔄</b> refreshes the page,
 <b>❔</b> or <kbd>?</kbd> opens this help, <kbd>Esc</kbd> closes it. Links between the pages keep the address you typed
@@ -106,7 +112,7 @@ confirmed by its signature only (the launcher warns). Results shows each benchma
   <tr><td><b>Replay</b></td><td>Each objective is run again with exactly the binary, flags and environment of the
     experiment, to get its report.</td></tr>
   <tr><td><b>Bug</b></td><td>Objectives with the same error type and top stack frames (or the same violated claim).
-    <i>Confirmed</i> (🐞 red): the replay reproduced an ASAN error, a security violation or a panic.
+    <i>Reproduced</i> (🐞 red): the replay reproduced an ASAN error, a security violation or a panic.
     <i>Fuzzer only</i> (🐞 orange): the fuzzer's own log recorded it (crash, ASan error, claim) but no replay
     reproduced it. Every objective gets the fuzzer's category, replayed or not.</td></tr>
   <tr><td><b>Expected bug</b></td><td>The CVE a VulnA configuration looks for (🎯); <b>⦸ set apart</b>: a known CVE that
@@ -138,7 +144,7 @@ confirmed by its signature only (the launcher warns). Results shows each benchma
     <b>click</b> opens a small window with the details (Esc, a click elsewhere or a second click closes it); the
     <b>? cursor</b>, a link or a button: its details show on <b>hover</b>, after half a second. Charts keep their
     hovers.</li>
-  <li><b>❓ N</b> (Results, objectives reports): N objectives <b>without category</b> — no replay confirmed them and
+  <li><b>❓ N</b> (Results, objectives reports): N objectives <b>without category</b> — no replay reproduced them and
     the fuzzer's log has no record of them (no log, or the record lost), or a crash without location; the click says
     why. They could hide a bug.</li>
 </ul>

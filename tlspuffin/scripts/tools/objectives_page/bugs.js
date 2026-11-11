@@ -2,7 +2,10 @@
 // (publisher, which imports it from /html/objectives/bugs.js): a bug is what the fuzzer recorded when it saved the
 // objectives (crash location or violated claim); objectives whose replay does not reproduce it count in it; another
 // bug only when a replay confirms another trace. Input: the runs of a report JSON (objectives_report.sh,
-// objectives_live.sh).
+// objectives_live.sh). The words of the verdicts: ../common/verdicts.js (the pages' common folder; in the tools'
+// tree, tools/common links to it, for QuickJS).
+
+import { VerdictKind, VERDICT_ORDER, SignatureText, LEVELS } from '../common/verdicts.js';
 
 export const UNCONFIRMED = new Set(['no-crash', 'replay-error', 'not-replayed']);
 export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'replay error', 'not-replayed': 'not replayed', 'security-violation': 'security violation',
@@ -12,11 +15,19 @@ export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'repl
 // notTargeted ({claim: CVE}, report.not_targeted): VulnA/VulnB claims that are not the target of the job (a known CVE
 // of the old library versions, found besides the targeted one): such a bug gets notTarget = its CVE and comes after
 // the targeted bugs
-// IsExpected(target, group): the group of objectives is the configuration's expected bug ({cve, kind, match} of
+// IsExpected(target, group, verdictOf): the group of objectives is the configuration's expected bug ({cve, kind, match} of
 // vuln_targets.json): a crash with the frame among the top 3 of the fuzzer's backtrace or of the replay's stack, or the
-// claim with that message (as PR_common.sh TargetMatches)
-export function IsExpected(target, group) {
+// claim with that message (as PR_common.sh TargetMatches). A custom benchmark's target (CustomTargets: { cve, oracle,
+// custom }): validation decides when it named a bug for one of the group's objectives (verdictOf(trace): its verdict),
+// else its signature (OracleMatchesGroup), until validation says
+export function IsExpected(target, group, verdictOf = null) {
   if (!target) return false;
+  if (target.custom) {
+    const verdicts = (group.traces ?? []).map(trace => verdictOf?.(trace)).filter(Boolean);
+    if (verdicts.some(v => (v.entries ?? []).includes(target.cve) || (v.known_unpatched ?? []).includes(target.cve))) return true;
+    if (verdicts.some(v => ['confirmed', 'not-patched', 'other-signature'].includes(v.verdict))) return false;
+    return OracleMatchesGroup(target.oracle, group);
+  }
   const fz = group.fuzzer;
   const top = (frames) => (frames ?? []).slice(0, 3).some(f => String(f).includes(target.match));
   if (target.kind === 'claim') {
@@ -27,6 +38,53 @@ export function IsExpected(target, group) {
       || (!['no-crash', 'replay-error', 'security-violation'].includes(group.type) && top(group.frames));
 }
 
+// the signal of a crash with an ASan report of that type, when the fuzzer records only the signal (LibAFL replaces
+// ASan's handler of SEGV, BUS, FPE, ILL: as PR_common.sh OracleMatches)
+const ASAN_SIGNAL = { SEGV: 'SIGSEGV', BUS: 'SIGBUS', FPE: 'SIGFPE', ILL: 'SIGILL' };
+// OracleMatchesGroup(oracle, group): a group of objectives has a catalogue signature, by its replay or the fuzzer's
+// record: the claim; a crash with the ASan report type (or its signal) and the signal; a panic
+function OracleMatchesGroup(oracle, group) {
+  if (!oracle) return false;
+  const fz = group.fuzzer;
+  if (oracle.kind === 'claim') {
+    return (fz?.kind === 'claim' && fz.detail === oracle.violation)
+        || (group.type === 'security-violation' && (group.frames ?? [])[0] === oracle.violation);
+  }
+  if (oracle.kind === 'panic') return group.type === 'panic';
+  if (oracle.kind !== 'crash') return false;
+  const detail = fz?.kind === 'crash' ? String(fz.detail ?? '') : '';
+  const asanOk = !oracle.asan || group.type === oracle.asan || detail.includes(`ASan ${oracle.asan}`)
+      || (!detail.includes('ASan ') && !!ASAN_SIGNAL[oracle.asan] && detail.includes(ASAN_SIGNAL[oracle.asan]));
+  const signalOk = !oracle.signal || detail.includes(oracle.signal);
+  return asanOk && signalOk && (fz?.kind === 'crash' || !['no-crash', 'replay-error', 'security-violation', 'panic'].includes(group.type));
+}
+
+// CustomTargets(runs): the targets of a custom benchmark's experiments (their runs' cli.custom: the catalogue's bug and
+// its signature), as targets of their configuration: { library: { cve, kind, oracle, custom: true } }
+function CustomTargets(runs) {
+  const out = {};
+  for (const run of runs ?? []) {
+    const c = run.cli?.custom;
+    if (c?.target && !out[run.library]) out[run.library] = { cve: c.target, kind: c.oracle?.kind ?? null, oracle: c.oracle ?? null, custom: true };
+  }
+  return out;
+}
+// ReportTargets(report): the expected bug of each configuration of a report: vuln_targets.json's (report.targets) and
+// those of a custom benchmark's experiments
+function ReportTargets(report) {
+  return { ...(report?.targets ?? {}), ...CustomTargets(report?.runs) };
+}
+// TargetText(target): how a configuration's expected bug is recognised, in words
+export function TargetText(t) {
+  if (t?.custom) return `${SignatureText(t.oracle)} (its signature), validation deciding`;
+  return t?.kind === 'claim' ? `the claim “${t.match}”` : `a crash in ${t?.match}`;
+}
+// VerdictOf(libraries, library, attempt): the validation verdict of an objective of that run, by its trace name
+export function VerdictOf(libraries, library, attempt) {
+  const byTrace = (libraries ?? []).find(l => l.library === library)?.validation?.byTrace;
+  return byTrace ? (trace) => byTrace[`${attempt}/${trace}`] : null;
+}
+
 // how the scheduler ended a run, in words
 const RUN_END = { TimedOut: 'ended by its timeout', Failed: 'failed', Cancelled: 'was cancelled' };
 
@@ -34,7 +92,9 @@ const RUN_END = { TimedOut: 'ended by its timeout', Failed: 'failed', Cancelled:
 // entry in the objectives report (libraries[]): the outcome of each run in the task's summary (outcomes: success only
 // when the run ended as its job expects and its summary saw what it looked for; null: no end-of-run summary), how the
 // scheduler ended it (ends), the error its end-of-run script recorded (end_errors), what its job scripts saw (script).
-// A Perf run succeeds when it reaches its timeout. [] for a report without outcomes (before 2026-10-09)
+// A Perf run succeeds when it reaches its timeout. [] for a report without outcomes (before 2026-10-09).
+// expectedTimeout: a run of a job that ends on a find (Vuln) that reached its timeout with its end-of-run summary: it
+// did not find its bug within its time, an outcome of the campaign, not a failure of the bench
 export function RunFailures(lib, jobType) {
   return Object.entries(lib?.outcomes ?? {}).filter(([, state]) => state !== 'success').map(([attempt, state]) => {
     const end = lib.ends?.[attempt], error = lib.end_errors?.[attempt];
@@ -47,7 +107,7 @@ export function RunFailures(lib, jobType) {
         : script?.cve ? 'it ended normally, but its job scripts did not see the expected bug'
         : script ? 'it ended normally, but its job scripts saw no objective'
         : 'it ended normally, but its end-of-run summary says it failed';
-    return { attempt: Number(attempt), why };
+    return { attempt: Number(attempt), why, expectedTimeout: state != null && jobType !== 'perf' && end === 'TimedOut' };
   }).sort((a, b) => a.attempt - b.attempt);
 }
 
@@ -71,7 +131,8 @@ export function ExpectedRuns(runs, targets = {}, libraries = []) {
     if (!target) continue;
     const o = entry(run.library);
     o.runs.add(run.attempt);
-    const expected = (run.groups ?? []).filter(g => IsExpected(target, g));
+    const verdictOf = VerdictOf(libraries, run.library, run.attempt);
+    const expected = (run.groups ?? []).filter(g => IsExpected(target, g, verdictOf));
     if (expected.length) o.found.add(run.attempt);
     // reproduced: a replay confirmed it in this run (else the fuzzer's log is the only evidence)
     if (expected.some(g => !UNCONFIRMED.has(g.type))) o.reproduced.add(run.attempt);
@@ -105,16 +166,17 @@ export function CountRuns(o, outcomes) {
 // ExpectedChipTip(library, o, marks): the hover of a 🎯 chip, the same on Results and on the objectives report: its
 // target, then one line per mark of the chip as it is displayed (🎯 k/n, · k untimed and each of those runs with why,
 // · no replay, +k ⦸, ⚠ k). marks: { why(attempt): why a run did not succeed, notReproduced, notTarget, unexpected, alias }
-export function ExpectedChipTip(library, o, { why = () => null, notReproduced = 0, notTarget = 0, unexpected = 0, alias = '' } = {}) {
+export function ExpectedChipTip(library, o, { why = () => null, notReproduced = 0, notTarget = 0, unexpected = 0, alias = '', noReplay = false } = {}) {
   const t = o.target;
-  return [`🎯 ${library}: ${t.cve}${alias && alias !== library ? ` (${alias})` : ''}, expected ${t.kind === 'claim' ? `claim “${t.match}”` : `crash in ${t.match}`}`,
+  return [`🎯 ${library}: ${t.cve}${alias && alias !== library ? ` (${alias})` : ''}, expected ${TargetText(t)}`,
       `🎯 ${o.counted.size}/${o.runs.size}: runs that found it / runs${o.provisional ? ' (provisional: runs not ended)' : ''}`,
       ...(o.preTarget ? ['before targets: the job scripts of this task had no expected bug (before 2026-10-07): a run '
           + 'ended on its first objective, whatever the bug, and succeeded with it; 🎯 counts the runs whose objectives '
           + 'include the expected bug'] : []),
       ...(o.untimed.length ? [`· ${o.untimed.length} untimed: found it, counted, but the run did not end normally: no time to find in the statistics of Results`,
           ...o.untimed.map(attempt => `run ${attempt}: ${why(attempt) ?? 'did not succeed'}`)] : []),
-      notReproduced > 0 ? `· no replay: no replay reproduced it in ${notReproduced} of the ${o.found.size} runs that found it (the fuzzer's log is the evidence)` : '',
+      noReplay ? `◌ its objectives do not replay on their own, as the catalogue says (replayable = false): the fuzzer's log is the evidence, as expected`
+        : notReproduced > 0 ? `· no replay: no replay reproduced it in ${notReproduced} of the ${o.found.size} runs that found it (the fuzzer's log is the evidence)` : '',
       notTarget ? `+${notTarget} ⦸: objectives of a known CVE set apart, not the target of this job` : '',
       unexpected ? `⚠ ${unexpected}: objectives of an unexpected bug, neither the target nor a CVE set apart` : '',
   ].filter(Boolean).join('\n');
@@ -181,7 +243,7 @@ export function SetApart(entry, run) {
   return built.version < Number(String(entry.below ?? '').replace(/\./g, '')) ? entry.cve : null;
 }
 
-export function Bugs(runs, notTargeted = {}, targets = {}) {
+export function Bugs(runs, notTargeted = {}, targets = {}, libraries = []) {
   // A bug is what the fuzzer recorded when it saved the objectives (crash location, or violated claim): objectives
   // whose replay does not reproduce it still belong to it. Only a replay that confirms another bug trace (another top
   // frame, another claim) makes another bug. Without a fuzzer record, the replay's signature identifies the bug.
@@ -197,9 +259,12 @@ export function Bugs(runs, notTargeted = {}, targets = {}) {
       const same = fz && (!confirmed || group.type === 'crash'
           || (fz.kind === 'crash' && rFrames.length && fzTop && LocationFrames(rFrames)[0] === fzTop)
           || (fz.kind === 'claim' && group.type === 'security-violation' && rFrames.join(' < ') === fz.detail));
-      // a claim set apart (CVE-2024-5814) only where its scope says: the same claim elsewhere is another bug, a real one
+      // a claim set apart (CVE-2024-5814) only where its scope says: the same claim elsewhere is another bug, a real one;
+      // never in the experiment that looks for that very bug (a custom benchmark of CVE-2024-5814): there it is the target,
+      // as the job scripts count it (PR_common.sh ObjectiveTargeted)
       const claimOf = fz?.kind === 'claim' ? fz.detail : (group.type === 'security-violation' ? rFrames[0] : null);
-      const apart = claimOf && notTargeted?.[claimOf] ? SetApart(notTargeted[claimOf], run) : null;
+      const apartCve = claimOf && notTargeted?.[claimOf] ? SetApart(notTargeted[claimOf], run) : null;
+      const apart = apartCve && apartCve !== targets?.[run.library]?.cve ? apartCve : null;
       const scope = claimOf && notTargeted?.[claimOf] ? (apart ? '|apart' : '|flagged') : '';
       // the harness aborting on a claim (tlspuffin before ac3b89aff logs the claim, then aborts): the fuzzer may have
       // recorded the abort instead of the claim, which the replay confirms: the claim's bug, as when it recorded the claim
@@ -226,7 +291,7 @@ export function Bugs(runs, notTargeted = {}, targets = {}) {
       // was found in has one, then a bug that is none of them is unexpected
       if (targets?.[run.library]) {
         bug.declared = (bug.declared ?? true);
-        if (IsExpected(targets[run.library], group)) (bug.expectedFor ??= new Set()).add(run.library);
+        if (IsExpected(targets[run.library], group, VerdictOf(libraries, run.library, run.attempt))) (bug.expectedFor ??= new Set()).add(run.library);
       } else {
         bug.declared = false;
       }
@@ -334,26 +399,38 @@ export function InferredCve(bug, run, cves) {
 }
 
 // NewBugs(bugs, known, task, report): the bugs flagged 🚨 new, per configuration (bug.runs: their library), for a real
-// bug (recorded by the fuzzer or confirmed by a replay) that is neither the expected bug of its configuration nor a
+// bug (recorded by the fuzzer or reproduced by a replay) that is neither the expected bug of its configuration nor a
 // known CVE set apart:
-//  - a configuration with an expected bug (an alias such as BUF, SKIP: report.targets): new when no earlier task had
+//  - a configuration with an expected bug (an alias such as BUF, SKIP: report.targets; a custom benchmark's experiment:
+//    ReportTargets): new when no earlier task had
 //    its signature in that configuration (known_bugs.json: "<configuration>|<signature>" -> the first task with it,
 //    tools/known_bugs.js);
 //  - a plain version (no target, e.g. Perf "WolfSSL" built as wolfssl580): not new when it is a CVE tlspuffin declares
 //    for that build (KnownCve: bug.knownCve = the CVE), else new, also when earlier tasks had it (it stays flagged
 //    until it is added to the CVE list of vuln_targets.json); a run without declaration: a CVE of the library it built
 //    (InferredCve: bug.knownCve = the CVE, bug.knownCveInferred), else as an alias.
+// Validation first, when it gave the bug a verdict (bug.validation, BugValidation): a bug it names by patch or by a
+// signature that is not weak is known (KnownByValidation); one with the signature of no known bug on the build with
+// every patch is new in each of its configurations; a weak signature (any crash of an ASan type) decides nothing, the
+// rules above do.
 // Marks bug.isNew = [configurations]; returns the new bugs.
 export function NewBugs(bugs, known, task, report = null) {
   const out = [];
+  const targets = ReportTargets(report);
   for (const bug of bugs) {
     if (bug.notTarget || bug.expected || !(bug.reproduced > 0 || bug.fuzzer)) continue;
+    if (KnownByValidation(bug)) continue;
+    if (bug.validation?.kind === 'new') {
+      bug.isNew = [...new Set(bug.runs.map(run => run.library))];
+      out.push(bug);
+      continue;
+    }
     const sig = BugSignature(bug);
     if (!sig) continue;
     const libs = [];
     for (const lib of new Set(bug.runs.map(run => run.library))) {
       const run = bug.runs.find(r => r.library === lib);
-      const plain = !report?.targets?.[lib];
+      const plain = !targets[lib];
       const declared = plain ? KnownCve(bug, run, report?.cves) : undefined;
       const inferred = plain && declared === undefined ? InferredCve(bug, run, report?.cves) : null;
       const cve = declared ?? inferred;
@@ -373,23 +450,42 @@ export function NewBugs(bugs, known, task, report = null) {
 }
 
 // BugsHeadline(bugs, newBugs, report): the title of an objectives report (report.js), repeated by the scheduler's history
-// page (report_verdicts.js -> task_links.json), after NewBugs: the real bugs (recorded by the fuzzer or confirmed by a
-// replay, CVEs set apart excluded), how many a replay confirmed, the new ones, and whether every real bug is expected
-// given the tested version (in each configuration it was found in: the expected bug of the configuration, or a CVE
-// tlspuffin declares for what it built). 🎉 unless every bug is expected (VulnA/VulnB look for known bugs: no 🎉 either).
-// text: null without a real bug.
+// page (report_verdicts.js -> task_links.json), after NewBugs: the real bugs (recorded by the fuzzer or reproduced by
+// a replay, CVEs set apart excluded), how many a replay reproduced, the new ones, whether every real bug is expected
+// given the tested version (in each configuration it was found in: the expected bug of the configuration, a CVE
+// tlspuffin declares for what it built, or a known bug validation names: KnownByValidation), and the level of the task
+// (LEVELS of ../common/verdicts.js):
+//   new         a new bug (NewBugs);
+//   unexpected  objectives in a configuration where no known bug is expected (no target, its build declares none), or,
+//               but in a Vuln job (it looks for known bugs), a real bug that is not expected there;
+//   known       every real bug expected there;
+//   unclear     objectives, but no real bug (no replay reproduced one, the fuzzer recorded none);
+//   null        no objective.
+// text: the marks of the level (LEVELS) with what was found; null without a real bug.
 export function BugsHeadline(bugs, newBugs, report) {
   const real = bugs.filter(bug => !bug.notTarget && (bug.reproduced > 0 || bug.fuzzer));
   const confirmed = bugs.filter(bug => bug.reproduced > 0 && !bug.notTarget).length;
-  const allKnown = real.length > 0 && real.every(bug => [...new Set(bug.runs.map(run => run.library))]
+  const allKnown = real.length > 0 && real.every(bug => KnownByValidation(bug) || [...new Set(bug.runs.map(run => run.library))]
       .every(lib => bug.expectedFor?.has(lib) || bug.knownCve?.[lib]));
-  const celebrate = !['vuln-a', 'vuln-b', 'vuln-custom'].includes(report?.job_type) && !allKnown;
+  const vuln = ['vuln-a', 'vuln-b', 'vuln-custom'].includes(report?.job_type);
+  const runs = report?.runs ?? [];
+  const targets = ReportTargets(report);
+  const declaredNone = lib => runs.filter(run => run.library === lib)
+      .every(run => Array.isArray(run.cli?.vulnerabilities?.declared) && run.cli.vulnerabilities.declared.length === 0);
+  const nothingExpected = [...new Set(runs.filter(run => (run.found ?? 0) > 0).map(run => run.library))]
+      .filter(lib => !targets[lib] && declaredNone(lib));
+  const objectives = runs.reduce((sum, run) => sum + (run.found ?? 0), 0);
+  const level = newBugs.length ? 'new'
+      : nothingExpected.length ? 'unexpected'
+      : !real.length ? (objectives > 0 ? 'unclear' : null)
+      : (vuln || allKnown) ? 'known' : 'unexpected';
   const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
-  const alarm = newBugs.length ? `🚨 ${newBugs.length} NEW BUG${newBugs.length > 1 ? 'S' : ''}` : '';
-  const found = real.length ? `${celebrate ? '🎉 ' : ''}${plural(real.length, allKnown ? 'known bug' : 'bug')} found`
-      + (confirmed < real.length ? ` (${confirmed} confirmed by replay)` : '') : '';
-  return { real: real.length, confirmed, new: newBugs.length, allKnown, celebrate, alarm, found,
-           text: found ? [alarm, found].filter(Boolean).join(' · ') : null };
+  const alarm = newBugs.length ? `${LEVELS.new.mark} ${newBugs.length} NEW BUG${newBugs.length > 1 ? 'S' : ''}` : '';
+  const where = nothingExpected.length ? `${LEVELS.unexpected.mark} objectives where no known bug is expected (${nothingExpected.join(', ')})` : '';
+  const found = real.length ? `${level === 'unexpected' && !where ? `${LEVELS.unexpected.mark} ` : ''}${plural(real.length, allKnown ? 'known bug' : 'bug')} found`
+      + (confirmed < real.length ? ` (${confirmed} reproduced)` : '') : '';
+  return { real: real.length, confirmed, new: newBugs.length, allKnown, alarm, found, level, nothingExpected,
+           text: found || where ? [alarm, found, where].filter(Boolean).join(' · ') : null };
 }
 
 // Uncategorised(runs): the objectives whose bug cannot be told, per configuration, with why: no replay confirmed it
@@ -507,47 +603,161 @@ export function VendorOfRun(run) {
   return (String(run?.cli?.vendor ?? '').split(':')[0] || run?.cli?.library?.name || '').toLowerCase() || null;
 }
 
-// The verdict of a bug from those of its validated objectives (report.libraries[].validation.byTrace, by
-// "<attempt>/<trace>"), strongest first:
+// The strength of a signature verdict (validation compares the catalogue's oracle only: the claim, the panic, the ASan
+// report type or signal). Strong: a crash whose stack (the replay's, else the fuzzer's record, top 3 frames) has a top
+// frame the catalogue gives for that bug (top_frames): the bug's own place, as well as a signature can tell. Weak:
+// every other, a signature without stack: a claim or a panic (one message, shared by several bugs: Authentication
+// bypass is CVE-2021-3336's, SIG's and SKIP's), a crash told by its type alone (no top frames in the catalogue: SDOS2),
+// or whose stack has none of them. A weak signature names a bug without telling it apart from another failure of the
+// same kind: it never makes a bug known by itself (NewBugs, BugsHeadline)
+function StackOf(bug) {
+  return [...LocationFrames(bug.frames).slice(0, 3), ...LocationFrames(bug.fuzzer?.frames).slice(0, 3)];
+}
+export function StrongSignature(oracle, topFrames, bug) {
+  if (oracle?.kind !== 'crash' || !(topFrames ?? []).length) return false;
+  const tops = new Set(topFrames.map(FrameName));
+  return StackOf(bug).some(frame => tops.has(frame));
+}
+
+// The verdict of a bug from those of its objectives (report.libraries[].validation.byTrace, by "<attempt>/<trace>"),
+// as parts, strongest first (VERDICT_ORDER of ../common/verdicts.js, where their words are):
 //   patch       confirmed by patch differential: the bug is ids (the full green)
-//   signature   on the build with every patch, with the signature of known bugs without patch there (ids): one of them
-//   unpatched   on the build with every patch, with the signature of bugs that have a patch there (ids): their patch
-//               does not remove it: not them, or an incomplete patch (⚠)
+//   signature   on the build with every patch, with the signature of known bugs without patch there (ids): one of
+//               them; strong (the ids whose catalogue top frames its stack has: part.strong, named first), else weak
+//               (StrongSignature)
+//   unpatched   on the build with every patch, with the claim or panic of bugs that have a patch there (ids): their
+//               patch does not remove it: not them, or an incomplete patch (⚠)
 //   new         on the build with every patch, the signature of no known bug: a new bug, or one missing from the
-//               catalogue (🚨)
+//               catalogue (🚨); lookalikes: the catalogue's bugs with a patch here whose top frames it has (said, not
+//               decided)
 //   other       removed by the patch of ids, with another signature: to review (⚠)
+//   error       a validation build could not run it (failures: what failed)
+//   no-replay   inconclusive, for a bug whose objectives do not replay on their own (the catalogue's replayable = false:
+//               CDOS), which it is (its configuration's target) or whose signature it has (ids): expected, not a doubt
 //   inconclusive, not-validated
-// with counts: validated / objectives, per verdict. null: none of its objectives was validated (then candidates: the
-// catalogue's bugs with its signature, for "has the signature of X")
-export function BugValidation(bug, libraries, catalogue = null) {
+//   none        objectives without verdict, by why (NO_VERDICT of verdicts.js: live, missing, failed, not-chosen,
+//               unsupported), in a configuration with a validation
+// kind: the strongest part with a verdict (null: none), ids: the bugs of that kind; counts: validated / objectives, per
+// verdict; candidates: the catalogue's bugs with its signature (for "has the signature of X"). null when the bug's
+// configurations have no validation and the catalogue names no candidate. oracles: the signature of each bug named.
+export function BugValidation(bug, libraries, catalogue = null, live = false) {
   const byLib = Object.fromEntries((libraries ?? []).filter(l => l.validation).map(l => [l.library, l.validation]));
   const objectives = bug.objectives ?? [];
-  const verdicts = objectives.map(o => byLib[o.library]?.byTrace?.[`${o.attempt}/${o.name}`]).filter(Boolean);
+  const oracleOf = id => Object.values(byLib).map(v => v.entries?.[id]?.oracle).find(Boolean)
+      ?? Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]?.oracle).find(Boolean) ?? null;
+  // the catalogue's top frames of a bug (the report's record of the entry, report_verdicts.js, else the catalogue): the
+  // strength of a signature verdict
+  const topFramesOf = id => [...Object.values(byLib).map(v => v.entries?.[id]?.top_frames), ...Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]?.top_frames)]
+      .find(t => t?.length) ?? [];
+  const verdicts = [], without = [];
+  for (const o of objectives) {
+    const v = byLib[o.library]?.byTrace?.[`${o.attempt}/${o.name}`];
+    if (v) verdicts.push(v); else if (byLib[o.library]) without.push(o);
+  }
   const vendor = VendorOfRun(bug.run) ?? VendorOfRun(bug.runs?.[0]);
   const candidates = catalogue && vendor ? SignatureEntries(bug, catalogue, vendor) : [];
+  // the known bugs it is whose objectives do not replay on their own (NoReplay)
+  const noReplay = NoReplay(bug, libraries, catalogue);
   const counts = verdicts.reduce((c, v) => ({ ...c, [v.verdict]: (c[v.verdict] ?? 0) + 1 }), {});
   const base = { validated: verdicts.length, objectives: objectives.length || bug.count, counts, candidates,
-                 during: verdicts.some(v => v.during_attempt) };
-  if (!verdicts.length) return candidates.length || Object.keys(byLib).length ? { ...base, kind: null, ids: [], parts: [] } : null;
+                 during: verdicts.some(v => v.during_attempt), oracles: {} };
+  if (!verdicts.length && !without.length) return candidates.length ? { ...base, kind: null, ids: [], parts: [] } : null;
   // its objectives by what validation says of each (one claim can be several bugs: CVE-2021-3336 and SIG, SKIP on
-  // 4.4.0 share "Authentication bypass"), strongest first
-  const strength = ['patch', 'signature', 'unpatched', 'new', 'other', 'inconclusive', 'not-validated'];
-  // the catalogue's bugs with its signature that have a patch here (those without are named by the verdicts)
-  const known = new Set(verdicts.flatMap(v => v.known_unpatched ?? []));
-  const patchedCandidates = candidates.filter(id => !known.has(id));
-  const partOf = v => v.verdict === 'confirmed' ? ['patch', v.entries ?? []]
-      : v.verdict === 'not-patched' ? ((v.known_unpatched ?? []).length ? ['signature', v.known_unpatched]
-                                       : patchedCandidates.length ? ['unpatched', patchedCandidates] : ['new', []])
-      : v.verdict === 'other-signature' ? ['other', v.other_signature ?? []]
-      : v.verdict === 'inconclusive' ? ['inconclusive', []] : ['not-validated', []];
+  // 4.4.0 share "Authentication bypass"); the kind is the validation's (VerdictKind), whatever the page knows besides
+  const partOf = v => {
+    const kind = VerdictKind(v);
+    if (kind === 'patch') return ['patch', v.entries ?? []];
+    if (kind === 'signature') return ['signature', v.known_unpatched];
+    if (kind === 'unpatched') return ['unpatched', v.signature_of_patched];
+    if (kind === 'other') return ['other', v.other_signature ?? []];
+    return [kind, []];
+  };
+  // a crash without known signature that looks like a bug with a patch here (the catalogue's top frames, shown to
+  // people): said beside the 🚨, decides nothing
+  const named = new Set(verdicts.flatMap(v => v.known_unpatched ?? []));
+  const lookalikes = candidates.filter(id => !named.has(id));
   const parts = [];
+  const add = (kind, ids, extra = {}) => {
+    const part = parts.find(p => p.kind === kind && p.ids.join() === ids.join() && (p.why ?? '') === (extra.why ?? ''));
+    if (part) { part.count += 1; return part; }
+    const created = { kind, ids, count: 1, ...extra };
+    parts.push(created);
+    return created;
+  };
   for (const v of verdicts) {
     const [kind, ids] = partOf(v);
-    const part = parts.find(p => p.kind === kind && p.ids.join() === ids.join());
-    if (part) part.count += 1; else parts.push({ kind, ids, count: 1 });
+    const part = kind === 'inconclusive' && noReplay.length ? add('no-replay', noReplay) : add(kind, ids);
+    if (kind === 'error' && v.failure?.message) {
+      part.failures ??= [];
+      const what = `${v.failure.build === 'F' ? 'the build with every patch' : `the build without the patch of ${v.failure.build}`}: ${v.failure.message}`;
+      if (!part.failures.includes(what) && part.failures.length < 3) part.failures.push(what);
+    }
   }
-  parts.sort((a, b) => strength.indexOf(a.kind) - strength.indexOf(b.kind) || b.count - a.count);
-  // the bug's verdict: its strongest part, with the bugs of every part of that kind
-  const kind = parts[0].kind;
-  return { ...base, parts, kind, ids: [...new Set(parts.filter(p => p.kind === kind).flatMap(p => p.ids))] };
+  // objectives without verdict, and why
+  for (const o of without) {
+    const lib = byLib[o.library];
+    const error = (lib.errors ?? []).find(e => String(e.attempt) === String(o.attempt));
+    const why = live ? 'live'
+        : error ? (/no validation result/.test(error.error ?? '') ? 'missing' : 'failed')
+        : lib.unsupported ? 'unsupported'
+        : Object.keys(lib.byTrace ?? {}).some(key => key.startsWith(`${o.attempt}/`)) ? 'not-chosen' : 'missing';
+    const part = add('none', [], { why });
+    if (error && why === 'failed') part.detail ??= error.error;
+    (part.attempts ??= new Set()).add(`${o.library} run ${o.attempt}`);
+  }
+  parts.forEach(part => { if (part.attempts) part.attempts = [...part.attempts]; });
+  // a signature verdict: strong for the bugs whose top frames the stack has (named first), else weak
+  for (const part of parts.filter(p => p.kind === 'signature')) {
+    const strong = part.ids.filter(id => StrongSignature(oracleOf(id), topFramesOf(id), bug));
+    part.weak = strong.length === 0;
+    if (strong.length) { part.strong = strong; part.ids = [...strong, ...part.ids.filter(id => !strong.includes(id))]; }
+  }
+  for (const part of parts.filter(p => p.kind === 'new')) if (lookalikes.length) part.lookalikes = lookalikes;
+  for (const id of new Set(parts.flatMap(p => p.ids))) base.oracles[id] = oracleOf(id);
+  parts.sort((a, b) => VERDICT_ORDER.indexOf(a.kind) - VERDICT_ORDER.indexOf(b.kind) || b.count - a.count);
+  // the bug's verdict: its strongest part with a verdict, with the bugs of every part of that kind
+  const kind = parts.find(p => p.kind !== 'none')?.kind ?? null;
+  const ofKind = parts.filter(p => p.kind === kind);
+  return { ...base, parts, kind, ids: [...new Set(ofKind.flatMap(p => p.ids))],
+           weak: kind === 'signature' && ofKind.every(p => p.weak) };
+}
+
+// NoReplay(bug, libraries, catalogue, cves): the known bugs it is (the expected bug of its configuration) or whose
+// signature the fuzzer recorded, whose objectives do not replay on their own (replayable = false: CDOS), from the report's
+// record of the entries (report_verdicts.js adds the catalogue's flag), the catalogue, else the bench's own table of CVEs
+// (report.cves, vuln_targets.json _cves: also for the reports of commits without catalogue): its objectives not
+// reproduced by a replay are expected, not a doubt about the find
+export function NoReplay(bug, libraries, catalogue = null, cves = null) {
+  const byLib = (libraries ?? []).filter(l => l.validation?.entries).map(l => l.validation.entries);
+  const entriesOf = id => [...byLib.map(e => e[id]), ...Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]), cves?.[id]];
+  const oracleOf = id => entriesOf(id).map(e => e?.oracle).find(Boolean) ?? null;
+  const vendor = VendorOfRun(bug.run) ?? VendorOfRun(bug.runs?.[0]);
+  const known = new Set([...byLib.flatMap(e => Object.keys(e)), ...Object.keys(catalogue?.vendors?.[vendor]?.entries ?? {})]);
+  const group = { fuzzer: bug.fuzzer, type: [...(bug.types?.keys() ?? [])][0] ?? bug.replayType ?? bug.type, frames: bug.frames };
+  return [...new Set([...(bug.expected ?? []), ...[...known].filter(id => OracleMatchesGroup(oracleOf(id), group))])]
+      .filter(id => entriesOf(id).map(e => e?.replayable).find(r => r != null) === false);
+}
+
+// KnownByValidation(bug): validation names a known bug for it: confirmed by patch, or by a signature that is not weak
+export const KnownByValidation = bug => bug.validation?.kind === 'patch' || (bug.validation?.kind === 'signature' && !bug.validation.weak);
+
+// AnalyseReport(report, known, catalogue): what the pages and tools tell of an objectives report, decided in one place
+// (the objectives page, Results, report_verdicts.js for History): the expected bug of each configuration, the bugs with
+// their validation verdicts, the new ones (known: the registry of the bugs found so far, known_bugs.json), the 🎯 runs
+// that found their expected bug, the headline and level of the task. catalogue (git_restapi's, optional; else the
+// report's catalogue_digest): the bugs with the signature of a bug none of whose objectives was validated, which bugs
+// do not replay, the top frames of the signatures
+export function AnalyseReport(report, known = null, catalogue = null) {
+  // without the catalogue (Results), the digest report_verdicts.js wrote into the report: the same flags
+  catalogue ??= report?.catalogue_digest?.format === 'vulnerabilities.toml' ? report.catalogue_digest : null;
+  const runs = report?.runs ?? [], libraries = report?.libraries ?? [];
+  const targets = ReportTargets(report);
+  const bugs = Bugs(runs, report?.not_targeted, targets, libraries);
+  for (const bug of bugs) {
+    bug.validation = BugValidation(bug, libraries, catalogue, !!report?.live);
+    bug.noReplay = NoReplay(bug, libraries, catalogue, report?.cves);
+  }
+  const newBugs = NewBugs(bugs, known, report?.task, report);
+  const expectedRuns = ExpectedRuns(runs, targets, libraries);
+  return { targets, bugs, newBugs, expectedRuns, headline: BugsHeadline(bugs, newBugs, report) };
 }

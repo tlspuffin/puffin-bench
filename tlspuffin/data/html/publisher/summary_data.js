@@ -171,7 +171,7 @@ function ExtractValue(path, obj) {
   }, acc).current;
 }
 
-function BuildDataSet(source, json) {
+export function BuildDataSet(source, json) {
   if (json?.data === undefined) {
     return {};
   }
@@ -269,6 +269,9 @@ function BuildDataSet(source, json) {
         unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported,
         // objectives replayed and grouped by bug (see ExperimentReplayObjectives), absent for older results
         objectives: libraries[library]?.objectives,
+        // validation of the objectives against tlspuffin's catalogue (Utils.AttachValidation): the verdict line of the
+        // 🐞 panel (summary_render.js ValidationLine); absent before it
+        validation: libraries[library]?.validation ?? null,
         // each run by its attempt: its state in the summary ('success', 'fail', or none when its summary is missing)
         runs: libraries[library].data.map(attempt => ({ id: attempt?.id, state: attempt?.state ?? null }))
       };

@@ -5,7 +5,8 @@
 #     type) and against a replay ("ASan <type>");
 #   - ExpectedTarget: the experiment's target (target_bug, target_oracle) first, else the preset's (VULN_TARGETS);
 #     TargetMatches on both, the frame rule of VulnA unchanged;
-#   - ObjectiveTargeted from fuzzer records (FuzzerRecords lines -> FuzzerVerdict): the expected bug, another bug;
+#   - ObjectiveTargeted from fuzzer records (FuzzerRecords lines -> FuzzerVerdict): the expected bug, another bug; a
+#     claim set apart (CVE-2024-5814 on wolfSSL < 5.7.2) does not count, but in the experiment that looks for it;
 #   - KnownVendorBuild: presets and builds derived from the catalogue, with the clone's presets.toml and
 #     vulnerabilities.toml;
 #   - CustomExperimentJSON: what cli-<step>.json records (null for Vuln group A and B, which name their bug too).
@@ -68,6 +69,21 @@ expect '3336 experiment: the claim is its oracle'   0 ObjectiveTargeted "${recor
 ObjectiveTargeted "${records}" 20261110-080000100-abcdef "$( ExpectedTarget x )"; rc=$?
 same '3336 experiment: the crash is another bug (3)' "${rc}" 3
 unset target_bug target_oracle
+
+# the claim of CVE-2024-5814, set apart on wolfSSL < 5.7.2 (vuln_targets.json _not_targeted), in a run of wolfSSL 5.4.0
+CLAIM="Negotiated cipher is not in agent's configured ciphers list"
+declare -gA OBJECTIVES_NOT_TARGETED=( ["${CLAIM}"]='CVE-2024-5814|wolfssl|5.7.2' )
+work=$( mktemp -d ); ( cd "${work}" && echo 'C harness, wolfssl540-asan' > .build_info )
+claims=$( printf '%s\t%s\t%s\t%s\t%s\t%s\n' 1794297700000 warn "${CLAIM}" '' '2026-11-10T08:01:40.000+00:00' '' )
+( cd "${work}" && ObjectiveTargeted "${claims}" 20261110-080140000-123456 ); rc=$?
+same 'a claim set apart (CVE-2024-5814 on 5.4.0), no target: not targeted (1)' "${rc}" 1
+target_bug=CVE-2022-39173; target_oracle="${BUF}"
+( cd "${work}" && ObjectiveTargeted "${claims}" 20261110-080140000-123456 "$( ExpectedTarget x )" ); rc=$?
+same 'the same claim in a BUF experiment: set apart (1)' "${rc}" 1
+target_bug=CVE-2024-5814; target_oracle="{\"kind\":\"claim\",\"violation\":\"${CLAIM}\"}"
+( cd "${work}" && ObjectiveTargeted "${claims}" 20261110-080140000-123456 "$( ExpectedTarget x )" ); rc=$?
+same 'the same claim in the experiment of CVE-2024-5814: its target (0)' "${rc}" 0
+unset target_bug target_oracle; rm -rf "${work}"
 
 echo "--- KnownVendorBuild"
 THEJOB_OUT_PATH=$( mktemp -d ); trap 'rm -rf "${THEJOB_OUT_PATH}"' EXIT

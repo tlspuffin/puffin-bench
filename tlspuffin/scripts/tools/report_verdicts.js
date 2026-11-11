@@ -4,6 +4,8 @@
 // page and tool tells the same: which runs found the expected bug (counted), which of them did not end normally (untimed:
 // no time to find), the conclusion of the task.
 // Run by objectives_report.sh after each report, with the qjs of the bench: qjs --std -m report_verdicts.js <file>
+// [<catalogue json>]: the catalogue the report's validation used (git_restapi's, as the page loads it): the top frames
+// that make a signature verdict strong
 //
 // Added to the report:
 //   verdicts: { conclusion: ExpectedConclusion (null without a configuration with a target),
@@ -12,14 +14,43 @@
 //                            first_expected: { <attempt>: <name of its first objective of the expected bug> },
 //                            script_disagrees: [{ attempt, script, report }] } },
 //               bugs: { count, objectives, confirmed },
-//               headline: BugsHeadline (the title of the report: { real, confirmed, new, allKnown, celebrate, text }) }
+//               headline: BugsHeadline (the title of the report: { real, confirmed, new, allKnown, level,
+//                         nothingExpected, text }),
+//               history: { level, title }: the 🐞 of the history page, its colour (the level: new, unexpected,
+//                        warning for nothing reproduced; plain for known bugs) and its hover, in the words of ../../data/html/common/verdicts.js }
+// The bugs get the validation's verdicts first (BugValidation, without the catalogue: the names and signatures of the
+// bugs are in the report's validation), as on the page: the same new bugs, the same level.
 //   new: the bugs of NewBugs, with the registry next to the report (known_bugs.json) as the page reads it
 //   script_disagrees: the runs whose job scripts (their summary: nb_objective_targeted, ObjectiveCounts in
 //   PR_vulnerabilities.sh) and bugs.js disagree on the expected bug, for the runs whose job scripts had the target
 
-import { Bugs, ExpectedRuns, ExpectedConclusion, RunFailures, IsExpected, NewBugs, BugsHeadline } from './objectives_page/bugs.js';
+import { ExpectedConclusion, RunFailures, IsExpected, VerdictOf, AnalyseReport, VendorOfRun } from './objectives_page/bugs.js';
+import { LEVELS } from './common/verdicts.js';
 
 const file = scriptArgs[1];
+let catalogue = null;
+try { catalogue = scriptArgs[2] ? JSON.parse(std.loadFile(scriptArgs[2])) : null; } catch (error) { catalogue = null; }
+if (catalogue?.format !== 'vulnerabilities.toml') catalogue = null;
+// the catalogue's flags the readers of the report need without it (the objectives pages, Results): whether a bug's
+// objectives replay, its top frames (the strength of a signature verdict), into the validation's record of each entry
+const enrich = (report) => {
+  if (!catalogue) return;
+  // and the catalogue's entries of the libraries of the report in brief (catalogue_digest: alias, oracle, replayable, top
+  // frames), for a report whose validation has no entries (older ones, unsupported): AnalyseReport's catalogue when the
+  // reader has none
+  const vendors = new Set((report.runs ?? []).map(run => VendorOfRun(run)).filter(Boolean));
+  report.catalogue_digest = { format: catalogue.format, commit: catalogue.commit ?? null, vendors: Object.fromEntries(
+      [...vendors].filter(v => catalogue.vendors?.[v]).map(v => [v, { entries: Object.fromEntries(Object.entries(catalogue.vendors[v].entries ?? {})
+          .map(([id, e]) => [id, { alias: e.alias ?? null, oracle: e.oracle ?? null, replayable: e.replayable ?? null, top_frames: e.top_frames ?? null }])) }])) };
+  for (const lib of report.libraries ?? []) {
+    for (const [id, entry] of Object.entries(lib.validation?.entries ?? {})) {
+      const known = Object.values(catalogue.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean);
+      if (!known || !entry) continue;
+      if (entry.replayable == null && known.replayable != null) entry.replayable = known.replayable;
+      if (!entry.top_frames && known.top_frames?.length) entry.top_frames = known.top_frames;
+    }
+  }
+};
 let report;
 try {
   report = JSON.parse(std.loadFile(file));
@@ -28,9 +59,16 @@ try {
   std.exit(1);
 }
 
+enrich(report);
 const runs = report.runs ?? [];
 const libraries = report.libraries ?? [];
-const expected = ExpectedRuns(runs, report.targets ?? {}, libraries);
+// the page's analysis (bugs.js AnalyseReport), with the registry next to the report (known_bugs.json) and the catalogue
+// of its validation, as the page reads them (the names and signatures of the bugs are in the report's validation; the
+// catalogue adds the top frames that make a signature verdict strong)
+let known = null;
+try { known = JSON.parse(std.loadFile(file.replace(/[^/]*$/, '') + 'known_bugs.json') ?? 'null'); } catch (error) {}
+const analysis = AnalyseReport(report, known, catalogue);
+const expected = analysis.expectedRuns;
 const out = {};
 for (const [library, o] of Object.entries(expected)) {
   const lib = libraries.find(l => l.library === library);
@@ -38,7 +76,8 @@ for (const [library, o] of Object.entries(expected)) {
   // the first objective of the expected bug of each run (names start with their UTC time: the smallest is the first)
   const firstExpected = {};
   for (const run of runs.filter(r => r.library === library)) {
-    const names = (run.groups ?? []).filter(g => IsExpected(o.target, g)).map(g => g.first).filter(Boolean).sort();
+    const verdictOf = VerdictOf(libraries, library, run.attempt);
+    const names = (run.groups ?? []).filter(g => IsExpected(o.target, g, verdictOf)).map(g => g.first).filter(Boolean).sort();
     if (names.length) firstExpected[run.attempt] = names[0];
   }
   // the job scripts' verdict (with the same target only: earlier job scripts had none, any objective ended a run)
@@ -53,19 +92,31 @@ for (const [library, o] of Object.entries(expected)) {
                    untimed: o.untimed.map(attempt => ({ attempt, why: why[attempt] ?? null })), level: o.level,
                    provisional: o.provisional, pre_target: o.preTarget, first_expected: firstExpected, script_disagrees: disagrees };
 }
-// the bugs of the task as the page lists them (confirmed by a replay, or recorded by the fuzzer)
-const all = Bugs(runs, report.not_targeted, report.targets);
+// the bugs of the task as the page lists them (reproduced by a replay, or recorded by the fuzzer)
+const all = analysis.bugs;
 const bugs = all.filter(bug => bug.reproduced > 0 || bug.fuzzer);
-// the title of the page: its new bugs (the registry of the bugs found so far, next to the report) and real bugs
-let known = null;
-try { known = JSON.parse(std.loadFile(file.replace(/[^/]*$/, '') + 'known_bugs.json') ?? 'null'); } catch (error) {}
-const { alarm, found, ...headline } = BugsHeadline(all, NewBugs(all, known, report.task, report), report);
+const { alarm, found, ...headline } = analysis.headline;
+const counts = { count: bugs.length, objectives: runs.reduce((sum, run) => sum + (run.found ?? 0), 0),
+                 confirmed: bugs.reduce((sum, bug) => sum + (bug.reproduced ?? 0), 0) };
+// the 🐞 of the history page: its colour from the level (new: 🚨, unexpected: gold, nothing reproduced: warning, outlined;
+// known bugs: plain), its hover
+const level = headline.level ? LEVELS[headline.level] : null;
+const history = {
+  level: ['new', 'unexpected'].includes(headline.level) ? headline.level : headline.level === 'unclear' ? 'warning' : null,
+  title: [
+    `🐞 ${counts.objectives} objective${counts.objectives === 1 ? '' : 's'}, ${counts.count} bug${counts.count === 1 ? '' : 's'}, ${counts.confirmed} objective${counts.confirmed === 1 ? '' : 's'} reproduced by a replay`,
+    level ? `${level.mark ? `${level.mark} ` : ''}${level.word}: ${level.tip}` : '',
+    headline.new ? `${alarm}: ${all.filter(bug => bug.isNew).map(bug => bug.frames?.[0] ?? bug.key).slice(0, 3).join(', ')}` : '',
+    headline.nothingExpected?.length ? `no known bug expected in ${headline.nothingExpected.join(', ')}` : '',
+    'Click: the objectives report, grouped by bug (new tab)',
+  ].filter(Boolean).join('\n'),
+};
 report.verdicts = {
   conclusion: ExpectedConclusion(expected),
   libraries: out,
-  bugs: { count: bugs.length, objectives: runs.reduce((sum, run) => sum + (run.found ?? 0), 0),
-          confirmed: bugs.reduce((sum, bug) => sum + (bug.reproduced ?? 0), 0) },
-  headline
+  bugs: counts,
+  headline,
+  history
 };
 const tmp = `${file}.verdicts.tmp`;
 const f = std.open(tmp, 'w');

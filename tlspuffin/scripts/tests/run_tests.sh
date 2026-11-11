@@ -62,7 +62,12 @@ Run validation_cache_test bash "${here}/validation_cache_test.sh"
 Run validation_choice_test bash "${here}/validation_choice_test.sh"
 Run live_validation_test bash "${here}/live_validation_test.sh"
 Run perf_objectives_test bash "${here}/perf_objectives_test.sh"
+Run validation_verdict_test bash "${here}/validation_verdict_test.sh"
+Run words_doc_test bash "${here}/words_doc_test.sh" "${qjs}"
+Run report_verdicts_test bash "${here}/report_verdicts_test.sh" "${qjs}"
+Run live_pill_test bash "${here}/live_pill_test.sh"
 Run asan_type_test bash "${here}/asan_type_test.sh"
+Run results_validation_test bash "${here}/results_validation_test.sh"
 
 echo
 echo "${passed} passed, ${#failed[@]} failed${failed[*]:+ (${failed[*]})}, ${#skipped[@]} skipped${skipped[*]:+ (${skipped[*]})}"

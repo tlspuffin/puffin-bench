@@ -445,7 +445,8 @@ def bench_times(groups, repo=None):
     """The time to find of each bug of Vuln group A and B, at the newest tlspuffin commit (committer date in the bench's
     clone of tlspuffin, read-only) each ran on, from the latest task there: what the launcher shows beside each bug of
     its custom benchmarks (/html/runs/bench_times.json): {source, bugs: {<experiment, the bug's alias>: {median_s,
-    found, runs, commit, date, task, job, cores, budget_s}}}; median_s of the attempts that found the bug (null: none)"""
+    found, runs, commit, date, task, job, cores, budget_s, asan}}}; median_s of the attempts that found the bug (null:
+    none); asan: whether that build had ASan (the run's record; null: not recorded)"""
     repo = repo or os.environ.get('PB_TLSPUFFIN_REPO', f'{PB_ROOT}/data/repo/tlspuffin/repo')
     dates = {}
     def date(commit):
@@ -474,9 +475,11 @@ def bench_times(groups, repo=None):
                     found = [r['measured'] for r in runs if r.get('measured') is not None]
                     best[exp] = (key, {'median_s': statistics.median(found) if found else None, 'found': len(found), 'runs': len(runs),
                                        'commit': commit, 'date': date(commit)[1], 'task': t.get('id'), 'job': t.get('job_type'),
-                                       'cores': (settings.get('cores') or [None])[0], 'budget_s': (settings.get('timeout') or [None])[0]})
-    return {'source': 'Vuln group A and B, each bug at the newest tlspuffin commit it ran on (latest task there): median time '
-                      'to find of the attempts that found it, found/attempts; their builds are without ASan except HEAP\'s',
+                                       'cores': (settings.get('cores') or [None])[0], 'budget_s': (settings.get('timeout') or [None])[0],
+                                       'asan': ((t.get('builds') or {}).get(exp) or {}).get('asan')})
+    return {'source': 'Vuln group A and B: each bug at the newest tlspuffin commit it ran on (its latest task there), the median '
+                      'time to find of the attempts that found it and found/attempts, on the build of that group (with ASan or '
+                      'without, as said beside each time: a build with ASan runs slower)',
             'bugs': {exp: value for exp, (key, value) in sorted(best.items())}}
 
 

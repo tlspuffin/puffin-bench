@@ -149,10 +149,10 @@ a:hover { text-decoration: underline; }
 .task:hover { background: #262b33; }
 .task:focus-visible { background: #262b33; outline: 2px solid #4c8dff; outline-offset: -2px; }
 .task.selected { background: #263247; box-shadow: inset 3px 0 0 var(--link); }
-/* a task whose objectives report found new bugs: yellow, with the report's title on its 🐞 button */
-.task.new-bugs { background: #4a3d0a; }
-.task.new-bugs:hover { background: #5a4a0e; }
-.task.new-bugs.selected { background: #5a4a0e; }
+/* a task whose objectives report found new bugs: red, with the report's title on its 🐞 button */
+.task.new-bugs { background: #4a1414; box-shadow: inset 4px 0 0 #ff5252; }
+.task.new-bugs:hover { background: #5a1a1a; }
+.task.new-bugs.selected { background: #5a1a1a; }
 .task .time { color: var(--muted); font-variant-numeric: tabular-nums; }
 .task .dur { color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 .task .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -182,7 +182,10 @@ a:hover { text-decoration: underline; }
 }
 
 .link-badge.warning { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
-.link-badge.new-bugs, .btn.new-bugs { background: var(--gold); color: #1a1a1a; border: 1px solid var(--gold); font-weight: 600; }
+/* the level of the objectives report (report_verdicts.js): new bug (red, 🚨), unexpected (gold); without level, plain */
+.link-badge.unexpected { background: var(--gold); color: #1a1a1a; border: 1px solid var(--gold); }
+.link-badge.new, .link-badge.new-bugs, .btn.new-bugs { background: #d32f2f; color: #fff; border: 1px solid #ff5252; font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(255, 82, 82, .35); }
 /* 🎯 of a Vuln task (the conclusion of its objectives report): green every run, amber some, red a configuration in none */
 .link-badge.expected-all, .btn.gold.expected-all, .btn.expected-all { background: #12361f; color: #aff5b4; border: 1px solid #3fb950; }
 .link-badge.expected-partial, .btn.gold.expected-partial, .btn.expected-partial { background: #2e2a0f; color: #f2d98b; border: 1px solid #d4a72c; }

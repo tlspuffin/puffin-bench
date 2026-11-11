@@ -190,7 +190,7 @@ CleanAllRepo
 ### Perf vs Vuln termination
 
 - **Perf**: the fuzzer runs for the full `timeout` — reaching it without dying counts as `success`; dying earlier (crash, hang-kill) counts as `fail`. Default `70m` in `PR_perf_cargo.json`, 10 twin steps of 2 runs per library (see CPU sharing).
-- **Vuln**: a VulnA run stops when the fuzzer records the **expected bug** of its configuration (declared in `vuln_targets.json`, see [Expected bugs](#expected-bugs-and-new-bugs)); other objectives are kept, and the known CVE-2024-5814 is set apart on wolfSSL < 5.7.2 (it never ends a run there; elsewhere its claim is a bug). A configuration without declared target (VulnB) stops at its first objective that is not set apart. Each configuration of group A and B also names its bug of tlspuffin's catalogue (`target_bug`): on a commit with the catalogue (tlspuffin `pr/vuln-catalogue` on), the objective that would end the run ends it only once validation confirms it is that bug (replayed on the builds of the configuration's validation set: by patch differential, else by its signature on the build with every patch), and its time to find is when the fuzzer saved it; an objective not confirmed lets the run go on. When validation cannot decide (a commit without the catalogue, a bug whose objectives do not replay such as CDOS), the fuzzer's record decides, as before. Results flags the change of monitor (⚠ not comparable: "run ends on targeted → confirmed find"). A run is `success` only if the task reached `Done` **and** the expected bug (any objective without target) was found — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
+- **Vuln**: a VulnA run stops when the fuzzer records the **expected bug** of its configuration (declared in `vuln_targets.json`, see [Expected bugs](#expected-bugs-and-new-bugs)); other objectives are kept, and the known CVE-2024-5814 is set apart on wolfSSL < 5.7.2 (it never ends a run there; elsewhere its claim is a bug). A configuration without declared target (VulnB) stops at its first objective that is not set apart. Each configuration of group A and B also names its bug of tlspuffin's catalogue (`target_bug`): on a commit with the catalogue (tlspuffin `pr/vuln-catalogue` on), the objective that would end the run ends it only once validation recognises it as that bug (replayed on the builds of the configuration's validation set: by patch differential, else by its signature on the build with every patch), and its time to find is when the fuzzer saved it; an objective not recognised lets the run go on. When validation cannot decide (a commit without the catalogue, a bug whose objectives do not replay such as CDOS), the fuzzer's record decides, as before. Results flags the change of monitor (⚠ not comparable: "run ends on targeted → confirmed find"). A run is `success` only if the task reached `Done` **and** the expected bug (any objective without target) was found — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
 
 ---
 
@@ -338,6 +338,88 @@ The scheduler's generic cache endpoints (`GET`/`PUT /api/cache/<id>`, see [sched
 
 No target is declared for group B: a run ends at its first objective that is not set apart.
 
+## Words of the pages
+
+Every page of the bench says what a task found, and how the bench knows, with the same words: the objectives pages, the
+🐞 panel of Results, the Bugs reference (its last section repeats this one), the 🐞 of the scheduler's History, and the
+help panels. They come from one module, `tlspuffin/data/html/common/verdicts.js`; the decisions (which verdict, which
+level) from the validation of the job scripts (`PR_validate.sh`) and from the pages' `objectives_page/bugs.js`
+(`AnalyseReport`: the same for the objectives page, Results and History). This section is generated from the module
+(`qjs --std -m tlspuffin/scripts/tools/words_markdown.js`); `words_doc_test.sh` fails when they differ.
+
+Two replays tell different things: an objective is **reproduced** by a replay on the build of its own run (the pages
+replay every objective, up to 100 a run); it is **validated** by replays on the validation builds, which name the bug
+(patch differential). "Confirmed" is said only of patch differential. A bug's **signature** is what the catalogue
+recognises it by, shown with its content ("a crash with an ASan SEGV report", "the claim “Authentication bypass”").
+Validation compares that oracle only; the pages then weigh a "by its signature" verdict with the bug's stack: **strong**
+(green) when the stack (the replay's, else the fuzzer's record) has a top frame the catalogue gives for that bug
+(`top_frames`: BUF's RefineSuites, HEAP's AddPacketInfo); **weak** (yellow) otherwise: a claim or a panic (one message,
+which several bugs can share: Authentication bypass is CVE-2021-3336's, SIG's and SKIP's), a crash told by its type
+alone (SDOS2's: any ASan SEGV on wolfSSL 5.4.0 with every other patch), or a stack without those frames. Confirmed by
+patch stays the only certainty. A weak signature names a bug without telling it apart and never makes it known by
+itself: the bug's stack (the CVE signatures of `vuln_targets.json`, the earlier tasks) decides whether it is new. During
+a run (a custom benchmark's in-run recognition of a bug without patch) the oracle alone decides: weak.
+
+<!-- words:begin -->
+| term | meaning |
+|---|---|
+| **objective** | an input the fuzzer saved because its oracle fired: a crash (with an ASan report when the build has ASan), a violated claim of the protocol, a panic |
+| **bug** | the objectives with the same failure: the same ASan report type and top stack frames, or the same violated claim |
+| **reproduced** | a replay of the objective, on the build of its own run, gave that failure again (else: not reproduced, or a replay error when the replay could not run) |
+| **fuzzer only** | the fuzzer's own log recorded the failure when it saved the objective, but no replay reproduces it (the fuzzer runs every input in one process: state, memory layout) |
+| **signature** | how tlspuffin's catalogue recognises a known bug (its oracle): a crash with a given ASan report type or signal, a violated claim with its message, a panic with its message; for some bugs, the top frames of their crash |
+| **strong signature** | a crash with the bug's ASan report type whose stack has a top frame the catalogue gives for that bug: its own place, as well as a signature can tell (only a patch is certain); green |
+| **weak signature** | a signature without stack: a claim or a panic (one message, which several bugs can share: Authentication bypass is CVE-2021-3336's, SIG's and SKIP's), or a crash told by its ASan report type or signal alone (no top frames in the catalogue, or a stack without them): it names a bug without telling it apart from another failure of the same kind; yellow |
+| **validated** | the objective was replayed on the validation builds (F: every known bug with a patch patched; V_X: F without the patch of X) and got a verdict |
+| **confirmed** | by patch differential only: the objective goes away with the patch of X and gives the signature of X without it; certain |
+| **known bug** | a bug of tlspuffin's catalogue (a CVE, an alias such as BUF), active at the version tested |
+| **expected** | for a configuration: its target (Vuln jobs), and the known bugs tlspuffin declares for the version it built |
+| **unexpected** | objectives in a configuration where no known bug is expected (no bug declared for its version), or a bug that is neither its target nor a known bug declared for it |
+| **new bug** | a bug no one knows: on the build with every patch, the signature of no known bug; or, without validation, a signature no earlier task had and no known bug of its version |
+
+The verdicts of the validation, per objective, strongest first (a bug's verdict is its strongest part):
+
+| badge | meaning |
+|---|---|
+| ✔ **confirmed by patch** | the patch of this bug removes the objective, and without it the objective gives its signature: it is this bug (certain) |
+| ≈ **by its signature** | on the build with every patch, the objective gives the signature of a known bug without patch at this version: one of them; strong (green) when its stack has the top frames the catalogue gives for that bug, weak (yellow) otherwise: a claim, a panic, a crash told by its type alone (a patch would make it certain) |
+| ⚠ **signature of a bug its patch does not remove** | the objective stays on the build with every patch: not this bug, or its patch is incomplete; to review |
+| 🚨 **no known bug's signature** | the objective stays on the build with every patch, with the signature of no bug of the catalogue: a new bug, or one missing from the catalogue |
+| ⚠ **another signature** | the patch of the bug(s) named removes the objective, but without it the objective does not give their signature: to review, never counted as them |
+| ⛔ **could not replay** | a validation build could not run the objective (its command line refused, it crashed before the trace, it timed out): no verdict, never read as "not reproduced" |
+| ◌ **does not replay, as known** | the catalogue says the objectives of this bug do not replay on their own (they need the state of the fuzzer, replayable = false): not reproducing them on the validation builds is expected, nothing to worry about; the fuzzer's record of the crash is the evidence |
+| ? **not reproduced on the validation builds** | the replays ran, without the failure: it needs the state of the fuzzer, another layout, or two bugs at once |
+| … **not validated** | the validation's time budget was spent before this objective |
+| ○ **no verdict** | this objective has no validation verdict (why: on the badge) |
+
+Why an objective has no verdict:
+
+- not validated yet (the run is going on)
+- no validation result for its run (its validation step failed or did not run)
+- the validation of its run failed
+- not among the objectives validated in its run (at most 20 a run, the first of each bug first)
+- the commit has no catalogue: nothing to validate against
+
+What a bug is for its task:
+
+| tag | meaning |
+|---|---|
+| 🎯 **expected** | the bug this configuration is meant to find (its target) |
+| ⦸ **set apart** | a known CVE of old library versions that is never a target: it does not end a run |
+| 📋 **known** | a CVE tlspuffin declares for what this configuration built, whose signature the bug has: not a new bug |
+| ⚠ **unexpected** | neither the target of its configuration nor a known bug declared for it |
+| 🚨 **NEW BUG** | a bug no one knows (see "new bug") |
+
+The level of a task: the title of its objectives page, the colour of its 🐞 on the scheduler's History, of its objectives on the board (its card, attempts and button) and of the top bar's live pill (red with 🚨 for a new bug, gold unexpected, plain otherwise):
+
+| level | meaning |
+|---|---|
+| 🚨 **new bug** | a bug no one knows: the signature of no known bug |
+| ⚡ **unexpected** | objectives where no known bug is expected (none declared for the version tested), or bugs other than those expected there |
+| **known bugs** | every bug found is expected there: a target, or a known bug of the version tested |
+| **nothing reproduced** | objectives, but no replay reproduced a bug and the fuzzer recorded none |
+<!-- words:end -->
+
 ## Expected bugs and new bugs
 
 - **The file to edit**: `tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json` — the expected bug of each VulnA preset (`cve`, `kind`: `crash` with `match` among the top 3 frames of the fuzzer's backtrace or of the replay's stack, or `claim` with the violation message; `note`: where the rule comes from) and, under `_not_targeted`, the claims of known CVEs that are never a target, each with its scope (CVE-2024-5814: set apart only on wolfSSL < 5.7.2, which all have it; on any other library or version the claim is a bug like any other); under `_cves`, the reference table of the CVEs of the Vuln jobs (alias, CVSS, type, version, TLS), with an optional signature (`kind`, `match`) for a CVE no target names. `scripts/build.sh` writes both into the job scripts (`PR_targets.sh`); new tasks and the objectives reports written afterwards use them.
@@ -347,7 +429,8 @@ No target is declared for group B: a run ends at its first objective that is not
   - in a configuration with an expected bug (an alias: BUF, SKIP…), when no earlier task had its signature in that configuration, whatever the job (VulnA, VulnB, Perf, campaigns);
   - in a plain version (e.g. Perf's wolfSSL 5.8.0, a campaign on wolfssl540), when it is none of the CVEs tlspuffin declares for that build — the build's `vendorinfo.sh` (puffin-build): known vulnerabilities of the version (the library's `builder.cmake`) minus those the preset fixes, recorded by `ForcedBuild` as `cli.vulnerabilities` — whose signature `vuln_targets.json` gives (a CVE's own `kind`/`match` in `_cves`, else its target's, else its claim in `_not_targeted`; `objectives_page/cve_signatures.jq`). Such a bug is shown as 📋 known · CVE; any other is new on every task until it is added to the file. A run without declaration (built before puffin-build, Rust harness, job scripts before 2026-10-09): next item.
   - in a plain version whose build declared no CVEs: when it is none of the CVEs of the library it built in the CVE table of `vuln_targets.json` (`_cves`: `library` and signature) and no earlier task had its signature in that configuration. A bug recognised this way is marked **📋 known (inferred)**.
-- **The title of a report** says **N known bugs found**, without 🎉, when every bug found is expected given the tested version (🎯 expected or 📋 known); otherwise 🎉, and 🚨 N NEW BUG(S) before it when there are new bugs. The history page of the scheduler highlights a task with new bugs in yellow, with that title on its 🐞 button.
+- **Validation first**: a bug validation names by patch, or by a signature that is not weak, is known; one whose objectives stay on the build with every patch with the signature of no known bug is 🚨 new in each of its configurations; a weak signature decides nothing (the rules above do).
+- **The level of a task** (`bugs.js BugsHeadline`, written into the report by `report_verdicts.js`, see [Words of the pages](#words-of-the-pages)): **🚨 new bug** when a bug is new; **⚡ unexpected** when objectives come from a configuration where no known bug is expected (no target and its build declares no known bug) or, but in a Vuln job, when a real bug is not expected there; **known bugs** when every bug found is expected given the tested version (🎯 expected, 📋 known, or named by validation); **nothing reproduced** otherwise. The title of a report says **N known bugs found** for known, **⚡ N bugs found** for unexpected (or **⚡ objectives where no known bug is expected (…)**), with **🚨 N NEW BUG(S)** before it for new. The history page of the scheduler colours the task's 🐞 by that level: **red, 🚨 and the row highlighted** for a new bug (with the report's title on the button), **gold** for unexpected, **plain** for known bugs (outlined when nothing was reproduced); the board does the same for a running task once its live report has a level (its attempts, the steps' squares and its `🐞 N objectives` button: no colour before, the monitor only counts objectives), and so does the pill of the top bar (only the running tasks whose level is new, red, or unexpected, yellow); a custom benchmark's experiments have their 🎯 like Vuln group A (their target: the catalogue's bug they name, recognised by validation).
 
 ## Known bugs: how an objective is decided
 
@@ -358,35 +441,50 @@ rebuilds the run's library at the run's
 commit, with ASan, once with every known bug that has a patch patched (F), and once per such bug X with all of them but
 X patched (V_X), and replays each objective on them:
 - ✔ **confirmed X**: no objective on F, and on V_X an objective matching X's oracle: the objective is bug X;
-- ✗ **not patched**: the objective stays on F: a new bug, or a known bug without patch (named when its oracle matches);
+- **not patched**: the objective stays on F: ≈ a known bug without patch when its oracle matches (by its signature:
+  strong on the pages when the stack has the bug's top frames, else weak), ⚠ the claim or panic of a bug that has a patch there (not removed by it: to review), else
+  🚨 no known bug's signature (a new bug, or one missing from the catalogue);
 - ⚠ **other signature**: X's patch removes the objective, but not with X's signature: to review, never counted as X;
-- ? **inconclusive**: no objective on the validation builds;
+- ⛔ **could not replay** (verdict `error`): a validation build could not run the objective (no outcome: its command
+  line refused, it crashed before the trace, it timed out); what failed is kept (the build, the first error line of its
+  log), it is never read as "not reproduced", and in-run confirmation leaves the find to the fuzzer's record;
+- ? **not reproduced on the validation builds** (verdict `inconclusive`): the replays ran, without the failure;
 - … **not validated**: the step's time budget (30 min of executions) was spent before it.
+
+Each validation file records the bench that made it (`bench`: the deployed version and the commit of the job scripts),
+shown below the tiles of the objectives page and on the validation line of Results; a run with objectives and no
+validation file is an error of its configuration ("no validation result"), and its objectives show "no verdict" with
+why.
 
 The witness of each X is run first on V_X and F (controls): when it does not behave, the verdicts say "controls
 failed". A run's first 20 objectives are validated: the targeted ones, then one of each bug (by the fuzzer's record),
 then by time. An experiment that names its bug (custom benchmarks, Vuln group A and B) prepares its validation in a step
-before it (`PrepareValidation`), so that the run ends on a find only once validation confirms it. The validation builds
+before it (`PrepareValidation`), so that the run ends on a find only once validation recognises it. The validation builds
 are made once: the libraries of a set in a folder shared by the tasks (`data/validation-libs/`, named after what they are
 made from; a folder unused for 30 days goes), the binary in the scheduler's cache, per the sources it is built from (a
 commit that changes neither reuses them).
 
-The objectives pages (and the 🐞 panel of Results) show, on each bug, what its objectives are: **✔ X** confirmed by
-patch (green, certain), **≈ X · signature** the signature of a known bug without patch at that version (yellow-green),
-**⚠ signature of X, not removed by its patch** (amber, to review), **🚨 no known bug's signature** (red: a new bug, or one
-missing from the catalogue), each with how many objectives; one claim can be several bugs (CVE-2021-3336, SIG and SKIP
-share "Authentication bypass" on wolfSSL 4.4.0). A bug confirmed by validation is named after the catalogue's entry
-(alias · ID), linked to the Bugs reference, and is never 🚨 new; a bug none of whose objectives was validated shows the
-catalogue's bugs with its signature, "not validated". The verdicts show in the 🐞 panel of Results. To add a known bug: an entry, a patch and a witness trace in
+The objectives pages (and the 🐞 panel of Results) show, on each bug, what its objectives are, one badge per verdict
+with how many objectives (the words: [Words of the pages](#words-of-the-pages)): **✔ X · confirmed by patch** (green,
+certain), **≈ X · by its signature (a crash with an ASan SEGV report)** with the signature itself (green "with its stack"
+when the stack has X's top frames; yellow, dashed, "weak" otherwise, with why), **⚠** to review, **🚨 no known bug's signature** (red), **⛔ could not replay** (with what failed
+on click), **? not reproduced on the validation builds**, **○ no verdict** with why (not validated yet, no validation
+result for its run, not among the 20 validated, …); one claim can be several bugs (CVE-2021-3336, SIG and SKIP share
+"Authentication bypass" on wolfSSL 4.4.0). A bug validation names (by patch, or by a signature that is not weak) is
+named after the catalogue's entry (alias · ID), linked to the Bugs reference, its signature on hover, and is never 🚨
+new; a bug none of whose objectives was validated shows the catalogue's bugs with its signature, "not validated". The
+verdicts show in the 🐞 panel of Results. To add a known bug: an entry, a patch and a witness trace in
 tlspuffin (see its puffin-build/README.md); the bench reads dev's catalogue, or the commit's with
 `VALIDATION_CATALOGUE=commit`.
 
 The **Bugs reference** page shows dev's catalogue; while dev has none, that of the open pull request updated last that
 has one (said so at the top), and `?commit=<sha>` any commit's. Its overview gives each bug as the launcher's custom
 benchmarks do: the presets of the catalogue's commit it can run on (the first: the one the launcher picks), the bench's
-time to find it (Vuln group A/B, `runs/bench_times.json`), how a find is confirmed (its patch, its signature only, the
-fuzzer's record) and the bugs with the same oracle; filters by library, category, ★ first found by puffin, bugs without
-witness. Every field of a bug: its card at the end of the page. A bug of tlspuffin's harness of past commits
+time to find it (Vuln group A/B, `runs/bench_times.json`), how a find is recognised (✔ confirmed by its patch, ≈ its
+signature only: weak, the oracle alone decides during the run; the fuzzer's record), its **signature** (the catalogue's
+oracle in words, "with its stack" when the catalogue gives top frames, which make a verdict strong on the reports, else
+"weak") and the bugs with the same signature; filters by library,
+category, ★ first found by puffin, bugs without witness; its last section, the words of the pages, with their badges as every page shows them. Every field of a bug: its card at the end of the page. A bug of tlspuffin's harness of past commits
 (`affected_commits = "not containing <commit of the fix>"`, e.g. the LibreSSL 3.3.3 claim of 2022–2026) is in no build of
 the commit: the launcher never offers it, and the bugs found so far name the finds of older commits after it.
 
@@ -396,34 +494,51 @@ The launcher's **Vuln — custom** job builds a benchmark from tlspuffin's vulne
 `puffin-build/vendors/<vendor>/vulnerabilities.toml`, every detail on the **Bugs reference** page, linked from the panel
 and from each bug):
 
-1. Pick the commit. The catalogue is dev's by default (what validation trusts); **Load bugs from this commit** takes the
-   commit's own (a PR adding a bug), each bug marked against dev (only in this commit, differs from dev).
-2. Tick the bugs to look for: one experiment each. **Run on** offers the presets of the commit that have the bug (its
+1. Pick the commit: the panel shows nothing else before (the saved benchmarks, the catalogue and the presets come from
+   it).
+2. **Saved benchmarks**, at the top of the panel: **VulnA** and **VulnB** first, built in (Vuln group A and B as
+   configured: each configuration's bug on its preset as it is, the group's attempts, cores per attempt and timeout;
+   never removed, their names never saved over), then the benchmarks saved with 💾 Save (below). **Load** ticks the same
+   bugs again with the same settings, on the commit chosen (a bug that commit's catalogue does not have is left out, and
+   named; a benchmark saved before the launcher kept the timeout gets the one already set, else the job's default, and
+   says so: Save it again to keep one); **🗑 Remove** takes a saved one out of the list (the tasks it launched and their
+   results stay).
+3. Below them, what a saved benchmark keeps: **Timeout**, **Attempts** and **Cores per attempt**, **CPU sharing**.
+4. **Catalogue**: dev's by default (what validation trusts); **Load bugs from this commit** takes the commit's own (a PR
+   adding a bug), each bug marked against dev (only in this commit, differs from dev). **Show**: a library, a category,
+   ★ first found by puffin; **hide bugs without witness** is ticked by default (nothing shows the fuzzer can reach them;
+   untick it to see them: one with a patch and a signature, CALLB, can be ticked, with a warning, its finds still
+   confirmed by its patch; one without patch, Heartbleed, FREAK, cannot).
+5. Tick the bugs to look for: one experiment each. **Run on** offers the presets of the commit that have the bug (its
    version affected, the build options it requires), the newest first, ASan first; a version without patch for it is
    marked "signature only". The bug's needs (build options, PUT options, fuzzer flags, cargo features, ASan) are footnote
    marks under the table. **Time to find on the bench**: Vuln group A/B's own measurement of that bug at the newest
-   commit they ran on (`/html/runs/bench_times.json`, written by `runs_report.py`; hover for the task).
-3. **Other known bugs**: patched where a patch exists (recommended: `<preset>-only-<ID>`, an experiment can only stop on
-   its own bug), or as in the preset. **What will run** lists each experiment's vendor, build, flags, the oracle it stops
-   on and the known bugs left in its build, and warns when one of them has the same oracle (a stop on it is not a find).
-4. Attempts, cores per attempt, timeout and CPU sharing as for the other jobs; **Benchmark**: its name. The experiments
-   are named `<benchmark>_<alias or ID>` (e.g. `VulnC_BUF`): launching it again with the same name continues their series
-   on Results. The definition is recorded with the task ("New task…" from it launches the same).
-5. **💾 Save** keeps the benchmark under its name in the scheduler (launching does not), for every user of the board,
-   with its bugs, attempts, cores per attempt, timeout and CPU sharing
-   (`/api/benchmarks/tlspuffin`, stored in `exports/benchmarks.json`). **Saved benchmarks**, at the top of the panel,
-   lists them with their bugs and settings: **Load** ticks the same bugs again with
-   the same settings, on the commit chosen (a bug that commit's catalogue does not have is left out, and named);
-   **🗑 Remove** takes one out of the list (the tasks it launched and their results stay). Saving under the name of a
-   saved benchmark replaces it, once confirmed.
+   commit they ran on (`/html/runs/bench_times.json`, written by `runs_report.py`; hover for the task), with whether
+   that build had ASan, flagged when the build chosen here differs (BUF: measured without ASan, a custom experiment of
+   BUF has ASan, its signature being an ASan report: expect another time).
+6. **Other known bugs in the build**: **patch them** (recommended: `<preset>-only-<ID>`, the build keeps only the bug
+   looked for, besides the known bugs without patch at that version) or **keep the preset as it is** (only the fixes of
+   its own list; the fuzzer may find one of the other known bugs first, which does not end the attempt). **What will
+   run** lists each experiment's vendor, build, flags, the signature it stops on ("weak" where it alone decides: no
+   patch at that version) and the known bugs left in its build, and warns when one of them has the same signature (a stop on it is not
+   a find).
+7. **Benchmark**: its name. The experiments are named `<benchmark>_<alias or ID>` (e.g. `VulnC_BUF`): launching it again
+   with the same name continues their series on Results. The definition is recorded with the task ("New task…" from it
+   launches the same). **💾 Save** keeps the benchmark under its name in the scheduler (launching does not), for every
+   user of the board, with its bugs, attempts, cores per attempt, timeout and CPU sharing (`/api/benchmarks/tlspuffin`,
+   stored in `exports/benchmarks.json`). Saving under the name of a saved benchmark replaces it, once confirmed.
 
 Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report) and its validation set
-(before the attempt, cached), runs with the bug's flags, and stops only on a confirmed find: an objective whose signature
+(before the attempt, cached), runs with the bug's flags, and stops only on a recognised find: an objective whose signature
 is the bug's oracle is replayed on the validation builds while the fuzzer goes on, and ends the attempt when validation
-confirms it (patch differential; a bug without patch: its signature on the build with every patch); one it does not
-confirm leaves the attempt going. The time to find is when the fuzzer saved the first confirmed objective (its name),
+recognises it (confirmed by patch differential; a bug without patch: its signature on the build with every patch); one
+it does not recognise leaves the attempt going. The time to find is when the fuzzer saved the first recognised objective (its name),
 not when the attempt stopped. A preset that turns out not to have the bug (a PUT capability the launcher cannot know)
-makes the experiment "unsupported" instead of running for nothing.
+makes the experiment "unsupported" instead of running for nothing. When the validation builds cannot run an objective
+(⛔ could not replay), validation does not decide: the fuzzer's record does, as on a commit without the catalogue.
+The objectives page, Results and History give each experiment its 🎯 (runs that found its target, as for Vuln group
+A): an objective is the target when validation names the target for it, else, until validation says, when it has the
+target's signature.
 
 ## Performance configurations
 

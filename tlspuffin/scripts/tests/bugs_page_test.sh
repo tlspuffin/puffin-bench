@@ -16,7 +16,7 @@ work=$( mktemp -d )
 trap 'rm -rf "${work}"' EXIT
 mkdir -p "${work}/html/board" "${work}/html/publisher"
 command cp -f "${bench}/tlspuffin/data/html/publisher/"{bugs.js,summary_config.js} "${work}/html/publisher/"
-mkdir -p "${work}/html/common" && command cp -f "${bench}/tlspuffin/data/html/common/"{catalogue,format}.js "${work}/html/common/"
+mkdir -p "${work}/html/common" && command cp -f "${bench}/tlspuffin/data/html/common/"{catalogue,format,verdicts}.js "${work}/html/common/"
 echo '' > "${work}/html/board/nav.js"   # the navigation bar needs a real DOM
 echo '{ "type": "module" }' > "${work}/package.json"
 "${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${commit}" > "${work}/catalogue.json"
@@ -172,8 +172,8 @@ configs=$( grep -o '<table class="configs">.*' <<< "$( tr '\n' ' ' <<< "${out}" 
 row() { awk -v k="<td><b>$1</b></td>" '{ i = index($0, k); if (i) { r = substr($0, i); j = index(r, "</tr>"); print (j ? substr(r, 1, j - 1) : r); exit } }' <<< "${configs}"; }
 grep -q "every patch but its bug" <<< "$( row BUF )" && grep -q '✓' <<< "$( row BUF )" && echo "ok   (configs): BUF's preset is every patch but its bug's" || { echo "FAIL (configs): BUF"; fail=1; }
 grep -q '≠' <<< "$( row SDOS2 )" && grep -q 'not patched: HEAP' <<< "$( row SDOS2 )" && echo "ok   (configs): SDOS2's preset leaves HEAP unpatched (it has a patch at 5.4.0)" || { echo "FAIL (configs): SDOS2"; fail=1; }
-grep -q 'CVE-2021-3449' <<< "$( row SDOS1 )" && grep -q 'confirmed as CVE-2021-3449 during the attempt' <<< "$( row SDOS1 )" && echo "ok   (configs): VulnB's SDOS1 names CVE-2021-3449, confirmed during the attempt" || { echo "FAIL (configs): SDOS1"; fail=1; }
-grep -q 'confirmed as CVE-2022-39173 during the attempt' <<< "$( row BUF )" && grep -q 'RefineSuites' <<< "$( row BUF )" && echo "ok   (configs): VulnA's BUF keeps its rule and is confirmed during the attempt" || { echo "FAIL (configs): BUF confirmation"; fail=1; }
+grep -q 'CVE-2021-3449' <<< "$( row SDOS1 )" && grep -q 'recognised as CVE-2021-3449 during the attempt' <<< "$( row SDOS1 )" && echo "ok   (configs): VulnB's SDOS1 names CVE-2021-3449, recognised during the attempt" || { echo "FAIL (configs): SDOS1"; fail=1; }
+grep -q 'recognised as CVE-2022-39173 during the attempt' <<< "$( row BUF )" && grep -q 'RefineSuites' <<< "$( row BUF )" && echo "ok   (configs): VulnA's BUF keeps its rule and is recognised during the attempt" || { echo "FAIL (configs): BUF confirmation"; fail=1; }
 # a CVE of vuln_targets.json _cves that the catalogue does not have is named (CALLB before the catalogue had it)
 if jq -e '.vendors.wolfssl.entries["CVE-2023-6936"]' "${work}/catalogue.json" > /dev/null; then
   check dev 'a CVE the catalogue has is not said missing' 'CVE-2023-6936</a> <span class="muted">CALLB</span>: not in the catalogue' absent
@@ -203,7 +203,7 @@ first_preset=$( node --input-type=module -e "
 grep -q "<span class=\"run-first\" title=\"${first_preset#* }\">" <<< "${overview}" && echo "ok   (overview): run on: ${first_preset% *} first on ${first_preset#* }, the launcher's pick" || { echo "FAIL (overview): run on ${first_preset}"; fail=1; }
 check dev 'a bug with a patch: confirmed by it' 'its patch \('
 if jq -e '[.vendors[].entries[] | select(.oracle and ((.patches // []) | length == 0) and .replayable != false)] | length > 0' "${work}/catalogue.json" > /dev/null; then
-  check dev 'a bug without patch: its signature only' 'signature only: no patch</span>'
+  check dev 'a bug without patch: its signature only, weak' 'signature only: no patch .weak: any '
 fi
 for filter in lib cat puffin nowitness; do check dev "the filter ${filter} of the overview" "data-filter=\"${filter}\""; done
 check dev 'no time without the measurements of the bench' 'none yet; hover for the task'

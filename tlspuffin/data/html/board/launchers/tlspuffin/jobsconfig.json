@@ -97,6 +97,7 @@
       "timeout":  true,
       "timeout_default": { "d": 0, "h": 3, "m": 10 },
       "custom_benchmark": true,
+      "builtin_benchmarks": ["vuln-a", "vuln-b"],
       "config":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities-custom_cargo.json",
       "script":   "/files/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh",
       "files":    [

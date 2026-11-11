@@ -604,10 +604,10 @@ a.tp-mon {
   color: #b9f6ca;
 }
 
-/* objectives found where they are the expected outcome (VulnA/VulnB): plain */
+/* objectives found, not news by their report (known bugs, or not judged yet): plain */
 .tp-mon.tp-mon-objective-expected { font-weight: 700; }
 
-/* objectives found: a bold pill */
+/* objectives found that their report calls news: a bold pill, gold (unexpected) or red (a new bug) */
 .tp-mon.tp-mon-objective {
   padding: 0 6px;
   border-radius: 999px;
@@ -616,6 +616,7 @@ a.tp-mon {
   font-weight: 700;
   text-decoration: none;
 }
+.tp-mon.tp-mon-objective.tp-mon-objective-new { background: #d32f2f; color: #fff; }
 
 .tp-mon-warning {
   color: #ffcc80;
@@ -683,6 +684,13 @@ a.tp-mon {
 .jl-modal.jl-wide { max-width: min(96vw, 1880px); }
 .jl-custom { display: none; flex-direction: column; gap: 6px; }
 .jl-custom.visible { display: flex; }
+.jl-custom-main { display: flex; flex-direction: column; gap: 6px; }
+/* until a commit is chosen: only the prompt */
+.jl-custom.no-commit .jl-custom-main { display: none; }
+.jl-custom-first { display: none; color: var(--jl-text-muted); font-size: 13px; padding: 4px 0; }
+.jl-custom.no-commit .jl-custom-first { display: block; }
+/* the launcher's Timeout and CPU sharing, moved here for a custom benchmark */
+.jl-custom-slot:empty { display: none; }
 .jl-custom-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--jl-text); font-size: 13px; }
 .jl-custom-row .jl-label { margin: 0; }
 .jl-custom-row input[type="number"] { width: 70px; }

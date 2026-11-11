@@ -249,7 +249,7 @@ Report() {
                  cves: $cves }' \
       <<< "${libs}" > "${OUT}/${task}.json" || return 1;
   # the verdicts of bugs.js (the pages' code) in the report, for runs_report.py and the history page
-  "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "${OUT}/${task}.json" || return 1;
+  Verdicts "${OUT}/${task}.json" || return 1;
   Render "${OUT}/${task}.json" "${OUT}/${task}.html" || return 1;
   echo "${task}: $( jq -r '[.runs[] | "\(.library) run \(.attempt): \(.reports) report(s) in \(.groups | length) group(s)"] | join("; ") | if . == "" then "no objective" else . end' "${OUT}/${task}.json" )";
   echo "  ${URL}/html/objectives/${task}.html";
@@ -307,14 +307,16 @@ AllTasks() {
     [ -f "${J%.json}.zip" ] || continue;
     # first the tasks without a final report (none, or the last live page kept until it, see objectives_live.sh),
     # then the reports older than what makes them: the export, this script, the signatures (ObjectiveSignature,
-    # PR_common.sh), the expected bugs (vuln_targets.json) and the verdicts (report_verdicts.js with bugs.js)
+    # PR_common.sh), the expected bugs (vuln_targets.json) and the verdicts (report_verdicts.js with bugs.js and the
+    # words of common/verdicts.js)
     first=1;
     if [ ! -e "${OUT}/${id}.html" ] || grep -q '"pending_final": *true' "${OUT}/${id}.json" 2> /dev/null; then
       first=0;
     elif [ "${OUT}/${id}.html" -nt "${J}" ] && [ "${OUT}/${id}.html" -nt "${BASH_SOURCE[0]}" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/PR_common.sh" ] && [ "${OUT}/${id}.html" -nt "${TARGETS_JSON}" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/report_verdicts.js" ] &&
-        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/objectives_page/bugs.js" ]; then
+        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/objectives_page/bugs.js" ] &&
+        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/common/verdicts.js" ]; then
       continue;
     fi
     # a task with objectives, or a Vuln task (its 🎯 also when no run saved any objective: 0/n)
@@ -351,21 +353,49 @@ TaskLinks() {
                       + (if .cancelled then "\ncancelled: the task was cancelled; its runs that had not started are not counted" else "" end)
                       + "\ngreen: every run; amber: every configuration, not every run; red: a configuration in no run\nClick: the objectives report (new tab)") }
                else empty end),
-              (if (.runs | length) > 0 then { label: "🐞", url: "../objectives/\($id).html", source: "objectives_report",
+              (if (.runs | length) > 0 then { label: (if ($v.headline.new // 0) > 0 then "🚨 🐞" else "🐞" end),
+                  url: "../objectives/\($id).html", source: "objectives_report",
                   count: $v.bugs.objectives, bugs: $v.bugs.count,
                   # the new bugs and the title of the report (bugs.js BugsHeadline): the history page highlights the task
                   new: (if ($v.headline.new // 0) > 0 then $v.headline.new else null end),
                   headline: (if ($v.headline.new // 0) > 0 then $v.headline.text else null end),
-                  level: (if $v.bugs.confirmed > 0 then null else "warning" end),
-                  title: (if $v.bugs.confirmed > 0
-                          then "🐞 \($v.bugs.objectives) objectives, \($v.bugs.count) bug(s), \($v.bugs.confirmed) objectives reproduced by a replay\nClick: the objectives report, grouped by bug (new tab)"
-                          else "🐞 \($v.bugs.objectives) objectives, but no replay reproduced a bug (not reproduced, timed out or could not run)\nClick: the objectives report (new tab)" end) }
+                  # its colour (report_verdicts.js history: the level of the task): new (🚨, red), unexpected (gold),
+                  # nothing reproduced (warning), known bugs (plain: also those found by the fuzzer alone, CDOS); a report
+                  # without levels: warning when no replay reproduced a bug
+                  level: (if ($v.history | type) == "object" then $v.history.level
+                          else (if $v.bugs.confirmed > 0 then null else "warning" end) end),
+                  title: ($v.history.title // "🐞 \($v.bugs.objectives) objectives, \($v.bugs.count) bug(s)\nClick: the objectives report (new tab)") }
                  | with_entries(select(.value != null))
                else empty end) ]) }' "${f}";
   done | jq -s 'add // {}' > "${links}.tmp" && mv "${links}.tmp" "${links}";
 }
 
+# ReportCatalogue <report json>: the file of the catalogue the report's validation used (else the task's commit's), as
+# the page loads it from git_restapi (PB_GIT_RESTAPI, default the local one): the top frames that make a signature
+# verdict strong. Cached per commit (a commit's catalogue does not change), with the answers without catalogue; nothing
+# printed when there is none
+ReportCatalogue() {
+  local commit; commit=$( jq -r '([.libraries[]?.validation?.catalogue?.commit | select(. != null)][0]) // .commit // empty' "$1" 2> /dev/null );
+  [[ "${commit}" =~ ^[0-9a-f]{7,40}$ ]] || return 0;
+  local dir="${PB_ROOT}/data/catalogue-cache"; local file="${dir}/${commit}.json";
+  if [ ! -s "${file}" ]; then
+    mkdir -p "${dir}" || return 0;
+    curl -sf --max-time 30 "${PB_GIT_RESTAPI:-http://127.0.0.1:10081}/api/git/catalogue/tlspuffin/${commit}" > "${file}.tmp" 2> /dev/null &&
+        jq -e 'type == "object"' "${file}.tmp" > /dev/null 2>&1 && mv -f "${file}.tmp" "${file}" || { rm -f "${file}.tmp"; return 0; };
+  fi
+  jq -e '.format == "vulnerabilities.toml"' "${file}" > /dev/null 2>&1 && echo "${file}";
+  return 0;
+}
+
+# Verdicts <report json>: the verdicts of the pages (report_verdicts.js with bugs.js and the report's catalogue) written
+# into the report
+Verdicts() {
+  local catalogue; catalogue=$( ReportCatalogue "$1" );
+  "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "$1" ${catalogue:+"${catalogue}"};
+}
+
 [ "${1:-}" == "--render" ] && { Render "$2" "$3"; exit $?; }
+[ "${1:-}" == "--verdicts" ] && { Verdicts "$2"; exit $?; }
 (( $# > 0 )) || { echo "Usage: $0 <task id> ... | --all" >&2; exit 1; }
 tasks=( "$@" );
 # one --all at a time (cron every 10 minutes): after an update of this script every page is rewritten, which can take

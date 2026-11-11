@@ -9,6 +9,7 @@ import '../board/nav.js';
 import { urls } from './summary_config.js';
 import { presentOn, patchedAt, runOptions, confirmation, needsAsan } from '../common/catalogue.js';
 import { esc, libraryName, duration, VENDORS } from '../common/format.js';
+import { TERMS, VERDICTS, VERDICT_ORDER, TAGS, LEVELS, SignatureText, SignatureWithStack } from '../common/verdicts.js';
 
 const TARGETS = '/html/jobsscripts/tlspuffin/vuln_targets.json';
 const KNOWN = '/html/objectives/known_bugs.json';
@@ -102,8 +103,13 @@ const dl = rows => {
   return kept.length ? `<dl>${kept.map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join('')}</dl>` : '<p class="muted">—</p>';
 };
 const box = (title, body, cls = '') => `<div class="box ${cls}"><h4>${title}</h4>${body}</div>`;
-const oracleText = o => !o ? '<span class="muted">none (no witness)</span>'
-  : `${esc(o.kind)}${['signal', 'asan', 'violation', 'panic'].filter(k => o[k]).map(k => ` <span class="muted">${k}</span> <code>${esc(o[k])}</code>`).join('')}`;
+// a bug's signature (its oracle in the catalogue) in words: with its top frames, strong on the reports when a stack has
+// them; else weak (a claim, a panic, a crash told by its type alone)
+const signatureText = (o, frames = null) => !o ? '<span class="muted">none</span>'
+  : `${esc(SignatureText(o))} ${SignatureWithStack(o, frames)
+      ? `<span class="badge b-exp" title="${esc(TERMS.find(t => t[0] === 'strong signature')[1])}">with its stack</span>`
+      : `<span class="badge b-unexp" title="${esc(TERMS.find(t => t[0] === 'weak signature')[1])}">weak</span>`}`
+    + (frames?.length ? `<div class="muted" title="a stack with one of them makes a signature verdict strong on the reports">top frames: <code>${esc(frames.join(' < '))}</code></div>` : '');
 // an upstream fix: a URL, or a commit of the library's repository (presets.toml)
 const upstreamLink = (repository, upstream) => {
   if (!upstream) return '<span class="muted">—</span>';
@@ -157,7 +163,7 @@ function entryCard(vendor, id, e) {
   ]);
   const o = e.oracle;
   const shows = dl([
-    ['oracle', o ? `<b>${esc(o.kind)}</b> <span class="muted">${o.kind === 'claim' ? '(the security oracle reports a violation)' : '(the execution crashes: signal, sanitizer report or panic)'}</span>`
+    ['signature', o ? `${signatureText(o)} <span class="muted">(the catalogue's oracle: ${o.kind === 'claim' ? 'the security oracle reports a violation' : 'the execution crashes: signal, sanitizer report or panic'})</span>`
       : '<span class="muted">none: its objectives cannot be recognised</span>'],
     ['signal', o?.signal ? `<code>${esc(o.signal)}</code>` : ''],
     ['ASan report', o?.asan ? `<code>${esc(o.asan)}</code>` : ''],
@@ -177,10 +183,11 @@ function entryCard(vendor, id, e) {
             + ` <span class="muted mono" title="sha256 ${esc(e.patch_hashes?.[file] ?? '')}">${esc(String(e.patch_hashes?.[file] ?? '').slice(0, 12))}</span>`).join('<br>')}</td>
           <td>${upstreamLink(repository, p.upstream)}${extra.map(([k, v]) => `<br><span class="muted">${esc(k)}</span> ${raw(v)}`).join('')}</td></tr>`;
       }).join('')}</table>
-      <p class="muted">A find on these versions is validated by patch differential; an affected version outside them has no patch: its finds are confirmed by their signature only.${e.no_patch ? ` ${esc(e.no_patch)}` : ''}</p>`
-    : `<p><span class="badge b-unexp">no patch</span> ${esc(e.no_patch ?? '')}</p><p class="muted">Its finds cannot be validated by patch differential, only recognised by their signature.</p>`;
+      <p class="muted">A find on these versions is confirmed by patch differential; an affected version outside them has no patch: its finds are recognised by their signature only.${e.no_patch ? ` ${esc(e.no_patch)}` : ''}</p>`
+    : `<p><span class="badge b-unexp">no patch</span> ${esc(e.no_patch ?? '')}</p><p class="muted">Its finds cannot be confirmed by patch differential, only recognised by their signature.</p>`;
   const witness = e.no_witness
-    ? `<p><span class="badge b-unexp">no witness</span> ${esc(e.no_witness)}</p><p class="muted">The entry cannot be checked on executions.</p>`
+    ? `<p><span class="badge b-unexp">no witness</span> ${esc(e.no_witness)}</p><p class="muted">The entry cannot be checked on executions${(e.patches ?? []).length && e.oracle
+        ? '; the launcher offers it all the same (its patch confirms a find), with a warning: nothing shows the fuzzer can reach it' : '; the launcher does not offer it (no patch to confirm a find)'}.</p>`
     : `<p><span class="badge b-exp">✓ witness</span> a trace in tlspuffin, registered with <code class="nowrap">#[puffin::witness("${esc(id)}")]</code>.</p>
        <p class="muted">tlspuffin's catalogue test runs it with and without the patch (<code class="nowrap">cargo test -p tlspuffin --features cputs --test catalogue</code>); the bench's validation step runs it as a control.</p>`;
   const found = e.find ? dl([
@@ -202,7 +209,7 @@ function entryCard(vendor, id, e) {
       <a class="eid" href="#${esc(id)}" title="Link to this bug">${esc(id)}</a>${e.alias ? `<b class="alias">${esc(e.alias)}</b>` : ''}${f.by_puffin ? '<span class="star" title="first found by puffin">★</span>' : ''}
       <span class="tag">${esc(libraryName(vendor))}</span><span class="tag">${esc(e.category)}</span>
       ${e.cvss ? `<span class="sev sev-${severity}" title="CVSS ${esc(e.cvss.version)}">CVSS ${esc(e.cvss.score)} · ${severity}</span>` : '<span class="sev">no CVSS</span>'}
-      ${patches.length ? `<span class="badge b-exp" title="validated by patch differential">✓ patch ${patches.map(p => esc(p.versions ?? p.commits ?? '')).join(' · ')}</span>` : '<span class="badge b-unexp">no patch</span>'}
+      ${patches.length ? `<span class="badge b-exp" title="its finds are confirmed by patch differential">✓ patch ${patches.map(p => esc(p.versions ?? p.commits ?? '')).join(' · ')}</span>` : '<span class="badge b-unexp">no patch</span>'}
       ${e.no_witness ? '<span class="badge b-unexp">no witness</span>' : '<span class="badge b-exp">✓ witness</span>'}${e.replayable === false ? ' <span class="badge b-apart">does not replay</span>' : ''}${e.bug_in_harness ? ' <span class="badge b-apart">🔧 harness</span>' : ''}
       <span class="spacer"></span>${id.startsWith('CVE-') ? external(NVD(id), 'NVD ↗') : ''}
     </div><p class="lead">${esc(e.summary)}</p></summary>
@@ -239,14 +246,14 @@ const timeToFind = (id, e) => {
   return `<span title="${esc(`task ${t.task} (${t.job}) at tlspuffin ${String(t.commit ?? '').slice(0, 9)} of ${String(t.date ?? '').slice(0, 10)}: ${t.cores} cores per attempt, ${duration(t.budget_s)} budget`)}">`
     + `${t.found ? duration(t.median_s) : 'not found'} · ${esc(t.found)}/${esc(t.runs)}</span>`;
 };
-// the other bugs of the same library with the same oracle: a stop on one of them may be taken for this one
-const sameOracle = (vendor, id, e) => e.oracle ? Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {})
+// the other bugs of the same library with the same signature: a stop on one of them may be taken for this one
+const sameSignature = (vendor, id, e) => e.oracle ? Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {})
   .filter(([other, o]) => other !== id && o.oracle && JSON.stringify(o.oracle) === JSON.stringify(e.oracle)).map(([other, o]) => o.alias ?? other) : [];
 const confirmedBy = (vendor, id, e) => {
   const how = confirmation(e);
-  const twins = sameOracle(vendor, id, e);
+  const twins = sameSignature(vendor, id, e);
   return `<span class="badge ${how.kind === 'patch' ? 'b-exp' : 'b-unexp'}"${how.kind === 'signature' && e.no_patch ? ` title="${esc(e.no_patch)}"` : ''}>${esc(how.text)}</span>`
-    + (twins.length ? `<br><span class="muted">same oracle as ${esc(twins.join(', '))}</span>` : '');
+    + (twins.length ? `<br><span class="muted">same signature as ${esc(twins.join(', '))}</span>` : '');
 };
 const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <b>${esc(e.alias)}</b>` : ''}${e.find?.by_puffin ? ' <span class="star" title="first found by puffin">★</span>' : ''}
     <span class="tag">${esc(e.category)}</span><div class="summary">${esc(e.summary)}</div></td>
@@ -256,9 +263,10 @@ const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <
   <td class="nowrap">${timeToFind(id, e)}</td>
   <td>${confirmedBy(vendor, id, e)}</td>
   <td>${e.no_witness ? `<span class="badge b-unexp" title="${esc(e.no_witness)}">no witness</span>` : '<span class="badge b-exp">✓</span>'}</td>
-  <td>${oracleText(e.oracle)}${e.replayable === false ? '<br><span class="muted">does not replay</span>' : ''}</td></tr>`;
+  <td>${signatureText(e.oracle, e.top_frames)}${e.replayable === false ? '<br><span class="muted">does not replay</span>' : ''}</td></tr>`;
 const OVERVIEW_HEAD = '<tr><th>bug</th><th>library</th><th>CVSS</th><th>run on <span class="muted">(presets of the commit)</span></th>'
-  + '<th>time to find on the bench ⁽ᵗ⁾</th><th>a find is confirmed by</th><th>witness</th><th>oracle</th></tr>';
+  + '<th>time to find on the bench ⁽ᵗ⁾</th><th>a find is recognised by</th><th>witness</th>'
+  + `<th title="${esc(TERMS.find(t => t[0] === 'signature')[1])}">signature <span class="muted">(the catalogue's oracle)</span></th></tr>`;
 const overviewTable = list => `<table class="overview">${OVERVIEW_HEAD}${list.map(overviewRow).join('') || '<tr><td colspan="8" class="muted">none</td></tr>'}</table>`;
 // the filters of the overview: library, category, first found by puffin, bugs without witness
 const kept = list => list.filter(x => (!filters.lib || x.vendor === filters.lib) && (!filters.cat || x.e.category === filters.cat)
@@ -367,7 +375,7 @@ function vulnConfigsSection() {
         const p = check.preset;
         return `<tr><td><b>${esc(name)}</b></td><td class="mono">${esc(vendorName)}</td>
           <td>${bug.id ? bugOrCve(bug.id) : '<span class="muted">—</span>'}</td>
-          <td>${bug.rule ? rule(bug.rule) : c.args?.target_bug ? '<span class="muted">its first objective that is not set apart</span>' : '<span class="muted">no target declared: its first objective that is not set apart</span>'}${c.args?.target_bug ? `<br><span class="muted">confirmed as ${esc(bug.id)} during the attempt (patch differential, else its signature on the build with every patch), on commits with the catalogue; otherwise as before</span>` : ''}</td>
+          <td>${bug.rule ? rule(bug.rule) : c.args?.target_bug ? '<span class="muted">its first objective that is not set apart</span>' : '<span class="muted">no target declared: its first objective that is not set apart</span>'}${c.args?.target_bug ? `<br><span class="muted">recognised as ${esc(bug.id)} during the attempt (confirmed by patch differential, else by its signature on the build with every patch), on commits with the catalogue; otherwise as before</span>` : ''}</td>
           <td>${p ? `${esc(p.version)}${p.asan ? ', ASan' : ''}${p.postauth === false ? ', postauth off' : ''}<br><span class="muted">fix: ${esc((p.fix ?? []).map(eid => catalogue?.vendors?.[vendorName.split(':')[0]]?.entries?.[eid]?.alias ?? eid).join(', ') || 'none')}</span>` : '<span class="muted">—</span>'}</td>
           <td>${check.html}</td>
           <td>${c.args?.extra_flags ? `<code>${esc(c.args.extra_flags)}</code>` : '<span class="muted">—</span>'}</td></tr>`;
@@ -387,7 +395,7 @@ function apartAgainstCatalogue(claim, v) {
   if (!e) return '<span class="muted">not in the catalogue</span>';
   const sameClaim = e.oracle?.kind === 'claim' && e.oracle.violation === claim;
   const sameRange = !v.below || (e.affected ?? '').replace(/\s+/g, '') === `<${v.below}`;
-  return `affected <code>${esc(e.affected ?? '')}</code>, oracle ${sameClaim ? 'this claim' : `<b>another</b> (${esc(e.oracle?.violation ?? e.oracle?.kind ?? 'none')})`}`
+  return `affected <code>${esc(e.affected ?? '')}</code>, signature ${sameClaim ? 'this claim' : `<b>another</b> (${esc(e.oracle?.violation ?? e.oracle?.kind ?? 'none')})`}`
     + `<br>${sameClaim && sameRange ? '<span class="badge b-exp">✓ agrees</span>' : '<span class="badge b-unexp">≠ differs from the rule</span>'}`;
 }
 
@@ -466,13 +474,13 @@ function registrySection() {
   const whatItIs = bug => {
     const parts = [];
     const expected = bug.rules.filter(r => r.how === 'expected'), apart = bug.rules.filter(r => r.how !== 'expected');
-    if (expected.length) parts.push(`<span class="badge b-exp">🎯 expected</span> ${bugOrCve(expected[0].cve)} <span class="muted">in ${esc([...new Set(expected.map(r => r.config))].join(', '))}</span>`);
+    if (expected.length) parts.push(`<span class="badge b-exp" title="${esc(TAGS.expected.tip)}">${TAGS.expected.mark} ${TAGS.expected.word}</span> ${bugOrCve(expected[0].cve)} <span class="muted">in ${esc([...new Set(expected.map(r => r.config))].join(', '))}</span>`);
     if (apart.length) parts.push(`<span class="badge b-apart">⦸ ${esc(apart[0].how)}</span> ${bugOrCve(apart[0].cve)}`);
     // the catalogue, when no rule of vuln_targets.json tells (a configuration without target, another library)
     const more = bug.rules.length ? [] : bug.ids;
     if (more.length) parts.push(`📚 ${more.map(id => bugLink(id) + harnessNote(id)).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
       : 'its top function among the bug\'s top frames, same report type'})</span>`);
-    return parts.join('<br>') || '<span class="badge b-new">🚨 not a known bug</span>';
+    return parts.join('<br>') || `<span class="badge b-new" title="${esc(TAGS.new.tip)}">${TAGS.new.mark} not a known bug</span>`;
   };
   const task = b => `<a href="/html/objectives/${esc(b.task)}.html">task ${esc(b.task)}</a>`;
   const date = b => esc(String(b.started ?? '').slice(0, 10));
@@ -500,8 +508,9 @@ function registrySection() {
 function render() {
 document.getElementById('bugsref').innerHTML = `<div class="wrap">
   <h1>Bugs reference</h1>
-  <p class="muted">How the pages tell a bug: <span class="badge b-exp">🎯 expected</span> <span class="badge b-apart">⦸ set apart</span>
-    <span class="badge b-unexp">⚠ unexpected</span> <span class="badge b-new">🚨 NEW BUG</span>.</p>
+  <p class="muted">How the pages tell a bug: <span class="badge b-exp" title="${esc(TAGS.expected.tip)}">${TAGS.expected.mark} ${TAGS.expected.word}</span> <span class="badge b-apart" title="${esc(TAGS.apart.tip)}">${TAGS.apart.mark} ${TAGS.apart.word}</span>
+    <span class="badge b-unexp" title="${esc(TAGS.unexpected.tip)}">${TAGS.unexpected.mark} ${TAGS.unexpected.word}</span> <span class="badge b-new" title="${esc(TAGS.new.tip)}">${TAGS.new.mark} ${TAGS.new.word}</span>.
+    <a href="#words">The words of the pages</a>.</p>
 
   <h2>📚 Known vulnerabilities (tlspuffin's catalogue)</h2>
   ${catalogueSection()}
@@ -533,8 +542,28 @@ document.getElementById('bugsref').innerHTML = `<div class="wrap">
   ${registrySection()}
 
   ${everyBugSection()}
+
+  ${wordsSection()}
 </div>`;
   document.getElementById('reload-dev')?.addEventListener?.('click', () => reload());
+}
+
+// The words of the pages (../common/verdicts.js: the same on every page and in the user guide): the terms, the verdicts
+// of the validation, what a bug is for its task, the level of a task
+// the classes of the badges, as the objectives pages colour them (objectives_page/report.css; bugs.css repeats them)
+const TAG_CLASS = { expected: 'expected', apart: 'not-target', known: 'known-cve', unexpected: 'unexpected', new: 'new-bug-badge' };
+function wordsSection() {
+  const row = (mark, word, tip, cls = '') => `<tr><td class="nowrap">${cls ? `<span class="${cls}">` : ''}${esc(`${mark ? `${mark} ` : ''}${word}`)}${cls ? '</span>' : ''}</td><td>${esc(tip).replace(/\n/g, '<br>')}</td></tr>`;
+  return `<h2 id="words">📖 The words of the pages</h2>
+  <div class="card words"><p class="muted">The same words on every page (objectives pages, Results, History, this page) and in the
+    user guide: one vocabulary, <code>tlspuffin/data/html/common/verdicts.js</code>.</p>
+    <table><tr><th>term</th><th>meaning</th></tr>${TERMS.map(([term, text]) => row('', term, text)).join('')}</table>
+    <h4>The verdicts of the validation, per objective (strongest first)</h4>
+    <table>${VERDICT_ORDER.map(kind => row(VERDICTS[kind].mark, VERDICTS[kind].word, VERDICTS[kind].tip, `val val-${kind}`)).join('')}</table>
+    <h4>What a bug is for its task</h4>
+    <table>${Object.entries(TAGS).map(([key, t]) => row(t.mark, t.word, t.tip, TAG_CLASS[key])).join('')}</table>
+    <h4>The level of a task: the title of its objectives page, the colour of its 🐞 on History, of its objectives on the board and of the top bar's live pill</h4>
+    <table>${Object.entries(LEVELS).map(([key, l]) => row(l.mark, l.word, l.tip, `lvl lvl-${key}`)).join('')}</table></div>`;
 }
 
 // openBug <ID>: its card, unfolded with its section, scrolled to (false: no such card)
