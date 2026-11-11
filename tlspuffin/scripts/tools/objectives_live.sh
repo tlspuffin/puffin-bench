@@ -137,7 +137,7 @@ TaskActive() {
 StepLibrary() {
   local stateJSON="$1" key="$2" expName="$3";
   local lib;
-  lib=$( jq -r --arg k "/${key}" '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment"))
+  lib=$( jq -r --arg k "/${key}" '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment", "PerfObjectives"))
       | select((.executor_data.run_path // "") | endswith($k)) | .id][0] // empty' <<< "${stateJSON}" 2> /dev/null );
   [ -n "${lib}" ] || lib=$( grep -oiE 'boringssl|openssl|libressl|wolfssl|libssh' <<< "${expName}" | tail -1 );
   echo "${lib:-${expName}}";
@@ -159,18 +159,29 @@ LiveValidation() {
                 + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)) }] | from_entries)))' \
         <<< "${out}" 2> /dev/null ) || out='{}';
   done
-  for dir in "${taskDir}"/executor/*/validation/verdicts; do
+  # the verdicts being given (custom benchmarks, VulnA/B: during the run; any flow: while ValidateObjectives runs), in
+  # <step dir>/validation, or <step dir>/run-<n>/validation for the runs of Perf validated after all of them
+  # (PerfObjectives, PR_perf.sh: after the runs, not during them). A verdict already in the result of an ended attempt
+  # (above) is kept.
+  local runDir run during;
+  for dir in "${taskDir}"/executor/*/validation/verdicts "${taskDir}"/executor/*/run-[0-9]*/validation/verdicts; do
     [ -d "${dir}" ] || continue;
-    key=$( basename "$( dirname "$( dirname "${dir}" )" )" ); attempt="${key##*-}";
+    runDir=$( dirname "$( dirname "${dir}" )" ); run=''; during=true;
+    if [[ "$( basename "${runDir}" )" == run-[0-9]* ]]; then
+      run=$( basename "${runDir}" ); run="${run#run-}"; during=false;
+      runDir=$( dirname "${runDir}" );
+    fi
+    key=$( basename "${runDir}" ); attempt="${run:-${key##*-}}";
     lib=$( StepLibrary "${taskJSON}" "${key}" "" );
     [ -n "${lib}" ] || continue;
     for file in "${dir}"/*.json; do
       [ -s "${file}" ] || continue;
-      out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --slurpfile v "${file}" \
+      out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --argjson during "${during}" --slurpfile v "${file}" \
           --slurpfile s "$( dirname "${dir}" )/state.json" '
           .[$lib] = ((.[$lib] // {})
             | .catalogue = (.catalogue // ($s[0] | if .catalogueCommit then { source, commit: .catalogueCommit } else null end))
-            | .byTrace[$a + "/" + $v[0].trace] = ($v[0] | { verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []), during_attempt: true }
+            | .byTrace[$a + "/" + $v[0].trace] //= ($v[0] | { verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
+                + (if $during then { during_attempt: true } else {} end)
                 + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)))' \
           <<< "${out}" 2> /dev/null ) || continue;
     done
@@ -201,6 +212,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
   while IFS= read -r objDir; do
     expDir=$( dirname "${objDir}" );
     runDir=$( dirname "$( dirname "${expDir}" )" );
+    # an ended run set up again after all the runs (PerfObjectives, PR_perf.sh): counted from its archive
+    [ -e "${runDir}/.after_runs" ] && continue;
     stepDir="${runDir}"; run='';
     if [[ "$( basename "${runDir}" )" == twin[01] ]]; then
       stepDir=$( dirname "${runDir}" );

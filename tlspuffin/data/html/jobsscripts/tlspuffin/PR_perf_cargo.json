@@ -84,12 +84,18 @@
       },
       {
         "step": "TwinExperimentEnd"
-      },
+      }
+    ],
+    [
       {
-        "step": "TwinValidateObjectives",
+        "run": [ ],
         "configuration": {
+          "nb_retry": 1,
           "nb_cores": 4
         }
+      },
+      {
+        "step": "PerfObjectives"
       }
     ],
     {

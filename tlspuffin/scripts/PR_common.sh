@@ -1100,7 +1100,9 @@ FuzzerExcerpt() {
 #   perf  1: until 2026-11, 3 clients per run on 2 physical cores, one build per run.
 #         2: from 2026-11, two one-client runs per physical core (twin: 20 runs of each library on 10 physical cores),
 #            one build per library (PR_perf.sh TwinExperiment).
-#   vuln, campaign  1.
+#   vuln, campaign  1. (Since 2026-11 a Vuln run naming its bug ends on a find validation confirmed, on the commits
+#         with tlspuffin's catalogue only: told per run, its monitor "confirmed find" (confirmed_by), which Results and
+#         runs_report.py compare; the runs of the other commits end as before.)
 declare -gA PB_MAJOR_VERSION=( [perf]=2 )
 
 # SummaryAddBench <summary.json>: the puffin-bench version that produced the results (version.json, written by

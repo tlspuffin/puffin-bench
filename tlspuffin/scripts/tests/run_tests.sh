@@ -60,6 +60,8 @@ Run objectives_placeholder_test bash "${here}/objectives_placeholder_test.sh"
 Run objectives_validation_test bash "${here}/objectives_validation_test.sh"
 Run validation_cache_test bash "${here}/validation_cache_test.sh"
 Run validation_choice_test bash "${here}/validation_choice_test.sh"
+Run live_validation_test bash "${here}/live_validation_test.sh"
+Run perf_objectives_test bash "${here}/perf_objectives_test.sh"
 
 echo
 echo "${passed} passed, ${#failed[@]} failed${failed[*]:+ (${failed[*]})}, ${#skipped[@]} skipped${skipped[*]:+ (${skipped[*]})}"

@@ -168,7 +168,8 @@ Init
   └─ cargo build --release --features=… inside nix-shell, fresh checkout, no cache
   └─ seed + help once, to warm/validate the binary
   (Perf: BuildOnce, one ForcedBuild per library before its runs; then TwinExperiment and TwinExperimentEnd, two
-   runs per step in its folders twin0 and twin1, each as below)
+   runs per step in its folders twin0 and twin1, each as below; then, once every run of every library ended,
+   PerfObjectives: the replays and the validation of their objectives, so that nothing heavy runs while runs measure)
 
  Experiment / ExperimentWithCargo   (monitored — see below)
   └─ reserve a loopback TCP port (embedded reserve_port tool)
@@ -352,7 +353,8 @@ No target is declared for group B: a run ends at its first objective that is not
 
 tlspuffin's vulnerability catalogue (puffin-build/vendors/<vendor>/vulnerabilities.toml in tlspuffin, listed on the
 **Bugs reference** page) gives, for each known bug, its affected versions, a patch per version range and its oracle (the
-signature of its objectives). After each run, the `ValidateObjectives` step rebuilds the run's library at the run's
+signature of its objectives). After each run (Perf: after all its runs, `PerfObjectives`), the `ValidateObjectives` step
+rebuilds the run's library at the run's
 commit, with ASan, once with every known bug that has a patch patched (F), and once per such bug X with all of them but
 X patched (V_X), and replays each objective on them:
 - ✔ **confirmed X**: no objective on F, and on V_X an objective matching X's oracle: the objective is bug X;
