@@ -146,7 +146,7 @@ ObjectiveCounts() {
       IFS=$'\t' read -r rtype rframes _ <<< "${sig}";
       case "${rtype}" in no-crash|replay-error) ;;
         security-violation) TargetMatches "${target}" claim "${rframes}" "" && rc=0;;
-        *) TargetMatches "${target}" crash "" "${rframes}" && rc=0;;
+        *) TargetMatches "${target}" crash "ASan ${rtype}" "${rframes}" && rc=0;;
       esac
     fi
     if (( rc == 1 )); then

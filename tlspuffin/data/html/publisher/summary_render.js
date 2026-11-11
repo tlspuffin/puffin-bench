@@ -3,6 +3,7 @@ import { GraphOverview } from './summary_graphoverview.js';
 import { GraphCompare } from './summary_graphcompare.js';
 import { MetricsCampaign } from './summary_metricscampaign.js';
 import { describeCommit, commitLineHTML } from '../common/commitinfo.js';
+import { BenchmarkOf, ExperimentLabel, OrderLibraries } from './summary_benchmarks.js';
 
 // open pull requests of the git_restapi history, for the PR of each commit (see SetPullRequests)
 let pullRequests = [];
@@ -884,7 +885,8 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
 function RenderLibrariesTable(config, project, type, typeData) {
   const table = document.createElement('table');
   table.className = 'libs-table';
-  const libraries = Object.entries(typeData.metrics).sort((a, b) => a[0].localeCompare(b[0]));
+  // custom Vuln benchmarks (<benchmark>_<bug>): after the others, one block per benchmark (summary_benchmarks.js)
+  const libraries = OrderLibraries(type, Object.entries(typeData.metrics));
   const columns = [...new Set(libraries.flatMap(([, metrics]) => Object.keys(metrics)
       .filter(field => !field.startsWith('fail_') && field !== 'ratio_success_execution' && (metrics[field]?.length ?? 0) > 0)))];
 
@@ -894,7 +896,17 @@ function RenderLibrariesTable(config, project, type, typeData) {
   table.appendChild(head);
   const nbColumns = 3 + columns.length;
 
+  let currentBenchmark = '';
   for (const [libName, metrics] of libraries) {
+    const benchmark = BenchmarkOf(type, libName);
+    if (benchmark && benchmark !== currentBenchmark) {
+      const header = document.createElement('tr');
+      header.className = 'benchmark-row';
+      header.innerHTML = `<td colspan="${nbColumns}">🧪 <b>${EscapeAttribute(benchmark)}</b> — custom benchmark: one experiment per known bug, `
+          + `compared across commits on the same experiment</td>`;
+      table.appendChild(header);
+    }
+    currentBenchmark = benchmark;
     const status = typeData.status[libName];
     const successCount = status?.success ?? '?';
     const totalRuns = status?.state.length ?? '?';
@@ -917,7 +929,7 @@ function RenderLibrariesTable(config, project, type, typeData) {
 
     const libNameLabel = (type == 'Perf')
         ? `<a href="${config.vis_comparator_perf(project, typeData.commit_id, libName)}">${EscapeAttribute(libName)}</a>`
-        : EscapeAttribute(libName);
+        : `<span title="${EscapeAttribute(libName)}">${EscapeAttribute(ExperimentLabel(type, libName))}</span>`;
 
     const row = document.createElement('tr');
     row.className = 'lib-row';
