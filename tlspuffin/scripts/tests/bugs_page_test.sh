@@ -16,7 +16,7 @@ work=$( mktemp -d )
 trap 'rm -rf "${work}"' EXIT
 mkdir -p "${work}/html/board" "${work}/html/publisher"
 command cp -f "${bench}/tlspuffin/data/html/publisher/"{bugs.js,summary_config.js} "${work}/html/publisher/"
-mkdir -p "${work}/html/common" && command cp -f "${bench}/tlspuffin/data/html/common/catalogue.js" "${work}/html/common/"
+mkdir -p "${work}/html/common" && command cp -f "${bench}/tlspuffin/data/html/common/"{catalogue,format}.js "${work}/html/common/"
 echo '' > "${work}/html/board/nav.js"   # the navigation bar needs a real DOM
 echo '{ "type": "module" }' > "${work}/package.json"
 "${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${commit}" > "${work}/catalogue.json"

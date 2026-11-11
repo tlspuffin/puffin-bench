@@ -31,7 +31,7 @@ for vendor in $( jq -r '.vendors | keys[]' "${work}/presets.json" ); do
 done
 mkdir -p "${work}/html/board/launchers/tlspuffin" "${work}/html/common"
 command cp -f "${bench}/tlspuffin/data/html/board/launchers/tlspuffin/custombench.js" "${work}/html/board/launchers/tlspuffin/"
-command cp -f "${bench}/tlspuffin/data/html/common/catalogue.js" "${work}/html/common/"
+command cp -f "${bench}/tlspuffin/data/html/common/"{catalogue,format}.js "${work}/html/common/"
 echo '{ "type": "module" }' > "${work}/package.json"
 cat > "${work}/run.mjs" <<'EOF'
 import { readFileSync } from 'node:fs';

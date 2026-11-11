@@ -134,7 +134,7 @@ add_custom_command(
   COMMAND "${BASH_EXECUTABLE}" "${TLSPUFFIN_SCRIPTS_DIR}/build.sh"
   COMMAND ${CMAKE_COMMAND} -E copy "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf_full.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/PR_perf_full.sh"
   COMMAND ${CMAKE_COMMAND} -E copy "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities_full.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/PR_vulnerabilities_full.sh"
-  DEPENDS "${TLSPUFFIN_SCRIPTS_DIR}/build.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_common.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_compat.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/vuln_targets.json"
+  DEPENDS "${TLSPUFFIN_SCRIPTS_DIR}/build.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_common.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_compat.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_perf.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_validate.sh" "${TLSPUFFIN_SCRIPTS_DIR}/PR_vulnerabilities.sh" "${TLSPUFFIN_JOBSCRIPTS_DIR}/vuln_targets.json"
   COMMENT "Running build.sh to generate PR_perf_full.sh / PR_vulnerabilities_full.sh"
   VERBATIM
 )
@@ -159,7 +159,7 @@ EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/embeded/i
   html/publisher/summary_graphmetrics.js html/publisher/summary_graphmetrics.css
   html/publisher/summary_graphcompare.js html/publisher/plotly_lazy.js
   html/publisher/bugs.html html/publisher/bugs.css html/publisher/bugs.js
-  html/common/commitinfo.js html/common/catalogue.js
+  html/common/commitinfo.js html/common/catalogue.js html/common/format.js
   html/third-party/plotly/plotly-3.3.0.min.js
 )
 EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/embeded/installer/samples.c" SampleFiles 

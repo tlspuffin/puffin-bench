@@ -71,13 +71,14 @@ CheckObjectif() {
 # TargetedObjectiveFound <verdicts (assoc array, kept between calls)>: true when an objective of the experiment is a
 # targeted one. An objective the fuzzer recorded as a claim of OBJECTIVES_NOT_TARGETED (PR_common.sh) does not count;
 # one without record yet is looked at again on the next call, then counts (as before: any objective ended the run).
-# The fuzzer's logs are read only when an objective has no verdict yet. A custom benchmark's experiment (a catalogue
-# entry as target): an objective with the target's signature ends it only once validation confirms it (ConfirmObjective,
-# PR_validate.sh: replayed on the validation builds prepared before the experiment, while the fuzzer goes on), at most
-# VALIDATION_INRUN_MAX (3) per call, the others at the next call; one it does not confirm leaves the experiment going.
+# The fuzzer's logs are read only when an objective has no verdict yet. An experiment naming its bug of the catalogue
+# (target_bug: custom benchmarks, Vuln group A and B): an objective with the bug's signature ends it only once
+# validation confirms it (ConfirmObjective, PR_validate.sh: replayed on the validation builds prepared before the
+# experiment, while the fuzzer goes on), at most VALIDATION_INRUN_MAX (3) per call, the others at the next call; one it
+# does not confirm leaves the experiment going.
 TargetedObjectiveFound() {
   local -n ref_verdicts=$1;
-  local expDir trace name records rc found=1 confirmations=0 why confirmed;
+  local expDir trace name records rc found=1 confirmations=0 why confirmed what;
   # the expected bug of the preset (vuln_targets.json); none declared: any objective but OBJECTIVES_NOT_TARGETED
   local target; target=$( ExpectedTarget "${vendor:-}" );
   for expDir in experiments/*/; do
@@ -98,30 +99,23 @@ TargetedObjectiveFound() {
         # another bug than the expected one: kept, the replay at the end may still find the expected bug in it
         ref_verdicts[${name}]=not-targeted;
         echo "objective ${name}: not the expected bug (${target%%|*}), the experiment goes on: $( FuzzerVerdict "${records}" "${name}" | cut -f1-3 | tr '\t' ' ' )" >&2;
-      elif (( rc == 0 )) && [ -n "${target_bug:-}" ]; then
+      elif [ -n "${target_bug:-}" ] && { (( rc == 0 )) || { [ "${ref_verdicts[${name}]:-}" == pending ] && [ -z "${records}" ]; }; }; then
+        # an experiment naming its bug: an objective with its signature, or any objective when the fuzzer records
+        # nothing at all, ends it once validation confirms it is that bug
         (( confirmations >= ${VALIDATION_INRUN_MAX:-3} )) && continue;
         confirmations=$(( confirmations + 1 ));
+        what="the signature of ${target_bug}"; (( rc == 0 )) || what="no record in the fuzzer's logs";
         why=$( ConfirmObjective "${trace}" ); confirmed=$?;
         if (( confirmed == 1 )); then
           ref_verdicts[${name}]=not-targeted;
-          echo "objective ${name}: the signature of ${target_bug}, not confirmed (${why}): the experiment goes on" >&2;
+          echo "objective ${name}: ${what}, not ${target_bug} (${why}): the experiment goes on" >&2;
         else
           ref_verdicts[${name}]=targeted; found=0;
-          echo "objective ${name}: ${target_bug}, ${why}: end of the experiment" >&2;
+          echo "objective ${name}: ${what}, ${target_bug} (${why}): end of the experiment" >&2;
         fi
       elif (( rc == 0 )); then
         ref_verdicts[${name}]=targeted; found=0;
         [ -n "${target}" ] && echo "objective ${name}: the expected bug (${target%%|*}), end of the experiment" >&2;
-      elif [ "${ref_verdicts[${name}]:-}" == pending ] && [ -n "${target_bug:-}" ] && [ -z "${records}" ]; then
-        # a custom benchmark's experiment whose fuzzer records nothing at all: validation decides
-        why=$( ConfirmObjective "${trace}" ); confirmed=$?;
-        if (( confirmed == 1 )); then
-          ref_verdicts[${name}]=not-targeted;
-          echo "objective ${name}: no record in the fuzzer's logs, not ${target_bug} (${why}): the experiment goes on" >&2;
-        else
-          ref_verdicts[${name}]=targeted; found=0;
-          echo "objective ${name}: no record in the fuzzer's logs, ${target_bug} (${why}): end of the experiment" >&2;
-        fi
       elif [ "${ref_verdicts[${name}]:-}" == pending ]; then
         # still no record: as before, it ends the experiment when no target is declared, or when the fuzzer's logs
         # have no record at all (none found: waiting for a record there would run the experiment to its timeout); with
@@ -141,8 +135,9 @@ TargetedObjectiveFound() {
   return "${found}";
 }
 
-# TargetedNames <experiment dir>: the names of its targeted objectives, oldest first (at most 3: enough evidence); a
-# custom benchmark's experiment: those validation confirms (ConfirmObjective; not decided by validation: as before)
+# TargetedNames <experiment dir>: the names of its targeted objectives, oldest first (at most 3: enough evidence); an
+# experiment naming its bug (target_bug): those validation confirms (ConfirmObjective; not decided by validation: as
+# before)
 TargetedNames() {
   local dir="$1" trace name records target;
   target=$( ExpectedTarget "${vendor:-}" );
@@ -161,7 +156,7 @@ TargetedNames() {
 # monitor looks once a minute, then the fuzzer has to stop). With an expected bug declared (vuln_targets.json), an
 # objective is targeted when the fuzzer's record or its replay (objective-reports/, ExperimentReplayObjectives) is that
 # bug: a crash the fuzzer logged without backtrace counts when the replay shows the expected frame
-# A custom benchmark's experiment: an objective of the target's signature (record or replay) counts once validation
+# An experiment naming its bug (target_bug): an objective of the bug's signature (record or replay) counts once validation
 # confirms it (ConfirmObjective, not decided by validation: as before; one it does not confirm is another bug), the
 # objectives taken oldest first, those after the first confirmed one counted without validation: the time to find is
 # that of the first confirmed objective, when the fuzzer saved it.

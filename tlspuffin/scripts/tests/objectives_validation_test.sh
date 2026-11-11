@@ -7,6 +7,7 @@
 #   - a crash with the signature of a bug that has a patch there, not removed by it: ⚠ to review;
 #   - a crash with no known signature on the build with every patch: 🚨;
 #   - a crash none of whose objectives was validated: ○ the signature of the catalogue's bug, not validated;
+#   - a crash removed by the patch of a bug without giving its signature: ⚠ another signature, to review;
 #   - the tiles: confirmed by patch, by signature, to review, without known signature; a bug confirmed is never 🚨 new.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -38,15 +39,17 @@ cat > "${pages}/7.json" <<EOF
     "0/a3": { "verdict": "not-patched", "entries": [], "known_unpatched": ["CVE-2022-25638", "CVE-2022-25640"] },
     "0/a4": { "verdict": "inconclusive", "entries": [], "known_unpatched": [] },
     "0/h1": { "verdict": "not-patched", "entries": [], "known_unpatched": [] },
-    "0/n1": { "verdict": "not-patched", "entries": [], "known_unpatched": [] } } } }],
-  "runs": [{ "library": "custom_X", "attempt": 0, "found": 7, "replayed": 7, "reports": 7,
+    "0/n1": { "verdict": "not-patched", "entries": [], "known_unpatched": [] },
+    "0/o1": { "verdict": "other-signature", "entries": [], "known_unpatched": [], "other_signature": ["CVE-2022-39173"] } } } }],
+  "runs": [{ "library": "custom_X", "attempt": 0, "found": 8, "replayed": 8, "reports": 8,
     "cli": { "vendor": "wolfssl:wolfssl440-asan-only-CVE-2021-3336", "library": { "name": "wolfssl", "version": "440" } },
     "groups": [
       { "type": "security-violation", "frames": ["Authentication bypass"], "count": 4, "traces": ["a1", "a2", "a3", "a4"], "excerpt": "",
         "fuzzer": { "kind": "claim", "detail": "Authentication bypass", "frames": [] } },
       { "type": "heap-buffer-overflow", "frames": ["AddPacketInfo", "DoTls13HandShakeMsgType"], "count": 1, "traces": ["h1"], "excerpt": "" },
       { "type": "heap-buffer-overflow", "frames": ["NewFunction", "Caller"], "count": 1, "traces": ["n1"], "excerpt": "" },
-      { "type": "stack-buffer-overflow", "frames": ["RefineSuites", "CheckPreSharedKeys"], "count": 1, "traces": ["b1"], "excerpt": "" } ] }] }
+      { "type": "stack-buffer-overflow", "frames": ["RefineSuites", "CheckPreSharedKeys"], "count": 1, "traces": ["b1"], "excerpt": "" },
+      { "type": "heap-use-after-free", "frames": ["FreeKeyExchange", "Caller"], "count": 1, "traces": ["o1"], "excerpt": "" } ] }] }
 EOF
 # the page, with the git_restapi of the catalogue answered from the file
 cat > "${pages}/7.html" <<'EOF'
@@ -86,8 +89,10 @@ check('a crash with the signature of HEAP, which has a patch there, not removed 
 check('a crash without known signature on the build with every patch', re.search(r"val val-new[^>]*>🚨 no known bug.s signature ×1", dom) is not None)
 check('a crash not validated: the signature of BUF, without proof',
       re.search(r'val val-none[^>]*>○ the signature of <a[^>]*>BUF · CVE-2022-39173</a> · not validated', dom) is not None)
-for tile in ['bug confirmed by patch', 'by their signature only', 'to review', 'without known signature']:
-    check('tile: ' + tile, '<b>1</b><span>%s</span>' % tile in dom)
+check('a crash removed by the patch of BUF without its signature: to review',
+      re.search(r'val val-other[^>]*>⚠ removed by the patch of <a[^>]*>BUF · CVE-2022-39173</a>, another signature ×1', dom) is not None)
+for n, tile in [(1, 'bug confirmed by patch'), (1, 'by their signature only'), (2, 'to review'), (1, 'without known signature')]:
+    check('tile: %d %s' % (n, tile), '<b>%d</b><span>%s</span>' % (n, tile) in dom)
 check('a bug confirmed by validation is never flagged new', 'new-bug-badge' not in claim)
 sys.exit(fail)
 PY

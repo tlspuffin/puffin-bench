@@ -13,13 +13,11 @@
 // Saved benchmarks: definitions kept by the scheduler under their name (/api/benchmarks/tlspuffin, shared by every
 // user of the board), saved with 💾 Save, loaded on any commit, removed.
 
-const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const LIBRARY = { wolfssl: 'wolfSSL', openssl: 'OpenSSL', libressl: 'LibreSSL', boringssl: 'BoringSSL', libssh: 'libssh', wolfssh: 'wolfSSH' };
-const libraryName = vendor => LIBRARY[vendor] ?? vendor;
 const MARKS = ['*', '†', '‡', '§', '¶', '‖', '**', '††', '‡‡'];
 
 // versions, ranges, where a bug is and has a patch: the catalogue's rules (common/catalogue.js), also for the tests
 import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation } from '../../../common/catalogue.js';
+import { esc, libraryName, duration } from '../../../common/format.js';
 export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation };
 
 // the scheduler's store of saved benchmarks (scheduler/src/scheduler/api/benchmarks_api.hxx)
@@ -27,13 +25,6 @@ const SAVED_API = '/api/benchmarks/tlspuffin';
 const answer = request => request.then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
   .catch(err => ({ ok: false, body: { error: `no answer from the scheduler (${err.message})` } }));
 
-const duration = s => {
-  if (s === null || s === undefined || !Number.isFinite(Number(s))) return '—';
-  if (Number(s) < 1) return '< 1 s';
-  const t = Math.round(Number(s));
-  return t < 60 ? `${t} s` : t < 3600 ? `${Math.floor(t / 60)} min ${String(t % 60).padStart(2, '0')} s`
-    : `${Math.floor(t / 3600)} h ${String(Math.floor(t % 3600 / 60)).padStart(2, '0')}`;
-};
 
 export class CustomBenchmark {
   node;

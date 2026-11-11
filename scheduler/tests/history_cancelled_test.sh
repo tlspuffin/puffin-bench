@@ -6,7 +6,8 @@
 #   - the history lists it, cancelled, with its steps; its record and archive are in exports/Canceled;
 #   - its task page answers (final state), and Delete removes it.
 set -euo pipefail
-binary=$( realpath "${1:?usage: history_cancelled_test.sh <scheduler binary>}" )
+binary=$( realpath -m "${1:?usage: history_cancelled_test.sh <scheduler binary>}" )
+[ -x "${binary}" ] || { echo "SKIP: no scheduler binary at ${binary} (build the scheduler target)"; exit 0; }
 work=$( mktemp -d ); pid=
 trap '[ -n "${pid}" ] && kill "${pid}" 2> /dev/null; wait 2> /dev/null; rm -rf "${work}"' EXIT
 fail=0

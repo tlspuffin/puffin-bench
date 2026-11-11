@@ -7,6 +7,10 @@ import '../board/nav.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
 import { UNCONFIRMED, TYPE_LABELS, Bugs, ExpectedRuns, NewBugs, FuzzerText, Mismatch, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, BugsHeadline, RunFailures, ExpectedConclusion, ExpectedChipTip, BugValidation } from './bugs.js';
 
+// the bench's services, on the host of the page
+const HOST = `${location.protocol}//${location.hostname}`;
+const SCHEDULER = `${HOST}:10082`, PUBLISHER = `${HOST}:10083`, GIT_RESTAPI = `${HOST}:10081`;
+const BUGS_PAGE = `${PUBLISHER}/html/publisher/bugs.html`;
 // a live page (its bugs are still being validated)
 let LIVE = false;
 // the CVE table of the bugs reference: the names of the bugs (BugName)
@@ -14,10 +18,10 @@ let CVES = null;
 // tlspuffin's catalogue the validation rests on (git_restapi; the commit validation used, else the task's): the names,
 // oracles and patches of the bugs, null when unavailable
 let CATALOGUE = null;
-const BUGS_PAGE = `${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html`;
+const CatalogueEntry = id => Object.values(CATALOGUE?.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean) ?? null;
 // a bug of the catalogue: "BUF · CVE-2022-39173", linked to its entry on the Bugs reference
 function EntryName(id) {
-  const entry = Object.values(CATALOGUE?.vendors ?? {}).find(v => v.entries?.[id])?.entries?.[id];
+  const entry = CatalogueEntry(id);
   const text = entry?.alias ? `${entry.alias} · ${id}` : id;
   return `<a href="${BUGS_PAGE}#${encodeURIComponent(id)}" target="_blank" rel="noopener" title="Every field of ${esc(id)}: Bugs reference">${esc(text)}</a>`;
 }
@@ -27,7 +31,7 @@ const EntryNames = (ids, joiner = ' or ') => ids.map(EntryName).join(joiner);
 function DisplayName(bug, short = false) {
   const main = bug.validation?.parts?.find(p => ['patch', 'signature'].includes(p.kind) && p.ids.length);
   if (main) {
-    const names = main.ids.map(id => Object.values(CATALOGUE?.vendors ?? {}).find(v => v.entries?.[id])?.entries?.[id]?.alias ?? id);
+    const names = main.ids.map(id => CatalogueEntry(id)?.alias ?? id);
     return names.join(short ? '/' : ' / ');
   }
   return short ? ShortName(bug, CVES) : BugName(bug, CVES);
@@ -109,8 +113,9 @@ help.innerHTML = `
 
   <h2>Validation against tlspuffin's catalogue</h2>
   <p>Each objective of a task on a commit with the catalogue is replayed on validation builds: the build with every known
-    bug that has a patch patched, and that build without the patch of each such bug (PrepareValidation during a custom
-    benchmark's run, ValidateObjectives after each run, at most 20 objectives a run). What it says, on each bug, per
+    bug that has a patch patched, and that build without the patch of each such bug (during the run for the experiments
+    that name their bug: custom benchmarks, Vuln group A and B; ValidateObjectives after each run, at most 20 objectives
+    a run, the first of each bug first). What it says, on each bug, per
     objective:</p>
   <ul>
     <li><span class="val val-patch">✔ BUF · CVE-2022-39173</span> confirmed by patch differential: its patch removes the
@@ -144,7 +149,7 @@ help.innerHTML = `
       crash) no earlier task had in that configuration, whatever the job. In a plain version (e.g. Perf's wolfSSL 5.8.0):
       not one of the CVEs tlspuffin declares for that build, whose signature is in vuln_targets.json (then
       <span class="known-cve">📋 known · CVE</span>); it stays new on every task until it is added there. The targets, the
-      CVEs and the bugs found so far: <a href="${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html">🎯 Bugs reference</a>.</li>
+      CVEs and the bugs found so far: <a href="${BUGS_PAGE}">🎯 Bugs reference</a>.</li>
   </ul>
 
   <h2>❓ Without category</h2>
@@ -574,7 +579,6 @@ function NextLiveUpdate(refresh, nowS = Date.now() / 1000) {
 async function RenderPlaceholder(root, report) {
   const nowS = Date.now() / 1000, r = report.refresh ?? {};
   const first = report.first_objective ? `first objective at ${esc(Clock(report.first_objective))}` : 'objectives found';
-  const scheduler = `${location.protocol}//${location.hostname}:10082`;
   let body;
   if (report.placeholder === 'live') {
     const by = NextLiveUpdate({ ...r, updated_epoch: nowS }, nowS);
@@ -583,7 +587,7 @@ async function RenderPlaceholder(root, report) {
       ${by ? `by about <b>${esc(Clock(by))}</b>` : 'within minutes'}. The page reloads every minute.</p>`;
   } else {
     // running or ended: the scheduler says (a task it no longer knows has ended)
-    const state = await fetch(`${scheduler}/api/task/${encodeURIComponent(report.task)}/state`, { cache: 'no-store' })
+    const state = await fetch(`${SCHEDULER}/api/task/${encodeURIComponent(report.task)}/state`, { cache: 'no-store' })
         .then(response => response.ok ? response.json() : null).catch(() => null);
     const running = [...JSON.stringify(state ?? {}).matchAll(/"state":"(Running|Pending)"/g)].length > 0;
     const live = report.live_page ? `<a href="${esc(report.live_page)}">its live objectives page</a>` : 'its live objectives page';
@@ -627,15 +631,16 @@ async function Render() {
   // validation against tlspuffin's catalogue: the catalogue it used (else the task's commit's), then each bug's verdict
   const catalogueCommit = (report.libraries ?? []).map(l => l.validation?.catalogue?.commit).find(Boolean) ?? report.commit;
   if (/^[0-9a-f]{7,40}$/.test(String(catalogueCommit ?? ''))) {
-    CATALOGUE = await fetch(`${location.protocol}//${location.hostname}:10081/api/git/catalogue/tlspuffin/${catalogueCommit}`, { cache: 'no-store' })
+    CATALOGUE = await fetch(`${GIT_RESTAPI}/api/git/catalogue/tlspuffin/${catalogueCommit}`, { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null).then(c => c?.format === 'vulnerabilities.toml' ? c : null).catch(() => null);
   }
   for (const bug of bugs) bug.validation = BugValidation(bug, report.libraries, CATALOGUE);
-  const newBugs = NewBugs(bugs, known, report.task, report);
   // validation knows better: a bug confirmed by patch or by signature is a known one
-  for (const bug of [...newBugs]) {
-    if (['patch', 'signature'].includes(bug.validation?.kind)) { delete bug.isNew; newBugs.splice(newBugs.indexOf(bug), 1); }
-  }
+  const newBugs = NewBugs(bugs, known, report.task, report).filter(bug => {
+    if (!['patch', 'signature'].includes(bug.validation?.kind)) return true;
+    delete bug.isNew;
+    return false;
+  });
   // objectives whose bug cannot be told (the tile says how many and why)
   const uncategorised = Uncategorised(runs, !!(report.live || report.pending_final));
   // VulnA/VulnB: bugs that are not the job's target (another known CVE) are counted apart
@@ -667,15 +672,14 @@ async function Render() {
       : found > 0 ? 'Objectives found, no bug confirmed' : 'No objective');
   document.title = `${title} · task ${report.task}`;
   const span = report.started && report.ended ? Duration(new Date(report.ended) - new Date(report.started)) : '';
-  const scheduler = `${location.protocol}//${location.hostname}:10082`;
   const links = [
     report.task_url ? `<a href="${esc(report.task_url)}" target="_blank" rel="noopener">task on the board</a>` : '',
-    `<a href="${location.protocol}//${location.hostname}:10083/files/tlspuffin" target="_blank" rel="noopener">results</a>`,
-    report.live ? '' : `<a href="${scheduler}/api/task/${esc(report.task)}/artefacts">⬇️ artefacts (zip)</a>`,
+    `<a href="${PUBLISHER}/files/tlspuffin" target="_blank" rel="noopener">results</a>`,
+    report.live ? '' : `<a href="${SCHEDULER}/api/task/${esc(report.task)}/artefacts">⬇️ artefacts (zip)</a>`,
     `<a href="${esc(source)}" target="_blank" rel="noopener">JSON</a>`,
   ].filter(Boolean).join(' · ')
     // tools of the page, left out of a saved copy
-    + ` · <a href="${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html" target="_blank" rel="noopener" title="The expected bug of each configuration, the CVEs set apart (the file to edit) and the bugs found so far per library">🎯 bugs reference</a>`
+    + ` · <a href="${BUGS_PAGE}" target="_blank" rel="noopener" title="The expected bug of each configuration, the CVEs set apart (the file to edit) and the bugs found so far per library">🎯 bugs reference</a>`
     + `<span class="page-tools"> · <a href="#" id="save-offline" title="One HTML file of this page as shown, to keep or send: bugs fold and unfold, the links lead to the bench">💾 save offline</a>`
     + ` · <a href="#" id="print-page" title="Print, or save as PDF from the print dialog: every bug of the current filter unfolded">🖨 print / PDF</a></span>`;
 
@@ -823,8 +827,7 @@ async function Render() {
 
   // the commit line: commit, PR and message (git_restapi)
   if (report.commit) {
-    const gitRestApi = `${location.protocol}//${location.hostname}:10081`;
-    const desc = (await resolveCommits(gitRestApi, 'tlspuffin', [report.commit]).catch(() => null))?.get(report.commit);
+    const desc = (await resolveCommits(GIT_RESTAPI, 'tlspuffin', [report.commit]).catch(() => null))?.get(report.commit);
     if (desc && desc.kind !== 'unknown') {
       const { type } = parseTaskName(report.name ?? '', report.commit);
       document.getElementById('commit-line').innerHTML =

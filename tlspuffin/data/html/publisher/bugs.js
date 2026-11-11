@@ -8,8 +8,8 @@
 import '../board/nav.js';
 import { urls } from './summary_config.js';
 import { presentOn, patchedAt, runOptions, confirmation, needsAsan } from '../common/catalogue.js';
+import { esc, libraryName, duration, VENDORS } from '../common/format.js';
 
-const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TARGETS = '/html/jobsscripts/tlspuffin/vuln_targets.json';
 const KNOWN = '/html/objectives/known_bugs.json';
 // the file in the repository at the deployed commit (board/version.json, written by deploy.sh), else on main
@@ -56,6 +56,8 @@ const presets = Object.entries(targets ?? {}).filter(([key]) => !key.startsWith(
 const apart = Object.entries(targets?._not_targeted ?? {});
 const cveTable = Object.entries(targets?._cves ?? {}).filter(([key]) => !key.startsWith('_'));
 const NVD = cve => `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve)}`;
+// an entry of the catalogue shown, whatever its library; null when it has none of that id
+const entryOf = id => Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean) ?? null;
 const cveLink = cve => `<a href="${NVD(cve)}" target="_blank" rel="noopener">${esc(cve)}</a>${targets?._cves?.[cve]?.alias ? ` <span class="muted">${esc(targets._cves[cve].alias)}</span>` : ''}`;
 // the CVE of a registry entry: the target of its configuration (the preset whose CVE has that alias) when its
 // rule matches, or a claim set apart; null otherwise
@@ -73,8 +75,6 @@ const rule = t => t.kind === 'claim' ? `claim <code>${esc(t.match)}</code>` : `c
 
 // ---- tlspuffin's catalogue: an overview, then every entry in full (its fields: puffin-build/README.md of tlspuffin)
 const TLSPUFFIN = 'https://github.com/tlspuffin/tlspuffin';
-const LIBRARY = { wolfssl: 'wolfSSL', openssl: 'OpenSSL', libressl: 'LibreSSL', boringssl: 'BoringSSL', libssh: 'libssh', wolfssh: 'wolfSSH' };
-const libraryName = vendor => LIBRARY[vendor] ?? vendor;
 const SEVERITY = score => score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : score > 0 ? 'low' : 'none';
 const CVSS_METRICS = {
   AV: ['attack vector', { N: 'network', A: 'adjacent', L: 'local', P: 'physical' }],
@@ -96,12 +96,6 @@ const external = (url, text) => `<a href="${esc(url)}" target="_blank" rel="noop
 const shortUrl = url => String(url).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
 const codes = list => (list ?? []).map(x => `<code>${esc(x)}</code>`).join(' ');
 const assignments = map => Object.entries(map ?? {}).map(([k, v]) => `<code>${esc(k)} = ${esc(v)}</code>`).join(' ');
-const duration = s => {
-  if (!Number.isFinite(Number(s))) return '—';
-  const t = Math.round(Number(s));
-  return t < 60 ? `${t} s` : t < 3600 ? `${Math.floor(t / 60)} min ${String(t % 60).padStart(2, '0')} s`
-    : `${Math.floor(t / 3600)} h ${String(Math.floor(t % 3600 / 60)).padStart(2, '0')}`;
-};
 // a definition list; rows without value are left out
 const dl = rows => {
   const kept = rows.filter(([, value]) => value !== '' && value !== null && value !== undefined);
@@ -372,7 +366,7 @@ function vulnConfigsSection() {
         const check = buildCheck(vendorName, bug.id);
         const p = check.preset;
         return `<tr><td><b>${esc(name)}</b></td><td class="mono">${esc(vendorName)}</td>
-          <td>${bug.id ? (Object.values(catalogue?.vendors ?? {}).some(v => v.entries?.[bug.id]) ? bugLink(bug.id) : cveLink(bug.id)) : '<span class="muted">—</span>'}</td>
+          <td>${bug.id ? bugOrCve(bug.id) : '<span class="muted">—</span>'}</td>
           <td>${bug.rule ? rule(bug.rule) : c.args?.target_bug ? '<span class="muted">its first objective that is not set apart</span>' : '<span class="muted">no target declared: its first objective that is not set apart</span>'}${c.args?.target_bug ? `<br><span class="muted">confirmed as ${esc(bug.id)} during the attempt (patch differential, else its signature on the build with every patch), on commits with the catalogue; otherwise as before</span>` : ''}</td>
           <td>${p ? `${esc(p.version)}${p.asan ? ', ASan' : ''}${p.postauth === false ? ', postauth off' : ''}<br><span class="muted">fix: ${esc((p.fix ?? []).map(eid => catalogue?.vendors?.[vendorName.split(':')[0]]?.entries?.[eid]?.alias ?? eid).join(', ') || 'none')}</span>` : '<span class="muted">—</span>'}</td>
           <td>${check.html}</td>
@@ -389,7 +383,7 @@ function vulnConfigsSection() {
 function apartAgainstCatalogue(claim, v) {
   const cve = v.cve ?? v;
   const vendor = v.library ?? null;
-  const e = vendor ? catalogue?.vendors?.[vendor]?.entries?.[cve] : Object.values(catalogue?.vendors ?? {}).map(x => x.entries?.[cve]).find(Boolean);
+  const e = vendor ? catalogue?.vendors?.[vendor]?.entries?.[cve] : entryOf(cve);
   if (!e) return '<span class="muted">not in the catalogue</span>';
   const sameClaim = e.oracle?.kind === 'claim' && e.oracle.violation === claim;
   const sameRange = !v.below || (e.affected ?? '').replace(/\s+/g, '') === `<${v.below}`;
@@ -418,7 +412,6 @@ function cvesDifferences() {
 // ---- the registry of the bugs found so far (known_bugs.json, written by tools/known_bugs.js from every final objectives
 // report: "<configuration or library>|<kind>|<signature>" -> { task, started, what }), one row per bug (its signature in
 // a library), with what it is and every configuration that found it
-const VENDORS = ['wolfssl', 'openssl', 'libressl', 'boringssl', 'libssh', 'wolfssh'];
 // the library of a configuration or library of the registry: WolfSSL, wolfssl540-asan: its name; BUF, SDOS1: the
 // library of the CVE with that alias (vuln_targets.json _cves)
 const vendorOf = name => {
@@ -436,11 +429,12 @@ function catalogueMatch(vendor, b) {
   return entries.filter(([, e]) => e.oracle?.kind === 'crash' && (e.top_frames ?? []).includes(b.sig)
     && (!type || type === 'crash' || !e.oracle.asan || e.oracle.asan === type)).map(([id]) => id);
 }
-const entryOf = id => Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean);
 const bugLink = id => {
   const e = entryOf(id);
   return `<a class="mono" href="#${esc(id)}" title="its card: every field">${esc(id)}</a>${e?.alias ? ` <b>${esc(e.alias)}</b>` : ''}`;
 };
+// a bug: its card when the catalogue has it, else NVD
+const bugOrCve = id => entryOf(id) ? bugLink(id) : cveLink(id);
 // a bug of tlspuffin's harness, not of the library: which commits have it (its card says more)
 const harnessNote = id => {
   const e = entryOf(id);
@@ -469,14 +463,11 @@ function registrySection() {
     return { ...g, first, rules, ids, known: rules.length > 0 || ids.length > 0 };
   }).sort((x, y) => (x.known - y.known) || String(x.vendor ?? '').localeCompare(String(y.vendor ?? ''))
     || String(x.first.started ?? '').localeCompare(String(y.first.started ?? '')));
-  // a CVE of the catalogue: its card (every field); else NVD
-  const inCatalogue = id => Object.values(catalogue?.vendors ?? {}).some(v => v.entries?.[id]);
-  const cve = id => inCatalogue(id) ? bugLink(id) : cveLink(id);
   const whatItIs = bug => {
     const parts = [];
     const expected = bug.rules.filter(r => r.how === 'expected'), apart = bug.rules.filter(r => r.how !== 'expected');
-    if (expected.length) parts.push(`<span class="badge b-exp">🎯 expected</span> ${cve(expected[0].cve)} <span class="muted">in ${esc([...new Set(expected.map(r => r.config))].join(', '))}</span>`);
-    if (apart.length) parts.push(`<span class="badge b-apart">⦸ ${esc(apart[0].how)}</span> ${cve(apart[0].cve)}`);
+    if (expected.length) parts.push(`<span class="badge b-exp">🎯 expected</span> ${bugOrCve(expected[0].cve)} <span class="muted">in ${esc([...new Set(expected.map(r => r.config))].join(', '))}</span>`);
+    if (apart.length) parts.push(`<span class="badge b-apart">⦸ ${esc(apart[0].how)}</span> ${bugOrCve(apart[0].cve)}`);
     // the catalogue, when no rule of vuln_targets.json tells (a configuration without target, another library)
     const more = bug.rules.length ? [] : bug.ids;
     if (more.length) parts.push(`📚 ${more.map(id => bugLink(id) + harnessNote(id)).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
@@ -532,7 +523,7 @@ document.getElementById('bugsref').innerHTML = `<div class="wrap">
 
   <h2>⦸ Known CVEs set apart (never a target)</h2>
   <div class="card"><table><tr><th>claim of the security oracle</th><th>CVE</th><th>set apart on</th><th>in the catalogue</th><th>note</th></tr>
-    ${apart.map(([claim, v]) => `<tr><td><code>${esc(claim)}</code></td><td>${(c => Object.values(catalogue?.vendors ?? {}).some(x => x.entries?.[c]) ? bugLink(c) : cveLink(c))(v.cve ?? v)}</td><td>${v.library ? `<b>${esc(v.library)} &lt; ${esc(v.below)}</b> only` : 'everywhere'}</td>
+    ${apart.map(([claim, v]) => `<tr><td><code>${esc(claim)}</code></td><td>${bugOrCve(v.cve ?? v)}</td><td>${v.library ? `<b>${esc(v.library)} &lt; ${esc(v.below)}</b> only` : 'everywhere'}</td>
       <td>${apartAgainstCatalogue(claim, v)}</td><td class="muted">${esc(v.note ?? '')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">none</td></tr>'}
   </table>
   <p class="muted">Only on the library and versions of its scope (what the run built: “C harness, wolfssl540-buf” is wolfSSL 5.4.0): such an objective does not end the experiment and does not count in the 🎯; it is shown as <b>+n ⦸</b>. On any other library or version the same claim is a bug like any other (⚠ unexpected, 🚨 new).

@@ -937,44 +937,36 @@ CustomExperimentJSON() {
     --argjson oracle "${target_oracle:-null}" '{ benchmark: $benchmark, target: $bug, oracle: $oracle, catalogue: $source }' 2> /dev/null || echo null;
 }
 
-# PresetNames <presets.toml>: the builds a presets.toml names, one per line: format 1, its tables; format 2 (tlspuffin
-# pr/vuln-catalogue), the build of each version under its name and the aliases
-PresetNames() {
-  python3 -I - "$1" <<'PY' 2> /dev/null
-import sys, tomllib
-path = sys.argv[1]; vendor = path.rstrip('/').split('/')[-2]
-table = tomllib.load(open(path, 'rb'))
-if table.get('format') == 2:
-    template = (table.get('library') or {}).get('name', vendor + '{compact}')
-    for version, entry in (table.get('versions') or {}).items():
-        print((entry or {}).get('name') or template.replace('{version_}', version.replace('.', '_'))
-              .replace('{compact}', version.replace('.', '')).replace('{version}', version))
-    for alias in table.get('aliases') or {}:
-        print(alias)
-else:
-    for name, value in table.items():
-        if isinstance(value, dict):
-            print(name)
-PY
-}
-
 # KnownVendorBuild <library> <name>: true when mk_vendor builds <library>:<name> at this commit (the task's clone): a
-# build its presets.toml names, or a build derived from its catalogue (vulnerabilities.toml): <ID> of an entry,
-# <preset>-only-<IDs>, <preset>-fix-<IDs>, <preset>-fix-all (custom benchmarks); with presets.toml format 2, any name of
-# puffin-build's grammar on these: <name>-<modifier>…, <version>[,<modifier>…] (mk_vendor tells the rest)
+# build its presets.toml names (format 1: its tables; format 2, tlspuffin pr/vuln-catalogue: the build of each version
+# under its name, the aliases, and any name of puffin-build's grammar on these, <name>-<modifier>… or
+# <version>[,<modifier>…]: mk_vendor tells the rest), or a build derived from its catalogue (vulnerabilities.toml): <ID>
+# of an entry, <preset>-only-<IDs>, <preset>-fix-<IDs>, <preset>-fix-all (custom benchmarks)
 KnownVendorBuild() {
-  local dir="${THEJOB_OUT_PATH}/repo/puffin-build/vendors/$1" name="$2";
+  local dir="${THEJOB_OUT_PATH}/repo/puffin-build/vendors/$1";
   [ -e "${dir}/presets.toml" ] || return 1;
-  local names; names=$( PresetNames "${dir}/presets.toml" );
-  grep -F -x -q -- "${name}" <<< "${names}" && return 0;
-  if grep -E -q '^[[:space:]]*format[[:space:]]*=[[:space:]]*2' "${dir}/presets.toml"; then
-    [[ "${name}" == *,* ]] && return 0;
-    local known; while IFS= read -r known; do [ -n "${known}" ] && [[ "${name}" == "${known}-"* ]] && return 0; done <<< "${names}";
-  fi
-  [ -r "${dir}/vulnerabilities.toml" ] || return 1;
-  grep -E -q "^\[\"?${name}\"?\][[:space:]]*(#.*)?$" "${dir}/vulnerabilities.toml" && return 0;
-  local base; base=$( sed -E 's/-(only|fix)-.*$//' <<< "${name}" );
-  [ "${base}" != "${name}" ] && grep -F -x -q -- "${base}" <<< "${names}";
+  python3 -I - "${dir}" "$2" <<'PY' 2> /dev/null
+import os, re, sys, tomllib
+directory, name = sys.argv[1], sys.argv[2]
+presets = tomllib.load(open(os.path.join(directory, 'presets.toml'), 'rb'))
+if presets.get('format') == 2:
+    template = (presets.get('library') or {}).get('name', os.path.basename(directory) + '{compact}')
+    names = [(entry or {}).get('name') or template.replace('{version_}', version.replace('.', '_'))
+             .replace('{compact}', version.replace('.', '')).replace('{version}', version)
+             for version, entry in (presets.get('versions') or {}).items()] + list(presets.get('aliases') or {})
+    if name in names or ',' in name or any(name.startswith(known + '-') for known in names):
+        sys.exit(0)
+else:
+    names = [key for key, value in presets.items() if isinstance(value, dict)]
+    if name in names:
+        sys.exit(0)
+try:
+    entries = tomllib.load(open(os.path.join(directory, 'vulnerabilities.toml'), 'rb'))
+except OSError:
+    sys.exit(1)
+base = re.sub(r'-(only|fix)-.*$', '', name)
+sys.exit(0 if name in entries or (base != name and base in names) else 1)
+PY
 }
 
 # ExpectedTarget <vendor>: "cve|kind|match" of the expected bug: that of a custom benchmark's experiment, a catalogue

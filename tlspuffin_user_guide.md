@@ -363,7 +363,11 @@ X patched (V_X), and replays each objective on them:
 
 The witness of each X is run first on V_X and F (controls): when it does not behave, the verdicts say "controls
 failed". A run's first 20 objectives are validated: the targeted ones, then one of each bug (by the fuzzer's record),
-then by time.
+then by time. An experiment that names its bug (custom benchmarks, Vuln group A and B) prepares its validation in a step
+before it (`PrepareValidation`), so that the run ends on a find only once validation confirms it. The validation builds
+are made once: the libraries of a set in a folder shared by the tasks (`data/validation-libs/`, named after what they are
+made from; a folder unused for 30 days goes), the binary in the scheduler's cache, per the sources it is built from (a
+commit that changes neither reuses them).
 
 The objectives pages (and the 🐞 panel of Results) show, on each bug, what its objectives are: **✔ X** confirmed by
 patch (green, certain), **≈ X · signature** the signature of a known bug without patch at that version (yellow-green),
@@ -380,7 +384,9 @@ has one (said so at the top), and `?commit=<sha>` any commit's. Its overview giv
 benchmarks do: the presets of the catalogue's commit it can run on (the first: the one the launcher picks), the bench's
 time to find it (Vuln group A/B, `runs/bench_times.json`), how a find is confirmed (its patch, its signature only, the
 fuzzer's record) and the bugs with the same oracle; filters by library, category, ★ first found by puffin, bugs without
-witness. Every field of a bug: its card at the end of the page.
+witness. Every field of a bug: its card at the end of the page. A bug of tlspuffin's harness of past commits
+(`affected_commits = "not containing <commit of the fix>"`, e.g. the LibreSSL 3.3.3 claim of 2022–2026) is in no build of
+the commit: the launcher never offers it, and the bugs found so far name the finds of older commits after it.
 
 ## Custom Vuln benchmarks
 
