@@ -667,3 +667,7 @@ a.tp-mon {
   outline: none;
 }
 .jl-select:focus { border-color: var(--jl-accent); }
+.jl-select[hidden] { display: none; }
+.jl-smt-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.jl-smt-note { font-size: 12px; color: var(--jl-text-muted); }
+.jl-smt-note:empty { display: none; }

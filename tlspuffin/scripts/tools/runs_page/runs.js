@@ -85,9 +85,16 @@ function SettingChanges(a, b) {
 // when they do. Their differences are then not tested: a difference there says nothing of the commit
 function NotComparable(a, b) {
   const out = [];
-  // the major version of puffin-bench's measurements (tasks without it: 1): two of them don't compare
+  // the major version of puffin-bench's measurements (runs_report.py major: tasks without it 1, a twin run 2): two of
+  // them don't compare
   const major = (t) => t.bench?.major ?? 1;
   if (major(a) !== major(b)) out.push(`puffin-bench major version ${major(a)} → ${major(b)}`);
+  // how the CPUs of each library's runs were chosen (cpus, recorded since 2026-10-10; before, the scheduler gave
+  // logical CPUs): another mode, or one recorded and one not, does not compare (runs_report.py cpu_sharing)
+  const sharing = (t, lib) => { const c = t.cpus?.[lib]; return c ? c.smt + (c.shared ? ', cores shared with others' : '') : 'not recorded (logical CPUs)'; };
+  const libs = Object.keys(a.metrics ?? {}).filter(lib => b.metrics?.[lib]);
+  const changes = [...new Set(libs.filter(lib => sharing(a, lib) !== sharing(b, lib)).map(lib => `${sharing(a, lib)} → ${sharing(b, lib)}`))];
+  if (changes.length) out.push(`CPU sharing ${changes.map(esc).join('; ')}`);
   return out;
 }
 

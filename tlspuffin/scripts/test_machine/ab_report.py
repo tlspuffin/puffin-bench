@@ -26,7 +26,7 @@ def summary(exports, tid):
 def main():
     tasks = sys.argv[1]
     exports = sys.argv[2] if len(sys.argv) > 2 else "/srv/puffin-bench/data/exports"
-    execs = {}  # lib -> pair -> group -> executions
+    execs = {}  # lib -> pair -> group -> executions (the mean of the task's successful runs of the library)
     for line in open(tasks):
         if not line.strip():
             continue
@@ -36,9 +36,10 @@ def main():
             print(f"task {tid} ({grp}{pair}): {err}")
             continue
         for lib, l in data.get("libraries", {}).items():
-            for a in l.get("data") or []:
-                if a.get("state") == "success":
-                    execs.setdefault(lib, {}).setdefault(pair, {})[grp] = a["global"][0]["tEnd"]["total_execs"]
+            # every successful run of the library (a twin attempt has two): their mean, not the last one
+            runs = [a["global"][0]["tEnd"]["total_execs"] for a in l.get("data") or [] if a.get("state") == "success"]
+            if runs:
+                execs.setdefault(lib, {}).setdefault(pair, {})[grp] = st.mean(runs)
     for lib in sorted(execs):
         full = [(p["A"], p["B"]) for p in execs[lib].values() if "A" in p and "B" in p]
         if not full:
