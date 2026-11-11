@@ -986,7 +986,13 @@ OracleMatches() {
     . as $o | ($o.kind == $kind) and
     (if $o.kind == "claim" then ($o.violation == null or $o.violation == $detail)
      else (($o.signal == null or ($detail | startswith($o.signal)))
-           and ($o.asan == null or ([$detail | scan("ASan ([A-Za-z_-]+)")] | any(.[0] == $o.asan)))
+           and ($o.asan == null or ([$detail | scan("ASan ([A-Za-z_-]+)")] | any(.[0] == $o.asan))
+                # ASan reports SEGV, BUS, FPE and ILL from its signal handler, which the fuzzer (LibAFL) replaces with
+                # its own: its record of such a crash has the signal only, which stands for the report (validation
+                # replays it with ASan)
+                or (($detail | test("ASan ") | not)
+                    and ({"SEGV": "SIGSEGV", "BUS": "SIGBUS", "FPE": "SIGFPE", "ILL": "SIGILL"}[$o.asan] as $signal
+                         | $signal != null and ($detail | startswith($signal)))))
            and ($o.panic == null)) end)' <<< "$1" > /dev/null 2>&1;
 }
 

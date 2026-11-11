@@ -61,9 +61,13 @@ for entry in tomllib.load(open(sys.argv[1], "rb")).values():
 ValidationExecute() {
   local binary="$1" put="$2" trace="$3" tag="$4";
   local file="${VALIDATION_WORK}/runs/${tag}.json";
-  # shellcheck disable=SC2086 # LAUNCH_FLAGS and LAUNCH_NOASLR are word lists
+  # the flags as the fuzzer's command line had them: a fragment of shell, which nix-shell --run read again (the job
+  # configurations quote them: '--put-use-clear'): its words
+  local -a flags=();
+  eval "flags=( ${LAUNCH_FLAGS:-} )" 2> /dev/null || flags=();
+  # shellcheck disable=SC2086 # LAUNCH_NOASLR is a word list
   ASAN_OPTIONS="${VALIDATION_ASAN_OPTIONS}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" ${LAUNCH_NOASLR:-} \
-    "${binary}" --put "${put}" ${LAUNCH_FLAGS:-} execute --outcome "${file}" "${trace}" \
+    "${binary}" --put "${put}" "${flags[@]}" execute --outcome "${file}" "${trace}" \
     < /dev/null > "${VALIDATION_WORK}/runs/${tag}.log" 2>&1;
   jq -c '.[0].outcome // empty' "${file}" 2> /dev/null | grep . ||
     echo '{"outcome":"error","message":"no outcome (see the log of the execution)"}';
