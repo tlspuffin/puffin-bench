@@ -29,7 +29,7 @@ export const helpTexts = {
   'tlspuffin.cores':      'CPU cores per run',
   'tlspuffin.memory':     'Memory limit in MB. 0 = no limit.',
   'tlspuffin.unknown':    'This hash is not in the commit list (not fetched yet, or a typo). Check it before launching.',
-  'tlspuffin.custom':     'Custom Vuln benchmark: tick known bugs of tlspuffin\'s catalogue (dev\'s, or the commit\'s with Load bugs from this commit). Each one becomes an experiment on a version that has it (the newest with a patch first), with every other known bug patched, the build options it needs and ASan when its oracle is an ASan report; it ends only on a find that validation confirms during the run (a warning says how a bug without patch is confirmed). Name the benchmark to follow it on Results; 💾 save for later (or Save now) keeps it under its name for every user of the board, to Load on any commit or Remove (Saved benchmarks, at the top); every field of a bug: the Bugs reference page.',
+  'tlspuffin.custom':     'Custom Vuln benchmark: tick known bugs of tlspuffin\'s catalogue (dev\'s, or the commit\'s with Load bugs from this commit). Each one becomes an experiment on a version that has it (the newest with a patch first), with every other known bug patched, the build options it needs and ASan when its oracle is an ASan report; it ends only on a find that validation confirms during the run (a warning says how a bug without patch is confirmed). Name the benchmark to follow it on Results; 💾 Save keeps it under its name for every user of the board, to Load on any commit or Remove (Saved benchmarks, at the top); every field of a bug: the Bugs reference page.',
 };
 
 // short type of the tasks of each job type (jobsconfig.json), for the task descriptions (see describeTask)
@@ -616,8 +616,28 @@ export class JobLauncher {
     body.appendChild(this.#campaignExtra);
 
     // ── Custom Vuln benchmark (job types with "custom_benchmark": true) ──
-    this.#custom = new CustomBenchmark({ gitOrigin: new URL(this.#config.commitsUrl).origin, onChange: () => this.#validate() });
-    this.#custom.node.dataset.help = 'tlspuffin.custom';
+    this.#custom = new CustomBenchmark({
+      gitOrigin: new URL(this.#config.commitsUrl).origin, onChange: () => this.#validate(),
+      // the fields of the launcher a custom benchmark keeps with its own: its timeout and CPU sharing
+      settings: {
+        get: () => ({
+          timeout: { d: parseInt(this.#timeoutDayInput.value, 10) || 0, h: parseInt(this.#timeoutInput.value, 10) || 0,
+                     m: parseInt(this.#timeoutMinInput.value, 10) || 0 },
+          smt: this.#smtSelect.value,
+        }),
+        set: ({ timeout, smt } = {}) => {
+          if (timeout) {
+            this.#timeoutDayInput.value = String(timeout.d ?? 0);
+            this.#timeoutInput.value = String(timeout.h ?? 0);
+            this.#timeoutMinInput.value = String(timeout.m ?? 0);
+          }
+          if (typeof smt === 'string' && [...this.#smtSelect.options].some(o => o.value === smt)) this.#smtSelect.value = smt;
+          this.#validate();
+        },
+      },
+    });
+    // its help on its own marker: on the whole panel it answered every hover inside, placed against the panel
+    this.#custom.helpAnchor.dataset.help = 'tlspuffin.custom';
     body.appendChild(this.#custom.node);
 
     // ── Separator + Launch ──
@@ -642,6 +662,8 @@ export class JobLauncher {
     body.appendChild(this.#launchBtn);
 
     this.#toast = this.#el('div', 'jl-toast');
+    this.#toast.title = 'Click to close';
+    this.#toast.addEventListener('click', () => { this.#toast.className = 'jl-toast'; });
     body.appendChild(this.#toast);
 
     return body;
@@ -1529,8 +1551,6 @@ export class JobLauncher {
     try {
       const baseName = this.#taskNameInput.value.trim() || 'New Task';
       const custom = this.#captureCustom(commit, baseName);
-      // a custom benchmark with "save for later": kept under its name first, so that a failed launch does not lose it
-      if (jobDef.custom_benchmark) await this.#custom.saveIfKept();
       if (jobDef.composite?.length) {
         const subJobs = jobDef.composite.map(v => this.#jobDefs.find(j => j.value === v)).filter(Boolean);
         const results = await Promise.all(

@@ -524,8 +524,15 @@
 }
 
 /* ── Toast ── */
+/* the answer to a launch: the last element of the form, kept at the bottom of the window while it is shown (with a
+   custom benchmark the form is taller than the window); opaque over the form; a click closes it */
 .jl-toast {
   display: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  cursor: pointer;
+  box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.45);
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: 8px;
@@ -537,20 +544,20 @@
 }
 .jl-toast.success {
   display: block;
-  background: rgba(76, 175, 80, 0.12);
+  background: linear-gradient(rgba(76, 175, 80, 0.12), rgba(76, 175, 80, 0.12)), var(--jl-surface);
   border: 1px solid #4CAF50;
   color: #81c784;
 }
 .jl-toast.error {
   display: block;
-  background: rgba(244, 67, 54, 0.12);
+  background: linear-gradient(rgba(244, 67, 54, 0.12), rgba(244, 67, 54, 0.12)), var(--jl-surface);
   border: 1px solid #f44336;
   color: #e57373;
 }
 /* the scheduler answered but is slow or busy: the launch goes on */
 .jl-toast.warn {
   display: block;
-  background: rgba(255, 196, 0, 0.12);
+  background: linear-gradient(rgba(255, 196, 0, 0.12), rgba(255, 196, 0, 0.12)), var(--jl-surface);
   border: 1px solid #ffc400;
   color: #ffd089;
 }
@@ -681,6 +688,7 @@ a.tp-mon {
 .jl-custom-row input[type="number"] { width: 70px; }
 .jl-custom-name { width: 140px; } .jl-custom-description { flex: 1; min-width: 240px; }
 .jl-custom-details { margin-left: auto; color: #58a6ff; font-weight: 600; text-decoration: none; }
+.jl-custom-about { color: var(--jl-text-muted); font-size: 12px; cursor: help; }
 .jl-custom-load { background: #30363d; color: var(--jl-text); border: 1px solid var(--jl-border-light); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
 .jl-custom-status { color: var(--jl-text-muted); font-size: 13px; }
 .jl-custom table { border-collapse: collapse; width: 100%; font-size: 13px; color: var(--jl-text); }

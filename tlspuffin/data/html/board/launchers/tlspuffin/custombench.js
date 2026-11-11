@@ -11,7 +11,7 @@
 // page. The experiments are the task's configurations (runtime RUNTIME_RUN_CONFIG, see runConfig), named
 // <benchmark>_<alias or ID>, and the definition is recorded in the task (definition) so that it can be launched again.
 // Saved benchmarks: definitions kept by the scheduler under their name (/api/benchmarks/tlspuffin, shared by every
-// user of the board), saved with "save for later" (at launch) or "Save now", loaded on any commit, removed.
+// user of the board), saved with 💾 Save, loaded on any commit, removed.
 
 const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const LIBRARY = { wolfssl: 'wolfSSL', openssl: 'OpenSSL', libressl: 'LibreSSL', boringssl: 'BoringSSL', libssh: 'libssh', wolfssh: 'wolfSSH' };
@@ -48,33 +48,36 @@ export class CustomBenchmark {
   #saved = {};                  // the saved benchmarks: name -> { saved_at, definition }
   #savedError = '';
   #pending = null;              // a definition to apply once the commit's catalogue and presets are there
+  #settings;                    // the launcher's own fields a benchmark keeps (timeout, CPU sharing): get() and set()
   #error = '';
   #loading = false;
   #els = {};
 
-  constructor({ gitOrigin, onChange }) {
+  constructor({ gitOrigin, onChange, settings }) {
     this.#gitOrigin = gitOrigin;
     this.#onChange = onChange ?? (() => {});
+    this.#settings = { get: () => ({}), set: () => {}, ...settings };
     this.node = document.createElement('div');
     this.node.className = 'jl-custom';
     this.node.innerHTML = `
       <div class="jl-custom-row jl-custom-savedrow">
-        <span class="jl-label">Saved benchmarks</span>
+        <span class="jl-label" title="Saved benchmarks: kept by the scheduler under their name, for every user of the board; Load ticks the same bugs with the same settings on the commit chosen">Saved benchmarks</span>
         <select class="jl-select jl-custom-saved"><option value="">none saved yet</option></select>
         <button type="button" class="jl-custom-load jl-custom-open" title="Its bugs, versions and settings, on the commit chosen above">Load</button>
         <button type="button" class="jl-custom-load jl-custom-remove" title="No longer among the saved benchmarks (the tasks it launched and their results stay)">🗑 Remove</button>
         <span class="jl-custom-savedinfo"></span>
       </div>
       <div class="jl-custom-row">
-        <span class="jl-label">Catalogue</span>
+        <span class="jl-label" title="Catalogue: where the bugs come from: dev's (what validation trusts) or the chosen commit's (a PR adding a bug)">Catalogue</span>
         <label><input type="radio" name="jl-custom-source" value="dev"> <span class="jl-custom-dev">dev's</span></label>
         <label><input type="radio" name="jl-custom-source" value="commit"> this commit's</label>
         <button type="button" class="jl-custom-load jl-custom-loadcommit" title="The catalogue of the chosen commit (e.g. a PR adding a bug): its bugs, compared with dev's">Load bugs from this commit</button>
         <span class="jl-custom-badge"></span>
-        <a class="jl-custom-details" target="_blank" rel="noopener">📖 Every detail of each bug: Bugs reference ↗</a>
+        <a class="jl-custom-details" target="_blank" rel="noopener" title="Bugs reference: every field of each bug of the catalogue (new tab)">📖 Every detail of each bug: Bugs reference ↗</a>
+        <span class="jl-custom-about">ⓘ how it works</span>
       </div>
       <div class="jl-custom-row">
-        <span class="jl-label">Show</span>
+        <span class="jl-label" title="Show: only the bugs of a library or a category; ★ the bugs first found by puffin; the bugs without witness (never targets) are hidden unless ticked">Show</span>
         <select class="jl-select jl-custom-lib"><option value="">all libraries</option></select>
         <select class="jl-select jl-custom-cat"><option value="">all categories</option></select>
         <label><input type="checkbox" class="jl-custom-puffin"> ★ first found by puffin only</label>
@@ -84,7 +87,7 @@ export class CustomBenchmark {
       <table class="jl-custom-bugs"></table>
       <div class="jl-custom-footnotes"></div>
       <div class="jl-custom-row">
-        <span class="jl-label">Other known bugs</span>
+        <span class="jl-label" title="Other known bugs: the known bugs of each experiment's build other than its own: patched where a patch exists (it can only stop on its own bug), or left as in the preset">Other known bugs</span>
         <label><input type="radio" name="jl-custom-others" value="patched" checked> patched where a patch exists (recommended: an experiment can only stop on its own bug)</label>
         <label title="The chosen preset as it is: only the fixes of its own fix list (none for wolfssl540-asan, HEAP for wolfssl540-buf); every other known bug stays in the build, and the fuzzer may find one of them first (the attempt then goes on)"><input type="radio" name="jl-custom-others" value="preset"> only the preset's own fixes (the other known bugs stay in the build)</label>
       </div>
@@ -96,16 +99,15 @@ export class CustomBenchmark {
         build with every patch); one validation does not confirm leaves the attempt going. The time to find is when the fuzzer saved the
         confirmed objective.</div>
       <div class="jl-custom-row">
-        <span class="jl-label">Attempts</span><input type="number" class="jl-commit-input jl-custom-attempts" min="1" max="50" value="5">
-        <span class="jl-label">Cores per attempt</span><input type="number" class="jl-commit-input jl-custom-cores" min="1" max="64" value="4">
+        <span class="jl-label" title="Attempts: runs of each experiment, each until it finds its bug (confirmed) or times out">Attempts</span><input type="number" class="jl-commit-input jl-custom-attempts" min="1" max="50" value="5">
+        <span class="jl-label" title="Cores per attempt: fuzzer clients of each attempt, one core each">Cores per attempt</span><input type="number" class="jl-commit-input jl-custom-cores" min="1" max="64" value="4">
         <span class="jl-custom-cost"></span>
       </div>
       <div class="jl-custom-row">
-        <span class="jl-label">Benchmark</span><input type="text" class="jl-commit-input jl-custom-name" value="custom" maxlength="24" spellcheck="false"
+        <span class="jl-label" title="Benchmark: its name (letters, digits, -): the experiments are named <benchmark>_<bug>, followed across commits on Results">Benchmark</span><input type="text" class="jl-commit-input jl-custom-name" value="custom" maxlength="24" spellcheck="false"
           title="Its name (letters, digits, -): the experiments are named <benchmark>_<bug>; launching it again with the same name continues its series on Results">
         <input type="text" class="jl-commit-input jl-custom-description" placeholder="description (optional)" maxlength="200">
-        <label title="Launching also keeps this benchmark under its name, to launch it again later on any commit (Saved benchmarks, above)"><input type="checkbox" class="jl-custom-keep"> 💾 save for later</label>
-        <button type="button" class="jl-custom-load jl-custom-savenow" title="Keep it under its name now, without launching it">Save now</button>
+        <button type="button" class="jl-custom-load jl-custom-save" title="Save: keep this benchmark under its name, for every user of the board, to Load it again later on any commit (Saved benchmarks, above); launching does not save it">💾 Save</button>
         <span class="jl-custom-savestatus"></span>
       </div>`;
     const $ = selector => this.node.querySelector(selector);
@@ -116,7 +118,7 @@ export class CustomBenchmark {
       cores: $('.jl-custom-cores'), cost: $('.jl-custom-cost'), name: $('.jl-custom-name'), description: $('.jl-custom-description'),
       dev: $('.jl-custom-dev'), load: $('.jl-custom-loadcommit'),
       warnings: $('.jl-custom-warnings'), saved: $('.jl-custom-saved'), open: $('.jl-custom-open'), remove: $('.jl-custom-remove'),
-      savedinfo: $('.jl-custom-savedinfo'), keep: $('.jl-custom-keep'), savenow: $('.jl-custom-savenow'), savestatus: $('.jl-custom-savestatus'),
+      about: $('.jl-custom-about'), savedinfo: $('.jl-custom-savedinfo'), save: $('.jl-custom-save'), savestatus: $('.jl-custom-savestatus'),
     };
     this.#els.saved.addEventListener('change', () => this.#renderSavedInfo());
     this.#els.open.addEventListener('click', () => {
@@ -124,7 +126,7 @@ export class CustomBenchmark {
       if (saved) this.restore(saved.definition);
     });
     this.#els.remove.addEventListener('click', () => this.#remove(this.#els.saved.value));
-    this.#els.savenow.addEventListener('click', () => this.save());
+    this.#els.save.addEventListener('click', () => this.save());
     this.#refreshSaved();
     this.node.querySelectorAll('input[name="jl-custom-source"]').forEach(radio =>
       radio.addEventListener('change', () => { this.#source = radio.value; this.#picked.clear(); this.#render(); }));
@@ -156,10 +158,12 @@ export class CustomBenchmark {
 
   show(visible) { this.node.classList.toggle('visible', visible); }
 
+  // where the launcher puts the help of the panel (its "ⓘ how it works")
+  get helpAnchor() { return this.#els.about; }
+
   reset() {
     this.#picked.clear();
     this.#pending = null;
-    this.#els.keep.checked = false;
     this.#saveStatus('', '');
     this.#refreshSaved();
     this.#els.name.value = 'custom';
@@ -215,6 +219,8 @@ export class CustomBenchmark {
       name: this.name, description: this.#els.description.value.trim(), others: this.#others(),
       catalogue: { source: this.#source, commit: catalogue?.commit ?? null },
       attempts: this.attempts, cores: this.cores,
+      // the launcher's: timeout { d, h, m }, smt (CPU sharing)
+      ...this.#settings.get(),
       experiments: this.#experiments().map(x => ({ name: x.name, bug: x.id, vendor: x.args.vendor, preset: x.preset.name,
         version: x.preset.version, asan: !!x.preset.asan || needsAsan(x.entry), oracle: x.entry.oracle, flags: x.entry.find?.flags ?? [],
         features: x.entry.find?.features ?? [], fingerprint: x.entry.fingerprint ?? null })),
@@ -231,6 +237,7 @@ export class CustomBenchmark {
     this.#els.cores.value = definition.cores ?? 4;
     const others = this.node.querySelector(`input[name="jl-custom-others"][value="${definition.others === 'preset' ? 'preset' : 'patched'}"]`);
     if (others) others.checked = true;
+    this.#settings.set({ timeout: definition.timeout, smt: definition.smt });
     if (!this.#sha || this.#loading) {
       this.#pending = definition;
       this.#saveStatus(`${definition.name ?? 'the benchmark'}: its bugs are ticked once a commit is chosen`, '');
@@ -278,8 +285,10 @@ export class CustomBenchmark {
     const d = saved.definition ?? {};
     const bugs = (d.experiments ?? []).map(x => String(x.name ?? '').startsWith(`${d.name}_`) ? x.name.slice(`${d.name}_`.length) : x.bug);
     const when = Number.isFinite(saved.saved_at) ? new Date(saved.saved_at).toISOString().slice(0, 16).replace('T', ' ') : '?';
+    const timeout = d.timeout ? ` · timeout ${d.timeout.d ? `${d.timeout.d} d ` : ''}${d.timeout.h ?? 0} h ${String(d.timeout.m ?? 0).padStart(2, '0')}` : '';
+    const smt = d.smt === undefined ? '' : ` · CPU sharing ${d.smt || 'default'}`;
     this.#els.savedinfo.textContent = `${bugs.length} bug(s): ${bugs.join(', ') || 'none'} · ${d.attempts ?? '?'} attempt(s) × ${d.cores ?? '?'} core(s)`
-      + ` · other known bugs ${d.others === 'preset' ? 'as in the preset' : 'patched'} · saved ${when} UTC`;
+      + `${timeout}${smt} · other known bugs ${d.others === 'preset' ? 'as in the preset' : 'patched'} · saved ${when} UTC`;
   }
 
   #saveStatus(text, kind) {
@@ -302,9 +311,6 @@ export class CustomBenchmark {
     await this.#refreshSaved(definition.name);
     return true;
   }
-
-  // at launch: saved too when "save for later" is ticked
-  async saveIfKept() { return this.#els.keep.checked ? this.save() : true; }
 
   async #remove(name) {
     if (!name || !window.confirm(`Remove the saved benchmark ${name}? The tasks it launched and their results stay.`)) return;
@@ -455,7 +461,11 @@ export class CustomBenchmark {
         <td>${confirm}${twins.length ? `<br><span class="jl-badge warn">same oracle as ${twins.join(', ')}</span>` : ''}</td></tr>`;
     };
     const group = (title, list) => list.length ? `<tr class="group"><td colspan="6">${title}</td></tr>${list.map(row).join('')}` : '';
-    els.bugs.innerHTML = `<tr><th></th><th>bug</th><th>CVSS</th><th>run on</th><th>time to find on the bench${this.#times ? ' ⁽ᵗ⁾' : ''}</th><th>a find is confirmed by</th></tr>`
+    els.bugs.innerHTML = `<tr><th></th><th title="bug: its ID (↗ every field, Bugs reference), alias, category and summary">bug</th>`
+      + '<th title="CVSS: the base score of the bug">CVSS</th>'
+      + '<th title="run on: the presets of the commit that have the bug (version, build options, ASan); the safest first: a version where it has a patch">run on</th>'
+      + `<th title="time to find on the bench: median of the Vuln group A/B attempts that found it, found/attempts; hover a value for its task">time to find on the bench${this.#times ? ' ⁽ᵗ⁾' : ''}</th>`
+      + '<th title="a find is confirmed by: how validation recognises a find of this bug (its patch: patch differential; else its signature only)">a find is confirmed by</th></tr>'
       + libs.filter(lib => library.some(x => x.lib === lib)).map(lib => group(`${esc(libraryName(lib))} — ${library.filter(x => x.lib === lib).length} bug(s)`,
           library.filter(x => x.lib === lib))).join('')
       + group('🔧 Bugs of the fuzzing harness', harness)
@@ -480,7 +490,12 @@ export class CustomBenchmark {
     const experiments = this.#experiments();
     const oracle = o => !o ? '—' : o.kind === 'claim' ? `claim <code>${esc(o.violation ?? '')}</code>`
       : `crash${o.signal ? ` <code>${esc(o.signal)}</code>` : ''}${o.asan ? `, ASan <code>${esc(o.asan)}</code>` : ''}${o.panic ? `, panic <code>${esc(o.panic)}</code>` : ''}`;
-    this.#els.runs.innerHTML = '<tr><th>experiment</th><th>vendor</th><th>build</th><th>run with</th><th>stops on its oracle</th><th>known bugs left in the build</th></tr>'
+    this.#els.runs.innerHTML = '<tr><th title="experiment: <benchmark>_<bug>, its name on Results">experiment</th>'
+      + '<th title="vendor: the build given to mk_vendor (<preset>-only-<ID>: every other bug with a patch patched)">vendor</th>'
+      + '<th title="build: library, version, ASan and the bugs patched">build</th>'
+      + '<th title="run with: the fuzzer flags and cargo features the bug needs">run with</th>'
+      + '<th title="stops on its oracle: the objectives that end an attempt, once validation confirms them">stops on its oracle</th>'
+      + '<th title="known bugs left in the build: other known bugs the fuzzer may find first (an attempt goes on after them)">known bugs left in the build</th></tr>'
       + (experiments.map(x => {
         const { patched, left } = this.#neighbours(x);
         const find = x.entry.find ?? {};

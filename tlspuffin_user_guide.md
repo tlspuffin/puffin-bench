@@ -392,9 +392,10 @@ and from each bug):
 4. Attempts, cores per attempt, timeout and CPU sharing as for the other jobs; **Benchmark**: its name. The experiments
    are named `<benchmark>_<alias or ID>` (e.g. `VulnC_BUF`): launching it again with the same name continues their series
    on Results. The definition is recorded with the task ("New task…" from it launches the same).
-5. **💾 save for later** (ticked at launch) or **Save now** (without launching) keeps the benchmark under its name in the
-   scheduler, for every user of the board (`/api/benchmarks/tlspuffin`, stored in `exports/benchmarks.json`). **Saved
-   benchmarks**, at the top of the panel, lists them with their bugs and settings: **Load** ticks the same bugs again with
+5. **💾 Save** keeps the benchmark under its name in the scheduler (launching does not), for every user of the board,
+   with its bugs, attempts, cores per attempt, timeout and CPU sharing
+   (`/api/benchmarks/tlspuffin`, stored in `exports/benchmarks.json`). **Saved benchmarks**, at the top of the panel,
+   lists them with their bugs and settings: **Load** ticks the same bugs again with
    the same settings, on the commit chosen (a bug that commit's catalogue does not have is left out, and named);
    **🗑 Remove** takes one out of the list (the tasks it launched and their results stay). Saving under the name of a
    saved benchmark replaces it, once confirmed.

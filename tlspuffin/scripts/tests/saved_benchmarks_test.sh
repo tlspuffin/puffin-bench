@@ -3,7 +3,7 @@
 # (data/html/board/launchers/tlspuffin/custombench.js) in a headless Chrome, against a store that answers as the
 # scheduler's /api/benchmarks/tlspuffin (scheduler/src/scheduler/api/benchmarks_api.hxx; its own test:
 # build/scheduler/testBenchmarksAPI) and the catalogue and presets of the commit (git_restapi's scripts):
-#   - "Save now" keeps the ticked bugs under the benchmark's name; a launch saves it only with "save for later";
+#   - 💾 Save keeps the ticked bugs under the benchmark's name, and saving again replaces it;
 #   - "Load" ticks the same bugs again, on the commit shown or, chosen before a commit, once one is;
 #   - a bug the catalogue shown does not have is left out, and said so;
 #   - "Remove" takes it out of the store.
@@ -71,30 +71,41 @@ try {
   await settle();
   const rows = [...panel.node.querySelectorAll('.jl-custom-bugs tr[data-id]')].filter(r => !r.querySelector('input').disabled);
   check(rows.length >= 2, `bugs to tick (${rows.length})`);
+  // the launcher puts the panel's help on its marker (data-help on the whole panel answered every hover inside it,
+  // placed against the panel); every column header and label says what it is
+  const anchor = panel.helpAnchor;
+  check(anchor && panel.node.contains(anchor) && anchor !== panel.node && anchor.getBoundingClientRect().height < 40,
+    'the help of the panel has a small marker of its own');
+  const untitled = [...panel.node.querySelectorAll('th, .jl-label')].filter(el => el.textContent.trim() && !el.title);
+  check(untitled.length === 0, `every header and label has its hover (${untitled.map(el => el.textContent.trim()).join(', ') || 'all'})`);
   const tick = row => { const box = row.querySelector('input'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); };
   tick(rows[0]); tick(rows[1]);
   const ticked = [rows[0].dataset.id, rows[1].dataset.id];
   $('.jl-custom-name').value = 'VulnT';
   $('.jl-custom-description').value = 'two bugs';
-  check(await panel.saveIfKept() && puts.length === 0, 'a launch without "save for later" saves nothing');
-  $('.jl-custom-savenow').click();
+  $('.jl-custom-attempts').value = '2'; $('.jl-custom-cores').value = '7';
+  $('.jl-custom-save').click();
   await settle();
   check(store.VulnT && store.VulnT.definition.experiments.map(x => x.bug).sort().join() === [...ticked].sort().join(),
-    `"Save now" keeps the ticked bugs under the name (${ticked.join(', ')})`);
+    `💾 Save keeps the ticked bugs under the name (${ticked.join(', ')})`);
   check($('.jl-custom-saved').value === 'VulnT' && $('.jl-custom-savedinfo').textContent.includes('2 bug(s)'), 'listed, with its bugs');
   check($('.jl-custom-savestatus').textContent === 'saved as VulnT', 'and said so');
-  $('.jl-custom-keep').checked = true;
-  check(await panel.saveIfKept() && puts.length === 2, 'a launch with "save for later" saves it (again)');
+  $('.jl-custom-description').value = 'two bugs, again';
+  $('.jl-custom-save').click();
+  await settle();
+  check(puts.length === 2 && store.VulnT.definition.description === 'two bugs, again', 'saving again under its name replaces it');
 
   // another benchmark, then VulnT loaded on the commit shown
   panel.reset();
   await settle();
-  check(panel.definition().experiments.length === 0 && !$('.jl-custom-keep').checked, 'reset: nothing ticked, "save for later" off');
+  check(panel.definition().experiments.length === 0, 'reset: nothing ticked');
   $('.jl-custom-saved').value = 'VulnT';
   $('.jl-custom-open').click();
   await settle();
   check(panel.definition().experiments.map(x => x.bug).sort().join() === [...ticked].sort().join() && panel.name === 'VulnT',
     'Load ticks its bugs again, under its name');
+  check(panel.attempts === 2 && panel.cores === 7 && $('.jl-custom-attempts').value === '2' && $('.jl-custom-cores').value === '7',
+    `Load sets its attempts and cores (${$('.jl-custom-attempts').value} × ${$('.jl-custom-cores').value})`);
 
   // loaded before a commit is chosen: ticked once one is
   panel.setCommit(null);
@@ -106,6 +117,7 @@ try {
   panel.setCommit(SHA);
   await settle();
   check(panel.definition().experiments.length === 2, 'then ticks its bugs on the commit chosen');
+  check(panel.attempts === 2 && panel.cores === 7, 'and its attempts and cores');
 
   // a bug the catalogue shown does not have
   store.Gone = { saved_at: Date.now(), definition: { ...structuredClone(store.VulnT.definition), name: 'Gone',

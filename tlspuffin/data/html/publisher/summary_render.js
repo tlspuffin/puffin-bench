@@ -741,11 +741,21 @@ function CreateActionButtons(typeData, type) {
   const actions = document.createElement('div');
   actions.className = 'actions';
 
-  const tasks = GetReferencedTasks(typeData);
+  let tasks = GetReferencedTasks(typeData);
+  // no library with results (every experiment of the task failed or was unsupported): the tasks of the index, so that
+  // their steps and logs stay one click away
+  if (!tasks.length) {
+    const seen = new Set();
+    tasks = Object.values(typeData?.index?.files ?? {})
+      .filter(task => task?.task_id && !seen.has(task.task_id) && seen.add(task.task_id))
+      .map(task => ({ task, libs: ['no results'] }));
+  }
+  // no task known: no button (a link without task id opens an empty task page)
+  if (!tasks.length) return actions;
 
-  // Fallback: no tasks array or single task → direct buttons
-  if (tasks.length <= 1) {
-    const taskId = tasks.length === 1 ? tasks[0].task.task_id : '';
+  // a single task → direct buttons
+  if (tasks.length === 1) {
+    const taskId = tasks[0].task.task_id;
     actions.innerHTML = `
       <button class="btn-details" onclick="ShowDetails('${taskId}')" title="📊 Details\nopens: the task on the board, its steps, logs and artefacts (new tab)">📊 Details</button>
       <button class="btn-download" onclick="DownloadResults('${taskId}')" title="⬇️ Download\nfile: the artefacts of the task (.tgz)">⬇️ Download</button>
@@ -1435,10 +1445,12 @@ export function RenderCampaigns(config, project, commit, allMetrics, container) 
 /*****************************************/
 
 export function ShowDetails(config, taskID) {
+  if (!taskID) return;
   window.open(`${config.taskInfoURL}?id=${taskID}`);
 }
 
 export function DownloadResults(config, taskID) {
+  if (!taskID) return;
   const a = document.createElement('a');
   a.href = config.artefactURL(taskID);
   a.download = `${taskID}-artefacts.tgz`;
