@@ -34,6 +34,9 @@ expect 'crash with its ASan report type'                 0 OracleMatches "${BUF}
 expect 'crash with another ASan report type'             1 OracleMatches "${BUF}" crash 'SIGABRT · ASan heap-buffer-overflow'
 expect 'crash without ASan report (record incomplete)'   1 OracleMatches "${BUF}" crash 'SIGABRT'
 expect 'ASan SEGV'                                       0 OracleMatches "${SEGV}" crash 'SIGSEGV · ASan SEGV'
+expect "ASan SEGV, the fuzzer's record: its signal only" 0 OracleMatches "${SEGV}" crash 'SIGSEGV'
+expect 'ASan SEGV, a record of another signal'           1 OracleMatches "${SEGV}" crash 'SIGABRT'
+expect 'ASan SEGV, a record with another ASan report'    1 OracleMatches "${SEGV}" crash 'SIGSEGV · ASan heap-buffer-overflow'
 expect 'a replay ("ASan <type>")'                        0 OracleMatches "${BUF}" crash 'ASan stack-buffer-overflow'
 expect 'claim with its message'                          0 OracleMatches "${AUTH}" claim 'Authentication bypass'
 expect 'claim with another message'                      1 OracleMatches "${AUTH}" claim "Negotiated cipher is not in agent's configured ciphers list"
