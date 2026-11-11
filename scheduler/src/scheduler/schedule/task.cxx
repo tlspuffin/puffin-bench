@@ -60,8 +60,9 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   }
   variables.emplace("task_id", std::to_string(id_));
   name_ = ResolveVariables(name_, variables);
+  // letters, digits and @ - _ . space, and / for branch names (pr/vuln-catalogue); a name is never part of a path
   name_.erase(std::remove_if(name_.begin(), name_.end(), [](char c) {
-    return !std::isalnum(c) && c != '@' && c != '-' && c != '_' && c != '.' && c != ' ';
+    return !std::isalnum(c) && c != '@' && c != '-' && c != '_' && c != '.' && c != ' ' && c != '/';
   }), name_.end());
 
   executor_name_ = GetOrDefault<std::string>(

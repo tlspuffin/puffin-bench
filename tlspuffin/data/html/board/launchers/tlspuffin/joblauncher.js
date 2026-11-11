@@ -33,7 +33,7 @@ export const helpTexts = {
 };
 
 // short type of the tasks of each job type (jobsconfig.json), for the task descriptions (see describeTask)
-const JOB_TYPE_PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnX', 'campaign': 'Camp' };
+const JOB_TYPE_PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnC', 'campaign': 'Camp' };
 
 export class JobLauncher {
   #config;
@@ -624,7 +624,7 @@ export class JobLauncher {
 
     // ── Custom Vuln benchmark (job types with "custom_benchmark": true) ──
     this.#custom = new CustomBenchmark({
-      gitOrigin: new URL(this.#config.commitsUrl).origin, onChange: () => this.#validate(),
+      gitOrigin: new URL(this.#config.commitsUrl).origin, onChange: () => { this.#autoUpdateTitle(); this.#validate(); },
       // the fields of the launcher a custom benchmark keeps with its own: its timeout and CPU sharing
       settings: {
         get: () => ({
@@ -1503,6 +1503,12 @@ export class JobLauncher {
     if (this.#selectedType) {
       const jobDef = this.#jobDefs.find(j => j.value === this.#selectedType);
       if (jobDef) {
+        // a custom Vuln benchmark: "Vuln <its name, C while it has the default one> - <branch or commit>"
+        if (jobDef.custom_benchmark) {
+          const bench = this.#custom.name && this.#custom.name !== 'custom' ? this.#custom.name : 'C';
+          this.#taskNameInput.value = [`Vuln ${bench}`, label].filter(Boolean).join(' - ');
+          return;
+        }
         if (typeof jobDef.job_label === 'string') {
           this.#taskNameInput.value = this.#resolveLabel(jobDef.job_label, commit);
           return;
