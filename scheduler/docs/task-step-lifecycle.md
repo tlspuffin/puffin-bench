@@ -92,8 +92,9 @@ Schedule::ScheduleLoop()  [background thread]
   v
 Step::TaskLastStep() true for the step that completes the task
   -> Task::FinalizeAndArchive(savePath)
-       - if the task never left Pending (e.g. cancelled before its first step ran):
-         Task::DeleteRunFolders() and return early, skipping everything below
+       - a task that never left Pending ends only when cancelled before its first step ran: it is
+         archived like any cancelled task, with empty artefacts/ and logs/ (it has no run folders nor
+         global parameters, and Local::TaskFinalize() is skipped), so that the history keeps it
        - moves artefacts/ and logs/ into <exportPath|exportCanceledPath>/<id>/
        - writes <exportPath>/<id>.json (task snapshot)
        - Local::TaskFinalize() reads the per-task flag file into Task::flag_
