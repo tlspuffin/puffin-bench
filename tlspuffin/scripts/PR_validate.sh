@@ -12,7 +12,8 @@
 #   - else "inconclusive".
 # Controls: the witness of each X must give X's oracle on V_X and not on F (`tlspuffin witness`).
 #
-# ValidationPrepare: the checkout (validation/tree), the builds (one binary, cached per commit, catalogue and preset) and
+# ValidationPrepare: the checkout (validation/tree), the builds (the libraries in a folder shared by the tasks, one
+# binary cached by the scheduler, both named after what they are made from rather than the commit) and
 # the controls, recorded in validation/state.json, once per attempt: by PrepareValidation, a step before the experiment
 # (custom benchmarks: the monitor then confirms the experiment's objectives during the attempt, ConfirmObjective), else
 # by ValidateObjectives. ValidationVerdict: the verdict of one objective, kept in validation/verdicts/.
@@ -97,6 +98,17 @@ ValidationCleanup() {
   return 0;
 }
 
+# ValidationInputsHash <tree> <path>...: a hash of the contents of the files under these paths of the checkout (a
+# missing path counts by its name): what the libraries or the binary of a validation set are made from, whatever the
+# commit (a commit that changes none of them reuses them; the catalogue of dev overlaid on the checkout counts as it is)
+ValidationInputsHash() {
+  local tree="$1"; shift;
+  ( cd "${tree}" && for input in "$@"; do
+      if [ -e "${input}" ]; then find "${input}" -type f ! -path '*/target/*' ! -path '*/.git/*' -print0 | sort -z | xargs -0 -r sha256sum;
+      else echo "missing ${input}"; fi
+    done ) | sha256sum | cut -c1-32;
+}
+
 # ValidationPrepare: the validation of this attempt ready (validation/state.json, status ready, unsupported or error),
 # once per attempt
 ValidationPrepare() {
@@ -129,7 +141,7 @@ ValidationPrepare() {
     ValidationState unsupported "${unsupported}"; ValidationCleanup; return 0;
   fi
 
-  # the validation set and the binary bundling it (cached per commit, catalogue and preset)
+  # the validation set and the binary bundling it
   export VENDOR_DIR="${VALIDATION_WORK}/vendor";
   ( cd "${tree}" && nix-shell --run "./tools/mk_vendor list '${vendor}' --json" ) > "${VALIDATION_WORK}/list.json" ||
     { ValidationFail "mk_vendor list ${vendor} failed"; return 0; };
@@ -144,7 +156,20 @@ ValidationPrepare() {
   fi
   local -a builds; mapfile -t builds < <( jq -r '.validation_set[]' "${VALIDATION_WORK}/list.json" );
   local fixAll="${preset}-fix-all";
-  local cacheId="validation-$( printf '%s %s %s %s' "${COMMIT_ID}" "$( jq -r .catalogue "${VALIDATION_WORK}/list.json" )" "${lib}:${preset}" "${builds[*]}" | md5sum | cut -d' ' -f1 )";
+  local set; set="$( jq -r .catalogue "${VALIDATION_WORK}/list.json" ) ${lib}:${preset} ${builds[*]}";
+  # the libraries of the set: built once into a folder shared by the tasks, named after what they are made from
+  # (puffin-build's build code, the vendor's files with the catalogue and its patches, the toolchain), whatever the
+  # commit; puffin-build locks each library while it builds or reads it, and builds only what is missing or stale
+  local libsRoot="${VALIDATION_LIBS_ROOT:-${THEJOB_TOOLS_PATH}/../validation-libs}";
+  local libsKey; libsKey=$( { ValidationInputsHash "${tree}" puffin-build/cmake puffin-build/src puffin-build/Cargo.toml \
+      "puffin-build/vendors/${lib}" shell.nix tools/mk_vendor; echo "${set}"; } | sha256sum | cut -c1-32 );
+  export VENDOR_DIR="${libsRoot}/${libsKey}";
+  mkdir -p "${VENDOR_DIR}" && touch "${VENDOR_DIR}/.used";
+  # the folders no task used for 30 days (.used: touched at each use)
+  find "${libsRoot}" -mindepth 2 -maxdepth 2 -name .used -mtime +30 -printf '%h\0' 2> /dev/null | xargs -0 -r rm -rf;
+  # the binary: cached per what it is made from (the crates, the build files, the toolchain) and the set it bundles
+  local cacheId="validation-$( { ValidationInputsHash "${tree}" .cargo Cargo.lock Cargo.toml rust-toolchain.toml shell.nix crates \
+      puffin puffin-build puffin-macros tlspuffin tlspuffin-claims extractable-macro tools; echo "${set}"; } | md5sum | cut -d' ' -f1 )";
   local binary cached=false; binary=$( QueryCache -q "${cacheId}" ) || binary='';
   if [ -z "${binary}" ] || [ ! -x "${binary}" ]; then
     local build;
@@ -198,8 +223,8 @@ ValidationPrepare() {
 
 # ValidationEnv: what the executions need, from the prepared validation and the campaign's launch (.currentlaunch,
 # written by the experiment step: its flags, ASLR, ASan options): VALIDATION_WORK, VALIDATION_BINARY, PUFFIN_BUILD_DIR
-# (the binary reads its catalogue at run time: that of this checkout, a cached binary was built in another one, of the
-# same commit and catalogue, which are in the cache key), LAUNCH_FLAGS, LAUNCH_NOASLR, VALIDATION_ASAN_OPTIONS. 1: not
+# (the binary reads its catalogue at run time: that of this checkout, a cached binary was built in another one, from
+# the same sources and catalogue, which are in the cache key), LAUNCH_FLAGS, LAUNCH_NOASLR, VALIDATION_ASAN_OPTIONS. 1: not
 # ready. Sets globals: run it in a subshell where they must not stay (the monitor)
 ValidationEnv() {
   VALIDATION_WORK="${PWD}/validation";
