@@ -180,6 +180,19 @@ TwinExperiment() {
 
 TwinExperimentEnd() { TwinEach ExperimentEnd; }
 
+# ValidateObjectives (PR_validate.sh) of both runs, one after the other in its folder under its run number (its result:
+# validation-<step>-<run>.json, as ExperimentEnd's): with the cores of this step, not one CPU each; the libraries and the
+# binary of the validation are built once, the second run takes them from their caches
+TwinValidateObjectives() {
+  local i run rc=0
+  for i in 0 1; do
+    [ -r "twin${i}/.step_run" ] || continue
+    read -r run _ < "twin${i}/.step_run"
+    ( cd "twin${i}" && THEJOB_STEP_ATTEMPT_ID="${run}" ValidateObjectives ) || rc=1
+  done
+  return ${rc}
+}
+
 # MonitorExperiment of both runs: their messages one after the other, and the facts of the two for the board (one
 # #MONITOR_JSON line: counts added up, the oldest stats and corpus, the newest objectives)
 TwinExperimentMonitor() {

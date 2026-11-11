@@ -127,8 +127,43 @@ function GetObjectivesButton(status) {
        + `🐞 ${objectives.total} (${distinct})</button>`;
 }
 
+// The validation of the objectives against tlspuffin's catalogue (ValidateObjectives, merged per library by the
+// summary scripts): one line, and the verdict of a trace
+const VALIDATION_VERDICTS = {
+  'confirmed': ['✔', 'known bug, confirmed by patch differential: the objective goes when the bug\'s patch is applied'],
+  'not-patched': ['✗', 'the objective stays with every known bug patched: a new bug, or a known bug without patch'],
+  'other-signature': ['⚠', 'a known bug\'s patch removes the objective, but its signature is not the bug\'s oracle: to review'],
+  'inconclusive': ['?', 'no objective on the validation builds (not reproduced, or needs two bugs)'],
+  'not-validated': ['…', 'the validation budget of the step was spent before this objective (VALIDATION_BUDGET)'],
+};
+function ValidationLine(validation) {
+  if (!validation) return '';
+  if (validation.unsupported) return `<div class="lib-validation muted">Not validated: ${EscapeAttribute(validation.unsupported)}.</div>`;
+  const catalogue = validation.catalogue
+    ? `${validation.catalogue.source === 'dev' ? 'dev' : 'the commit\'s own catalogue'} at ${EscapeAttribute(String(validation.catalogue.commit ?? '').slice(0, 10))}` : '';
+  const count = (map) => Object.entries(map ?? {}).map(([id, n]) => `${EscapeAttribute(id)}${n > 1 ? ` ×${n}` : ''}`).join(', ');
+  const parts = Object.entries(validation.verdicts ?? {}).map(([verdict, n]) => {
+    const [mark, help] = VALIDATION_VERDICTS[verdict] ?? ['', ''];
+    const detail = verdict === 'confirmed' ? count(validation.confirmed) : verdict === 'not-patched' && Object.keys(validation.known_unpatched ?? {}).length
+      ? `known without patch: ${count(validation.known_unpatched)}` : '';
+    return `<span class="validation-${EscapeAttribute(verdict)}" title="${EscapeAttribute(help)}">${mark} ${n} ${EscapeAttribute(verdict)}${detail ? ` (${detail})` : ''}</span>`;
+  });
+  const controls = (validation.controls_failed ?? []).length
+    ? ` · <b class="validation-controls-failed" title="the witness of a candidate bug did not behave on the validation builds: verdicts not trusted">controls failed (runs ${EscapeAttribute(validation.controls_failed.join(', '))})</b>` : '';
+  const errors = (validation.errors ?? []).length ? ` · errors: ${validation.errors.map(e => `run ${EscapeAttribute(e.attempt)}: ${EscapeAttribute(e.error)}`).join('; ')}` : '';
+  return `<div class="lib-validation">Validated against tlspuffin's catalogue${catalogue ? ` (${catalogue})` : ''}: ${parts.join(' · ') || 'no objective validated'}${controls}${errors}.</div>`;
+}
+function ValidationBadge(validation, trace) {
+  const v = validation?.byTrace?.[trace];
+  if (!v) return '';
+  const [mark, help] = VALIDATION_VERDICTS[v.verdict] ?? ['', ''];
+  const ids = [...(v.entries ?? []), ...(v.known_unpatched ?? []).map(id => `${id} (no patch)`)];
+  return ` <span class="objective-validation validation-${EscapeAttribute(v.verdict)}" title="${EscapeAttribute(help)}">${mark} ${EscapeAttribute(ids.join(', ') || v.verdict)}</span>`;
+}
+
 // taskID: task of the results, for the link to its full objectives page (objectives_report.sh)
-function ObjectivesPanel(objectives, taskID = null) {
+// validation: the library's validation of its objectives (summary scripts' AttachValidation), if any
+function ObjectivesPanel(objectives, taskID = null, validation = null) {
   const panel = document.createElement('div');
   panel.className = 'lib-objectives-panel';
   panel.hidden = true;
@@ -138,14 +173,15 @@ function ObjectivesPanel(objectives, taskID = null) {
       + `${objectives.distinct ?? groups.length} distinct${shown}. `
       + (taskID ? `<a class="lib-objectives-report" href="${ObjectivesPageURL(taskID)}" target="_blank" rel="noopener" `
           + `title="All the objectives of the task, grouped by bug, with their reports (new tab)">Full report ↗</a> · ` : '')
-      + `traces: artefacts <code>&lt;library&gt;/&lt;run&gt;-objective-reports</code> and <code>-objective</code>.</div>`;
+      + `traces: artefacts <code>&lt;library&gt;/&lt;run&gt;-objective-reports</code> and <code>-objective</code>.</div>`
+      + ValidationLine(validation);
   const rows = groups.map(group => {
     const frames = (group.frames ?? []).map(EscapeAttribute).join(' &lt; ') || '—';
     const attempts = (group.attempts ?? []).join(', ');
     return `<details class="lib-objective">
         <summary><b>${group.count} ×</b> <span class="objective-type objective-${EscapeAttribute(group.type)}">${EscapeAttribute(group.type)}</span>
           <span class="objective-frames">${frames}</span>
-          <span class="objective-runs">runs ${EscapeAttribute(attempts)}</span></summary>
+          <span class="objective-runs">runs ${EscapeAttribute(attempts)}</span>${ValidationBadge(validation, `${group.first_attempt}/${group.first_trace}`)}</summary>
         <div class="objective-trace">first: run ${EscapeAttribute(group.first_attempt)}, ${EscapeAttribute(group.first_trace)}.trace</div>
         <pre>${EscapeAttribute(group.excerpt ?? '')}</pre>
       </details>`;
@@ -944,7 +980,7 @@ function RenderLibrariesTable(config, project, type, typeData) {
     // objectives grouped by bug: a full-width row under the library, opened by its 🐞 button
     const objectivesButton = row.querySelector('.lib-objectives');
     if ((objectivesButton !== null) && (objectivesButton.tagName === 'BUTTON')) {
-      const panel = ObjectivesPanel(status.objectives, libTaskID);
+      const panel = ObjectivesPanel(status.objectives, libTaskID, status.validation);
       panel.hidden = false;
       if (ConfirmedObjectives(status.objectives) === 0) panel.classList.add('unconfirmed');
       // the same bugs as the objectives report of the task, when it exists (else the groups of the summary above)

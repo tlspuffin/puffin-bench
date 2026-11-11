@@ -140,6 +140,37 @@ For tasks that finished before this feature (or to share a link), `scripts/tools
 
 **Live objectives** — `scripts/tools/objectives_live.sh`, run from cron every 5 minutes pinned to core 0 (never assigned to experiments) at idle priority (`taskset -c 0 chrt -i 0 nice -n 19`), replays the objectives found since its last call in the running tasks and updates `/html/objectives/live-<task id>.json` and its page `live-<task id>.html` (the same page as for finished tasks, reloaded every minute) and the index `/html/objectives/live.json`, shown by `live.html` (one row per running task with objectives: commit line, counts, configurations hit). Attempts that already ended are read from the task artefacts, where the experiment archives their objectives and its own replays of them (`<library>/<attempt>-objective/`, `<attempt>-objective-reports/`): a VulnA attempt usually stops at its first objective before the next call. It takes no time from the fuzzing cores, never calls cargo (which could rebuild the binary of a running fuzzer), runs the experiment's binary in a working directory of its own with the ASAN options of the commit, and spends at most `PB_LIVE_BUDGET` seconds (240) per call. Cron jobs run outside `user.slice`, which the scheduler keeps off the fuzzing cores, hence the explicit pinning (also for `objectives_report.sh --all`). Each live page shows, per library, what was built (harness and library version, the `build` of `cli-<library>.json`, see Recorded Experiment Conditions) and whether ASAN is active, and links to the task on the scheduler board; the pages of finished tasks show the same, read from the experiment step's record in the export (derived from its other fields for older tasks), and `--all` rewrites the pages older than the script once it is updated. When running tasks other than VulnA/VulnB have objectives (VulnA/VulnB look for known bugs: their objectives are expected), the top bar of every page shows a yellow "🐞 … live" pill to `live.html` (`nav.js` reads `live.json`; outlined while no replay confirmed a bug). The "🐞 Live objectives" button the script used to write in the board's optional `board/custom/header.html` is gone: it empties a header it wrote (a header it did not write is left alone).
 
+## Objectives: Validation Against tlspuffin's Catalogue
+
+`ValidateObjectives` (`PR_validate.sh`, in every `*_full.sh`) runs after `ExperimentEnd`, in the same working directory,
+with its own cores (`nb_cores` of the step, 4 in the job configurations). It tells, for each objective (at most
+`VALIDATION_MAX`, 20 by default, the targeted ones first), whether it is a known bug of tlspuffin's vulnerability
+catalogue (`puffin-build/vendors/<vendor>/vulnerabilities.toml`), by patch differential:
+
+1. At the campaign's commit, a checkout of the task's clone gets the catalogue: dev's (`VALIDATION_CATALOGUE=dev`, the
+   default: origin/dev's `vulnerabilities.toml` files and the patches they name replace the commit's) or the commit's own
+   (`VALIDATION_CATALOGUE=commit`, for a bug added by a PR).
+2. `mk_vendor list <vendor> --json` gives the entries of the campaign's preset and its validation set: F
+   (`<preset>-fix-all`, every active bug with a patch patched) and one V_X (`<preset>-only-<X>`) per such bug. They are
+   built with ASan, and bundled into one tlspuffin binary, cached per commit, catalogue hash and preset. A build derived
+   from the catalogue (a custom benchmark's `<preset>-only-<ID>`) is validated on the set of its base preset. The binary
+   reads its catalogue at run time from the step's own checkout (`PUFFIN_BUILD_DIR`): a cached binary was built in
+   another task's.
+3. Controls: `tlspuffin --put <V_X> witness X` must match X's oracle, and `--put <F> witness X` must not (`controls_ok`).
+4. Each objective runs up to `VALIDATION_RUNS` times (3) with `execute --outcome`, the campaign's flags and ASan
+   options (`.currentlaunch`): on F first, then on each V_X. Verdicts: `not-patched` (an objective on F; the known bugs
+   without patch whose oracle matches are named in `known_unpatched`), `confirmed` (an objective on V_X matching X's
+   oracle: `entries`), `other-signature` (an objective on V_X with another signature), `inconclusive`. The executions
+   stop at `VALIDATION_BUDGET` seconds (1800, counted after the builds): the objectives left are `not-validated`.
+
+Output: `validation-<library>-<attempt>.json` (verdicts, controls, the catalogue's source, commit and hash, the entries
+with their hashes), and the outcome and output of every execution as the artefact `<library>/<attempt>-validation`. The
+summary scripts attach it to the runs (`Utils.AttachValidation`), and Results shows it in the 🐞 panel. A commit without
+catalogue (before tlspuffin pr/vuln-catalogue), or a dev without catalogue for the library, is recorded as
+`unsupported`; a failed build as `error`, without failing the attempt. `VALIDATION=off` skips the step.
+`tests/validate_step_test.sh` runs the step outside the scheduler on a simulated task (real builds and executions,
+then again from the cache with no budget); `tests/attach_validation_test.sh` merges a result as the summary scripts do.
+
 ## Monitoring: Hang Detection
 
 `ExperimentCheckAllThreadsRunning` (in `PR_common.sh`) runs once a minute during `ExperimentCheckRun` and implements two independent kill paths:

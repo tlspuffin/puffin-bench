@@ -347,6 +347,24 @@ No target is declared for group B: a run ends at its first objective that is not
   - in a plain version whose build declared no CVEs: when it is none of the CVEs of the library it built in the CVE table of `vuln_targets.json` (`_cves`: `library` and signature) and no earlier task had its signature in that configuration. A bug recognised this way is marked **📋 known (inferred)**.
 - **The title of a report** says **N known bugs found**, without 🎉, when every bug found is expected given the tested version (🎯 expected or 📋 known); otherwise 🎉, and 🚨 N NEW BUG(S) before it when there are new bugs. The history page of the scheduler highlights a task with new bugs in yellow, with that title on its 🐞 button.
 
+## Known bugs: how an objective is decided
+
+tlspuffin's vulnerability catalogue (puffin-build/vendors/<vendor>/vulnerabilities.toml in tlspuffin, listed on the
+**Bugs reference** page) gives, for each known bug, its affected versions, a patch per version range and its oracle (the
+signature of its objectives). After each run, the `ValidateObjectives` step rebuilds the run's library at the run's
+commit, with ASan, once with every known bug that has a patch patched (F), and once per such bug X with all of them but
+X patched (V_X), and replays each objective on them:
+- ✔ **confirmed X**: no objective on F, and on V_X an objective matching X's oracle: the objective is bug X;
+- ✗ **not patched**: the objective stays on F: a new bug, or a known bug without patch (named when its oracle matches);
+- ⚠ **other signature**: X's patch removes the objective, but not with X's signature: to review, never counted as X;
+- ? **inconclusive**: no objective on the validation builds;
+- … **not validated**: the step's time budget (30 min of executions) was spent before it.
+
+The witness of each X is run first on V_X and F (controls): when it does not behave, the verdicts say "controls
+failed". The verdicts show in the 🐞 panel of Results. To add a known bug: an entry, a patch and a witness trace in
+tlspuffin (see its puffin-build/README.md); the bench reads dev's catalogue, or the commit's with
+`VALIDATION_CATALOGUE=commit`.
+
 ## Performance configurations
 
 `PR_perf_cargo.json` runs four libraries in parallel, each built once, then 20 one-client runs of 70 minutes (10 twin steps, two runs per physical core, see CPU sharing), all requiring the `introspection` cargo feature:

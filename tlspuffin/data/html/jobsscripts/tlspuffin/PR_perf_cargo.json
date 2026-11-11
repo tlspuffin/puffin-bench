@@ -84,6 +84,12 @@
       },
       {
         "step": "TwinExperimentEnd"
+      },
+      {
+        "step": "TwinValidateObjectives",
+        "configuration": {
+          "nb_cores": 4
+        }
       }
     ],
     {
