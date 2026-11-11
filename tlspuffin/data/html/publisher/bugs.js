@@ -29,9 +29,10 @@ let catalogue = firstCatalogue;
 // dev without catalogue (before tlspuffin pr/vuln-catalogue is merged): the catalogue of the open pull request updated
 // last that has one (git_restapi's history of tlspuffin), said so on the page
 let shownPR = null, devCatalogue = null;
-async function fallbackCatalogue() {
+async function fallbackCatalogue(refresh = false) {
   if (catalogueRef !== 'dev' || catalogue?.format !== 'none') return;
-  const history = await load(`${urls.git_restapi}/api/git/history/tlspuffin`);
+  // refresh: git_restapi asks GitHub for the pull requests first (their heads move: a push to the PR)
+  const history = await load(`${urls.git_restapi}/api/git/history/tlspuffin${refresh ? '?refresh=all' : ''}`);
   const open = (history?.PR ?? []).filter(pr => pr.state === 'open' && /^[0-9a-f]{40}$/.test(pr.id ?? ''))
     .sort((a, b) => String(b.updated_at ?? b.date ?? '').localeCompare(String(a.updated_at ?? a.date ?? ''))).slice(0, 10);
   for (const pr of open) {
@@ -554,7 +555,7 @@ async function reload() {
   const fresh = await load(`${CATALOGUE}?refresh=fetch`);
   if (fresh) {
     catalogue = fresh; shownPR = null; devCatalogue = null;
-    await fallbackCatalogue();
+    await fallbackCatalogue(true);
     presetsAt = await loadPresets(catalogue); reloaded = new Date().toLocaleTimeString(); reloadError = null;
   } else { reloadError = 'the reload failed: dev as last fetched'; }
   render();
