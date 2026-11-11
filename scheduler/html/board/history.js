@@ -171,7 +171,7 @@ function SearchText(task) {
 const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' })[type] ?? type;
 
 // objectives of VulnA/VulnB tasks are their expected outcome: their button is plain, not gold
-const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b'].includes(task.type);
+const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b', 'vuln-custom'].includes(task.type);
 
 // a task whose objectives report found new bugs (task_links.json "new"): highlighted, with the title of the report
 const HasNewBugs = task => (state.taskLinks[task.id] ?? []).some(link => link.new > 0);

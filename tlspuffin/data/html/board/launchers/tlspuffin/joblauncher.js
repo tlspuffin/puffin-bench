@@ -232,16 +232,23 @@ export class JobLauncher {
         label: `${expected ? '' : '🎉 '}{count} objectives${!url ? '' : running ? ' · live ↗' : ' · report ↗'}`,
         title: running ? 'Objectives of the running attempts; click: live objectives of this task, replayed and grouped by bug'
             : 'Objectives of the task; click: its final report, replayed and grouped by bug',
-        pending: url && !running ? {
+        // a page written later, without link until it exists: the final report (objectives_report.sh, every 10 minutes
+        // after the end of the task), or the live page (objectives_live.sh, every 5 minutes: the first one appears after
+        // the round that follows the first objective has replayed it)
+        pending: !url ? null : !running ? {
           label: `${expected ? '' : '🎉 '}{count} objectives · report pending`,
           title: 'The final report of the objectives is written within 10 minutes of the end of the task',
-        } : null,
+        } : {
+          label: `${expected ? '' : '🎉 '}{count} objectives · live page soon`,
+          title: 'The live objectives page is written every 5 minutes, once its round has replayed the new objectives: it appears within about 10 minutes of the first objective',
+        },
       } : null,
     };
   }
 
   static #ObjectivesExpected(task) {
-    return ['vuln-a', 'vuln-b'].includes(task?.job_type);
+    // Vuln jobs look for known bugs: VulnA/VulnB and the custom benchmarks (their own targets)
+    return ['vuln-a', 'vuln-b', 'vuln-custom'].includes(task?.job_type);
   }
 
   // The settings of a tlspuffin task for the task page (see launchers.js DescribeSettings): job type, commit, package,

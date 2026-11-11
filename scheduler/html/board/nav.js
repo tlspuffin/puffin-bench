@@ -196,8 +196,9 @@ function Health(nav) {
 
 // Objectives found by running tasks (objectives/live.json, written every 5 minutes by objectives_live.sh): a yellow
 // pill next to the services, to the live objectives page. VulnA/VulnB tasks look for known bugs: their objectives
-// are expected and not announced. Outlined while no replay confirmed a bug.
-const objectivesExpected = new Set(['vuln-a', 'vuln-b']);
+// are expected and not announced, as those of custom Vuln benchmarks (their own targets). Outlined while no replay
+// confirmed a bug.
+const objectivesExpected = new Set(['vuln-a', 'vuln-b', 'vuln-custom']);
 
 function LiveObjectives(nav, after) {
   const pill = document.createElement('a');
@@ -218,7 +219,7 @@ function LiveObjectives(nav, after) {
       pill.classList.toggle('unconfirmed', bugs === 0);
       pill.textContent = bugs > 0 ? `\u{1F41E} ${bugs} bug${bugs > 1 ? 's' : ''} found live (${tasks.length} task${tasks.length > 1 ? 's' : ''})`
           : `\u{1F41E} live objectives (${tasks.length} task${tasks.length > 1 ? 's' : ''}, none confirmed)`;
-      pill.title = ['Running tasks with objectives (not VulnA/VulnB), replayed and grouped by bug:',
+      pill.title = ['Running tasks with objectives (not VulnA/VulnB nor custom Vuln benchmarks), replayed and grouped by bug:',
           ...tasks.map(task => `${task.name}: ${task.found} found, ${task.bugs ?? 0} bug(s)`), 'Click: live objectives page']
           .join('\n');
     } catch (error) {

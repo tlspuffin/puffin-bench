@@ -381,7 +381,7 @@ export function BugsHeadline(bugs, newBugs, report) {
   const confirmed = bugs.filter(bug => bug.reproduced > 0 && !bug.notTarget).length;
   const allKnown = real.length > 0 && real.every(bug => [...new Set(bug.runs.map(run => run.library))]
       .every(lib => bug.expectedFor?.has(lib) || bug.knownCve?.[lib]));
-  const celebrate = !['vuln-a', 'vuln-b'].includes(report?.job_type) && !allKnown;
+  const celebrate = !['vuln-a', 'vuln-b', 'vuln-custom'].includes(report?.job_type) && !allKnown;
   const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
   const alarm = newBugs.length ? `🚨 ${newBugs.length} NEW BUG${newBugs.length > 1 ? 'S' : ''}` : '';
   const found = real.length ? `${celebrate ? '🎉 ' : ''}${plural(real.length, allKnown ? 'known bug' : 'bug')} found`

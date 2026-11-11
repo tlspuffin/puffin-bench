@@ -23,7 +23,7 @@ help.innerHTML = `
   <p>Press <b>?</b> to toggle this panel.</p>`;
 document.head.appendChild(help);
 
-const EXPECTED = new Set(['vuln-a', 'vuln-b']);
+const EXPECTED = new Set(['vuln-a', 'vuln-b', 'vuln-custom']);
 const PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' };
 const esc = (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
