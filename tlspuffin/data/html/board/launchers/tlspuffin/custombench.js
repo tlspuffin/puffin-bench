@@ -10,6 +10,8 @@
 // A bug's needs are footnote marks under the table, one per distinct set. Every field of a bug: the Bugs reference
 // page. The experiments are the task's configurations (runtime RUNTIME_RUN_CONFIG, see runConfig), named
 // <benchmark>_<alias or ID>, and the definition is recorded in the task (definition) so that it can be launched again.
+// Saved benchmarks: definitions kept by the scheduler under their name (/api/benchmarks/tlspuffin, shared by every
+// user of the board), saved with "save for later" (at launch) or "Save now", loaded on any commit, removed.
 
 const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const LIBRARY = { wolfssl: 'wolfSSL', openssl: 'OpenSSL', libressl: 'LibreSSL', boringssl: 'BoringSSL', libssh: 'libssh', wolfssh: 'wolfSSH' };
@@ -19,6 +21,11 @@ const MARKS = ['*', '†', '‡', '§', '¶', '‖', '**', '††', '‡‡'];
 // versions, ranges, where a bug is and has a patch: the catalogue's rules (common/catalogue.js), also for the tests
 import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt } from '../../../common/catalogue.js';
 export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt };
+
+// the scheduler's store of saved benchmarks (scheduler/src/scheduler/api/benchmarks_api.hxx)
+const SAVED_API = '/api/benchmarks/tlspuffin';
+const answer = request => request.then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
+  .catch(err => ({ ok: false, body: { error: `no answer from the scheduler (${err.message})` } }));
 
 const duration = s => {
   if (s === null || s === undefined || !Number.isFinite(Number(s))) return '—';
@@ -38,6 +45,9 @@ export class CustomBenchmark {
   #source = 'dev';              // the catalogue the bugs come from: 'dev' or 'commit'
   #times = null;                // the bench's times to find (/html/runs/bench_times.json), when there are
   #picked = new Map();          // ID -> { preset } of the ticked bugs
+  #saved = {};                  // the saved benchmarks: name -> { saved_at, definition }
+  #savedError = '';
+  #pending = null;              // a definition to apply once the commit's catalogue and presets are there
   #error = '';
   #loading = false;
   #els = {};
@@ -48,11 +58,18 @@ export class CustomBenchmark {
     this.node = document.createElement('div');
     this.node.className = 'jl-custom';
     this.node.innerHTML = `
+      <div class="jl-custom-row jl-custom-savedrow">
+        <span class="jl-label">Saved benchmarks</span>
+        <select class="jl-select jl-custom-saved"><option value="">none saved yet</option></select>
+        <button type="button" class="jl-custom-load jl-custom-open" title="Its bugs, versions and settings, on the commit chosen above">Load</button>
+        <button type="button" class="jl-custom-load jl-custom-remove" title="No longer among the saved benchmarks (the tasks it launched and their results stay)">🗑 Remove</button>
+        <span class="jl-custom-savedinfo"></span>
+      </div>
       <div class="jl-custom-row">
         <span class="jl-label">Catalogue</span>
         <label><input type="radio" name="jl-custom-source" value="dev"> <span class="jl-custom-dev">dev's</span></label>
         <label><input type="radio" name="jl-custom-source" value="commit"> this commit's</label>
-        <button type="button" class="jl-custom-load" title="The catalogue of the chosen commit (e.g. a PR adding a bug): its bugs, compared with dev's">Load bugs from this commit</button>
+        <button type="button" class="jl-custom-load jl-custom-loadcommit" title="The catalogue of the chosen commit (e.g. a PR adding a bug): its bugs, compared with dev's">Load bugs from this commit</button>
         <span class="jl-custom-badge"></span>
         <a class="jl-custom-details" target="_blank" rel="noopener">📖 Every detail of each bug: Bugs reference ↗</a>
       </div>
@@ -87,6 +104,9 @@ export class CustomBenchmark {
         <span class="jl-label">Benchmark</span><input type="text" class="jl-commit-input jl-custom-name" value="custom" maxlength="24" spellcheck="false"
           title="Its name (letters, digits, -): the experiments are named <benchmark>_<bug>; launching it again with the same name continues its series on Results">
         <input type="text" class="jl-commit-input jl-custom-description" placeholder="description (optional)" maxlength="200">
+        <label title="Launching also keeps this benchmark under its name, to launch it again later on any commit (Saved benchmarks, above)"><input type="checkbox" class="jl-custom-keep"> 💾 save for later</label>
+        <button type="button" class="jl-custom-load jl-custom-savenow" title="Keep it under its name now, without launching it">Save now</button>
+        <span class="jl-custom-savestatus"></span>
       </div>`;
     const $ = selector => this.node.querySelector(selector);
     this.#els = {
@@ -94,8 +114,18 @@ export class CustomBenchmark {
       footnotes: $('.jl-custom-footnotes'), runs: $('.jl-custom-runs'), lib: $('.jl-custom-lib'), cat: $('.jl-custom-cat'),
       puffin: $('.jl-custom-puffin'), nowitness: $('.jl-custom-nowitness'), attempts: $('.jl-custom-attempts'),
       cores: $('.jl-custom-cores'), cost: $('.jl-custom-cost'), name: $('.jl-custom-name'), description: $('.jl-custom-description'),
-      dev: $('.jl-custom-dev'), load: $('.jl-custom-load'), warnings: $('.jl-custom-warnings'),
+      dev: $('.jl-custom-dev'), load: $('.jl-custom-loadcommit'),
+      warnings: $('.jl-custom-warnings'), saved: $('.jl-custom-saved'), open: $('.jl-custom-open'), remove: $('.jl-custom-remove'),
+      savedinfo: $('.jl-custom-savedinfo'), keep: $('.jl-custom-keep'), savenow: $('.jl-custom-savenow'), savestatus: $('.jl-custom-savestatus'),
     };
+    this.#els.saved.addEventListener('change', () => this.#renderSavedInfo());
+    this.#els.open.addEventListener('click', () => {
+      const saved = this.#saved[this.#els.saved.value];
+      if (saved) this.restore(saved.definition);
+    });
+    this.#els.remove.addEventListener('click', () => this.#remove(this.#els.saved.value));
+    this.#els.savenow.addEventListener('click', () => this.save());
+    this.#refreshSaved();
     this.node.querySelectorAll('input[name="jl-custom-source"]').forEach(radio =>
       radio.addEventListener('change', () => { this.#source = radio.value; this.#picked.clear(); this.#render(); }));
     this.#els.load.addEventListener('click', () => { this.#source = 'commit'; this.#picked.clear(); this.#render(); });
@@ -127,6 +157,10 @@ export class CustomBenchmark {
 
   reset() {
     this.#picked.clear();
+    this.#pending = null;
+    this.#els.keep.checked = false;
+    this.#saveStatus('', '');
+    this.#refreshSaved();
     this.#els.name.value = 'custom';
     this.#els.description.value = '';
     this.#render();
@@ -153,7 +187,13 @@ export class CustomBenchmark {
       if (!presets || !commit) this.#error = 'git_restapi did not answer the presets or the catalogue of this commit';
       // dev's catalogue by default (what validation trusts), the commit's when dev has none
       this.#source = dev?.format === 'vulnerabilities.toml' ? 'dev' : 'commit';
-      this.#render();
+      if (this.#pending) {
+        const definition = this.#pending;
+        this.#pending = null;
+        this.#apply(definition);
+      } else {
+        this.#render();
+      }
     });
   }
 
@@ -180,26 +220,96 @@ export class CustomBenchmark {
     };
   }
 
-  // a definition recorded with an earlier task ("New task…" from it): the same bugs, versions and settings
+  // a definition recorded with an earlier task ("New task…" from it) or saved (Saved benchmarks): the same bugs, versions
+  // and settings, on the commit chosen (once its catalogue and presets are there)
   restore(definition) {
     if (!definition) return;
-    this.#els.name.value = definition.name ?? 'custom';
+    this.#els.name.value = String(definition.name ?? 'custom').replace(/[^A-Za-z0-9-]/g, '').slice(0, 24) || 'custom';
     this.#els.description.value = definition.description ?? '';
     this.#els.attempts.value = definition.attempts ?? 5;
     this.#els.cores.value = definition.cores ?? 4;
     const others = this.node.querySelector(`input[name="jl-custom-others"][value="${definition.others === 'preset' ? 'preset' : 'patched'}"]`);
     if (others) others.checked = true;
-    const apply = () => {
-      if (definition.catalogue?.source) this.#source = definition.catalogue.source;
-      this.#picked.clear();
-      for (const x of definition.experiments ?? []) this.#picked.set(x.bug, { preset: x.preset });
-      this.#render();
-    };
-    if (this.#loading) {
-      const wait = setInterval(() => { if (!this.#loading) { clearInterval(wait); apply(); } }, 100);
-    } else {
-      apply();
+    if (!this.#sha || this.#loading) {
+      this.#pending = definition;
+      this.#saveStatus(`${definition.name ?? 'the benchmark'}: its bugs are ticked once a commit is chosen`, '');
+      return;
     }
+    this.#apply(definition);
+  }
+
+  // ticks the bugs of a definition in the catalogue shown: its own (dev's or the commit's) when there is one
+  #apply(definition) {
+    const wanted = definition.catalogue?.source;
+    if (wanted && this.#catalogues[wanted]?.format === 'vulnerabilities.toml') this.#source = wanted;
+    this.#picked.clear();
+    for (const x of definition.experiments ?? []) this.#picked.set(x.bug, { preset: x.preset });
+    this.#render();
+    const here = new Set(this.#entries().map(x => x.id));
+    const missing = (definition.experiments ?? []).filter(x => !here.has(x.bug)).map(x => x.bug);
+    for (const id of missing) this.#picked.delete(id);
+    if (missing.length) {
+      this.#renderRuns();
+      this.#saveStatus(`not in this catalogue, left out: ${missing.join(', ')}`, 'warn');
+    } else {
+      this.#saveStatus('', '');
+    }
+  }
+
+  // ── saved benchmarks ──
+  async #refreshSaved(select = null) {
+    const { ok, body } = await answer(fetch(SAVED_API, { cache: 'no-store' }));
+    this.#saved = ok && body.success ? (body.data ?? {}) : {};
+    this.#savedError = ok && body.success ? '' : `the scheduler did not list them${body.error ? ` (${body.error})` : ''}`;
+    const names = Object.keys(this.#saved).sort((a, b) => a.localeCompare(b));
+    const keep = select ?? this.#els.saved.value;
+    this.#els.saved.innerHTML = names.length
+      ? names.map(n => `<option value="${esc(n)}">${esc(n)}${this.#saved[n].definition?.description ? ` — ${esc(this.#saved[n].definition.description)}` : ''}</option>`).join('')
+      : '<option value="">none saved yet</option>';
+    this.#els.saved.value = names.includes(keep) ? keep : (names[0] ?? '');
+    this.#els.open.disabled = this.#els.remove.disabled = !names.length;
+    this.#renderSavedInfo();
+  }
+
+  #renderSavedInfo() {
+    const saved = this.#saved[this.#els.saved.value];
+    if (!saved) { this.#els.savedinfo.textContent = this.#savedError; return; }
+    const d = saved.definition ?? {};
+    const bugs = (d.experiments ?? []).map(x => String(x.name ?? '').startsWith(`${d.name}_`) ? x.name.slice(`${d.name}_`.length) : x.bug);
+    const when = Number.isFinite(saved.saved_at) ? new Date(saved.saved_at).toISOString().slice(0, 16).replace('T', ' ') : '?';
+    this.#els.savedinfo.textContent = `${bugs.length} bug(s): ${bugs.join(', ') || 'none'} · ${d.attempts ?? '?'} attempt(s) × ${d.cores ?? '?'} core(s)`
+      + ` · other known bugs ${d.others === 'preset' ? 'as in the preset' : 'patched'} · saved ${when} UTC`;
+  }
+
+  #saveStatus(text, kind) {
+    this.#els.savestatus.textContent = text;
+    this.#els.savestatus.className = `jl-custom-savestatus${kind ? ` ${kind}` : ''}`;
+  }
+
+  // keeps the benchmark under its name (replacing a saved one of that name, once confirmed); false: not saved
+  async save() {
+    if (!this.#experiments().length) { this.#saveStatus('nothing to save: tick at least one bug', 'warn'); return false; }
+    const definition = this.definition();
+    if (this.#saved[definition.name] && !window.confirm(`Replace the saved benchmark ${definition.name}?`)) return false;
+    const { ok, body } = await answer(fetch(`${SAVED_API}/${encodeURIComponent(definition.name)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(definition) }));
+    if (!ok || body.success === false) {
+      this.#saveStatus(`not saved: ${body.error ?? 'refused by the scheduler'}`, 'warn');
+      return false;
+    }
+    this.#saveStatus(`saved as ${definition.name}`, 'ok');
+    await this.#refreshSaved(definition.name);
+    return true;
+  }
+
+  // at launch: saved too when "save for later" is ticked
+  async saveIfKept() { return this.#els.keep.checked ? this.save() : true; }
+
+  async #remove(name) {
+    if (!name || !window.confirm(`Remove the saved benchmark ${name}? The tasks it launched and their results stay.`)) return;
+    const { ok, body } = await answer(fetch(`${SAVED_API}/${encodeURIComponent(name)}`, { method: 'DELETE' }));
+    this.#saveStatus(ok && body.success !== false ? `${name} removed` : `not removed: ${body.error ?? 'refused by the scheduler'}`, ok ? 'ok' : 'warn');
+    await this.#refreshSaved();
   }
 
   // ── data ──

@@ -706,6 +706,13 @@ a.tp-mon {
 .jl-custom-note label { display: block; margin-top: 3px; }
 .jl-custom-disabled { opacity: .6; }
 .jl-custom-cost { color: var(--jl-text-muted); font-size: 12px; }
+.jl-custom-savedrow { border: 1px solid var(--jl-border); border-radius: 6px; padding: 5px 8px; background: #161b22; }
+.jl-custom-savedrow .jl-select { min-width: 220px; }
+.jl-custom-savedinfo { color: var(--jl-text-muted); font-size: 12px; }
+.jl-custom-load:disabled { opacity: .5; cursor: default; }
+.jl-custom-savestatus { font-size: 12px; color: var(--jl-text-muted); }
+.jl-custom-savestatus.ok { color: #3fb950; }
+.jl-custom-savestatus.warn { color: #d29922; }
 .jl-custom .jl-select { max-width: 360px; }
 /* the space kept for the campaign fields (no jump between job types) is not needed by the wide custom panel */
 .jl-modal.jl-wide .jl-campaign-extra:not(.visible) { display: none; }

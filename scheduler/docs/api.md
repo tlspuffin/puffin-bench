@@ -584,6 +584,55 @@ Note there is no `md5` field in the response body in the current implementation.
 
 ---
 
+## Saved Benchmarks
+
+Named definitions a project's launcher keeps for later, shared by every user of the board: tlspuffin's custom Vuln
+benchmarks (their bugs, versions and settings, as `custombench.js` `definition()` records them with a task). The
+scheduler stores them and never reads them (`src/scheduler/api/benchmarks_api.cxx`), in one file,
+`<schedule.exportPath>/benchmarks.json`, next to `users.json`:
+```json
+{ "tlspuffin": { "VulnC": { "saved_at": 1794322228448, "definition": { "name": "VulnC", "experiments": [ ... ] } } } }
+```
+written whole on each change (a temporary file, then renamed). A file that is not a JSON object is renamed
+`benchmarks.json.unreadable` at start, and the board starts without saved benchmarks. `<project>` is `[A-Za-z0-9_-]{1,64}`,
+`<name>` `[A-Za-z0-9-]{1,24}` (what the launcher allows for a benchmark name). Test: `build/scheduler/testBenchmarksAPI`.
+
+### List the Saved Benchmarks of a Project
+
+```
+GET /api/benchmarks/<project>
+```
+
+**Response `200 OK`:** `{ "success": true, "data": { "<name>": { "saved_at": <ms since the epoch>, "definition": { ... } }, ... } }`
+(`"data": {}` when none).
+
+### Save a Benchmark
+
+```
+PUT /api/benchmarks/<project>/<name>
+Content-Type: application/json
+
+{ "name": "<name>", ... }
+```
+
+Saves the definition (the body, a JSON object of at most 256 KiB), replacing one of that name. A `name` field, when
+there is one, must be `<name>`.
+
+**Response `200 OK`:** `{ "success": true }`
+**Response `400 Bad Request`:** `{ "success": false, "error": "..." }`: a body that is not a JSON object, over 256 KiB, or
+named otherwise.
+
+### Remove a Saved Benchmark
+
+```
+DELETE /api/benchmarks/<project>/<name>
+```
+
+**Response `200 OK`:** `{ "success": true }`
+**Response `404 Not Found`:** `{ "success": false, "error": "no saved benchmark <name> for <project>" }`
+
+---
+
 ## Static Files
 
 ```
@@ -637,8 +686,10 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | GET | `/api/users$` | `RequestHandlerUsersList` |
 | GET | `/api/user/([a-zA-Z0-9_-]+)/job_types$` | `RequestHandlerUserJobsTypeList` |
 | GET | `/api/user/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)/tasks$` | `RequestHandlerUserTasksList` |
+| GET | `/api/benchmarks/([A-Za-z0-9_-]+)` | `RequestHandlerBenchmarksList` |
 | GET | `/files/*` (prefix match) | `RequestHandlerFiles` |
 | POST | `/api/task/new` (literal) | `RequestHandlerTaskNew` |
+| PUT | `/api/benchmarks/([A-Za-z0-9_-]+)/([A-Za-z0-9-]+)` | `RequestHandlerBenchmarkSave` |
 | PUT | `/api/cache/([a-zA-Z0-9_-]+)` | `RequestHandlerCachePut` |
 | PATCH | `/api/task/(\d+)/priority/(-?\d+)` | `RequestHandlerTaskUpdatePriority` |
 | PATCH | `/api/executor/([A-Za-z0-9_.-]+)/max_cores/(\d+)/(\d+)` | `RequestHandlerExecutorMaxCores` |
@@ -646,6 +697,7 @@ Extracted directly from `src/scheduler/server/request_handler_factory.hxx`. Rege
 | PATCH | `/api/task/(\d+)/args$` | `RequestHandlerTaskUpdateArgs` |
 | DELETE | `/api/task/(\d+)` | `RequestHandlerTaskCancelOrDelete` |
 | DELETE | `/api/task/(\d+)/step/(\d+)` | `RequestHandlerTaskCancelStep` |
+| DELETE | `/api/benchmarks/([A-Za-z0-9_-]+)/([A-Za-z0-9-]+)` | `RequestHandlerBenchmarkDelete` |
 | OPTIONS | any URI (dispatched on method alone, no URI match) | `RequestHandlerOptions` |
 
 Any unmatched `GET`/`POST`/`PUT`/`PATCH`/`DELETE` method/URI combination resolves to `RequestHandlerError` (`404`). Every `OPTIONS` request resolves to `RequestHandlerOptions` (`200 OK`, CORS headers only, no body) regardless of URI — see "CORS and OPTIONS" above.
