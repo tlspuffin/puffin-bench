@@ -494,12 +494,13 @@ bool ns_GIT::GitAPI::ManageExternalPR(rapidjson::Document& json, std::string& re
   return true;
 }
 
-bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, bool& notFound) {
+bool ns_GIT::GitAPI::PerCommit(std::string const& script, std::string const& cacheName, PerCommitCache& cache,
+    std::string const& commitID, std::string& result, bool& notFound, bool fetch) {
   notFound = false;
-  std::filesystem::path const cacheFile = directory_ / "presets_cache.json";
-  std::lock_guard presetsLock(presetsLock_);
-  if (!presetsLoaded_) {
-    presetsLoaded_ = true;
+  std::filesystem::path const cacheFile = directory_ / cacheName;
+  std::lock_guard cacheLock(cache.lock);
+  if (!cache.loaded) {
+    cache.loaded = true;
     std::ifstream ifs(cacheFile);
     std::string content((std::istreambuf_iterator<char>(ifs)), {});
     rapidjson::Document doc;
@@ -509,14 +510,21 @@ bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, b
         rapidjson::StringBuffer buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
         entry.value.Accept(writer);
-        presets_[entry.name.GetString()] = buffer.GetString();
+        cache.answers[entry.name.GetString()] = buffer.GetString();
       }
+    }
+  }
+  // the latest head of a branch: fetch first (a commit id needs no fetch: an unknown one is fetched below)
+  if (fetch && ((commitID == "dev") || (commitID == "main"))) {
+    std::lock_guard lock(lock_);
+    if (std::system(("git -C \"" + (directory_ / "repo").string() + "\" fetch --all --quiet >/dev/null 2>&1").c_str()) != 0) {
+      LOGW << "git fetch failed, answering " << commitID << " as last fetched" << Log::Flags::End;
     }
   }
   // a short id may match several cached commits: the cache answers only when it names exactly one
   std::string const* cached = nullptr;
   size_t matches = 0;
-  for (auto const& [commit, json] : presets_) {
+  for (auto const& [commit, json] : cache.answers) {
     if (commit.rfind(commitID, 0) == 0) {
       cached = &json;
       ++matches;
@@ -527,7 +535,7 @@ bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, b
     return true;
   }
 
-  std::string const commandLine = (scriptsPath_ / "tlspuffin_presets.sh").string() + " \"" +
+  std::string const commandLine = (scriptsPath_ / script).string() + " \"" +
       (directory_ / "repo").string() + "\" " + commitID + " 2>/dev/null";
   auto run = [&](std::string& output) -> int {
     std::shared_lock lock(lock_);
@@ -550,7 +558,7 @@ bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, b
     std::lock_guard lock(lock_);
     // a failed fetch leaves the commit unknown (the retry below answers so)
     if (std::system(("git -C \"" + (directory_ / "repo").string() + "\" fetch --all --quiet >/dev/null 2>&1").c_str()) != 0) {
-      LOGW << "git fetch failed, looking for the presets of " << commitID << Log::Flags::End;
+      LOGW << "git fetch failed, running " << script << " for " << commitID << Log::Flags::End;
     }
   }
   if (status == 2) {
@@ -564,14 +572,14 @@ bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, b
   rapidjson::Document doc;
   doc.Parse(result.c_str());
   if ((status != 0) || doc.HasParseError() || !doc.IsObject() || !doc.HasMember("commit") || !doc["commit"].IsString()) {
-    result = "Error while running tlspuffin_presets.sh";
+    result = "Error while running " + script;
     return false;
   }
-  presets_[doc["commit"].GetString()] = result;
+  cache.answers[doc["commit"].GetString()] = result;
 
   rapidjson::Document all;
   all.SetObject();
-  for (auto const& [commit, json] : presets_) {
+  for (auto const& [commit, json] : cache.answers) {
     rapidjson::Document one(&all.GetAllocator());
     one.Parse(json.c_str());
     all.AddMember(rapidjson::Value(commit.c_str(), all.GetAllocator()), rapidjson::Value(one, all.GetAllocator()),
@@ -582,4 +590,12 @@ bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, b
   all.Accept(writer);
   SaveFile(cacheFile, buffer.GetString());
   return true;
+}
+
+bool ns_GIT::GitAPI::Presets(std::string const& commitID, std::string& result, bool& notFound) {
+  return PerCommit("tlspuffin_presets.sh", "presets_cache.json", presets_, commitID, result, notFound);
+}
+
+bool ns_GIT::GitAPI::Catalogue(std::string const& commitID, std::string& result, bool& notFound, bool fetch) {
+  return PerCommit("tlspuffin_catalogue.sh", "catalogue_cache.json", catalogue_, commitID, result, notFound, fetch);
 }
