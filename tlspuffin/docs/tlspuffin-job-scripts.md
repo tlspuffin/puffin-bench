@@ -187,7 +187,14 @@ Arguments of a configuration, besides `experiment` (`<benchmark>_<alias or ID>`)
 | `benchmark` | its name | recorded |
 
 After the build, `ForcedBuild` checks with `mk_vendor list` that the target is active in the library built; otherwise
-the attempt is recorded as unsupported (as for the compat rules). `cli-<step>.json` records the experiment under `custom`.
+the attempt is recorded as unsupported (as for the compat rules). `PrepareValidation` (a step after `ForcedBuild`, with
+its own cores) prepares the validation of the attempt (`ValidationPrepare`: checkout, builds, controls, in
+`validation/state.json`). An objective with the target's signature then ends the attempt only once validation confirms
+it (`ConfirmObjective`: confirmed by patch differential; a target without patch: not-patched with the target named; not
+decided by validation — not prepared, a target whose objectives do not replay —: the fuzzer's record, as before): the
+monitor replays at most `VALIDATION_INRUN_MAX` (3) candidates per call while the fuzzer goes on; `ObjectiveCounts` and
+`TargetedNames` count the confirmed ones, the objectives taken oldest first, so that the time to find is when the fuzzer
+saved the first confirmed objective. `ValidateObjectives` keeps those verdicts (`during_attempt`). `cli-<step>.json` records the experiment under `custom`.
 `ValidateObjectives` validates an objective of a derived build on the validation set of its base preset (shared, cached,
 with every experiment on that preset). Tests: `tests/custom_target_test.sh` (the matching and the vendor names, on
 synthetic fuzzer records), `tests/custombench_test.sh` (the launcher's rules against `mk_vendor list` on every preset).

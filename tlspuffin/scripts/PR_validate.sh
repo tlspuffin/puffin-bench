@@ -1,19 +1,25 @@
-# Validation of the objectives of an experiment against tlspuffin's vulnerability catalogue (patch differential).
+# Validation of objectives against tlspuffin's vulnerability catalogue (patch differential).
 #
-# ValidateObjectives is a step after ExperimentEnd, in the same working directory (the experiment and .currentlaunch).
-# At the campaign's commit, with ASan, it builds the validation set of the campaign's preset (`mk_vendor list`): F,
-# every active bug that has a patch patched (`<preset>-fix-all`), and V_X, F without the patch of X
-# (`<preset>-only-<X>`). The catalogue is dev's (VALIDATION_CATALOGUE=dev, the default: the vulnerabilities.toml files
-# of origin/dev and the patches they name replace the commit's) or the commit's (VALIDATION_CATALOGUE=commit, e.g. a bug
-# added by a PR). Each objective runs up to VALIDATION_RUNS times (3) on F, then on each V_X, with the campaign's flags:
+# At the campaign's commit, with ASan, the validation set of the campaign's preset (`mk_vendor list`): F, every active
+# bug that has a patch patched (`<preset>-fix-all`), and V_X, F without the patch of X (`<preset>-only-<X>`); a build
+# derived from the catalogue (a custom benchmark's `<preset>-only-<ID>`) is validated on the set of its base preset. The
+# catalogue is dev's (the default: the vulnerabilities.toml files of origin/dev and the patches they name replace the
+# commit's) or the commit's (VALIDATION_CATALOGUE=commit, else the experiment's catalogue_source). An objective runs up to
+# VALIDATION_RUNS times (3) on F, then on each V_X, with the campaign's flags:
 #   - an objective on F: "not-patched" (a new bug, or a known bug without patch, named when its oracle matches);
 #   - else an objective on V_X matching X's oracle: "confirmed" X;
 #   - else an objective on V_X with another signature: "other-signature" (removed by X's patch, to review, never X);
 #   - else "inconclusive".
 # Controls: the witness of each X must give X's oracle on V_X and not on F (`tlspuffin witness`).
-# Executions after the builds stop at VALIDATION_BUDGET seconds (1800): the objectives left get "not-validated".
-# Result: ${THEJOB_OUT_PATH}/validation-<step>-<attempt>.json; the outcome and output of every execution are an
-# artefact (<step>/<attempt>-validation). Commits without the catalogue are recorded as unsupported.
+#
+# ValidationPrepare: the checkout (validation/tree), the builds (one binary, cached per commit, catalogue and preset) and
+# the controls, recorded in validation/state.json, once per attempt: by PrepareValidation, a step before the experiment
+# (custom benchmarks: the monitor then confirms the experiment's objectives during the attempt, ConfirmObjective), else
+# by ValidateObjectives. ValidationVerdict: the verdict of one objective, kept in validation/verdicts/.
+# ValidateObjectives, after ExperimentEnd: the verdicts of the attempt's objectives (the targeted ones first, at most
+# VALIDATION_MAX, within VALIDATION_BUDGET seconds of executions: the others are "not-validated"), recorded in
+# ${THEJOB_OUT_PATH}/validation-<step>-<attempt>.json, every execution as an artefact (<step>/<attempt>-validation); it
+# removes the checkout. Commits without the catalogue are recorded as unsupported.
 
 # tlspuffin's oracle matching (puffin::outcome::matches), on the outcome JSON of `execute --outcome`
 VALIDATION_JQ='def matches($o): . as $out | $o != null
@@ -44,15 +50,6 @@ for entry in tomllib.load(open(sys.argv[1], "rb")).values():
   echo "${dev}";
 }
 
-# ValidationError <file> <message> <tree>: a validation that could not be done, recorded (the campaign's attempt
-# does not fail for it)
-ValidationError() {
-  echo "Validation: $2";
-  jq -n --arg e "$2" '{ error: $e, objectives: [] }' > "$1";
-  git -C "${THEJOB_OUT_PATH}/repo" worktree remove --force "$3" > /dev/null 2>&1;
-  return 0;
-}
-
 # ValidationExecute <binary> <put> <trace> <tag>: one execution of an objective; prints its outcome (one JSON line)
 ValidationExecute() {
   local binary="$1" put="$2" trace="$3" tag="$4";
@@ -77,26 +74,41 @@ ValidationRuns() {
   echo "${outcomes}";
 }
 
-ValidateObjectives() {
-  local out="${THEJOB_OUT_PATH}/validation-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
-  if [ "${VALIDATION:-on}" == off ]; then
-    jq -n '{ skipped: "VALIDATION=off" }' > "${out}"; return 0;
-  fi
-  local experiment; experiment=$( ls -d ./experiments/*/ 2> /dev/null | head -1 );
-  local -a traces=();
-  if [ -n "${experiment}" ] && [ -d "${experiment}objective" ]; then
-    # the targeted objectives first (ExperimentEnd's .targeted-names), then by time, at most VALIDATION_MAX
-    mapfile -t traces < <(
-      { [ -s "${experiment}.targeted-names" ] && sed "s|^|${experiment}objective/|; s|$|.trace|" "${experiment}.targeted-names";
-        find "${experiment}objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2-; } |
-      awk '!seen[$0]++' | while read -r t; do [ -f "${t}" ] && echo "${t}"; done | head -n "${VALIDATION_MAX:-20}" );
-  fi
-  if (( ${#traces[@]} == 0 )); then
-    jq -n '{ objectives: [], note: "no objective" }' > "${out}"; return 0;
-  fi
+# ValidationState <status> <message> [<fields (JSON object)>]: validation/state.json
+ValidationState() {
+  jq -n --arg status "$1" --arg message "$2" --argjson fields "${3:-{\}}" '{ status: $status, message: $message } + $fields' \
+    > "${PWD}/validation/state.json";
+}
 
+# ValidationFail <message>: a validation that cannot be prepared (recorded as an error; the attempt does not fail)
+ValidationFail() {
+  ValidationState error "$1"; ValidationCleanup; return 0;
+}
+
+# ValidationCleanup: the checkout of the attempt goes (the binary first in the cache, when built here: it copies in
+# the background)
+ValidationCleanup() {
+  local state="${PWD}/validation/state.json" tree="${PWD}/validation/tree";
+  if [ "$( jq -r '.cached // false' "${state}" 2> /dev/null )" == true ]; then
+    local wait cacheId; cacheId=$( jq -r .cacheId "${state}" );
+    for (( wait = 0; wait < 120; wait += 2 )); do QueryCache -q "${cacheId}" > /dev/null && break; sleep 2; done
+  fi
+  git -C "${THEJOB_OUT_PATH}/repo" worktree remove --force "${tree}" > /dev/null 2>&1;
+  return 0;
+}
+
+# ValidationPrepare: the validation of this attempt ready (validation/state.json, status ready, unsupported or error),
+# once per attempt
+ValidationPrepare() {
   export VALIDATION_WORK="${PWD}/validation";
-  rm -rf "${VALIDATION_WORK}"; mkdir -p "${VALIDATION_WORK}/runs";
+  local state="${VALIDATION_WORK}/state.json";
+  if [ -s "${state}" ]; then
+    case "$( jq -r .status "${state}" )" in
+      ready) [ -x "$( jq -r .binary "${state}" )" ] && [ -d "$( jq -r .tree "${state}" )" ] && return 0;;
+      unsupported|error) return 0;;
+    esac
+  fi
+  rm -rf "${VALIDATION_WORK}"; mkdir -p "${VALIDATION_WORK}/runs" "${VALIDATION_WORK}/verdicts";
   local repo="${THEJOB_OUT_PATH}/repo" tree="${VALIDATION_WORK}/tree";
   local lib="${vendor%%:*}" preset="${vendor#*:}";
   local unsupported='';
@@ -114,16 +126,13 @@ ValidateObjectives() {
       unsupported="dev (${catalogueCommit:0:10}) has no catalogue for ${lib} yet (VALIDATION_CATALOGUE=commit: the commit's own)";
   fi
   if [ -n "${unsupported}" ]; then
-    echo "Validation: ${unsupported}";
-    jq -n --arg u "${unsupported}" --argjson n "${#traces[@]}" '{ unsupported: $u, total: $n, objectives: [] }' > "${out}";
-    git -C "${repo}" worktree remove --force "${tree}" > /dev/null 2>&1;
-    return 0;
+    ValidationState unsupported "${unsupported}"; ValidationCleanup; return 0;
   fi
 
   # the validation set and the binary bundling it (cached per commit, catalogue and preset)
   export VENDOR_DIR="${VALIDATION_WORK}/vendor";
   ( cd "${tree}" && nix-shell --run "./tools/mk_vendor list '${vendor}' --json" ) > "${VALIDATION_WORK}/list.json" ||
-    { ValidationError "${out}" "mk_vendor list ${vendor} failed" "${tree}"; return 0; };
+    { ValidationFail "mk_vendor list ${vendor} failed"; return 0; };
   # a build derived from the catalogue (<vendor>:<ID>, <preset>-only-<IDs>, -fix-…: custom benchmarks): the validation
   # set of its base preset, shared with every experiment on that preset
   local base; base=$( jq -r '.derived.base // empty' "${VALIDATION_WORK}/list.json" );
@@ -131,44 +140,35 @@ ValidateObjectives() {
   if [ -n "${base}" ]; then
     preset="${base}";
     ( cd "${tree}" && nix-shell --run "./tools/mk_vendor list '${lib}:${base}' --json" ) > "${VALIDATION_WORK}/list.json" ||
-      { ValidationError "${out}" "mk_vendor list ${lib}:${base} failed" "${tree}"; return 0; };
+      { ValidationFail "mk_vendor list ${lib}:${base} failed"; return 0; };
   fi
   local -a builds; mapfile -t builds < <( jq -r '.validation_set[]' "${VALIDATION_WORK}/list.json" );
   local fixAll="${preset}-fix-all";
   local cacheId="validation-$( printf '%s %s %s %s' "${COMMIT_ID}" "$( jq -r .catalogue "${VALIDATION_WORK}/list.json" )" "${lib}:${preset}" "${builds[*]}" | md5sum | cut -d' ' -f1 )";
-  local binary; binary=$( QueryCache -q "${cacheId}" ) || binary='';
+  local binary cached=false; binary=$( QueryCache -q "${cacheId}" ) || binary='';
   if [ -z "${binary}" ] || [ ! -x "${binary}" ]; then
     local build;
     for build in "${builds[@]}"; do
       ( cd "${tree}" && nix-shell --run "./tools/mk_vendor make --asan '${lib}:${build}'" ) ||
-        { ValidationError "${out}" "cannot build ${lib}:${build}" "${tree}"; return 0; };
+        { ValidationFail "cannot build ${lib}:${build}"; return 0; };
     done
     ( cd "${tree}" && nix-shell --run "cargo build --bin tlspuffin --release --features=cputs -j ${THEJOB_NB_CORES:-1}" ) ||
-      { ValidationError "${out}" "cannot build the validation binary" "${tree}"; return 0; };
+      { ValidationFail "cannot build the validation binary"; return 0; };
     binary="${tree}/target/release/tlspuffin";
     SetCache "${cacheId}" "${binary}" > /dev/null;
-    local cached=true;
+    cached=true;
   fi
   echo "Validation set of ${vendor}: ${builds[*]} (binary ${binary})";
-  # the binary reads its catalogue at run time: that of this checkout (a cached binary was built in another one; same
-  # commit and catalogue, they are in the cache key)
-  local -x PUFFIN_BUILD_DIR="${tree}/puffin-build";
-
-  # the launch of the campaign (flags, ASLR); ASan options of the campaign, else tlspuffin's defaults
-  local LAUNCH_FLAGS='' LAUNCH_NOASLR='' LAUNCH_ASAN_SET=false LAUNCH_ASAN_OPTIONS='';
-  # shellcheck disable=SC1091
-  [ -r .currentlaunch ] && source .currentlaunch;
-  export VALIDATION_ASAN_OPTIONS="verify_asan_link_order=1:detect_leaks=0:abort_on_error=1";
-  [ "${LAUNCH_ASAN_SET}" == true ] && [ -n "${LAUNCH_ASAN_OPTIONS}" ] && VALIDATION_ASAN_OPTIONS="${LAUNCH_ASAN_OPTIONS}";
 
   # candidates: the active bugs with a patch, whose objectives replay; known bugs left active everywhere: no patch
   local candidates unpatched;
   candidates=$( jq -c '[.entries[] | select(.state == "active" and .patchable and .replayable)]' "${VALIDATION_WORK}/list.json" );
   unpatched=$( jq -c '[.entries[] | select(.state == "active" and (.patchable | not))]' "${VALIDATION_WORK}/list.json" );
 
-  local budgetStart=${SECONDS};
-  # controls: each candidate's witness, when this commit has one
-  local witnesses; witnesses=$( ASAN_OPTIONS="${VALIDATION_ASAN_OPTIONS}" "${binary}" catalogue --json 2> /dev/null | jq -c '[.witnesses[].entry] | unique' ) || witnesses='[]';
+  # controls: each candidate's witness, when this commit has one (the binary reads the catalogue of this checkout)
+  local -x PUFFIN_BUILD_DIR="${tree}/puffin-build";
+  local asanOptions="verify_asan_link_order=1:detect_leaks=0:abort_on_error=1";
+  local witnesses; witnesses=$( ASAN_OPTIONS="${asanOptions}" "${binary}" catalogue --json 2> /dev/null | jq -c '[.witnesses[].entry] | unique' ) || witnesses='[]';
   local controls='[]' id;
   for id in $( jq -r '.[].id' <<< "${candidates}" ); do
     if ! jq -e --arg id "${id}" 'index($id) != null' <<< "${witnesses}" > /dev/null; then
@@ -176,7 +176,7 @@ ValidateObjectives() {
     fi
     local put good bad;
     for put in "${preset}-only-${id}" "${fixAll}"; do
-      ASAN_OPTIONS="${VALIDATION_ASAN_OPTIONS}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" "${binary}" --put "${put}" witness "${id}" \
+      ASAN_OPTIONS="${asanOptions}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" "${binary}" --put "${put}" witness "${id}" \
         --runs "${VALIDATION_RUNS:-3}" --outcome "${VALIDATION_WORK}/runs/control-${id}-${put}.json" \
         < /dev/null > "${VALIDATION_WORK}/runs/control-${id}-${put}.log" 2>&1;
     done
@@ -186,53 +186,160 @@ ValidateObjectives() {
       '. + [{ entry: $id, triggers_unpatched: $good, triggers_patched: $bad, ok: ($good == true and $bad == false) }]' <<< "${controls}" );
   done
 
-  # the verdict of each objective, within the budget (counted from the controls: the builds are cached)
-  local results='[]' trace n=0;
+  ValidationState ready '' "$( jq -n --arg binary "${binary}" --arg tree "${tree}" --arg lib "${lib}" --arg preset "${preset}" \
+    --arg fixAll "${fixAll}" --arg source "${source}" --arg catalogueCommit "${catalogueCommit}" --arg cacheId "${cacheId}" \
+    --argjson cached "${cached}" --argjson candidates "${candidates}" --argjson unpatched "${unpatched}" --argjson controls "${controls}" \
+    --slurpfile list "${VALIDATION_WORK}/list.json" \
+    '{ binary: $binary, tree: $tree, lib: $lib, preset: $preset, fixAll: $fixAll, source: $source, catalogueCommit: $catalogueCommit,
+       cacheId: $cacheId, cached: $cached, candidates: $candidates, unpatched: $unpatched, controls: $controls,
+       entries: [$list[0].entries[] | { id, state, patchable, replayable, oracle }] }' )";
+  return 0;
+}
+
+# ValidationEnv: what the executions need, from the prepared validation and the campaign's launch (.currentlaunch,
+# written by the experiment step: its flags, ASLR, ASan options): VALIDATION_WORK, VALIDATION_BINARY, PUFFIN_BUILD_DIR
+# (the binary reads its catalogue at run time: that of this checkout, a cached binary was built in another one, of the
+# same commit and catalogue, which are in the cache key), LAUNCH_FLAGS, LAUNCH_NOASLR, VALIDATION_ASAN_OPTIONS. 1: not
+# ready. Sets globals: run it in a subshell where they must not stay (the monitor)
+ValidationEnv() {
+  VALIDATION_WORK="${PWD}/validation";
+  local state="${VALIDATION_WORK}/state.json";
+  [ "$( jq -r .status "${state}" 2> /dev/null )" == ready ] || return 1;
+  VALIDATION_BINARY=$( jq -r .binary "${state}" );
+  export PUFFIN_BUILD_DIR; PUFFIN_BUILD_DIR="$( jq -r .tree "${state}" )/puffin-build";
+  LAUNCH_FLAGS=''; LAUNCH_NOASLR=''; LAUNCH_ASAN_SET=false; LAUNCH_ASAN_OPTIONS='';
+  # shellcheck disable=SC1091
+  [ -r .currentlaunch ] && source .currentlaunch;
+  VALIDATION_ASAN_OPTIONS="verify_asan_link_order=1:detect_leaks=0:abort_on_error=1";
+  [ "${LAUNCH_ASAN_SET}" == true ] && [ -n "${LAUNCH_ASAN_OPTIONS}" ] && VALIDATION_ASAN_OPTIONS="${LAUNCH_ASAN_OPTIONS}";
+  return 0;
+}
+
+# ValidationVerdict <trace> [during]: the verdict of an objective (JSON: trace, verdict, entries, known_unpatched,
+# other_signature, the executions), computed once (validation/verdicts/<name>.json; "during": by the monitor, during
+# the attempt). Needs ValidationEnv
+ValidationVerdict() {
+  local trace="$1" name; name=$( basename "$1" .trace );
+  local file="${VALIDATION_WORK}/verdicts/${name}.json" state="${VALIDATION_WORK}/state.json";
+  [ -s "${file}" ] && { cat "${file}"; return 0; };
+  local fixAll preset candidates unpatched;
+  fixAll=$( jq -r .fixAll "${state}" ); preset=$( jq -r .preset "${state}" );
+  candidates=$( jq -c .candidates "${state}" ); unpatched=$( jq -c .unpatched "${state}" );
+  local onF; onF=$( ValidationRuns "${VALIDATION_BINARY}" "${fixAll}" "${trace}" "${name}-F" );
+  local result id;
+  if jq -e "${VALIDATION_JQ} any(.[]; objective)" <<< "${onF}" > /dev/null; then
+    result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson unpatched "${unpatched}" "${VALIDATION_JQ}
+      ([\$f[] | select(objective)][0]) as \$o
+      | { trace: \$t, verdict: \"not-patched\", entries: [], known_unpatched: [\$unpatched[] | select(.oracle as \$or | \$o | matches(\$or)) | .id], f: \$f }" <<< 'null' );
+  else
+    local onV='{}';
+    for id in $( jq -r '.[].id' <<< "${candidates}" ); do
+      onV=$( jq -c --arg id "${id}" --argjson runs "$( ValidationRuns "${VALIDATION_BINARY}" "${preset}-only-${id}" "${trace}" "${name}-${id}" )" '. + { ($id): $runs }' <<< "${onV}" );
+    done
+    result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson v "${onV}" --argjson candidates "${candidates}" "${VALIDATION_JQ}
+      [\$candidates[] | .id as \$id | .oracle as \$or | select(any(\$v[\$id][]?; matches(\$or))) | \$id] as \$confirmed
+      | [\$candidates[] | .id as \$id | .oracle as \$or | select((any(\$v[\$id][]?; matches(\$or)) | not) and any(\$v[\$id][]?; objective)) | \$id] as \$other
+      | { trace: \$t, verdict: (if (\$confirmed | length) > 0 then \"confirmed\" elif (\$other | length) > 0 then \"other-signature\" else \"inconclusive\" end),
+          entries: \$confirmed, other_signature: \$other, f: \$f, v: \$v }" <<< 'null' );
+  fi
+  [ "${2:-}" == during ] && result=$( jq -c '. + { during_attempt: true }' <<< "${result}" );
+  echo "${result}" > "${file}";
+  echo "${result}";
+}
+
+# ConfirmObjective <trace>: whether an objective of a custom benchmark's experiment is its target (target_bug), by its
+# verdict: 0 confirmed, by patch differential when the target has a patch at this version, else by its signature on the
+# build with every patch (verdict not-patched, the target named); 1 not confirmed (another bug, not reproduced); 2 not
+# decided by validation (not prepared: unsupported or error; the target's objectives do not replay): the caller keeps
+# the fuzzer's record. Prints why, in a few words. The executions run in a subshell (the monitor's globals stay).
+ConfirmObjective() {
+  local trace="$1" state="${PWD}/validation/state.json";
+  if [ "$( jq -r .status "${state}" 2> /dev/null )" != ready ]; then
+    echo "no validation: $( jq -r '.message // empty' "${state}" 2> /dev/null || true )"; return 2;
+  fi
+  local target; target=$( jq -c --arg id "${target_bug:-}" '{ candidate: ([.candidates[].id] | index($id) != null),
+      replayable: ([.entries[] | select(.id == $id) | .replayable][0] // true) }' "${state}" );
+  jq -e '.replayable == false' <<< "${target}" > /dev/null && { echo "its objectives do not replay: the fuzzer's record"; return 2; };
+  local verdict; verdict=$( ValidationEnv && ValidationVerdict "${trace}" during ) || { echo "the validation failed"; return 2; };
+  if jq -e '.candidate' <<< "${target}" > /dev/null; then
+    jq -e --arg id "${target_bug}" '.verdict == "confirmed" and (.entries | index($id) != null)' <<< "${verdict}" > /dev/null &&
+      { echo "confirmed by patch differential"; return 0; };
+  else
+    jq -e --arg id "${target_bug}" '.verdict == "not-patched" and ((.known_unpatched // []) | index($id) != null)' <<< "${verdict}" > /dev/null &&
+      { echo "its signature on the build with every patch (no patch for it)"; return 0; };
+  fi
+  jq -r '"validation: " + .verdict + (if (.entries | length) > 0 then " " + (.entries | join(", ")) else "" end)
+    + (if ((.known_unpatched // []) | length) > 0 then " (" + (.known_unpatched | join(", ")) + ")" else "" end)' <<< "${verdict}";
+  return 1;
+}
+
+# PrepareValidation: a step before the experiment (custom benchmarks): the validation ready, so that the monitor can
+# confirm the experiment's objectives before it ends the attempt (ConfirmObjective), with the cores of this step
+PrepareValidation() {
+  [ -s ./.unsupported ] && return 0;
+  [ "${VALIDATION:-on}" == off ] && return 0;
+  ValidationPrepare;
+  echo "Validation: $( jq -r '.status + (if .message != "" then ": " + .message else "" end)' "${PWD}/validation/state.json" )";
+  return 0;
+}
+
+ValidateObjectives() {
+  local out="${THEJOB_OUT_PATH}/validation-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}.json";
+  if [ "${VALIDATION:-on}" == off ]; then
+    jq -n '{ skipped: "VALIDATION=off" }' > "${out}"; ValidationCleanup; return 0;
+  fi
+  local experiment; experiment=$( ls -d ./experiments/*/ 2> /dev/null | head -1 );
+  local -a traces=();
+  if [ -n "${experiment}" ] && [ -d "${experiment}objective" ]; then
+    # the targeted objectives first (ExperimentEnd's .targeted-names), then by time, at most VALIDATION_MAX
+    mapfile -t traces < <(
+      { [ -s "${experiment}.targeted-names" ] && sed "s|^|${experiment}objective/|; s|$|.trace|" "${experiment}.targeted-names";
+        find "${experiment}objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2-; } |
+      awk '!seen[$0]++' | while read -r t; do [ -f "${t}" ] && echo "${t}"; done | head -n "${VALIDATION_MAX:-20}" );
+  fi
+  if (( ${#traces[@]} == 0 )); then
+    jq -n '{ objectives: [], note: "no objective" }' > "${out}"; ValidationCleanup; return 0;
+  fi
+
+  ValidationPrepare;
+  local state="${PWD}/validation/state.json" status; status=$( jq -r .status "${state}" );
+  if [ "${status}" != ready ]; then
+    echo "Validation: $( jq -r .message "${state}" )";
+    if [ "${status}" == unsupported ]; then
+      jq -n --arg u "$( jq -r .message "${state}" )" --argjson n "${#traces[@]}" '{ unsupported: $u, total: $n, objectives: [] }' > "${out}";
+    else
+      jq -n --arg e "$( jq -r .message "${state}" )" '{ error: $e, objectives: [] }' > "${out}";
+    fi
+    ValidationCleanup; return 0;
+  fi
+  ValidationEnv;
+
+  # the verdict of each objective (those of the monitor kept), within the budget of executions
+  local budgetStart=${SECONDS} results='[]' trace result name;
   for trace in "${traces[@]}"; do
-    n=$(( n + 1 ));
-    local name; name=$( basename "${trace}" .trace );
-    if (( SECONDS - budgetStart >= ${VALIDATION_BUDGET:-1800} )); then
+    name=$( basename "${trace}" .trace );
+    if [ ! -s "${VALIDATION_WORK}/verdicts/${name}.json" ] && (( SECONDS - budgetStart >= ${VALIDATION_BUDGET:-1800} )); then
       echo "Validation: ${name}: not validated (budget of ${VALIDATION_BUDGET:-1800} s spent)";
       results=$( jq -c --arg t "${name}" '. + [{ trace: $t, verdict: "not-validated", entries: [], note: "validation budget spent" }]' <<< "${results}" );
       continue;
     fi
-    local onF; onF=$( ValidationRuns "${binary}" "${fixAll}" "${trace}" "${n}-F" );
-    local result;
-    if jq -e "${VALIDATION_JQ} any(.[]; objective)" <<< "${onF}" > /dev/null; then
-      result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson unpatched "${unpatched}" "${VALIDATION_JQ}
-        ([\$f[] | select(objective)][0]) as \$o
-        | { trace: \$t, verdict: \"not-patched\", entries: [], known_unpatched: [\$unpatched[] | select(.oracle as \$or | \$o | matches(\$or)) | .id], f: \$f }" <<< 'null' );
-    else
-      local onV='{}';
-      for id in $( jq -r '.[].id' <<< "${candidates}" ); do
-        onV=$( jq -c --arg id "${id}" --argjson runs "$( ValidationRuns "${binary}" "${preset}-only-${id}" "${trace}" "${n}-${id}" )" '. + { ($id): $runs }' <<< "${onV}" );
-      done
-      result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson v "${onV}" --argjson candidates "${candidates}" "${VALIDATION_JQ}
-        [\$candidates[] | .id as \$id | .oracle as \$or | select(any(\$v[\$id][]?; matches(\$or))) | \$id] as \$confirmed
-        | [\$candidates[] | .id as \$id | .oracle as \$or | select((any(\$v[\$id][]?; matches(\$or)) | not) and any(\$v[\$id][]?; objective)) | \$id] as \$other
-        | { trace: \$t, verdict: (if (\$confirmed | length) > 0 then \"confirmed\" elif (\$other | length) > 0 then \"other-signature\" else \"inconclusive\" end),
-            entries: \$confirmed, other_signature: \$other, f: \$f, v: \$v }" <<< 'null' );
-    fi
-    echo "Validation: ${name}: $( jq -r '.verdict + (if (.entries | length) > 0 then " " + (.entries | join(", ")) else "" end)' <<< "${result}" )";
+    result=$( ValidationVerdict "${trace}" );
+    echo "Validation: ${name}: $( jq -r '.verdict + (if (.entries | length) > 0 then " " + (.entries | join(", ")) else "" end) + (if .during_attempt then " (during the attempt)" else "" end)' <<< "${result}" )";
     results=$( jq -c --argjson r "${result}" '. + [$r]' <<< "${results}" );
   done
 
-  jq -n --arg commit "${COMMIT_ID}" --arg vendor "${vendor}" --arg source "${source}" --arg catalogueCommit "${catalogueCommit}" \
+  local lib preset; lib=$( jq -r .lib "${state}" ); preset=$( jq -r .preset "${state}" );
+  jq -n --arg commit "${COMMIT_ID}" --arg vendor "${vendor}" --arg source "$( jq -r .source "${state}" )" --arg catalogueCommit "$( jq -r .catalogueCommit "${state}" )" \
     --argjson total "$( find "${experiment}objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' | wc -l )" \
     --slurpfile list "${VALIDATION_WORK}/list.json" --slurpfile build "${VALIDATION_WORK}/list-build.json" \
-    --arg validatedOn "${lib}:${preset}" --argjson controls "${controls}" --argjson results "${results}" \
+    --arg validatedOn "${lib}:${preset}" --argjson controls "$( jq -c .controls "${state}" )" --argjson results "${results}" \
     '{ commit: $commit, vendor: $vendor, catalogue: { source: $source, commit: $catalogueCommit, hash: $list[0].catalogue },
        build: { name: $build[0].name, derived: $build[0].derived, fix: $build[0].fix, asan: $build[0].asan,
                 states: ($build[0].entries | map({ (.id): .state }) | add) },
        validated_on: $validatedOn, builds: $list[0].validation_set, entries: ($list[0].entries | map({ (.id): { state, patchable, hash, build_hash, alias, oracle } }) | add),
        controls: $controls, controls_ok: ([$controls[].ok | select(. != null)] | all), total: $total, objectives: $results }' > "${out}" || return 1;
   CreateArtefact "${VALIDATION_WORK}/runs" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-validation" "commit_id:${COMMIT_ID}";
-  # the cache copies the binary in the background: the checkout goes once the copy is there
-  if [ "${cached:-false}" == true ]; then
-    local wait;
-    for (( wait = 0; wait < 120; wait += 2 )); do QueryCache -q "${cacheId}" > /dev/null && break; sleep 2; done
-  fi
-  git -C "${repo}" worktree remove --force "${tree}" > /dev/null 2>&1;
+  ValidationCleanup;
   echo "Validation: $( jq -r '"\(.objectives | length) of \(.total) objectives: " + ([.objectives[] | .verdict] | group_by(.) | map("\(length) \(.[0])") | join(", ")) + (if .controls_ok then "" else " (controls failed)" end)' "${out}" )";
   return 0;
 }
