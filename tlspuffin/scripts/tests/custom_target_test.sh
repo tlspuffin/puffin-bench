@@ -69,17 +69,29 @@ unset target_bug target_oracle
 echo "--- KnownVendorBuild"
 THEJOB_OUT_PATH=$( mktemp -d ); trap 'rm -rf "${THEJOB_OUT_PATH}"' EXIT
 mkdir -p "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/wolfssl"
-for f in presets.toml vulnerabilities.toml; do
-  git -C "${clone}" show "HEAD:puffin-build/vendors/wolfssl/${f}" > "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/wolfssl/${f}" || { echo "FAIL: ${clone} has no ${f}"; exit 1; }
+# the clone's head, and the commit before presets.toml format 2 when the head has it
+v2=$( git -C "${clone}" log -1 --format=%H -G'^format = 2' -- puffin-build/vendors/wolfssl/presets.toml )
+for ref in HEAD ${v2:+${v2}^}; do
+  for f in presets.toml vulnerabilities.toml; do
+    git -C "${clone}" show "${ref}:puffin-build/vendors/wolfssl/${f}" > "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/wolfssl/${f}" || { echo "FAIL: ${clone} has no ${f}"; exit 1; }
+  done
+  format=$( grep -E -q '^format = 2' "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/wolfssl/presets.toml" && echo 2 || echo 1 )
+  echo "    (presets.toml format ${format}, ${ref})"
+  expect 'a preset'                                0 KnownVendorBuild wolfssl wolfssl540-asan
+  expect 'a preset, not the prefix of another'     0 KnownVendorBuild wolfssl wolfssl540
+  expect 'a preset of a benchmark'                 0 KnownVendorBuild wolfssl wolfssl540-heap
+  expect 'an entry of the catalogue'               0 KnownVendorBuild wolfssl CVE-2022-39173
+  expect '<preset>-only-<ID>'                      0 KnownVendorBuild wolfssl wolfssl540-asan-only-CVE-2022-39173
+  expect '<preset>-fix-all'                        0 KnownVendorBuild wolfssl wolfssl540-asan-fix-all
+  expect 'no such entry'                           1 KnownVendorBuild wolfssl CVE-2099-0001
+  expect 'no such preset under -only-'             1 KnownVendorBuild wolfssl wolfssl999-only-CVE-2022-39173
+  expect 'no such library'                         1 KnownVendorBuild nosuchlib CVE-2022-39173
+  if [ "${format}" == 2 ]; then
+    expect 'format 2: a name with modifiers'       0 KnownVendorBuild wolfssl wolfssl540-asan-no-postauth
+    expect 'format 2: the comma form'              0 KnownVendorBuild wolfssl 5.4.0,asan,only-BUF
+    expect 'format 2: no such version'             1 KnownVendorBuild wolfssl wolfssl999-asan
+  fi
 done
-expect 'a preset'                                0 KnownVendorBuild wolfssl wolfssl540-asan
-expect 'a preset, not the prefix of another'     0 KnownVendorBuild wolfssl wolfssl540
-expect 'an entry of the catalogue'               0 KnownVendorBuild wolfssl CVE-2022-39173
-expect '<preset>-only-<ID>'                      0 KnownVendorBuild wolfssl wolfssl540-asan-only-CVE-2022-39173
-expect '<preset>-fix-all'                        0 KnownVendorBuild wolfssl wolfssl540-asan-fix-all
-expect 'no such entry'                           1 KnownVendorBuild wolfssl CVE-2099-0001
-expect 'no such preset under -only-'             1 KnownVendorBuild wolfssl wolfssl999-only-CVE-2022-39173
-expect 'no such library'                         1 KnownVendorBuild nosuchlib CVE-2022-39173
 
 echo "--- Vuln group A and B: their bug named, their rule kept"
 unset benchmark target_oracle; target_bug=CVE-2022-39173

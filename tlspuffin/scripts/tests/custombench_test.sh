@@ -43,6 +43,8 @@ const order = ['0.9.8', '0.9.8z', '0.9.8za', '0.9.8zd', '1.0.0', '1.0.0p', '1.0.
 check(order.every((v, i) => i === 0 || compareVersions(order[i - 1], v) < 0), `versions in order: ${order.join(' < ')}`);
 check(compareVersions('5.4', '5.4.0') === 0 && compareVersions('5.4.0', '5.4') === 0, '5.4 = 5.4.0');
 check(compareVersions('master', 'main') === 0, 'development heads are equal');
+check(compareVersions('1.1.1g+git.368d0d87d0bd', '1.1.1g') === 0 && compareVersions('1.1.1g+git.368d0d87d0bd', '1.1.1h') < 0,
+  'build metadata is not compared (1.1.1g+git.368d0d87d0bd = 1.1.1g)');
 check(inRange('< 0.9.8zd || >= 1.0.0, < 1.0.0p || >= 1.0.1, < 1.0.1k', '1.0.1f') && !inRange('< 0.9.8zd || >= 1.0.0, < 1.0.0p || >= 1.0.1, < 1.0.1k', '1.0.1k')
   && inRange('< 0.9.8zd || >= 1.0.0, < 1.0.0p', '0.9.8z') && !inRange('< 0.9.8zd || >= 1.0.0, < 1.0.0p', '0.9.8zd'), 'alternatives of FREAK');
 check(inRange('= 5.3.0', '5.3') && !inRange('= 5.3.0', '5.3.1') && inRange('>= 5.4.0, < 5.5.0', '5.4.0') && !inRange('< 5.7.2', 'master'), 'comparisons');
