@@ -1914,3 +1914,6 @@ a.no-run:hover { color: #ddd; } a.no-run:hover .slot-launch { opacity: 1; }
 /* 🐞 at the end of the line of a type: its bug report */
 .type-bugs { text-decoration: none; font-size: 0.95em; cursor: pointer; }
 .type-bugs:hover { filter: brightness(1.3); }
+
+/* custom Vuln benchmarks: one block per benchmark in the Vuln table */
+tr.benchmark-row td { background: #1b2433; color: #cfe3ff; font-size: 12px; padding: 3px 8px; border-top: 1px solid #2f4466; }

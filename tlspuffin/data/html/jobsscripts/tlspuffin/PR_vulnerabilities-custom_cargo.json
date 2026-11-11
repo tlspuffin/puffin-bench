@@ -1,0 +1,67 @@
+{
+  "publish": {
+    "server": "default",
+    "storage": "${PACKAGE}/PR/${COMMIT_ID}/Vuln/",
+    "goal": "Vuln PR/Commit ${COMMIT_ID}"
+  },
+  "configurations": ${RUNTIME_RUN_CONFIG},
+  "args": {
+    "TYPE": "vuln"
+  },
+  "name": "Vulnerabilities (custom benchmark) search - ${COMMIT_ID}",
+  "flow": [
+    {
+      "step": "Init",
+      "configuration": {
+        "nb_cores": 4
+      }
+    },
+    [
+      {
+        "run": [],
+        "configuration": {
+          "nb_cores": ${RUNTIME_NB_CORES},
+          "nb_retry": ${RUNTIME_NB_RUN}
+        },
+        "streams": [
+          {
+            "name": "error",
+            "path": "current_log/error.log"
+          }
+        ]
+      },
+      {
+        "step": "ForcedBuild",
+        "configuration": {
+          "nb_cores": 4
+        }
+      },
+      {
+        "step": "ExperimentWithCargo",
+        "configuration": {
+          "timeout": "${RUNTIME_TIMEOUT}"
+        },
+        "monitor": {
+          "entry_point": "MonitorExperiment",
+          "delay_start": "10s",
+          "interval": "60s"
+        }
+      },
+      {
+        "step": "ExperimentEnd"
+      },
+      {
+        "step": "ValidateObjectives",
+        "configuration": {
+          "nb_cores": 4
+        }
+      }
+    ],
+    {
+      "step": "SummaryRun"
+    },
+    {
+      "step": "CleanAllRepo"
+    }
+  ]
+}

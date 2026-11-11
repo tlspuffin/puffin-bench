@@ -2,6 +2,7 @@ import { config } from './config.js'
 import { ListInput } from './widget-listinput.js'
 import { resolveCommits, parseTaskName, commitLineHTML } from '../../../common/commitinfo.js'
 import { CheckScheduler } from '../../nav.js'
+import { CustomBenchmark } from './custombench.js'
 
 const link = document.createElement('link');
 link.rel  = 'stylesheet';
@@ -28,10 +29,11 @@ export const helpTexts = {
   'tlspuffin.cores':      'CPU cores per run',
   'tlspuffin.memory':     'Memory limit in MB. 0 = no limit.',
   'tlspuffin.unknown':    'This hash is not in the commit list (not fetched yet, or a typo). Check it before launching.',
+  'tlspuffin.custom':     'Custom Vuln benchmark: tick known bugs of tlspuffin\'s catalogue; each one becomes an experiment, built and run the way it needs, stopping on its own oracle.',
 };
 
 // short type of the tasks of each job type (jobsconfig.json), for the task descriptions (see describeTask)
-const JOB_TYPE_PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' };
+const JOB_TYPE_PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnX', 'campaign': 'Camp' };
 
 export class JobLauncher {
   #config;
@@ -92,6 +94,8 @@ export class JobLauncher {
   #confirmUnknownCheck = null;
   #toast               = null;
   #tabBtns             = {};
+  #custom              = null;   // the custom Vuln benchmark panel (custombench.js), for job types with custom_benchmark
+  #modal               = null;
 
   constructor() {
     if (config?.commitsUrl == null) {
@@ -405,6 +409,10 @@ export class JobLauncher {
       this.#taskNameInput.value = custom.name;
       this.#titleModified = true;
     }
+    if (custom.customBenchmark) {
+      this.#validate();   // the commit's catalogue and presets first
+      this.#custom.restore(custom.customBenchmark);
+    }
 
     this.#trackTemplateEdits();
     this.#validate();
@@ -438,6 +446,7 @@ export class JobLauncher {
   #buildDOM() {
     this.#overlay = this.#el('div', 'jl-overlay');
     const modal = this.#el('div', 'jl-modal');
+    this.#modal = modal;
     modal.addEventListener('click', e => e.stopPropagation());
     this.#overlay.addEventListener('mousedown', () => {
       if (this.#tablistEl?.classList.contains('open'))
@@ -606,6 +615,11 @@ export class JobLauncher {
     this.#campaignExtra.append(this.#buildCampaignFields());
     body.appendChild(this.#campaignExtra);
 
+    // ── Custom Vuln benchmark (job types with "custom_benchmark": true) ──
+    this.#custom = new CustomBenchmark({ gitOrigin: new URL(this.#config.commitsUrl).origin, onChange: () => this.#validate() });
+    this.#custom.node.dataset.help = 'tlspuffin.custom';
+    body.appendChild(this.#custom.node);
+
     // ── Separator + Launch ──
     body.appendChild(this.#el('hr', 'jl-sep'));
 
@@ -649,6 +663,8 @@ export class JobLauncher {
       input.addEventListener('change', () => {
         this.#selectedType = job.value;
         this.#campaignExtra.classList.toggle('visible', !!job.campaign);
+        this.#custom.show(!!job.custom_benchmark);
+        this.#modal.classList.toggle('jl-wide', !!job.custom_benchmark);
         this.#timeoutSection.classList.toggle('visible', !!job.campaign || !!job.timeout);
         const timeoutJob = job.timeout ? job
           : this.#jobDefs.find(j => job.composite?.includes(j.value) && j.timeout);
@@ -1489,7 +1505,9 @@ export class JobLauncher {
     const jobDef        = this.#jobDefs.find(j => j.value === this.#selectedType);
     const vendorOk      = !jobDef?.campaign || this.#vendorListInput.value.trim().length > 0;
     const packageOk     = !jobDef?.package?.length || this.#packageListInput.value.trim().length > 0;
-    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && packageOk);
+    if (jobDef?.custom_benchmark) this.#custom.setCommit(commitOk ? this.#commitSha() : null);
+    const customOk      = !jobDef?.custom_benchmark || this.#custom.valid;
+    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && packageOk && customOk);
     if (jobDef?.campaign) this.#refreshPresets();
   }
 
@@ -1571,6 +1589,7 @@ export class JobLauncher {
       nbCore:     parseInt(this.#nbCoreInput.value,     10) || 1,
       memMax:     parseInt(this.#memMaxInput.value,     10) || 0,
       smt:        this.#smtSelect.disabled ? '' : this.#smtSelect.value,
+      ...(this.#jobDefs.find(j => j.value === this.#selectedType)?.custom_benchmark ? { customBenchmark: this.#custom.definition() } : {}),
     };
   }
 
@@ -1634,6 +1653,12 @@ export class JobLauncher {
       if (nbCore     != null) fd.append('runtime[RUNTIME_NB_CORES]',          String(nbCore));
       if (memMax     > 0)     fd.append('runtime[RUNTIME_MEMORY_CORE]',        String(memMax));
       if (memMax     > 0)     fd.append('runtime[RUNTIME_MEMORY_CONSUMPTION]', String(memMax));
+      if (jobDef.custom_benchmark) {
+        // one configuration per ticked bug (custombench.js), the attempts and cores of the panel
+        fd.append('runtime[RUNTIME_RUN_CONFIG]', JSON.stringify(this.#custom.runConfig()));
+        fd.append('runtime[RUNTIME_NB_RUN]',     String(this.#custom.attempts));
+        fd.append('runtime[RUNTIME_NB_CORES]',   String(this.#custom.cores));
+      }
       if (isCampaign) {
         const configName = vendor ? vendor.split(':').pop() : 'campaign';
         const conf = { args: {} };
@@ -1714,6 +1739,10 @@ export class JobLauncher {
     this.#packageOptions = [];
     this.#packageRow.classList.remove('visible');
     this.#campaignExtra.classList.remove('visible');
+    this.#custom.show(false);
+    this.#custom.reset();
+    this.#custom.setCommit(null);
+    this.#modal.classList.remove('jl-wide');
     this.#timeoutSection.classList.remove('visible');
     this.#updateSmtNote(null);
     this.#timeoutDayInput.value  = '0';

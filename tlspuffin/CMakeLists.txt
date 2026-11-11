@@ -144,14 +144,16 @@ add_custom_target(generate_tlspuffin_scripts ALL
 
 EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/embeded/installer/files.c" InstallFiles
   FILES html/board/launchers/tlspuffin/widget-listinput.js html/board/launchers/tlspuffin/joblauncher.css html/board/launchers/tlspuffin/joblauncher.js 
-  html/board/launchers/tlspuffin/jobsconfig.json
+  html/board/launchers/tlspuffin/jobsconfig.json html/board/launchers/tlspuffin/custombench.js
   html/jobsscripts/tlspuffin/PR_campaign.json html/jobsscripts/tlspuffin/PR_perf_cargo.json html/jobsscripts/tlspuffin/PR_perf_full.sh 
   html/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo.json
+  html/jobsscripts/tlspuffin/PR_vulnerabilities-custom_cargo.json
   html/jobsscripts/tlspuffin/shell.nix html/jobsscripts/tlspuffin/wolfssl_put.c.patch html/jobsscripts/tlspuffin/vuln_targets.json tools/qjs 
   tools/js/utils.js tools/js/perf_experiment_end.js tools/js/vuln_experiment_end.js tools/js/perf_summary_run.js tools/js/vuln_summary_run.js
   tools/js/get_last_stats_time.js
   html/publisher/summary.html html/publisher/summary.css html/publisher/summary.js
   html/publisher/summary_render.js html/publisher/summary_data.js html/publisher/summary_metrics.js html/publisher/summary_metricscampaign.js 
+  html/publisher/summary_benchmarks.js
   html/publisher/summary_graph.js html/publisher/summary_managegraphs.js 
   html/publisher/summary_graphoverview.js html/publisher/summary_graphoverview.css 
   html/publisher/summary_graphmetrics.js html/publisher/summary_graphmetrics.css

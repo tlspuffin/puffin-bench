@@ -55,6 +55,7 @@ The following job types are declared in `jobsconfig.json`, served with the rest 
 | Perf | `perf` | `PR_perf_cargo.json` | Measures exec/s, coverage, corpus over a fixed duration, per library |
 | Vuln group A | `vuln-a` | `PR_vulnerabilities-groupA_cargo.json` | Reproduces 5 known WolfSSL CVEs, stops per-library as soon as an objective (`.trace`) is found |
 | Vuln group B | `vuln-b` | `PR_vulnerabilities-groupB_cargo.json` | 2 harder-to-trigger CVE repros with a much longer retry budget |
+| Vuln — custom | `vuln-custom` | `PR_vulnerabilities-custom_cargo.json` | Template flow — one experiment per known bug ticked in the launcher (see [Custom Vuln benchmarks](#custom-vuln-benchmarks)) |
 | Evaluate PR | `evaluate-pr` | *(composite)* | Not a flow of its own — submits `vuln-a` **and** `perf` as two separate tasks and reports on both |
 | Campaign | `campaign` | `PR_campaign.json` | Template flow — libraries/timeout/cores/retries are filled in at submission time from the launcher UI's campaign form, not fixed in the file |
 
@@ -364,6 +365,31 @@ The witness of each X is run first on V_X and F (controls): when it does not beh
 failed". The verdicts show in the 🐞 panel of Results. To add a known bug: an entry, a patch and a witness trace in
 tlspuffin (see its puffin-build/README.md); the bench reads dev's catalogue, or the commit's with
 `VALIDATION_CATALOGUE=commit`.
+
+## Custom Vuln benchmarks
+
+The launcher's **Vuln — custom** job builds a benchmark from tlspuffin's vulnerability catalogue (the bugs of
+`puffin-build/vendors/<vendor>/vulnerabilities.toml`, every detail on the **Bugs reference** page, linked from the panel
+and from each bug):
+
+1. Pick the commit. The catalogue is dev's by default (what validation trusts); **Load bugs from this commit** takes the
+   commit's own (a PR adding a bug), each bug marked against dev (only in this commit, differs from dev).
+2. Tick the bugs to look for: one experiment each. **Run on** offers the presets of the commit that have the bug (its
+   version affected, the build options it requires), the newest first, ASan first; a version without patch for it is
+   marked "signature only". The bug's needs (build options, PUT options, fuzzer flags, cargo features, ASan) are footnote
+   marks under the table. **Time to find on the bench**: Vuln group A/B's own measurement of that bug at the newest
+   commit they ran on (`/html/runs/bench_times.json`, written by `runs_report.py`; hover for the task).
+3. **Other known bugs**: patched where a patch exists (recommended: `<preset>-only-<ID>`, an experiment can only stop on
+   its own bug), or as in the preset. **What will run** lists each experiment's vendor, build, flags, the oracle it stops
+   on and the known bugs left in its build, and warns when one of them has the same oracle (a stop on it is not a find).
+4. Attempts, cores per attempt, timeout and CPU sharing as for the other jobs; **Benchmark**: its name. The experiments
+   are named `<benchmark>_<alias or ID>` (e.g. `VulnC_BUF`): launching it again with the same name continues their series
+   on Results. The definition is recorded with the task ("New task…" from it launches the same).
+
+Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report), runs with the bug's
+flags, and stops on the first objective whose signature is the bug's oracle; the validation step then confirms it (patch
+differential), or, without patch, by its signature. A preset that turns out not to have the bug (a PUT capability the
+launcher cannot know) makes the experiment "unsupported" instead of running for nothing.
 
 ## Performance configurations
 

@@ -171,6 +171,27 @@ catalogue (before tlspuffin pr/vuln-catalogue), or a dev without catalogue for t
 `tests/validate_step_test.sh` runs the step outside the scheduler on a simulated task (real builds and executions,
 then again from the cache with no budget); `tests/attach_validation_test.sh` merges a result as the summary scripts do.
 
+## Custom Vuln Benchmarks (`vuln-custom`)
+
+The launcher (`custombench.js`) sends one configuration per ticked bug in `RUNTIME_RUN_CONFIG`, filled into
+`PR_vulnerabilities-custom_cargo.json` (the VulnA flow, with `RUNTIME_NB_RUN` attempts of `RUNTIME_NB_CORES` cores).
+Arguments of a configuration, besides `experiment` (`<benchmark>_<alias or ID>`):
+
+| Argument | Meaning | Used by |
+|---|---|---|
+| `vendor` | `<lib>:<preset>-only-<ID>` (other bugs patched) or `<lib>:<preset>` | `KnownVendorBuild` (derived names are C vendor builds), mk_vendor |
+| `asan_build` | `true` when the bug's oracle is an ASan report and the preset is not ASan | `ForcedBuild`: `mk_vendor make --asan` |
+| `extra_flags`, `required_features` | the entry's `find.flags`, `find.features` | the fuzzer's command line, the cargo build |
+| `target_bug`, `target_oracle` | the entry's ID and oracle (JSON) | `ExpectedTarget` → `"<ID>\|oracle\|"`; `TargetMatches` → `OracleMatches` (the fuzzer's record: claim message, crash signal and `ASan <report type>`; the replays at the end: `ASan <type>`) |
+| `catalogue_source` | `dev` or `commit` | `ForcedBuild` overlays dev's catalogue (`ValidationOverlayDev`) before the build; `ValidateObjectives` uses the same |
+| `benchmark` | its name | recorded |
+
+After the build, `ForcedBuild` checks with `mk_vendor list` that the target is active in the library built; otherwise
+the attempt is recorded as unsupported (as for the compat rules). `cli-<step>.json` records the experiment under `custom`.
+`ValidateObjectives` validates an objective of a derived build on the validation set of its base preset (shared, cached,
+with every experiment on that preset). Tests: `tests/custom_target_test.sh` (the matching and the vendor names, on
+synthetic fuzzer records), `tests/custombench_test.sh` (the launcher's rules against `mk_vendor list` on every preset).
+
 ## Monitoring: Hang Detection
 
 `ExperimentCheckAllThreadsRunning` (in `PR_common.sh`) runs once a minute during `ExperimentCheckRun` and implements two independent kill paths:
