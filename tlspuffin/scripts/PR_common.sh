@@ -930,9 +930,9 @@ RecordLoad() {
 }
 
 # CustomExperimentJSON: the experiment of a custom benchmark (launcher: benchmark, target_bug, target_oracle,
-# catalogue_source), recorded in cli-<step>.json; null for the others
+# catalogue_source), recorded in cli-<step>.json; null for the others (Vuln group A and B name their bug too)
 CustomExperimentJSON() {
-  [ -n "${target_bug:-}" ] || { echo null; return 0; };
+  [ -n "${target_bug:-}" ] && [ -n "${benchmark:-}" ] || { echo null; return 0; };
   jq -cn --arg benchmark "${benchmark:-}" --arg bug "${target_bug}" --arg source "${catalogue_source:-commit}" \
     --argjson oracle "${target_oracle:-null}" '{ benchmark: $benchmark, target: $bug, oracle: $oracle, catalogue: $source }' 2> /dev/null || echo null;
 }
@@ -1775,12 +1775,15 @@ ForcedBuild() {
     local asanFlag=''; [ "${asan_build:-}" == true ] && asanFlag='--asan ';
     echo "nix-shell --run \"./tools/mk_vendor make ${asanFlag}'${vendor}'\""
     nix-shell --run "./tools/mk_vendor make ${asanFlag}'${vendor}'"
-    # a custom benchmark's experiment: its target must be in the library built (the launcher cannot know every PUT
-    # capability); otherwise the attempt is recorded as unsupported, as for the compat rules
-    if [ -n "${target_bug:-}" ]; then
+    # an experiment naming its bug (custom benchmarks, Vuln group A and B): its target must be in the library built
+    # (the launcher cannot know every PUT capability); a library the catalogue says is without it (unaffected, fixed)
+    # makes the attempt unsupported, as for the compat rules (a custom benchmark: anything but active). A commit without
+    # catalogue: as before
+    if [ -n "${target_bug:-}" ] && [ -r "./puffin-build/vendors/${vendor%%:*}/vulnerabilities.toml" ]; then
       local targetState; targetState=$( nix-shell --run "./tools/mk_vendor list '${vendor}' --json" 2> /dev/null |
           jq -r --arg id "${target_bug}" '[.entries[] | select(.id == $id) | .state][0] // "not in the catalogue"' );
-      if [ "${targetState}" != active ]; then
+      if [ "${targetState}" == unaffected ] || [ "${targetState}" == fixed ] ||
+         { [ -n "${benchmark:-}" ] && [ "${targetState}" != active ]; }; then
         local why="${target_bug} is not in ${vendor} (${targetState:-unknown}): nothing to look for";
         echo "${why}"; echo "${why}" > ./.unsupported;
         echo "{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${features}\", \"flags\": \"${extra_flags}\", \"unsupported\": \"${why}\", \"custom\": $( CustomExperimentJSON ) }" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json"

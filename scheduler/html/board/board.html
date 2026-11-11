@@ -90,7 +90,7 @@
       <li>Arguments on one line (the commit when it is not in the title, the package, compat warnings).</li>
       <li>One block per step: a square per attempt in its header, one line per configuration, then one line per attempt (cores on hover, duration, exit code, logs).</li>
       <li>Monitor: one line summarizing the last message of the attempt (executions, corpus, objectives); the corpus turns red when it has not grown for 60 min; click for the full message.</li>
-      <li>VulnA: a run ends when it finds the CVE of its configuration (other objectives go on being collected).</li>
+      <li>VulnA: a run ends when it finds the CVE of its configuration (other objectives go on being collected); on a commit with tlspuffin's vulnerability catalogue, once validation confirms the find.</li>
 <li>An attempt that found objectives is highlighted (not in VulnA/VulnB, which look for known bugs), and the task
         gets a button to its objectives page: live while it runs, its final report once it ended. The top bar shows
         🐞 when running tasks found objectives.</li>

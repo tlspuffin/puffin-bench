@@ -53,7 +53,7 @@ The following job types are declared in `jobsconfig.json`, served with the rest 
 | Label in UI | Job type key | Flow JSON | Purpose |
 |-------------|--------------|-----------|---------|
 | Perf | `perf` | `PR_perf_cargo.json` | Measures exec/s, coverage, corpus over a fixed duration, per library |
-| Vuln group A | `vuln-a` | `PR_vulnerabilities-groupA_cargo.json` | Reproduces 5 known WolfSSL CVEs, stops per-library as soon as an objective (`.trace`) is found |
+| Vuln group A | `vuln-a` | `PR_vulnerabilities-groupA_cargo.json` | Reproduces 5 known WolfSSL CVEs, one per configuration (its `target_bug`); a run stops when it finds that bug (see Vuln below) |
 | Vuln group B | `vuln-b` | `PR_vulnerabilities-groupB_cargo.json` | 2 harder-to-trigger CVE repros with a much longer retry budget |
 | Vuln — custom | `vuln-custom` | `PR_vulnerabilities-custom_cargo.json` | Template flow — one experiment per known bug ticked in the launcher (see [Custom Vuln benchmarks](#custom-vuln-benchmarks)) |
 | Evaluate PR | `evaluate-pr` | *(composite)* | Not a flow of its own — submits `vuln-a` **and** `perf` as two separate tasks and reports on both |
@@ -189,7 +189,7 @@ CleanAllRepo
 ### Perf vs Vuln termination
 
 - **Perf**: the fuzzer runs for the full `timeout` — reaching it without dying counts as `success`; dying earlier (crash, hang-kill) counts as `fail`. Default `70m` in `PR_perf_cargo.json`, 10 twin steps of 2 runs per library (see CPU sharing).
-- **Vuln**: a VulnA run stops when the fuzzer records the **expected bug** of its configuration (declared in `vuln_targets.json`, see [Expected bugs](#expected-bugs-and-new-bugs)); other objectives are kept, and the known CVE-2024-5814 is set apart on wolfSSL < 5.7.2 (it never ends a run there; elsewhere its claim is a bug). A configuration without declared target (VulnB) stops at its first objective that is not set apart. A run is `success` only if the task reached `Done` **and** the expected bug (any objective without target) was found — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
+- **Vuln**: a VulnA run stops when the fuzzer records the **expected bug** of its configuration (declared in `vuln_targets.json`, see [Expected bugs](#expected-bugs-and-new-bugs)); other objectives are kept, and the known CVE-2024-5814 is set apart on wolfSSL < 5.7.2 (it never ends a run there; elsewhere its claim is a bug). A configuration without declared target (VulnB) stops at its first objective that is not set apart. Each configuration of group A and B also names its bug of tlspuffin's catalogue (`target_bug`): on a commit with the catalogue (tlspuffin `pr/vuln-catalogue` on), the objective that would end the run ends it only once validation confirms it is that bug (replayed on the builds of the configuration's validation set: by patch differential, else by its signature on the build with every patch), and its time to find is when the fuzzer saved it; an objective not confirmed lets the run go on. When validation cannot decide (a commit without the catalogue, a bug whose objectives do not replay such as CDOS), the fuzzer's record decides, as before. Results flags the change of monitor (⚠ not comparable: "run ends on targeted → confirmed find"). A run is `success` only if the task reached `Done` **and** the expected bug (any objective without target) was found — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
 
 ---
 

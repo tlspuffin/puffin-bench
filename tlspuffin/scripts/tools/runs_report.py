@@ -265,7 +265,10 @@ def vuln_metrics(z, summary, report, targets, vendors):
             first_any = (times[0][0] / 1000 - t0) if times else None
             first_targeted = (targeted[0] / 1000 - t0) if targeted else None
             new_monitor = d.get('nb_objective_targeted') is not None
-            if new_monitor:
+            if d.get('confirmed_by'):
+                # since 2026-11-10, on commits with tlspuffin's catalogue: the run ends on a find validation confirmed
+                monitors.add('confirmed find')
+            elif new_monitor:
                 monitors.add('targeted')
             elif d.get('state') == 'success':
                 monitors.add('first objective')
@@ -603,7 +606,8 @@ def measured_floors(groups):
                 for lib in set(va) & set(vb):
                     if (a.get('builds') or {}).get(lib) != (b.get('builds') or {}).get(lib):
                         continue
-                    # Vuln: the same monitor (since bf0392b a run ends on its targeted bug, before on any objective)
+                    # Vuln: the same monitor (since bf0392b a run ends on its targeted bug, before on any objective; on
+                    # commits with tlspuffin's catalogue, from 2026-11-10, on a find validation confirmed)
                     if ctype == 'Vuln' and va[lib].get('_monitor') != vb[lib].get('_monitor'):
                         continue
                     # the same CPU sharing, when both recorded it (as the regressions: another mode is not comparable)
