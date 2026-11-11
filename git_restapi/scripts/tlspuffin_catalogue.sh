@@ -9,7 +9,8 @@
 # Read from puffin-build/vendors/<vendor>/vulnerabilities.toml and its patch files (tlspuffin pr/vuln-catalogue); before,
 # "format": "none". The fingerprint of an entry hashes its fields and its patch files: the bench compares entries of two
 # commits with it (the same entry at dev and at a PR's commit); toml (the source text, for people) is not part of it.
-# repository: the sources.repo of the vendor's presets.toml (for links to upstream commits). Exit status 2: the commit is
+# repository: the library's repository in the vendor's presets.toml (format 2: library.repo; format 1: a preset's
+# sources.repo), for links to upstream commits. Exit status 2: the commit is
 # not in the repository.
 repo="$1"; commit="$2"
 # `dev` and `main`: the heads of the branches as last fetched (the clone's remote-tracking branches)
@@ -47,7 +48,12 @@ def repository(d):
     if presets.returncode != 0:
         return None
     try:
-        for preset in tomllib.loads(presets.stdout.decode()).values():
+        table = tomllib.loads(presets.stdout.decode())
+        # format 2: the library's repository; format 1: that of a preset's sources
+        if table.get("format") == 2:
+            repo_url = (table.get("library") or {}).get("repo")
+            return repo_url.removesuffix(".git") if repo_url else None
+        for preset in table.values():
             repo_url = isinstance(preset, dict) and preset.get("sources", {}).get("repo")
             if repo_url:
                 return repo_url.removesuffix(".git")
