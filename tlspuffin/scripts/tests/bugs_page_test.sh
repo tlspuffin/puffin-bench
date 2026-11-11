@@ -157,7 +157,12 @@ grep -q "every patch but its bug" <<< "$( row BUF )" && grep -q '✓' <<< "$( ro
 grep -q '≠' <<< "$( row SDOS2 )" && grep -q 'not patched: HEAP' <<< "$( row SDOS2 )" && echo "ok   (configs): SDOS2's preset leaves HEAP unpatched (it has a patch at 5.4.0)" || { echo "FAIL (configs): SDOS2"; fail=1; }
 grep -q 'CVE-2021-3449' <<< "$( row SDOS1 )" && grep -q 'confirmed as CVE-2021-3449 during the attempt' <<< "$( row SDOS1 )" && echo "ok   (configs): VulnB's SDOS1 names CVE-2021-3449, confirmed during the attempt" || { echo "FAIL (configs): SDOS1"; fail=1; }
 grep -q 'confirmed as CVE-2022-39173 during the attempt' <<< "$( row BUF )" && grep -q 'RefineSuites' <<< "$( row BUF )" && echo "ok   (configs): VulnA's BUF keeps its rule and is confirmed during the attempt" || { echo "FAIL (configs): BUF confirmation"; fail=1; }
-check dev 'the differences of _cves with the catalogue' 'CVE-2023-6936</a> <span class="muted">CALLB</span>: not in the catalogue'
+# a CVE of vuln_targets.json _cves that the catalogue does not have is named (CALLB before the catalogue had it)
+if jq -e '.vendors.wolfssl.entries["CVE-2023-6936"]' "${work}/catalogue.json" > /dev/null; then
+  check dev 'a CVE the catalogue has is not said missing' 'CVE-2023-6936</a> <span class="muted">CALLB</span>: not in the catalogue' absent
+else
+  check dev 'the differences of _cves with the catalogue' 'CVE-2023-6936</a> <span class="muted">CALLB</span>: not in the catalogue'
+fi
 check dev 'the claim set apart agrees with the catalogue' '✓ agrees'
 check commit 'a commit asked with ?commit= is named' 'catalogue of tlspuffin commit deadbeef'
 check unavailable 'an unavailable catalogue is said' 'is not available'
