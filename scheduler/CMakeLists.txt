@@ -207,3 +207,6 @@ add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 add_executable(testOutputRing src/test_output_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 add_executable(testCpuTopology src/test_cpu_topology.cxx src/scheduler/system/cpu_topology.cxx)
+# the step arguments as the executor writes them and functions.sh reads them: build/scheduler/testStepParameters
+add_executable(testStepParameters src/test_step_parameters.cxx)
+target_compile_definitions(testStepParameters PRIVATE FUNCTIONS_SH="${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh")
