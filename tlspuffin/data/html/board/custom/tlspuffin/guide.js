@@ -57,7 +57,8 @@ confirmed by its signature only (the launcher warns). Results shows each benchma
     is not in the title, the package, the compat warnings. The monitor line of an attempt sums up its last message
     (executions, corpus, objectives); the corpus is flagged when it has not grown for 60 min.</li>
   <li><b>Objectives</b>: an attempt that found objectives is highlighted (not in VulnA/VulnB, which look for known
-    bugs: a VulnA run ends when it finds the CVE of its configuration, the other objectives go on being collected),
+    bugs: a VulnA run ends when it finds the CVE of its configuration, on a commit with tlspuffin's vulnerability
+    catalogue once validation confirms the find, the other objectives go on being collected),
     and the task gets a button to its objectives page: live while it runs, its final report once it ended (written
     within 10 minutes; the live page meanwhile). On the task page, the chip of an attempt counts its objectives.</li>
   <li><b>Estimated times</b>: the <i>context</i> of a tlspuffin task is its commit.</li>
