@@ -5,7 +5,8 @@
 // A version: dotted numbers (missing ones are 0), then letters (a patch release after it, OpenSSL: 1.0.1 < 1.0.1a,
 // 0.9.8z < 0.9.8za) or -<pre-release> (before it); not starting with a digit (master): newer than every release.
 export function parseVersion(text) {
-  const t = String(text ?? '').trim();
+  // +<text>: build metadata, not compared (BoringSSL's commits: 1.1.1g+git.368d0d87d0bd = 1.1.1g)
+  const t = String(text ?? '').trim().replace(/\+.*$/, '');
   if (!/^[0-9]/.test(t)) return { head: true };
   const m = /^([0-9]+(?:\.[0-9]+)*)(.*)$/.exec(t);
   const numbers = m[1].split('.').map(Number);
