@@ -144,7 +144,7 @@ For tasks that finished before this feature (or to share a link), `scripts/tools
 
 `ValidateObjectives` (`PR_validate.sh`, in every `*_full.sh`) runs after `ExperimentEnd`, in the same working directory,
 with its own cores (`nb_cores` of the step, 4 in the job configurations). It tells, for each objective (at most
-`VALIDATION_MAX`, 20 by default, the targeted ones first), whether it is a known bug of tlspuffin's vulnerability
+`VALIDATION_MAX`, 20 by default: the targeted ones first, then the first objective of each bug by the fuzzer's record — its claim, or the top frame of its crash, `ValidationChoice` — then the others by time, so that each distinct bug of a campaign gets a verdict), whether it is a known bug of tlspuffin's vulnerability
 catalogue (`puffin-build/vendors/<vendor>/vulnerabilities.toml`), by patch differential:
 
 1. At the campaign's commit, a checkout of the task's clone gets the catalogue: dev's (`VALIDATION_CATALOGUE=dev`, the

@@ -204,14 +204,20 @@ Report() {
       | { key: (.id | tostring), value: { cve: (.expected_cve // null), targeted: (.nb_objective_targeted // null) } }] | from_entries)' <<< "${summary}" );
   [ -n "${outcomes}" ] || outcomes='{}';
   [ -n "${script}" ] || script='{}';
+  # the validation of each configuration's objectives against tlspuffin's catalogue (ValidateObjectives, merged by the
+  # summary scripts: counts per verdict, confirmed entries, known bugs without patch, controls, the catalogue's commit,
+  # and the verdict of each validated objective by "<attempt>/<trace>"), as Results shows it
+  local validation; validation=$( jq -c 'map_values(.validation // null) | with_entries(select(.value != null))' <<< "${summary}" );
+  [ -n "${validation}" ] || validation='{}';
   local info;
-  info=$( jq -c --arg board "${BOARD_URL}" --argjson outcomes "${outcomes}" --argjson script "${script}" '
+  info=$( jq -c --arg board "${BOARD_URL}" --argjson outcomes "${outcomes}" --argjson script "${script}" --argjson validation "${validation}" '
       [.task.steps[]] as $steps
       | ([.task.steps[] | .time_points_ms // [] | .[] | select(. > 0)]) as $times
       | { name: (.task.name // ""), user: (.task.user // ""), job_type: (.task.job_type // ""),
           started: (if ($times | length) > 0 then ($times | min / 1000 | floor | todate) else null end),
           ended: (if ($times | length) > 0 then ($times | max / 1000 | floor | todate) else null end),
-          task_url: "\($board)/files/board/task.html?id=\(.task.id // "")",
+          # no link to a task page without the id of the task (task.html?id= is an empty page)
+          task_url: (if .task.id then "\($board)/files/board/task.html?id=\(.task.id)" else null end),
           # the runs of each configuration: one per experiment step, two per twin step (TwinExperiment: runs 2k, 2k+1)
           libraries: ([.task.steps[] | select(.name == "ExperimentWithCargo" or .name == "TwinExperiment")] | group_by(.id)
             | map((first(.[] | .user_run_state // "" | split("\n")[] | (try fromjson catch null)
@@ -230,7 +236,8 @@ Report() {
               | { key: (.attempt_id | tostring), value: first(.user_run_state // "" | split("\n")[]
                   | (try fromjson catch null) | select(type == "object" and (.error | type) == "string") | .error) }]
               | from_entries) } + (if $outcomes[.library] then { outcomes: $outcomes[.library] } else {} end)
-              + (if $script[.library] then { script: $script[.library] } else {} end)) }' "${J}" 2> /dev/null ) || info='{}';
+              + (if $script[.library] then { script: $script[.library] } else {} end)
+              + (if $validation[.library] then { validation: $validation[.library] } else {} end)) }' "${J}" 2> /dev/null ) || info='{}';
   [ -n "${info}" ] || info='{}';
   local cancelled=false;
   [[ "${J}" == */Canceled/* ]] && cancelled=true;

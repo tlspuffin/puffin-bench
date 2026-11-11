@@ -362,7 +362,16 @@ X patched (V_X), and replays each objective on them:
 - … **not validated**: the step's time budget (30 min of executions) was spent before it.
 
 The witness of each X is run first on V_X and F (controls): when it does not behave, the verdicts say "controls
-failed". The verdicts show in the 🐞 panel of Results. To add a known bug: an entry, a patch and a witness trace in
+failed". A run's first 20 objectives are validated: the targeted ones, then one of each bug (by the fuzzer's record),
+then by time.
+
+The objectives pages (and the 🐞 panel of Results) show, on each bug, what its objectives are: **✔ X** confirmed by
+patch (green, certain), **≈ X · signature** the signature of a known bug without patch at that version (yellow-green),
+**⚠ signature of X, not removed by its patch** (amber, to review), **🚨 no known bug's signature** (red: a new bug, or one
+missing from the catalogue), each with how many objectives; one claim can be several bugs (CVE-2021-3336, SIG and SKIP
+share "Authentication bypass" on wolfSSL 4.4.0). A bug confirmed by validation is named after the catalogue's entry
+(alias · ID), linked to the Bugs reference, and is never 🚨 new; a bug none of whose objectives was validated shows the
+catalogue's bugs with its signature, "not validated". The verdicts show in the 🐞 panel of Results. To add a known bug: an entry, a patch and a witness trace in
 tlspuffin (see its puffin-build/README.md); the bench reads dev's catalogue, or the commit's with
 `VALIDATION_CATALOGUE=commit`.
 

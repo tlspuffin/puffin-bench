@@ -130,9 +130,12 @@ function GetObjectivesButton(status) {
 
 // The validation of the objectives against tlspuffin's catalogue (ValidateObjectives, merged per library by the
 // summary scripts): one line, and the verdict of a trace
+// the same words as the objectives pages (objectives_page/report.js): ✔ confirmed by patch (green), ≈ by signature only
+// (a known bug without patch: yellow-green), 🚨 no known bug's signature (red), ⚠ other signature
 const VALIDATION_VERDICTS = {
-  'confirmed': ['✔', 'known bug, confirmed by patch differential: the objective goes when the bug\'s patch is applied'],
-  'not-patched': ['✗', 'the objective stays with every known bug patched: a new bug, or a known bug without patch'],
+  'confirmed': ['✔', 'confirmed by patch differential: the objective goes when the bug\'s patch is applied, and gives its signature without it'],
+  'signature': ['≈', 'on the build with every patch, the signature of known bugs without patch at that version: one of them, by its signature only'],
+  'not-patched': ['🚨', 'on the build with every patch, the signature of no known bug: a new bug, or one missing from the catalogue'],
   'other-signature': ['⚠', 'a known bug\'s patch removes the objective, but its signature is not the bug\'s oracle: to review'],
   'inconclusive': ['?', 'no objective on the validation builds (not reproduced, or needs two bugs)'],
   'not-validated': ['…', 'the validation budget of the step was spent before this objective (VALIDATION_BUDGET)'],
@@ -143,11 +146,23 @@ function ValidationLine(validation) {
   const catalogue = validation.catalogue
     ? `${validation.catalogue.source === 'dev' ? 'dev' : 'the commit\'s own catalogue'} at ${EscapeAttribute(String(validation.catalogue.commit ?? '').slice(0, 10))}` : '';
   const count = (map) => Object.entries(map ?? {}).map(([id, n]) => `${EscapeAttribute(id)}${n > 1 ? ` ×${n}` : ''}`).join(', ');
-  const parts = Object.entries(validation.verdicts ?? {}).map(([verdict, n]) => {
+  // the objectives that stay on the build with every patch: by the signature of known bugs without patch, or of none
+  // (from the verdict of each objective when there is one)
+  const traces = Object.values(validation.byTrace ?? {});
+  const verdicts = { ...(validation.verdicts ?? {}) };
+  if (traces.length && verdicts['not-patched']) {
+    const bySignature = traces.filter(v => v.verdict === 'not-patched' && (v.known_unpatched ?? []).length).length;
+    if (bySignature) verdicts.signature = bySignature;
+    verdicts['not-patched'] -= bySignature;
+    if (!verdicts['not-patched']) delete verdicts['not-patched'];
+  }
+  const order = ['confirmed', 'signature', 'not-patched', 'other-signature', 'inconclusive', 'not-validated'];
+  const words = { 'confirmed': 'by patch', 'signature': 'by signature', 'not-patched': 'no known bug', 'other-signature': 'other signature',
+                  'inconclusive': 'inconclusive', 'not-validated': 'not validated' };
+  const parts = Object.entries(verdicts).sort(([a], [b]) => order.indexOf(a) - order.indexOf(b)).map(([verdict, n]) => {
     const [mark, help] = VALIDATION_VERDICTS[verdict] ?? ['', ''];
-    const detail = verdict === 'confirmed' ? count(validation.confirmed) : verdict === 'not-patched' && Object.keys(validation.known_unpatched ?? {}).length
-      ? `known without patch: ${count(validation.known_unpatched)}` : '';
-    return `<span class="validation-${EscapeAttribute(verdict)}" title="${EscapeAttribute(help)}">${mark} ${n} ${EscapeAttribute(verdict)}${detail ? ` (${detail})` : ''}</span>`;
+    const detail = verdict === 'confirmed' ? count(validation.confirmed) : verdict === 'signature' ? count(validation.known_unpatched) : '';
+    return `<span class="validation-${EscapeAttribute(verdict)}" title="${EscapeAttribute(help)}">${mark} ${n} ${EscapeAttribute(words[verdict] ?? verdict)}${detail ? ` (${detail})` : ''}</span>`;
   });
   const controls = (validation.controls_failed ?? []).length
     ? ` · <b class="validation-controls-failed" title="the witness of a candidate bug did not behave on the validation builds: verdicts not trusted">controls failed (runs ${EscapeAttribute(validation.controls_failed.join(', '))})</b>` : '';
@@ -157,9 +172,12 @@ function ValidationLine(validation) {
 function ValidationBadge(validation, trace) {
   const v = validation?.byTrace?.[trace];
   if (!v) return '';
-  const [mark, help] = VALIDATION_VERDICTS[v.verdict] ?? ['', ''];
-  const ids = [...(v.entries ?? []), ...(v.known_unpatched ?? []).map(id => `${id} (no patch)`)];
-  return ` <span class="objective-validation validation-${EscapeAttribute(v.verdict)}" title="${EscapeAttribute(help)}">${mark} ${EscapeAttribute(ids.join(', ') || v.verdict)}</span>`;
+  // not patched with the signature of known bugs without patch: by signature (yellow-green), else no known bug (red)
+  const verdict = v.verdict === 'not-patched' && (v.known_unpatched ?? []).length ? 'signature' : v.verdict;
+  const [mark, help] = VALIDATION_VERDICTS[verdict] ?? ['', ''];
+  const ids = verdict === 'confirmed' ? (v.entries ?? []).map(id => `${id} (patch)`)
+    : verdict === 'signature' ? [(v.known_unpatched ?? []).join(' or ') + ' (signature)'] : [];
+  return ` <span class="objective-validation validation-${EscapeAttribute(verdict)}" title="${EscapeAttribute(help)}">${mark} ${EscapeAttribute(ids.join(', ') || (verdict === 'not-patched' ? 'no known bug' : verdict))}</span>`;
 }
 
 // taskID: task of the results, for the link to its full objectives page (objectives_report.sh)

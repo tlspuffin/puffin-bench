@@ -5,10 +5,56 @@
 
 import '../board/nav.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
-import { UNCONFIRMED, TYPE_LABELS, Bugs, ExpectedRuns, NewBugs, FuzzerText, Mismatch, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, BugsHeadline, RunFailures, ExpectedConclusion, ExpectedChipTip } from './bugs.js';
+import { UNCONFIRMED, TYPE_LABELS, Bugs, ExpectedRuns, NewBugs, FuzzerText, Mismatch, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, BugsHeadline, RunFailures, ExpectedConclusion, ExpectedChipTip, BugValidation } from './bugs.js';
 
+// a live page (its bugs are still being validated)
+let LIVE = false;
 // the CVE table of the bugs reference: the names of the bugs (BugName)
 let CVES = null;
+// tlspuffin's catalogue the validation rests on (git_restapi; the commit validation used, else the task's): the names,
+// oracles and patches of the bugs, null when unavailable
+let CATALOGUE = null;
+const BUGS_PAGE = `${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html`;
+// a bug of the catalogue: "BUF · CVE-2022-39173", linked to its entry on the Bugs reference
+function EntryName(id) {
+  const entry = Object.values(CATALOGUE?.vendors ?? {}).find(v => v.entries?.[id])?.entries?.[id];
+  const text = entry?.alias ? `${entry.alias} · ${id}` : id;
+  return `<a href="${BUGS_PAGE}#${encodeURIComponent(id)}" target="_blank" rel="noopener" title="Every field of ${esc(id)}: Bugs reference">${esc(text)}</a>`;
+}
+const EntryNames = (ids, joiner = ' or ') => ids.map(EntryName).join(joiner);
+// the name of a bug: from the catalogue when validation confirmed it (by patch, else by signature: its alias or ID),
+// else BugName (the expected bug of its configuration, a CVE set apart or declared, else "Bug A"…)
+function DisplayName(bug, short = false) {
+  const main = bug.validation?.parts?.find(p => ['patch', 'signature'].includes(p.kind) && p.ids.length);
+  if (main) {
+    const names = main.ids.map(id => Object.values(CATALOGUE?.vendors ?? {}).find(v => v.entries?.[id])?.entries?.[id]?.alias ?? id);
+    return names.join(short ? '/' : ' / ');
+  }
+  return short ? ShortName(bug, CVES) : BugName(bug, CVES);
+}
+// what each verdict says, as the badge of a part of a bug's objectives (BugValidation parts)
+function ValidationPart(part, live) {
+  const n = ` ×${count(part.count)}`;
+  switch (part.kind) {
+    case 'patch': return `<span class="val val-patch" data-click-tip="${esc(`✔ confirmed by patch differential\nthe objective is removed by the patch of this bug, and gives its signature on the build with every other patch: it is this bug`)}">✔ ${EntryNames(part.ids, ', ')}${n}</span>`;
+    case 'signature': return `<span class="val val-signature" data-click-tip="${esc(`≈ its signature only\non the build with every patch, the objective gives the signature of known bug(s) without patch at this version: one of them, by its signature (a patch would make it certain)`)}">≈ ${EntryNames(part.ids)} · signature${n}</span>`;
+    case 'unpatched': return `<span class="val val-unpatched" data-click-tip="${esc(`⚠ the signature of a bug with a patch here, not removed by it\nthe objective stays on the build with every patch: not this bug, or its patch is incomplete; to review`)}">⚠ signature of ${EntryNames(part.ids)}, not removed by its patch${n}</span>`;
+    case 'new': return `<span class="val val-new" data-click-tip="${esc(`🚨 no known bug\nthe objective stays on the build with every patch, with the signature of no bug of the catalogue: a new bug, or one missing from the catalogue`)}">🚨 no known bug's signature${n}</span>`;
+    case 'other': return `<span class="val val-other" data-click-tip="${esc(`⚠ another signature\nthe patch of the bug(s) named removes the objective, but it does not give their signature: to review, never counted as them`)}">⚠ removed by the patch of ${part.ids.length ? EntryNames(part.ids, ', ') : 'a bug'}, another signature${n}</span>`;
+    case 'inconclusive': return `<span class="val val-inconclusive" data-click-tip="${esc('? inconclusive\nno objective on the validation builds (not reproduced there, or it needs two bugs)')}">? inconclusive${n}</span>`;
+    default: return `<span class="val val-not-validated" data-click-tip="${esc(`… not validated\n${live ? 'not validated yet' : 'the validation budget of the run was spent before it'}`)}">… not validated${n}</span>`;
+  }
+}
+// the validation line of a bug: its parts, how many of its objectives were validated; without verdict, the bugs of
+// the catalogue with its signature
+function ValidationHTML(bug, live) {
+  const v = bug.validation;
+  if (!v) return '';
+  if (!v.kind) {
+    return v.candidates.length ? `<div class="validation"><span class="val val-none" data-click-tip="${esc(`○ its signature, not validated${live ? ' yet' : ''}\nnone of its objectives was validated against the catalogue: the bug(s) of the catalogue with its signature (claim, or ASan report type and top frame) are named, without proof`)}">○ the signature of ${EntryNames(v.candidates)} · not validated${live ? ' yet' : ''}</span></div>` : '';
+  }
+  return `<div class="validation">${v.parts.map(part => ValidationPart(part, live)).join('')}<span class="val-note">${count(v.validated)} of ${count(v.objectives)} objectives validated${v.during ? ', during the run' : ''}</span></div>`;
+}
 // the configurations of the report shown (report.libraries): runs, outcomes, ends, errors of the end-of-run summaries
 let REPORT_LIBRARIES = [];
 // the job type of the report (perf, vuln-a…): why a run did not succeed depends on it (RunFailures)
@@ -60,6 +106,30 @@ help.innerHTML = `
       without error, or the library stopped on an error before it, shown as the reason) and
       <span class="type none">replay error</span> (timed out or could not run) are not confirmed bugs.</li>
   </ul>
+
+  <h2>Validation against tlspuffin's catalogue</h2>
+  <p>Each objective of a task on a commit with the catalogue is replayed on validation builds: the build with every known
+    bug that has a patch patched, and that build without the patch of each such bug (PrepareValidation during a custom
+    benchmark's run, ValidateObjectives after each run, at most 20 objectives a run). What it says, on each bug, per
+    objective:</p>
+  <ul>
+    <li><span class="val val-patch">✔ BUF · CVE-2022-39173</span> confirmed by patch differential: its patch removes the
+      objective, which gives its signature without it. Certain.</li>
+    <li><span class="val val-signature">≈ … · signature</span> on the build with every patch, the signature of a known
+      bug without patch at that version: one of them, by its signature only.</li>
+    <li><span class="val val-unpatched">⚠ signature of …, not removed by its patch</span> the signature of a bug that has
+      a patch there, which does not remove it: not that bug, or an incomplete patch. To review.</li>
+    <li><span class="val val-new">🚨 no known bug's signature</span> on the build with every patch, the signature of no
+      bug of the catalogue: a new bug, or one missing from the catalogue.</li>
+    <li><span class="val val-other">⚠ another signature</span> removed by a bug's patch without its signature: to review.
+      <span class="val val-inconclusive">? inconclusive</span> not reproduced on the validation builds;
+      <span class="val val-not-validated">… not validated</span> beyond the budget.</li>
+    <li><span class="val val-none">○ the signature of … · not validated</span> no objective of the bug validated: the
+      catalogue's bugs with its signature, without proof.</li>
+  </ul>
+  <p>One claim or crash can be several bugs (CVE-2021-3336, SIG and SKIP share "Authentication bypass" on wolfSSL 4.4.0):
+    the line of a bug lists what its objectives are, each badge with how many. A bug's name comes from the catalogue when
+    validation confirmed it; each name links to the bug's entry on the Bugs reference.</p>
 
   <h2>Expected, set apart, unexpected, new</h2>
   <ul>
@@ -196,13 +266,21 @@ function LetterBadge(bug) {
   const what = `${TYPE_LABELS[bug.type] ?? bug.type}${bug.frames.length ? ': ' + bug.frames.join(' < ') : bug.summary ? ': ' + bug.summary : ''}`;
   const repro = bug.notReproduced ? ` (${bug.notReproduced} not reproduced by the replay)` : '';
   const notTarget = bug.notTarget ? ` — not the target of this job: ${bug.notTarget}` : '';
-  return `<a class="type letter ${TypeClass(bug.type)}${bug.notTarget ? ' not-target-letter' : ''}" href="#bug-${bug.letter}" title="${esc(BugName(bug, CVES))}: ${esc(what)} (${bug.count} objectives${esc(repro)})${esc(notTarget)}">${esc(ShortName(bug, CVES))}${Mismatch(bug) ? ' ⚠' : ''}</a>`;
+  return `<a class="type letter ${TypeClass(bug.type)}${bug.notTarget ? ' not-target-letter' : ''}" href="#bug-${bug.letter}" title="${esc(DisplayName(bug))}: ${esc(what)} (${bug.count} objectives${esc(repro)})${esc(notTarget)}">${esc(DisplayName(bug, true))}${Mismatch(bug) ? ' ⚠' : ''}</a>`;
 }
 
 // The expected bug of a configuration and how it is recognised (vuln_targets.json); without one, the CVEs tlspuffin
 // declares for its build when the run recorded them (cli.vulnerabilities: recognised as 📋 known by their signature)
 function ExpectedCell(report, library, run) {
   const rule = (t) => t.kind === 'claim' ? `the claim “${esc(t.match)}”` : `a crash with <code>${esc(t.match)}</code> among the top 3 frames`;
+  // a custom benchmark's experiment: the catalogue's bug it looks for, by its oracle
+  const custom = (report.runs ?? []).find(r => r.library === library && r.cli?.custom?.target)?.cli?.custom ?? run?.cli?.custom;
+  if (custom?.target) {
+    const o = custom.oracle ?? {};
+    const oracle = o.kind === 'claim' ? `the claim “${esc(o.violation ?? '')}”`
+      : o.kind === 'crash' ? `a crash${o.asan ? ` with an ASan report ${esc(o.asan)}` : ''}${o.signal ? ` (${esc(o.signal)})` : ''}` : 'its oracle';
+    return `<b>${EntryName(custom.target)}</b> <span class="muted">(the experiment's target)</span><div class="muted">${oracle}, confirmed by validation</div>`;
+  }
   const target = report.targets?.[library];
   if (target) {
     const alias = CVES?.[target.cve]?.alias;
@@ -280,11 +358,24 @@ function FailuresNote(libraries, expectedRuns) {
 function BugTags(bug) {
   return (bug.notTarget ? NotTargetBadge(bug) : '')
       + (bug.expected ? ` <span class="expected" data-click-tip="The bug this configuration is meant to find (vuln_targets.json): ${esc(bug.expected.join(', '))}">🎯 expected · ${esc(bug.expected.join(', '))}</span>` : '')
-      + (bug.knownCve ? ` <span class="known-cve" data-click-tip="${esc(bug.knownCveInferred
+      + (bug.knownCve && !bug.validation?.kind ? ` <span class="known-cve" data-click-tip="${esc(bug.knownCveInferred
           ? `A CVE of the library this configuration built (${Object.keys(bug.knownCve).join(', ')}), whose signature in vuln_targets.json this bug matches: not a new bug.\nInferred: this build declared no CVEs (built before puffin-build), so the CVE comes from the CVE table of vuln_targets.json (library, signature), not from the build`
           : `A CVE that tlspuffin declares for what this configuration built (${Object.keys(bug.knownCve).join(', ')}: the build's vendorinfo, known minus fixed vulnerabilities), and whose signature in vuln_targets.json this bug matches: not a new bug`)}">📋 known${bug.knownCveInferred ? ' (inferred)' : ''} · ${esc([...new Set(Object.values(bug.knownCve))].join(', '))}</span>` : '')
       + (bug.unexpected ? ' <span class="unexpected" data-click-tip="Neither the expected bug of its configuration nor a known CVE set apart: a new finding, or a rule of vuln_targets.json to complete">⚠ unexpected</span>' : '')
       + (bug.isNew ? ` <span class="new-bug-badge" data-click-tip="New for ${esc(bug.isNew.join(', '))}: with an expected bug, never seen there before this task (any earlier task: VulnA, VulnB, Perf, campaigns); in a plain version, none of the CVEs tlspuffin declares for that build">🚨 NEW BUG</span>` : '');
+}
+
+// The bugs as validation sees them, first of the tiles when the task was validated: confirmed by patch, by signature,
+// to review, without known signature (new-bug candidates)
+function ValidationTiles(bugs) {
+  const validated = bugs.filter(b => b.validation?.kind);
+  if (!validated.length) return '';
+  const has = kind => validated.filter(b => b.validation.parts.some(p => p.kind === kind)).length;
+  const tile = (n, cls, text, tip) => n ? `<div class="tile ${cls}" data-click-tip="${esc(tip)}"><b>${count(n)}</b><span>${n === 1 ? text.replace(/^bugs /, 'bug ') : text}</span></div>` : '';
+  return tile(has('patch'), 'val-tile', 'bugs confirmed by patch', 'bugs with objectives confirmed by patch differential (validation against tlspuffin\'s catalogue): certain')
+    + tile(has('signature'), '', 'by their signature only', 'bugs with objectives that give the signature of known bugs without patch at that version: one of them, by signature')
+    + tile(has('unpatched') + has('other'), 'warn', 'to review', 'objectives with the signature of a bug that has a patch here but are not removed by it, or removed by a patch with another signature')
+    + tile(has('new'), 'val-new-tile', 'without known signature', 'objectives on the build with every patch, with the signature of no bug of the catalogue: new-bug candidates');
 }
 
 // What was found, then what the replay did with it. Mismatch: the fuzzer's record (its logs) is the evidence.
@@ -391,9 +482,9 @@ function BugRow(bug, open) {
   const replayed = bug.run?.replayed;
   return `<details class="bug" id="bug-${esc(bug.letter)}" data-kind="${bug.notTarget ? 'not-target' : bug.reproduced ? 'confirmed' : bug.fuzzer ? 'fuzzer' : bug.type}" ${open ? 'open' : ''}>
     <summary>
-      <div class="count"><span class="bugletter"><span class="chev" title="Click: replay report and fuzzer log">▸</span> ${esc(BugName(bug, CVES))}</span>${count(bug.count)} <small>objective${bug.count > 1 ? 's' : ''}</small>${bug.notReproduced && bug.reproduced ? `<small class="nr">(${count(bug.notReproduced)} not reproduced)</small>` : ''}</div>
+      <div class="count"><span class="bugletter"><span class="chev" title="Click: replay report and fuzzer log">▸</span> ${esc(DisplayName(bug))}</span>${count(bug.count)} <small>objective${bug.count > 1 ? 's' : ''}</small>${bug.notReproduced && bug.reproduced ? `<small class="nr">(${count(bug.notReproduced)} not reproduced)</small>` : ''}</div>
       <div>${TypeBadges(bug)}</div>
-      <div class="symptom"><div class="frames" title="${esc((bug.frames.join(' < ') || bug.summary) + (reasons.length ? '\nnot reproduced: ' + reasons.join(', ') : ''))}">${frames}</div>${BugTags(bug) ? `<div class="bug-tags">${BugTags(bug)}</div>` : ''}</div>
+      <div class="symptom"><div class="frames" title="${esc((bug.frames.join(' < ') || bug.summary) + (reasons.length ? '\nnot reproduced: ' + reasons.join(', ') : ''))}">${frames}</div>${BugTags(bug) ? `<div class="bug-tags">${BugTags(bug)}</div>` : ''}${ValidationHTML(bug, LIVE)}</div>
       <div class="where">${where}</div>
     </summary>
     <div class="detail">
@@ -525,6 +616,7 @@ async function Render() {
   }
   if (report.placeholder) { await RenderPlaceholder(root, report); return; }
   const runs = report.runs ?? [];
+  LIVE = !!report.live;
   const bugs = Bugs(runs, report.not_targeted, report.targets);
   REPORT_LIBRARIES = report.libraries ?? [];
   REPORT_JOB_TYPE = report.job_type ?? null;
@@ -532,7 +624,18 @@ async function Render() {
   // 🚨 new bugs: never seen for their library before this task (known_bugs.json next to the reports)
   const known = await fetch('known_bugs.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
   CVES = await LoadCves();
+  // validation against tlspuffin's catalogue: the catalogue it used (else the task's commit's), then each bug's verdict
+  const catalogueCommit = (report.libraries ?? []).map(l => l.validation?.catalogue?.commit).find(Boolean) ?? report.commit;
+  if (/^[0-9a-f]{7,40}$/.test(String(catalogueCommit ?? ''))) {
+    CATALOGUE = await fetch(`${location.protocol}//${location.hostname}:10081/api/git/catalogue/tlspuffin/${catalogueCommit}`, { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null).then(c => c?.format === 'vulnerabilities.toml' ? c : null).catch(() => null);
+  }
+  for (const bug of bugs) bug.validation = BugValidation(bug, report.libraries, CATALOGUE);
   const newBugs = NewBugs(bugs, known, report.task, report);
+  // validation knows better: a bug confirmed by patch or by signature is a known one
+  for (const bug of [...newBugs]) {
+    if (['patch', 'signature'].includes(bug.validation?.kind)) { delete bug.isNew; newBugs.splice(newBugs.indexOf(bug), 1); }
+  }
   // objectives whose bug cannot be told (the tile says how many and why)
   const uncategorised = Uncategorised(runs, !!(report.live || report.pending_final));
   // VulnA/VulnB: bugs that are not the job's target (another known CVE) are counted apart
@@ -585,7 +688,8 @@ async function Render() {
         ${report.live ? ` · <span class="live">● live · updated ${esc(report.updated)}${(n => n ? ` · next update by about ${esc(Clock(n))}` : '')(NextLiveUpdate(report.refresh))}</span>` : ''} · ${links}</div>
       <div class="tiles">
         ${ExpectedBanner(expectedRuns, report.libraries)}
-        <div class="tile ${confirmed.length && celebrate ? 'gold' : ''}"><b>${count(confirmed.length)}</b><span>distinct bug${confirmed.length === 1 ? '' : 's'} (confirmed)</span></div>
+        ${ValidationTiles(bugs)}
+        <div class="tile ${confirmed.length && celebrate ? 'gold' : ''}"><b>${count(confirmed.length)}</b><span>distinct bug${confirmed.length === 1 ? '' : 's'} (confirmed${bugs.some(b => b.validation?.kind) ? ' by replay' : ''})</span></div>
         ${uncategorised.total ? `<div class="tile warn uncat-tile" data-click-tip="${esc(UncategorisedText(uncategorised))}"><b>❓ ${count(uncategorised.total)}</b> without category</div>` : ''}
       ${uncategorised.pending ? `<div class="tile pending-tile" data-click-tip="${esc(UncategorisedText(uncategorised, null, true))}"><b>⏳ ${count(uncategorised.pending)}</b> not processed yet</div>` : ''}
       ${fuzzerOnly.length ? `<div class="tile warn" data-click-tip="Objectives whose replay does not reproduce what the fuzzer saw (crash or claim violation, from its logs)"><b>${count(fuzzerOnly.length)}</b><span>seen only by the fuzzer (${count(fuzzerOnlyObjectives)} objectives)</span></div>` : ''}

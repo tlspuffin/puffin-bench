@@ -161,7 +161,8 @@ export function AttachValidation(libResult, attempt, library, attemptID, outPath
   (validation.objectives ?? []).forEach(o => {
     (o.entries ?? []).forEach(id => { merged.confirmed[id] = (merged.confirmed[id] ?? 0) + 1; });
     (o.known_unpatched ?? []).forEach(id => { merged.known_unpatched[id] = (merged.known_unpatched[id] ?? 0) + 1; });
-    merged.byTrace[`${attemptID}/${o.trace}`] = { verdict: o.verdict, entries: o.entries ?? [], known_unpatched: o.known_unpatched ?? [] };
+    merged.byTrace[`${attemptID}/${o.trace}`] = { verdict: o.verdict, entries: o.entries ?? [], known_unpatched: o.known_unpatched ?? [],
+                                                  ...(o.other_signature?.length ? { other_signature: o.other_signature } : {}) };
   });
   if (validation.controls_ok === false) merged.controls_failed.push(attemptID);
   if (validation.unsupported) merged.unsupported = validation.unsupported;

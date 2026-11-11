@@ -143,6 +143,41 @@ StepLibrary() {
   echo "${lib:-${expName}}";
 }
 
+# LiveValidation <task dir> <state JSON>: the validation of the task's objectives so far, per configuration, in the
+# shape of the final report's (the summary scripts' AttachValidation): the verdicts of the attempts that ended
+# (output/validation-<library>-<attempt>.json, ValidateObjectives) and those given during the running attempts
+# (executor/<step>/validation/verdicts/, ConfirmObjective), each by "<attempt>/<trace>", with the catalogue they rest on
+LiveValidation() {
+  local taskDir="$1" taskJSON="$2" out='{}' file base lib attempt dir key;
+  for file in "${taskDir}"/output/validation-*-*.json; do
+    [ -s "${file}" ] || continue;
+    base=$( basename "${file}" .json ); base="${base#validation-}"; attempt="${base##*-}"; lib="${base%-*}";
+    out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --slurpfile v "${file}" '
+        .[$lib] = ((.[$lib] // {}) | .catalogue = ($v[0].catalogue // .catalogue)
+          | .byTrace = ((.byTrace // {}) + ([$v[0].objectives[]? | { key: ($a + "/" + .trace),
+              value: ({ verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
+                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)) }] | from_entries)))' \
+        <<< "${out}" 2> /dev/null ) || out='{}';
+  done
+  for dir in "${taskDir}"/executor/*/validation/verdicts; do
+    [ -d "${dir}" ] || continue;
+    key=$( basename "$( dirname "$( dirname "${dir}" )" )" ); attempt="${key##*-}";
+    lib=$( StepLibrary "${taskJSON}" "${key}" "" );
+    [ -n "${lib}" ] || continue;
+    for file in "${dir}"/*.json; do
+      [ -s "${file}" ] || continue;
+      out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --slurpfile v "${file}" \
+          --slurpfile s "$( dirname "${dir}" )/state.json" '
+          .[$lib] = ((.[$lib] // {})
+            | .catalogue = (.catalogue // ($s[0] | if .catalogueCommit then { source, commit: .catalogueCommit } else null end))
+            | .byTrace[$a + "/" + $v[0].trace] = ($v[0] | { verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []), during_attempt: true }
+                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)))' \
+          <<< "${out}" 2> /dev/null ) || continue;
+    done
+  done
+  echo "${out}";
+}
+
 # Commit and name of a task, from its state ($1, JSON of /api/task/<id>/state): its arguments are [{key, value}]
 TaskInfo() {
   jq -r '[([.task.args[]? | select(.key? == "COMMIT_ID") | .value] + [.task.args.COMMIT_ID? // empty])[0] // "?",
@@ -321,6 +356,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
   [ "$( jq length <<< "${runs}" )" -gt 0 ] || continue;
   IFS=$'\t' read -r commit name <<< "$( TaskInfo "${taskJSON}" )";
   jq --arg task "${task}" --arg name "${name}" --arg commit "${commit}" --arg updated "$( date '+%F %T' )" \
+      --argjson validation "$( LiveValidation "${taskDir}" "${taskJSON}" )" \
       --argjson refresh "$( jq -n --argjson e "${EVERY}" --argjson b "${BUDGET}" --argjson r "${REPORT_EVERY}" --argjson now "$( date +%s )" \
           '{ live_every_s: $e, live_budget_s: $b, report_every_s: $r, updated_epoch: $now }' )" \
       --arg taskUrl "${BOARD_URL}/files/board/task.html?id=${task}" \
@@ -337,7 +373,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
          refresh: $refresh,
          not_targeted: (if $jobType | test("^vuln-") then $nt else {} end), targets: $targets, cves: $cves,
          # every configuration with its number of runs, also the runs without objective yet (the 🎯 count: k/runs)
-         libraries: $libraries,
+         libraries: ($libraries | map(. + (if $validation[.library] then { validation: $validation[.library] } else {} end))),
          runs: sort_by(.library, .attempt) }' \
       <<< "${runs}" > "${OUT}/live-${task}.json";
   bash "${TOOLS}/objectives_report.sh" --render "${OUT}/live-${task}.json" "${OUT}/live-${task}.html";
