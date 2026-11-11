@@ -27,11 +27,14 @@ for vendor in $( jq -r '.vendors | keys[]' "${work}/presets.json" ); do
     jq -s '.[0] * .[1]' "${work}/states.json" "${work}/one.json" > "${work}/merged.json" && mv "${work}/merged.json" "${work}/states.json"
   done
 done
-command cp -f "${bench}/tlspuffin/data/html/board/launchers/tlspuffin/custombench.js" "${work}/custombench.mjs"
+mkdir -p "${work}/html/board/launchers/tlspuffin" "${work}/html/common"
+command cp -f "${bench}/tlspuffin/data/html/board/launchers/tlspuffin/custombench.js" "${work}/html/board/launchers/tlspuffin/"
+command cp -f "${bench}/tlspuffin/data/html/common/catalogue.js" "${work}/html/common/"
+echo '{ "type": "module" }' > "${work}/package.json"
 cat > "${work}/run.mjs" <<'EOF'
 import { readFileSync } from 'node:fs';
 const [, , work] = process.argv;
-const { parseVersion, compareVersions, inRange, activeOn, patchedAt } = await import(`${work}/custombench.mjs`);
+const { parseVersion, compareVersions, inRange, activeOn, patchedAt } = await import(`${work}/html/board/launchers/tlspuffin/custombench.js`);
 let fail = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fail = 1; };
 // versions, as version.rs

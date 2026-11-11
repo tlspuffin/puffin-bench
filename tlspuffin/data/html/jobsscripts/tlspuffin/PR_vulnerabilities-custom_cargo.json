@@ -37,6 +37,12 @@
         }
       },
       {
+        "step": "PrepareValidation",
+        "configuration": {
+          "nb_cores": 4
+        }
+      },
+      {
         "step": "ExperimentWithCargo",
         "configuration": {
           "timeout": "${RUNTIME_TIMEOUT}"

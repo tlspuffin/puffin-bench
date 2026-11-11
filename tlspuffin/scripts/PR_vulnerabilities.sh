@@ -71,10 +71,13 @@ CheckObjectif() {
 # TargetedObjectiveFound <verdicts (assoc array, kept between calls)>: true when an objective of the experiment is a
 # targeted one. An objective the fuzzer recorded as a claim of OBJECTIVES_NOT_TARGETED (PR_common.sh) does not count;
 # one without record yet is looked at again on the next call, then counts (as before: any objective ended the run).
-# The fuzzer's logs are read only when an objective has no verdict yet.
+# The fuzzer's logs are read only when an objective has no verdict yet. A custom benchmark's experiment (a catalogue
+# entry as target): an objective with the target's signature ends it only once validation confirms it (ConfirmObjective,
+# PR_validate.sh: replayed on the validation builds prepared before the experiment, while the fuzzer goes on), at most
+# VALIDATION_INRUN_MAX (3) per call, the others at the next call; one it does not confirm leaves the experiment going.
 TargetedObjectiveFound() {
   local -n ref_verdicts=$1;
-  local expDir trace name records rc found=1;
+  local expDir trace name records rc found=1 confirmations=0 why confirmed;
   # the expected bug of the preset (vuln_targets.json); none declared: any objective but OBJECTIVES_NOT_TARGETED
   local target; target=$( ExpectedTarget "${vendor:-}" );
   for expDir in experiments/*/; do
@@ -95,9 +98,30 @@ TargetedObjectiveFound() {
         # another bug than the expected one: kept, the replay at the end may still find the expected bug in it
         ref_verdicts[${name}]=not-targeted;
         echo "objective ${name}: not the expected bug (${target%%|*}), the experiment goes on: $( FuzzerVerdict "${records}" "${name}" | cut -f1-3 | tr '\t' ' ' )" >&2;
+      elif (( rc == 0 )) && [ -n "${target_bug:-}" ]; then
+        (( confirmations >= ${VALIDATION_INRUN_MAX:-3} )) && continue;
+        confirmations=$(( confirmations + 1 ));
+        why=$( ConfirmObjective "${trace}" ); confirmed=$?;
+        if (( confirmed == 1 )); then
+          ref_verdicts[${name}]=not-targeted;
+          echo "objective ${name}: the signature of ${target_bug}, not confirmed (${why}): the experiment goes on" >&2;
+        else
+          ref_verdicts[${name}]=targeted; found=0;
+          echo "objective ${name}: ${target_bug}, ${why}: end of the experiment" >&2;
+        fi
       elif (( rc == 0 )); then
         ref_verdicts[${name}]=targeted; found=0;
         [ -n "${target}" ] && echo "objective ${name}: the expected bug (${target%%|*}), end of the experiment" >&2;
+      elif [ "${ref_verdicts[${name}]:-}" == pending ] && [ -n "${target_bug:-}" ] && [ -z "${records}" ]; then
+        # a custom benchmark's experiment whose fuzzer records nothing at all: validation decides
+        why=$( ConfirmObjective "${trace}" ); confirmed=$?;
+        if (( confirmed == 1 )); then
+          ref_verdicts[${name}]=not-targeted;
+          echo "objective ${name}: no record in the fuzzer's logs, not ${target_bug} (${why}): the experiment goes on" >&2;
+        else
+          ref_verdicts[${name}]=targeted; found=0;
+          echo "objective ${name}: no record in the fuzzer's logs, ${target_bug} (${why}): end of the experiment" >&2;
+        fi
       elif [ "${ref_verdicts[${name}]:-}" == pending ]; then
         # still no record: as before, it ends the experiment when no target is declared, or when the fuzzer's logs
         # have no record at all (none found: waiting for a record there would run the experiment to its timeout); with
@@ -117,14 +141,17 @@ TargetedObjectiveFound() {
   return "${found}";
 }
 
-# TargetedNames <experiment dir>: the names of its targeted objectives, oldest first (at most 3: enough evidence)
+# TargetedNames <experiment dir>: the names of its targeted objectives, oldest first (at most 3: enough evidence); a
+# custom benchmark's experiment: those validation confirms (ConfirmObjective; not decided by validation: as before)
 TargetedNames() {
   local dir="$1" trace name records target;
   target=$( ExpectedTarget "${vendor:-}" );
   records=$( FuzzerRecords "$( FuzzerLogDir "${dir}" )" );
   while IFS= read -r trace; do
     name=$( basename "${trace}" .trace );
-    ObjectiveTargeted "${records}" "${name}" "${target}" && echo "${name}";
+    ObjectiveTargeted "${records}" "${name}" "${target}" || continue;
+    if [ -n "${target_bug:-}" ]; then ConfirmObjective "${trace}" > /dev/null; (( $? == 1 )) && continue; fi
+    echo "${name}";
   done < <( find "${dir}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %p\n' 2> /dev/null | sort -n | cut -d' ' -f2- ) | head -n 3;
 }
 
@@ -134,8 +161,12 @@ TargetedNames() {
 # monitor looks once a minute, then the fuzzer has to stop). With an expected bug declared (vuln_targets.json), an
 # objective is targeted when the fuzzer's record or its replay (objective-reports/, ExperimentReplayObjectives) is that
 # bug: a crash the fuzzer logged without backtrace counts when the replay shows the expected frame
+# A custom benchmark's experiment: an objective of the target's signature (record or replay) counts once validation
+# confirms it (ConfirmObjective, not decided by validation: as before; one it does not confirm is another bug), the
+# objectives taken oldest first, those after the first confirmed one counted without validation: the time to find is
+# that of the first confirmed objective, when the fuzzer saved it.
 ObjectiveCounts() {
-  local dir="$1" trace name targeted=0 excluded=0 unexpected=0 first='' t records rc sig rtype rframes;
+  local dir="$1" trace name targeted=0 excluded=0 unexpected=0 first='' t records rc sig rtype rframes confirmedOne=false;
   local target; target=$( ExpectedTarget "${vendor:-}" );
   records=$( FuzzerRecords "$( FuzzerLogDir "${dir}" )" );
   while IFS= read -r trace; do
@@ -149,6 +180,10 @@ ObjectiveCounts() {
         *) TargetMatches "${target}" crash "ASan ${rtype}" "${rframes}" && rc=0;;
       esac
     fi
+    if (( rc == 0 )) && [ -n "${target_bug:-}" ] && ! ${confirmedOne}; then
+      ConfirmObjective "${trace}" > /dev/null;
+      case $? in 0) confirmedOne=true;; 1) rc=3;; esac
+    fi
     if (( rc == 1 )); then
       excluded=$(( excluded + 1 ));
     elif [ -n "${target}" ] && (( rc != 0 )); then
@@ -158,7 +193,7 @@ ObjectiveCounts() {
       t=$( date -u -d "$( sed -E 's/^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3}).*/\1-\2-\3 \4:\5:\6.\7/' <<< "${name}" )" +%s%3N 2> /dev/null ) || t='';
       [ -n "${t}" ] && { [ -z "${first}" ] || (( t < first )); } && first="${t}";
     fi
-  done < <( find "${dir}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' 2> /dev/null )
+  done < <( find "${dir}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' 2> /dev/null | sort )
   echo "${targeted} ${excluded} ${first:--} ${unexpected}";
 }
 

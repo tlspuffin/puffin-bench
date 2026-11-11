@@ -30,6 +30,6 @@
   },
   "_not_targeted": {
     "Negotiated cipher is not in agent's configured ciphers list": { "cve": "CVE-2024-5814", "library": "wolfssl", "below": "5.7.2",
-        "note": "tlspuffin e6bbd77b (2026-03): the oracle of CVE-2024-5814, which every wolfSSL < 5.7.2 has; set apart only there: on any other library or version this claim is a bug" }
+        "note": "tlspuffin e6bbd77b (2026-03): the oracle of CVE-2024-5814, which every wolfSSL < 5.7.2 has; set apart only there: on any other library or version this claim is a bug. Checked on 2026-11-10 with its witness (seed_cve_2024_5814, tlspuffin pr/vuln-catalogue a82624001), 3 runs each: wolfSSL 5.5.2 makes the claim 3/3; wolfSSL 5.7.2, which has the fix, refuses the ServerHello 3/3 (\"can't match cipher suite\")" }
   }
 }

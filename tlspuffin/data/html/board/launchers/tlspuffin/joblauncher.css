@@ -709,3 +709,6 @@ a.tp-mon {
 .jl-custom .jl-select { max-width: 360px; }
 /* the space kept for the campaign fields (no jump between job types) is not needed by the wide custom panel */
 .jl-modal.jl-wide .jl-campaign-extra:not(.visible) { display: none; }
+.jl-custom-warnings { font-size: 12px; color: #d29922; border-left: 3px solid #d29922; background: #1f1a12; padding: 4px 10px; }
+.jl-custom-warnings:empty { display: none; }
+.jl-custom-warnings div + div { margin-top: 3px; }

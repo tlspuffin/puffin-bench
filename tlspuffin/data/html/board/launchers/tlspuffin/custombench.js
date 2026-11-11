@@ -5,8 +5,8 @@
 //     presets only when `find.asan`), by default the newest one, ASan first;
 //   - with every other known bug that has a patch at that version patched (`<preset>-only-<ID>`), or as in the preset;
 //   - with the fuzzer flags and cargo features of its `find`;
-//   - stopping on its own oracle (job scripts: target_bug, target_oracle), confirmed after each attempt by the
-//     validation step (patch differential, or its signature when it has no patch).
+//   - stopping only on an objective with its own oracle (job scripts: target_bug, target_oracle) that validation
+//     confirms during the attempt (patch differential, or its signature when it has no patch).
 // A bug's needs are footnote marks under the table, one per distinct set. Every field of a bug: the Bugs reference
 // page. The experiments are the task's configurations (runtime RUNTIME_RUN_CONFIG, see runConfig), named
 // <benchmark>_<alias or ID>, and the definition is recorded in the task (definition) so that it can be launched again.
@@ -16,58 +16,9 @@ const LIBRARY = { wolfssl: 'wolfSSL', openssl: 'OpenSSL', libressl: 'LibreSSL', 
 const libraryName = vendor => LIBRARY[vendor] ?? vendor;
 const MARKS = ['*', '†', '‡', '§', '¶', '‖', '**', '††', '‡‡'];
 
-// ── Versions and ranges, as the catalogue (puffin-build/src/catalogue/version.rs) ──
-// A version: dotted numbers (missing ones are 0), then letters (a patch release after it, OpenSSL: 1.0.1 < 1.0.1a,
-// 0.9.8z < 0.9.8za) or -<pre-release> (before it); not starting with a digit (master): newer than every release.
-export function parseVersion(text) {
-  const t = String(text ?? '').trim();
-  if (!/^[0-9]/.test(t)) return { head: true };
-  const m = /^([0-9]+(?:\.[0-9]+)*)(.*)$/.exec(t);
-  const numbers = m[1].split('.').map(Number);
-  while (numbers.length > 1 && numbers[numbers.length - 1] === 0) numbers.pop();
-  const rest = m[2];
-  const suffix = rest === '' ? { rank: 1 } : rest.startsWith('-') ? { rank: 0, text: rest.slice(1) } : { rank: 2, text: rest };
-  return { numbers, suffix };
-}
-export function compareVersions(a, b) {
-  const x = typeof a === 'string' ? parseVersion(a) : a, y = typeof b === 'string' ? parseVersion(b) : b;
-  if (x.head || y.head) return (x.head ? 1 : 0) - (y.head ? 1 : 0);
-  for (let i = 0; i < Math.min(x.numbers.length, y.numbers.length); i++) {
-    if (x.numbers[i] !== y.numbers[i]) return x.numbers[i] < y.numbers[i] ? -1 : 1;
-  }
-  if (x.numbers.length !== y.numbers.length) return x.numbers.length < y.numbers.length ? -1 : 1;
-  if (x.suffix.rank !== y.suffix.rank) return x.suffix.rank < y.suffix.rank ? -1 : 1;
-  if (x.suffix.rank === 2 && x.suffix.text.length !== y.suffix.text.length) return x.suffix.text.length < y.suffix.text.length ? -1 : 1;
-  return x.suffix.text === y.suffix.text ? 0 : (x.suffix.text ?? '') < (y.suffix.text ?? '') ? -1 : 1;
-}
-// a range: alternatives separated by ||, each comparisons separated by , that must all hold (>= 1.0.0, < 1.0.0p)
-export function inRange(range, version) {
-  if (!range) return false;
-  return String(range).split('||').some(alternative => alternative.split(',').every(comparison => {
-    const m = /^\s*(<=|>=|<|>|=)\s*(\S+)\s*$/.exec(comparison);
-    if (!m) return false;
-    const c = compareVersions(version, m[2]);
-    return { '<': c < 0, '<=': c <= 0, '>': c > 0, '>=': c >= 0, '=': c === 0 }[m[1]];
-  }));
-}
-
-// whether a bug is in the code a preset builds: its version is affected, it has the build options the bug requires,
-// it does not fix it (PUT capabilities: the build tells, see PR_common.sh ForcedBuild)
-export function presentOn(id, entry, preset) {
-  if (entry.affected && !inRange(entry.affected, preset.version)) return false;
-  for (const [option, value] of Object.entries(entry.requires ?? {})) if (preset[option] !== value) return false;
-  return !(preset.fix ?? []).includes(id);
-}
-// whether a preset is offered to look for a bug: the bug is in its code, and it is an ASan build when the bug is only
-// detected with ASan (find.asan)
-export function activeOn(id, entry, preset) {
-  return presentOn(id, entry, preset) && !(entry.find?.asan && !preset.asan);
-}
-// whether a bug is only recognised with ASan (its oracle is an ASan report, or find.asan): its experiments are built
-// with ASan whatever the preset (mk_vendor make --asan, job scripts: asan_build)
-export function needsAsan(entry) { return !!(entry.oracle?.asan || entry.find?.asan); }
-// whether a bug has a patch at a version (its finds are then validated by patch differential)
-export function patchedAt(entry, version) { return (entry.patches ?? []).some(p => p.versions && inRange(p.versions, version)); }
+// versions, ranges, where a bug is and has a patch: the catalogue's rules (common/catalogue.js), also for the tests
+import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt } from '../../../common/catalogue.js';
+export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt };
 
 const duration = s => {
   if (s === null || s === undefined || !Number.isFinite(Number(s))) return '—';
@@ -118,13 +69,15 @@ export class CustomBenchmark {
       <div class="jl-custom-row">
         <span class="jl-label">Other known bugs</span>
         <label><input type="radio" name="jl-custom-others" value="patched" checked> patched where a patch exists (recommended: an experiment can only stop on its own bug)</label>
-        <label><input type="radio" name="jl-custom-others" value="preset"> as in the preset</label>
+        <label title="The chosen preset as it is: only the fixes of its own fix list (none for wolfssl540-asan, HEAP for wolfssl540-buf); every other known bug stays in the build, and the fuzzer may find one of them first (the attempt then goes on)"><input type="radio" name="jl-custom-others" value="preset"> only the preset's own fixes (the other known bugs stay in the build)</label>
       </div>
       <h4 class="jl-custom-h">What will run</h4>
       <table class="jl-custom-runs"></table>
-      <div class="jl-custom-note">An attempt counts as "found at t" only when the validation step confirms its stop (patch differential),
-        or, for a bug without patch, when the stop has the bug's signature. A stop it does not confirm is shown as such, never as a find.
-        <label class="jl-custom-disabled"><input type="checkbox" disabled> Confirm during the attempt (replay on the build with every patch before stopping): not available yet</label></div>
+      <div class="jl-custom-warnings"></div>
+      <div class="jl-custom-note">An attempt stops only on a confirmed find: an objective with the bug's signature is first replayed on the
+        validation builds, prepared before the attempt, while the fuzzer goes on (patch differential; a bug without patch: its signature on the
+        build with every patch); one validation does not confirm leaves the attempt going. The time to find is when the fuzzer saved the
+        confirmed objective.</div>
       <div class="jl-custom-row">
         <span class="jl-label">Attempts</span><input type="number" class="jl-commit-input jl-custom-attempts" min="1" max="50" value="5">
         <span class="jl-label">Cores per attempt</span><input type="number" class="jl-commit-input jl-custom-cores" min="1" max="64" value="4">
@@ -141,7 +94,7 @@ export class CustomBenchmark {
       footnotes: $('.jl-custom-footnotes'), runs: $('.jl-custom-runs'), lib: $('.jl-custom-lib'), cat: $('.jl-custom-cat'),
       puffin: $('.jl-custom-puffin'), nowitness: $('.jl-custom-nowitness'), attempts: $('.jl-custom-attempts'),
       cores: $('.jl-custom-cores'), cost: $('.jl-custom-cost'), name: $('.jl-custom-name'), description: $('.jl-custom-description'),
-      dev: $('.jl-custom-dev'), load: $('.jl-custom-load'),
+      dev: $('.jl-custom-dev'), load: $('.jl-custom-load'), warnings: $('.jl-custom-warnings'),
     };
     this.node.querySelectorAll('input[name="jl-custom-source"]').forEach(radio =>
       radio.addEventListener('change', () => { this.#source = radio.value; this.#picked.clear(); this.#render(); }));
@@ -261,7 +214,8 @@ export class CustomBenchmark {
       const presets = (this.#presets?.vendors?.[lib] ?? []).filter(p => this.#active(id, entry, p));
       const options = presets.map(p => ({ ...p, patched: this.#patchedAt(entry, p.version),
                                           witness: !entry.witness_versions || inRange(entry.witness_versions, p.version) }))
-        .sort((a, b) => compareVersions(b.version, a.version) || (b.asan ? 1 : 0) - (a.asan ? 1 : 0)
+        // the safest first: a version where the bug has a patch (finds validated by patch differential), then the newest, ASan
+        .sort((a, b) => (b.patched ? 1 : 0) - (a.patched ? 1 : 0) || compareVersions(b.version, a.version) || (b.asan ? 1 : 0) - (a.asan ? 1 : 0)
                        || (a.fix?.length ?? 0) - (b.fix?.length ?? 0) || a.name.length - b.name.length);
       const reference = options.find(p => p.name === entry.reference) ?? options[0] ?? null;
       return { lib, id, entry, options, reference };
@@ -331,7 +285,8 @@ export class CustomBenchmark {
     devRadio.disabled = !devHas;
     els.dev.textContent = !dev ? "dev's" : devHas ? `dev's (${dev.commit.slice(0, 7)})` : `dev's — none yet (${dev.commit.slice(0, 7)} has no vulnerabilities.toml)`;
     for (const radio of this.node.querySelectorAll('input[name="jl-custom-source"]')) radio.checked = radio.value === this.#source;
-    els.details.href = `/html/publisher/bugs.html${this.#source === 'commit' && this.#sha ? `?commit=${encodeURIComponent(this.#sha)}` : ''}`;
+    // the Bugs reference is a page of the publisher (the launcher is the scheduler's): its port, this host
+    els.details.href = `${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html${this.#source === 'commit' && this.#sha ? `?commit=${encodeURIComponent(this.#sha)}` : ''}`;
 
     if (!this.#sha) { this.#status('Choose a commit: the bugs of its catalogue and the presets it can build come from it.'); return; }
     if (this.#loading) { this.#status('Loading the presets and the catalogue of the commit…'); return; }
@@ -432,6 +387,22 @@ export class CustomBenchmark {
           <td>${oracle(x.entry.oracle)}</td>
           <td>${left.length ? esc(left.join(', ')) : 'none'}${twins.length ? `<br><span class="jl-badge warn">a stop on ${twins.join(' or ')} is not a find</span>` : ''}</td></tr>`;
       }).join('') || '<tr><td colspan="6" class="jl-muted">Tick the bugs to look for above: one experiment each.</td></tr>');
+    // the experiments whose finds cannot be validated by patch differential, and how they will be confirmed
+    const describe = o => !o ? 'none' : o.kind === 'claim' ? `the claim "${o.violation ?? ''}"`
+      : `a crash${o.signal ? ` (${o.signal})` : ''}${o.asan ? ` with an ASan report ${o.asan}` : ''}${o.panic ? ` (panic ${o.panic})` : ''}`;
+    this.#els.warnings.innerHTML = experiments.flatMap(x => {
+      const label = esc(x.entry.alias ?? x.id), version = esc(x.preset.version);
+      const twins = this.#sameOracle(x).map(y => esc(y.entry.alias ?? y.id));
+      if (x.entry.replayable === false) {
+        return [`⚠ <b>${label}</b>: its objectives do not replay on their own: a find is the fuzzer's own record of ${esc(describe(x.entry.oracle))}, not validated.`];
+      }
+      if (!x.preset.patched) {
+        return [`⚠ <b>${label}</b> has no patch at ${version}: a find is confirmed by its signature only: the objective must reproduce, with
+          ${esc(describe(x.entry.oracle))}, on the build with every other patch${twins.length ? `; ${twins.join(', ')}, left in that build with the same
+          signature, would be taken for it` : ''}. A patch for it in tlspuffin's catalogue would make it a patch differential.`];
+      }
+      return [];
+    }).map(w => `<div>${w}</div>`).join('');
     const n = experiments.length;
     this.#els.cost.textContent = n ? `${n} experiment(s) × ${this.attempts} attempt(s) × ${this.cores} core(s), until each attempt finds its bug or times out` : '';
     this.#onChange();

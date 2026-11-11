@@ -386,10 +386,13 @@ and from each bug):
    are named `<benchmark>_<alias or ID>` (e.g. `VulnC_BUF`): launching it again with the same name continues their series
    on Results. The definition is recorded with the task ("New task…" from it launches the same).
 
-Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report), runs with the bug's
-flags, and stops on the first objective whose signature is the bug's oracle; the validation step then confirms it (patch
-differential), or, without patch, by its signature. A preset that turns out not to have the bug (a PUT capability the
-launcher cannot know) makes the experiment "unsupported" instead of running for nothing.
+Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report) and its validation set
+(before the attempt, cached), runs with the bug's flags, and stops only on a confirmed find: an objective whose signature
+is the bug's oracle is replayed on the validation builds while the fuzzer goes on, and ends the attempt when validation
+confirms it (patch differential; a bug without patch: its signature on the build with every patch); one it does not
+confirm leaves the attempt going. The time to find is when the fuzzer saved the first confirmed objective (its name),
+not when the attempt stopped. A preset that turns out not to have the bug (a PUT capability the launcher cannot know)
+makes the experiment "unsupported" instead of running for nothing.
 
 ## Performance configurations
 
