@@ -494,7 +494,7 @@ GET /api/user/<username>/<jobType>/tasks
 ```
 Regex for both `<username>` and `<jobType>`: `[a-zA-Z0-9_-]+`.
 
-Entries whose task record is stale (not running, not cancelled, and no matching export/cancel JSON exists on disk) are dropped and the on-disk index is rewritten as a side effect of this call.
+Entries whose task record is gone are dropped and the on-disk index is rewritten as a side effect of this call: an entry stays while its task runs, or while its `<id>.json` exists (in `exportPath` for a finished task, in `exportPath/Canceled` for a cancelled one, including a task cancelled before its first step, archived with empty logs and artefacts). Test: `scheduler/tests/history_cancelled_test.sh <scheduler binary>`.
 
 **Response `200 OK`:**
 ```json

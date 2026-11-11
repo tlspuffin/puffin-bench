@@ -466,7 +466,7 @@ function RenderDrawer(task, finalTask, error) {
       <button type="button" class="btn danger delete" data-help="history.delete">💣 Delete</button>
     </div>
     <div class="kv">
-      <div>State</div><div><span class="dot ${StateOf(task)}"></span> ${StateOf(task)}${steps ? `, ${esc(steps.title)}` : ''}</div>
+      <div>State</div><div><span class="dot ${StateOf(task)}"></span> ${StateOf(task)}${task.cancelled && !summary?.start_timestamp ? ' before it started' : ''}${steps ? `, ${esc(steps.title)}` : ''}</div>
       <div>Submitted</div><div>${esc(DateTime(task.id))}${waited > 60000 ? ` (waited ${esc(Duration(waited))})` : ''}</div>
       <div>Ended</div><div>${esc(DateTime(End(task)))} — ${esc(Duration(End(task) - Start(task)))}${summary?.core_hours ? `, ${CoreHours(summary.core_hours)} core-hours` : ''}</div>
       <div>User / type</div><div>${esc(task.user)} / ${esc(task.type)}</div>
