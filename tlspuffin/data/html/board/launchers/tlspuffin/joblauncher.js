@@ -29,7 +29,7 @@ export const helpTexts = {
   'tlspuffin.cores':      'CPU cores per run',
   'tlspuffin.memory':     'Memory limit in MB. 0 = no limit.',
   'tlspuffin.unknown':    'This hash is not in the commit list (not fetched yet, or a typo). Check it before launching.',
-  'tlspuffin.custom':     'Custom Vuln benchmark: tick known bugs of tlspuffin\'s catalogue; each one becomes an experiment, built and run the way it needs, stopping on its own oracle.',
+  'tlspuffin.custom':     'Custom Vuln benchmark: tick known bugs of tlspuffin\'s catalogue (dev\'s, or the commit\'s with Load bugs from this commit). Each one becomes an experiment on a version that has it (the newest with a patch first), with every other known bug patched, the build options it needs and ASan when its oracle is an ASan report; it ends only on a find that validation confirms during the run (a warning says how a bug without patch is confirmed). Name the benchmark to follow it on Results; every field of a bug: the Bugs reference page.',
 };
 
 // short type of the tasks of each job type (jobsconfig.json), for the task descriptions (see describeTask)

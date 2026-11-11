@@ -24,10 +24,26 @@ are made comparable by the <i>compat rules</i> (see below).</p>
     traces. While the task runs, the <i>live</i> page is updated every few minutes.</td></tr>
   <tr><td>🕘 Runs of a commit</td><td>Opened from <b>🕘 N runs</b> (Results, task page): every task of a commit and type,
     the puffin-bench version of each, what changed between two of them, charts.</td></tr>
-  <tr><td>🎯 Bugs reference</td><td><a href="${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html" target="_blank">/html/publisher/bugs.html</a>: the
-    expected bug of each Vuln configuration and the CVEs set apart (from the one file to edit,
-    <code>vuln_targets.json</code>), and the bugs found so far per library (🚨 new bugs).</td></tr>
+  <tr><td>🎯 Bugs reference</td><td><a href="${location.protocol}//${location.hostname}:10083/html/publisher/bugs.html" target="_blank">/html/publisher/bugs.html</a>:
+    tlspuffin's vulnerability catalogue (dev's, <b>⟳ Reload from the latest dev</b>), how each configuration of Vuln group A
+    and B is built and ends, checked against it, the claims set apart, the bugs found so far (one row per bug, the unknown
+    ones first) and, folded at the end, every field of every bug (a link <code>#&lt;ID&gt;</code> opens one).</td></tr>
 </table>
+
+<h2>Known bugs: the catalogue, validation, custom benchmarks</h2>
+<p>tlspuffin's <b>vulnerability catalogue</b> (<code>puffin-build/vendors/&lt;library&gt;/vulnerabilities.toml</code>, shown on
+the Bugs reference page) lists the known bugs: the versions they affect, a patch per version range, their
+<i>oracle</i> (the signature of their objectives: a claim, or a crash and its ASan report) and a witness trace that
+triggers them.</p>
+<p>After each attempt, the <b>validation</b> step replays the attempt's objectives on its library rebuilt with ASan, once
+with every known bug patched and once per bug with all of them but that one (a <i>patch differential</i>): <b>✔ confirmed</b>
+(the bug named), <b>✗ not patched</b> (a new bug, or a known one without patch), <b>⚠ other signature</b> (to review),
+<b>? inconclusive</b> (not reproduced), <b>… not validated</b> (its time budget spent). Results shows them in the 🐞
+panel of each configuration.</p>
+<p><b>Custom benchmarks</b> (launcher, job <b>Vuln — custom</b>): tick known bugs; each becomes an experiment built to
+look for it (every other bug patched, its build options, ASan when its oracle needs it) that ends only on a find
+validation confirms during the attempt; its time to find is when the fuzzer saved that objective. A bug without patch is
+confirmed by its signature only (the launcher warns). Results shows each benchmark in a block of its own.</p>
 <p>The <b>package</b> selector chooses the fuzzer shown by Results and Analyzer. The short hash after
 <b>puffin-bench</b> is the deployed version of the bench (link to the commit). <b>🔄</b> refreshes the page,
 <b>❔</b> or <kbd>?</kbd> opens this help, <kbd>Esc</kbd> closes it. Links between the pages keep the address you typed
