@@ -8,13 +8,15 @@
 #     launcher cannot know (listed, then refused by the build step); a preset where mk_vendor has it active must be
 #     offered, except a non-ASan preset of a bug only detected with ASan (find.asan);
 #   - patches (patchedAt) against mk_vendor's `patchable`.
-# Needs the clone's mk_vendor built (target/debug/mk_vendor) and git_restapi's tlspuffin_catalogue.sh and
-# tlspuffin_presets.sh (the data the launcher gets).
+# Needs the clone's mk_vendor built (target/debug/mk_vendor, or MK_VENDOR=<path> for another target folder) and
+# git_restapi's tlspuffin_catalogue.sh and tlspuffin_presets.sh (the data the launcher gets).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 bench=$( cd "${here}/../../.." && pwd )
 clone="${1:?usage: custombench_test.sh <tlspuffin clone> [<commit>]}"; commit="${2:-HEAD}"
 command -v node > /dev/null || { echo "SKIP: node not found"; exit 0; }
+mk_vendor=$( realpath -m "${MK_VENDOR:-${clone}/target/debug/mk_vendor}" )
+[ -x "${mk_vendor}" ] || { echo "FAIL: no mk_vendor at ${mk_vendor} (cargo build -p puffin-build --bin mk_vendor, or MK_VENDOR=<path>)"; exit 1; }
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
 "${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${commit}" > "${work}/catalogue.json"
 "${bench}/git_restapi/scripts/tlspuffin_presets.sh" "${clone}" "${commit}" > "${work}/presets.json"
@@ -22,7 +24,7 @@ work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
 echo '{}' > "${work}/states.json"
 for vendor in $( jq -r '.vendors | keys[]' "${work}/presets.json" ); do
   for preset in $( jq -r --arg v "${vendor}" '.vendors[$v][].name' "${work}/presets.json" ); do
-    ( cd "${clone}" && ./target/debug/mk_vendor list "${vendor}:${preset}" --json 2> /dev/null ) |
+    ( cd "${clone}" && "${mk_vendor}" list "${vendor}:${preset}" --json 2> /dev/null ) |
       jq -c --arg v "${vendor}" --arg p "${preset}" '{ ($v): { ($p): ([.entries[] | { (.id): [.state, .patchable] }] | add // {}) } }' > "${work}/one.json" || continue
     jq -s '.[0] * .[1]' "${work}/states.json" "${work}/one.json" > "${work}/merged.json" && mv "${work}/merged.json" "${work}/states.json"
   done

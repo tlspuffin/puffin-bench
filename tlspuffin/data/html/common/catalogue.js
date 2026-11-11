@@ -38,9 +38,10 @@ export function inRange(range, version) {
 }
 
 // whether a bug is in the code a preset builds: its version is affected, it has the build options the bug requires,
-// it does not fix it (PUT capabilities: the build tells, see PR_common.sh ForcedBuild)
+// it does not fix it (PUT capabilities: the build tells, see PR_common.sh ForcedBuild). A bug keyed by tlspuffin commits
+// (affected_commits: a bug of the harness of past commits) is in no build, as for mk_vendor (Entry::affects)
 export function presentOn(id, entry, preset) {
-  if (entry.affected && !inRange(entry.affected, preset.version)) return false;
+  if (!entry.affected || !inRange(entry.affected, preset.version)) return false;
   for (const [option, value] of Object.entries(entry.requires ?? {})) if (preset[option] !== value) return false;
   return !(preset.fix ?? []).includes(id);
 }
