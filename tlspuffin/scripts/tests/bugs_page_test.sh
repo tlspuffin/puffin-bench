@@ -29,11 +29,13 @@ JSON
 # the job configurations of Vuln group A and B the page reads (run.mjs serves them from there)
 export JOBS_DIR="${bench}/tlspuffin/data/html/jobsscripts/tlspuffin"
 # a registry of the bugs found so far (known_bugs.json): the same crash in two configurations of wolfSSL (HEAP of the
-# catalogue, by its ASan report type and top frame), a crash of LibreSSL none of the known bugs, a claim set apart
+# catalogue, by its ASan report type and top frame), a crash of OpenSSL none of the known bugs, the crash of the LibreSSL
+# harness of past commits (in the catalogue since PUFFIN-LIBRESSL333-HKDF-CLAIM), a claim set apart
 cat > "${work}/known_bugs.json" <<'JSON'
 { "WolfSSL|crash|AddPacketInfo": { "task": "1790851747037", "started": "2026-10-01T10:49:07Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
   "wolfssl540-asan|crash|AddPacketInfo": { "task": "1791638282947", "started": "2026-10-10T08:00:00Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
   "LibreSSL|crash|tls13_hkdf_expand_label_with_length": { "task": "1790851749055", "started": "2026-10-01T11:00:00Z", "what": "global-buffer-overflow: MemcmpInterceptorCommon < tls13_hkdf_expand_label_with_length" },
+  "OpenSSL|crash|ossl_not_a_known_function": { "task": "1790851749056", "started": "2026-10-01T12:00:00Z", "what": "heap-use-after-free: ossl_not_a_known_function < SSL_do_handshake" },
   "BUF|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237378849", "started": "2026-10-05T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
   "CDOS|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237386132", "started": "2026-10-06T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
   "custom2_SKIP|claim|Authentication bypass": { "task": "1794327919866", "started": "2026-11-10T16:39:18Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "target": "CVE-2022-25640" } }
@@ -129,9 +131,20 @@ rows() { grep -o '<tr' <<< "$( grep -o "<tr[^>]*>[^<]*<td><span class=\"kind[^\"
 [ "$( rows AddPacketInfo )" == 1 ] && echo "ok   (registry): one row for AddPacketInfo, found in two configurations" || { echo "FAIL (registry): AddPacketInfo rows $( rows AddPacketInfo )"; fail=1; }
 [ "$( rows 'Negotiated cipher' )" == 1 ] && echo "ok   (registry): one row for the claim of CVE-2024-5814" || { echo "FAIL (registry): claim rows $( rows 'Negotiated cipher' )"; fail=1; }
 grep -q 'href="#CVE-2022-42905"' <<< "${registry}" && echo "ok   (registry): AddPacketInfo in wolfSSL is CVE-2022-42905 (catalogue), linked to its card" || { echo "FAIL (registry): AddPacketInfo not recognised"; fail=1; }
-first_row=$( grep -o '<tr class="[^"]*">' <<< "${registry}" | head -1 )
-[ "${first_row}" == '<tr class="unknown-bug">' ] && grep -q 'tls13_hkdf_expand_label_with_length' <<< "$( grep -o '<tr class="unknown-bug">.\{0,400\}' <<< "${registry}" | head -1 )" &&
-  echo "ok   (registry): the bug none of the known ones (LibreSSL) first" || { echo "FAIL (registry): the unknown bug is not first"; fail=1; }
+classes=$( grep -o '<tr class="[^"]*">' <<< "${registry}" | tr '\n' ' ' )
+unknown=$( grep -o '<tr class="unknown-bug">.\{0,400\}' <<< "${registry}" )
+[[ "${classes}" =~ ^(\<tr\ class=\"unknown-bug\"\>\ )+(\<tr\ class=\"\"\>\ )+$ ]] && grep -q 'ossl_not_a_known_function' <<< "${unknown}" &&
+  echo "ok   (registry): the bugs none of the known ones first (OpenSSL)" || { echo "FAIL (registry): the unknown bugs are not first (${classes})"; fail=1; }
+# the crash of the LibreSSL harness: the catalogue's entry when it has one, linked to its card as a bug of the harness
+hkdf=$( jq -r '[.vendors.libressl.entries // {} | to_entries[] | select((.value.top_frames // []) | index("tls13_hkdf_expand_label_with_length")) | .key][0] // empty' "${work}/catalogue.json" )
+libre=$( grep -o '<code>tls13_hkdf_expand_label_with_length</code>.\{0,900\}' <<< "${registry}" | head -1 )
+if [ -n "${hkdf}" ]; then
+  grep -q "href=\"#${hkdf}\"" <<< "${libre}" && grep -q "a bug of tlspuffin's harness: commits not containing" <<< "${libre}" && ! grep -q 'tls13_hkdf_expand_label_with_length' <<< "${unknown}" &&
+    echo "ok   (registry): the LibreSSL crash is ${hkdf} of the catalogue, a bug of the harness of past commits" || { echo "FAIL (registry): the LibreSSL crash is not ${hkdf}"; fail=1; }
+else
+  grep -q 'tls13_hkdf_expand_label_with_length' <<< "${unknown}" &&
+    echo "ok   (registry): the LibreSSL crash, not in this catalogue, is not a known bug" || { echo "FAIL (registry): the LibreSSL crash"; fail=1; }
+fi
 grep -q 'set apart' <<< "$( grep -o "<code>Negotiated cipher.\{0,600\}" <<< "${registry}" )" && echo "ok   (registry): the claim set apart" || { echo "FAIL (registry): claim not set apart"; fail=1; }
 skip=$( grep -o '<code>Authentication bypass</code>.\{0,900\}' <<< "${registry}" | head -1 )
 grep -q 'custom2_SKIP' <<< "${skip}" && grep -q '🎯 expected' <<< "${skip}" && grep -q 'CVE-2022-25640' <<< "${skip}" && ! grep -q 'not a known bug' <<< "${skip}" &&

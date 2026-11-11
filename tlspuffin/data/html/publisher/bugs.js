@@ -436,9 +436,16 @@ function catalogueMatch(vendor, b) {
   return entries.filter(([, e]) => e.oracle?.kind === 'crash' && (e.top_frames ?? []).includes(b.sig)
     && (!type || type === 'crash' || !e.oracle.asan || e.oracle.asan === type)).map(([id]) => id);
 }
+const entryOf = id => Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean);
 const bugLink = id => {
-  const e = Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean);
+  const e = entryOf(id);
   return `<a class="mono" href="#${esc(id)}" title="its card: every field">${esc(id)}</a>${e?.alias ? ` <b>${esc(e.alias)}</b>` : ''}`;
+};
+// a bug of tlspuffin's harness, not of the library: which commits have it (its card says more)
+const harnessNote = id => {
+  const e = entryOf(id);
+  if (!e?.bug_in_harness) return '';
+  return ` <span class="muted">(a bug of tlspuffin's harness${e.affected_commits ? `: commits ${esc(e.affected_commits)}` : ''})</span>`;
 };
 function registrySection() {
   const groups = new Map();
@@ -472,7 +479,7 @@ function registrySection() {
     if (apart.length) parts.push(`<span class="badge b-apart">⦸ ${esc(apart[0].how)}</span> ${cve(apart[0].cve)}`);
     // the catalogue, when no rule of vuln_targets.json tells (a configuration without target, another library)
     const more = bug.rules.length ? [] : bug.ids;
-    if (more.length) parts.push(`📚 ${more.map(bugLink).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
+    if (more.length) parts.push(`📚 ${more.map(id => bugLink(id) + harnessNote(id)).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
       : 'its top function among the bug\'s top frames, same report type'})</span>`);
     return parts.join('<br>') || '<span class="badge b-new">🚨 not a known bug</span>';
   };
