@@ -32,7 +32,7 @@ STATE="${PB_ROOT}/data/objectives-live"
 RUNS="${PB_ROOT}/data/runs"
 API="${PB_SCHEDULER_API:-http://127.0.0.1:10082}"
 TOOLS="$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )"
-source <( sed -n '/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${TOOLS}/../PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${TOOLS}/../PR_common.sh" )
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)
 declare -gA OBJECTIVES_NOT_TARGETED=()
 source <( jq -r '"OBJECTIVES_NOT_TARGETED=(", (._not_targeted // {} | to_entries[] | "  [\(.key | @sh)]=\("\(.value.cve)|\(.value.library // "")|\(.value.below // "")" | @sh)"), ")"' "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" 2> /dev/null )
