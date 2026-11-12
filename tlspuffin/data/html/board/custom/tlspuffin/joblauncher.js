@@ -1579,12 +1579,8 @@ export class JobLauncher {
         return res.blob();
       }));
 
-      // The config file is a JSON template with unresolved ${RUNTIME_*} tokens
-      // (resolved server-side), so it can't be JSON.parse'd here — the launcher
-      // metadata is spliced in as raw text instead, right after the root '{'.
-      const launcherJSON = JSON.stringify({ project: 'tlspuffin', custom });
-      const configWithLauncher = configText.replace('{', `{"launcher":${launcherJSON},`);
-      const configBlob = new Blob([configWithLauncher], { type: 'application/json' });
+      // the job file as it is (a JSON template whose ${RUNTIME_*} the scheduler resolves)
+      const configBlob = new Blob([configText], { type: 'application/json' });
 
       const fd = new FormData();
       fd.append('name',     name);
@@ -1595,6 +1591,9 @@ export class JobLauncher {
       for (let i = 0; i < (jobDef.files ?? []).length; i++)
         fd.append('files[]', blobs[1 + i], jobDef.files[i].split('/').pop());
 
+      // the record of this launcher in the task (task.launcher): the scheduler's pages route the task to this plugin
+      // and relaunch it with these settings (custom)
+      fd.append('runtime[RUNTIME_LAUNCHER]', JSON.stringify({ project: 'tlspuffin', custom }));
       fd.append('args[COMMIT_ID]', commit);
       fd.append('args[PACKAGE]', this.#packageListInput.value.trim() || 'tlspuffin');
       if (isCampaign) {

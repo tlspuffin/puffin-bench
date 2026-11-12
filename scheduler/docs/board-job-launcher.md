@@ -207,19 +207,21 @@ A hook that throws is logged in the console and counts as `null`.
 
 ### The launcher record of a task
 
-A launcher records itself in the task it submits: a top-level key `launcher` of its flow JSON,
-`{ "project": "<name>", "custom": { … } }`, `custom` being what its form needs to open again with the same settings.
-The scheduler keeps that object as it is (anything but an object is recorded as `{}`) and returns it as `launcher` in the
-task's JSON (`/api/tasks/running`, `/api/task/<id>/state`, `/api/task/<id>/final_state`). The pages route the task's
-hooks by `launcher.project`, and their relaunch buttons (the `...` menu of a card, the drawer of History, the task
-page) call `open(launcher.custom)` of that project's launcher.
+A launcher records itself in the task it submits: the field `runtime[RUNTIME_LAUNCHER]` of the submission, a JSON
+object `{ "project": "<name>", "custom": { … } }`, `custom` being what its form needs to open again with the same
+settings. The scheduler checks it (a JSON object with a non-empty string `project`, else the task is refused), adds it
+to the task as its `launcher` — it is not substituted in the flow, and the flow JSON itself must not have a `launcher`
+key — and returns it in the task's JSON (`/api/tasks/running`, `/api/task/<id>/state`, `/api/task/<id>/final_state`).
+A task submitted without it has `launcher: {}`. The pages route the task's hooks by `launcher.project`, and their
+relaunch buttons (the `...` menu of a card, the drawer of History, the task page) call `open(launcher.custom)` of that
+project's launcher.
 
 ### A minimal plugin
 
 ```js
 // <html>/board/custom/myproj/plugin.js, with config.js = { projects: ['myproj'] }
 class Launcher {
-  open(params) { /* show a form; on submit, POST /api/task/new (below) with "launcher": { project: 'myproj', … } */ }
+  open(params) { /* show a form; on submit, POST /api/task/new (below) with runtime[RUNTIME_LAUNCHER] = { project: 'myproj', … } */ }
   async describeTask(task) {
     return task.job_type === 'build' ? { title: `🔨 ${task.name}` } : null;
   }
@@ -258,7 +260,8 @@ example, `samples/jobs/tests/test_publish.json`:
 
 `publish.storage` and `publish.goal` (and any other flow field) support `${VAR}` substitution from the `args[...]` the
 launcher POSTs alongside the flow — see below. `publish.server` must name a key under the server's `schedule.publisher`
-config section (see `docs/configuration.md`). A launcher adds its record as a top-level `launcher` key (above).
+config section (see `docs/configuration.md`). The flow JSON has no `launcher` key: a launcher sends its record as
+`runtime[RUNTIME_LAUNCHER]` (above).
 
 ## Server-Side Contract: `POST /api/task/new`
 
@@ -274,7 +277,7 @@ This part is real, current code (`ns_Server::RequestHandlerTaskNew::handleReques
 | `script` | **yes** | The step script file (bash, sourced by `executor.sh`/`functions.sh`). Same failure mode if absent. |
 | `files[]` | no, repeatable | Extra files (patches, configs, etc.), keyed by their uploaded filename. |
 | `args[<KEY>]` | no, repeatable | Free-form key/value pairs, parsed by stripping the `args[...]` wrapper off each form field name. Duplicate keys throw a 500 (`"args[] value duplicate key found"`). These become the `${KEY}` substitution variables available inside the flow JSON. |
-| `runtime[<KEY>]` | no, repeatable | Field names `runtime[RUNTIME_<KEY>]`: the values of the `${RUNTIME_<KEY>}` placeholders of the flow JSON (`NB_RUN`, `NB_CORES`, `TIMEOUT`, `MEMORY_CORE`, `MEMORY_CONSUMPTION`, `RUN_SELECT`, `RUN_CONFIG`, `PRIORITY`), substituted textually before the flow JSON is parsed. Duplicate keys throw the analogous 500. |
+| `runtime[<KEY>]` | no, repeatable | Field names `runtime[RUNTIME_<KEY>]`: the values of the `${RUNTIME_<KEY>}` placeholders of the flow JSON (`NB_RUN`, `NB_CORES`, `TIMEOUT`, `MEMORY_CORE`, `MEMORY_CONSUMPTION`, `RUN_SELECT`, `RUN_CONFIG`, `PRIORITY`), substituted textually before the flow JSON is parsed; and `runtime[RUNTIME_LAUNCHER]`, the record of the launcher, added to the task (above), not substituted. Duplicate keys throw the analogous 500. |
 
 On success the handler returns `{"success": true, "task_id": "<id>"}`; on any exception, HTTP 500 with
 `{"success": false, "error": "<message>"}`.

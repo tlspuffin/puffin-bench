@@ -350,7 +350,6 @@ Build() {
 | `configurations` | no | Object of named, reusable `configuration` blocks, referenced from `run` |
 | `publish` | no | `{ "server": "<publisher name>", "storage": "...", "goal": "...", "check_server_certificat": bool }` |
 | `duration_context` | no | Which runs of this job are expected to last the same, for the estimated times (see [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times"). `${VAR}` placeholders resolve against the task's `args[KEY]`, e.g. `"${COMMIT_ID}"`: runs of the same commit. `""`: no such runs (estimates from all the runs of a step). Absent: the runs with exactly the same task arguments |
-| `launcher` | no | Object, the record of the launcher that submitted the task: `{ "project": "<name>", "custom": { … } }`. Kept as is (anything but an object: `{}`) and returned as `launcher` in the task's JSON; the board pages route the task to the plugin of `project` and relaunch it with `custom` (see [board-job-launcher.md](board-job-launcher.md)) |
 
 **Runtime placeholder substitution.** Before the flow JSON is parsed, the scheduler textually substitutes a **fixed** set of `${RUNTIME_*}` placeholders (`Schedule::AddTask()`), sourced from the `runtime[KEY]` multipart fields of the submit request, with defaults if omitted:
 
@@ -365,7 +364,10 @@ Build() {
 | `RUN_CONFIG` | `${RUNTIME_RUN_CONFIG}` | `""` |
 | `PRIORITY` | `${RUNTIME_PRIORITY}` | `0` |
 
-No other runtime keys are substituted at this stage. Example (`samples/jobs/tests/test_priority_flow.json`):
+No other runtime keys are substituted at this stage. `runtime[RUNTIME_LAUNCHER]` is not a placeholder: the record of the
+launcher that submits the task (`{ "project": "<name>", "custom": { … } }`), which the scheduler adds to the task as its
+`launcher` after parsing the flow (see [api.md](api.md) and [board-job-launcher.md](board-job-launcher.md)); a flow JSON
+must not have a top-level `launcher` key of its own (the task is refused). Example (`samples/jobs/tests/test_priority_flow.json`):
 ```json
 {
   "name": "Priority Test",

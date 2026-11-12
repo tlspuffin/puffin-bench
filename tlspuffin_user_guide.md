@@ -97,7 +97,7 @@ curl -X POST http://localhost:10082/api/task/new \
   -F "job_type=perf"
 ```
 
-`config` and `script` are required; `files[]`/`args[KEY]`/`runtime[RUNTIME_KEY]` are repeatable and optional (note the `runtime[]` field name must include the `RUNTIME_` prefix inside the brackets, e.g. `runtime[RUNTIME_TIMEOUT]`); `user`/`job_type` default to `"anonymous"`/`"unknown"` if omitted. The response contains the task ID **as a string**:
+`config` and `script` are required; `files[]`/`args[KEY]`/`runtime[RUNTIME_KEY]` are repeatable and optional (note the `runtime[]` field name must include the `RUNTIME_` prefix inside the brackets, e.g. `runtime[RUNTIME_TIMEOUT]`); `user`/`job_type` default to `"anonymous"`/`"unknown"` if omitted. `-F 'runtime[RUNTIME_LAUNCHER]={"project":"tlspuffin"}'` (optional) records the task as one of tlspuffin: the scheduler's pages then ask only the tlspuffin plugin for it. The response contains the task ID **as a string**:
 ```json
 { "success": true, "task_id": "1713240000000" }
 ```
