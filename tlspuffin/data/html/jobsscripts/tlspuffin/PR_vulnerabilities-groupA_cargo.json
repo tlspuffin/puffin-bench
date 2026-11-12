@@ -46,6 +46,7 @@
     "TYPE": "vuln"
   },
   "name" : "Vulnerabilities (group A) search - ${COMMIT_ID}",
+  "duration_context" : "${COMMIT_ID}",
   "flow" : [
     {
       "step": "Init",

@@ -7,11 +7,22 @@
 #include "../../utils/rapidjson.hxx"
 #include "../../utils/variables.hxx"
 #include "../../utils/dir.hxx"
+#include "../../utils/md5_poco.hxx"
 #include <unordered_set>
+#include <map>
 #include <fstream>
 #include <algorithm>
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h>
+
+static std::string Args2String(std::unordered_map<std::string, std::string> const& args) {
+  std::map<std::string, std::string> const sorted(args.begin(), args.end());
+  std::string text;
+  for (auto const& [key, value] : sorted) {
+    text += key + "=" + value + ";";
+  }
+  return text;
+}
 
 ns_Schedule::Task::Task(uint64_t id, std::string const& name, 
     rapidjson::Value const& configJSON, 
@@ -38,8 +49,8 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     root_steps_(), steps_file_(), user_(user), job_type_(jobType), 
     request_cancel_(false), cancel_source_(), publish_(), 
     md5_(std::move(md5)), state_(Task::State::Pending), publish_link_(), 
-    flag_(), apiURL_(apiURL), priority_(0), estimatedEndTime_(0), launcher_(), 
-    argsToUpdate_()
+    flag_(), apiURL_(apiURL), priority_(0), duration_context_(), estimatedEndTime_(0), 
+    launcher_(), argsToUpdate_()
 {
   if (name_.empty()) {
     name_ = GetOrDefault<std::string>(configJSON, "name", "");
@@ -94,6 +105,19 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   priority_ = GetOrDefault<int64_t>(configJSON, "priority", priority_);
 
   launcher_ = ParseJSONObject(configJSON, "launcher", false);
+
+  {
+    std::unordered_map<std::string, std::string> alteredVariables(variables);
+    alteredVariables.erase("task_id");
+    if (configJSON.HasMember("duration_context") && configJSON["duration_context"].IsString()) {
+      duration_context_ = ResolveVariables(configJSON["duration_context"].GetString(), alteredVariables);
+      if (!duration_context_.empty()) {
+        duration_context_ = MD5(duration_context_);
+      }
+    } else {
+      duration_context_ = MD5(ResolveVariables(Args2String(args_), alteredVariables));
+    }
+  }
 
   CreateStepsFromJson(configJSON);
 }
@@ -241,6 +265,15 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
 
     priority_ = Get<int64_t>(config, "priority");
 
+    if (config.HasMember("duration_context") && config["duration_context"].IsString()) {
+      duration_context_ = Get<std::string>(config, "duration_context");
+    } else {
+      std::unordered_map<std::string, std::string> variables;
+      for (const auto& [key, value] : args_) {
+        variables.emplace(key, value);
+      }
+      duration_context_ = MD5(ResolveVariables(Args2String(args_), variables));
+    }
     estimatedEndTime_ = Get<int64_t>(config, "estimated_end_time");
 
     launcher_ = Get<std::string>(config, "launcher");
@@ -491,6 +524,7 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
 
   out.AddMember("priority", priority_, alloc);
 
+  out.AddMember("duration_context", rapidjson::Value(duration_context_.c_str(), alloc), alloc);
   out.AddMember("estimated_end_time", estimatedEndTime_, alloc);
 
   out.AddMember("launcher", StringToJSON(alloc, launcher_), alloc);

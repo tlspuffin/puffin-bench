@@ -9,6 +9,7 @@
     "TYPE": "campaign"
   },
   "name" : "Campaign - Commit ${COMMIT_ID}",
+  "duration_context" : "${COMMIT_ID}",
   "flow" : [
     {
       "step": "Init"

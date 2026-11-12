@@ -87,7 +87,7 @@ main()
        usersAPI_    = UsersAPI(configSchedule)
        scheduleAPI_ = ScheduleAPI(configSchedule, usersAPI_, OSAPI_, serverPort)
          → constructs Schedule, which:
-             - loads the step durations (DurationHistory::Load: step_durations.json,
+             - loads the step durations (DurationHistory::Load: duration_history.json,
                or seeded from steps_done.json)
              - removes the run folders a stop left being deleted, and logs the
                folders of tasks it no longer holds (FolderRemover)
@@ -208,7 +208,7 @@ Drift note: an earlier revision of this documentation set referenced `html/board
   tasksmanager.json          full task/step state, rewritten every loop iteration
   status.json                running-steps snapshot
   steps_done.json            append-only log of every step that finished
-  step_durations.json        last durations of each kind of step, for the estimated times (see task-step-lifecycle.md)
+  duration_history.json      last durations of each kind of step, for the estimated times (see task-step-lifecycle.md)
   <taskID>.zip               completed task archive (built by `zip`, moved here)
   <taskID>.json              task metadata snapshot (post-archive)
   Canceled/
