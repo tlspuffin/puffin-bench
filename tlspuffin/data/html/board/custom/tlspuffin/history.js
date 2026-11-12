@@ -11,7 +11,7 @@
 // - the filters "package" and "🐞 with objectives", the short job types, the number of tasks with objectives.
 
 const PACKAGES = ['tlspuffin', 'sshpuffin'];
-const TYPES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' };
+const TYPES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnC', 'campaign': 'Camp' };
 
 let links = {};
 const packages = new Map();  // task id -> package (null: not a task of tlspuffin)
