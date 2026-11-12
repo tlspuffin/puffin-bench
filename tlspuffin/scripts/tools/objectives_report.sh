@@ -24,7 +24,7 @@ OUT="${PB_ROOT}/data/html/objectives"
 # traces of each group of objectives kept next to its page, for download (<task>-traces/<library>/<run>/)
 TRACES_PER_GROUP=50
 SCRIPTS="$( cd "$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )/.." && pwd )"
-source <( sed -n '/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${SCRIPTS}/PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${SCRIPTS}/PR_common.sh" )
 # the expected bugs of the Vuln jobs and the CVEs set apart (the one file to edit)
 TARGETS_JSON="${SCRIPTS}/../data/html/jobsscripts/tlspuffin/vuln_targets.json"
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)

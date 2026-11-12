@@ -784,6 +784,24 @@ FuzzerRecords() {
   done;
 }
 
+# AsanTypeAwk: the awk function asantype(<ERROR line>) of FuzzerRecordsOf and ObjectiveSignature: AddressSanitizer's
+# report type, the word after "AddressSanitizer:" (heap-buffer-overflow, SEGV, ...), or, for the reports that say
+# what was attempted, the type their SUMMARY line gives (bad-free for "attempting free on address which was not
+# malloc()-ed", double-free, ...). Both prefer the SUMMARY line when they read it (older records said "ASan
+# attempting", which no signature matches: the records cache key v5 renews them).
+AsanTypeAwk() {
+  cat <<'AWK'
+function asantype(s,   t) { t = s; sub(/.*AddressSanitizer: /, "", t);
+  if (t ~ /^attempting double-free/) return "double-free";
+  if (t ~ /^attempting free on address which was not malloc/) return "bad-free";
+  if (t ~ /^attempting to call malloc_usable_size/) return "bad-malloc_usable_size";
+  if (t ~ /^requested allocation size/) return "allocation-size-too-big";
+  if (t ~ /^(allocator is )?out of memory/) return "out-of-memory";
+  if (t ~ /^calloc parameters overflow/) return "calloc-overflow";
+  sub(/ on .*/, "", t); sub(/[ :(].*/, "", t); return t }
+AWK
+}
+
 # FuzzerRecordsOf <log file> <crash|asan>: the records of one log file, as FuzzerRecords prints them. With
 # FUZZER_RECORDS_CACHE (a directory), the records of a file are kept there by path, size and modification time: a file
 # that does not change (a rotated .gz, the logs of an ended attempt) is read once (the live page reads the logs of
@@ -793,7 +811,7 @@ FuzzerRecordsOf() {
   # only a file that no longer changes: a rotated .gz, or one not modified for 5 minutes (an ended attempt)
   if [ -n "${FUZZER_RECORDS_CACHE:-}" ] && { [[ "${f}" == *.gz ]] || (( $( date +%s ) - $( stat -c %Y "${f}" ) > 300 )); }; then
     # (v4: the version of the records; a change of what is recorded makes a new key)
-    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v4 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
+    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v5 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
     [ -f "${cached}" ] && { cat "${cached}"; return; };
   fi
   { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } |
@@ -841,10 +859,13 @@ FuzzerRecordsOf() {
         return sprintf("%d%03d", t, ms) }
       function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor|_ZN11__sanitizer|_ZN6__asan)/ ||
                                  f ~ /^(mem(cpy|move|set|cmp)|str(len|cpy|ncpy|cmp|ncmp|cat)|bcmp)$/) }
+      '"$( AsanTypeAwk )"'
       # the clients share this stderr: several reports can come before the next dated line, each makes a record (the
       # first ones were lost: a crash 1 s earlier then took the report of another client, campaign 1791638282947)
       /ERROR: AddressSanitizer: / { if (inb) { np++; pt[np] = t; pf[np] = fr }
-                                    t = $0; sub(/.*AddressSanitizer: /, "", t); sub(/ on .*/, "", t); sub(/ .*/, "", t); inb = 1; n = 0; fr = ""; next }
+                                    t = asantype($0); inb = 1; n = 0; fr = ""; next }
+      # the report type of its summary: the canonical one (the ERROR line of a bad-free says "attempting free on …")
+      inb && /^SUMMARY: AddressSanitizer: / { s = $0; sub(/.*AddressSanitizer: /, "", s); sub(/[ (].*/, "", s); if (s != "") t = s; next }
       inb && /^ *#[0-9]+ 0x[0-9a-f]+ in / { f = $0; sub(/^ *#[0-9]+ 0x[0-9a-f]+ in /, "", f); sub(/ .*/, "", f);
                                            if (!skip(f) && n < 3) { fr = fr (n ? " < " : "") f; n++ } next }
       inb && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+[+-][0-9:]+/ { ts = $0; sub(/[ \t].*/, "", ts);
@@ -1136,8 +1157,8 @@ ObjectiveSignature() {
   awk '
     function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor)/ ||
                                f ~ /^(mem(cpy|move|set|cmp)|str(len|cpy|ncpy|cmp|ncmp|cat)|bcmp)$/) }
-    type == "" && match($0, /ERROR: AddressSanitizer: [A-Za-z_-]+/) {
-      type = substr($0, RSTART + 25, RLENGTH - 25); start = NR; next }
+    '"$( AsanTypeAwk )"'
+    type == "" && /ERROR: AddressSanitizer: [A-Za-z_-]+/ { type = asantype($0); start = NR; next }
     type == "" && panic == "" && /panicked at / { panic = $0; sub(/.*panicked at /, "", panic); sub(/:$/, "", panic) }
     # security oracle (claims): "error because a security violation occurred. msg: <msg>" logged by the forked
     # execution, or "Failed to execute trace <path>: SecurityClaim(\"<msg>\")" on older commits
@@ -1153,7 +1174,8 @@ ObjectiveSignature() {
       f = $0; sub(/^[^(]*\(/, "", f); sub(/\).*/, "", f); sub(/.*\//, "", f);
       if (f !~ /^libclang_rt\.|^libasan/ && n < 3) frames[++n] = f; seen = 1; next }
     type != "" && seen && /^ *$/ { done = 1 }
-    type != "" && summary == "" && /^SUMMARY: AddressSanitizer:/ { summary = $0 }
+    type != "" && summary == "" && /^SUMMARY: AddressSanitizer:/ { summary = $0
+      t = $0; sub(/.*AddressSanitizer: /, "", t); sub(/[ (].*/, "", t); if (t != "") type = t }
     /error while loading shared libraries|binary not found:|^error: could not compile|^binary changed since the experiment/ { replayerr = $0 }
     # the sanitizer itself crashed while reporting ("AddressSanitizer: nested bug in the same thread"), with no stack:
     # the ASAN runtime of LLVM < 18 under more than 28 bits of mmap randomization (the replay ran with ASLR, see
