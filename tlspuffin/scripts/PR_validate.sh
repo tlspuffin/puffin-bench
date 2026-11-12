@@ -14,7 +14,11 @@
 #   - else, when an execution could not run (no outcome: the binary refused its command line, crashed before the trace,
 #     timed out): "error", with what failed (no replay result, never read as "not reproduced");
 #   - else "inconclusive" (not reproduced on the validation builds).
-# Controls: the witness of each X must give X's oracle on V_X and not on F (`tlspuffin witness`).
+# Controls: the witness of each X must give X's oracle on V_X and not on F (`tlspuffin witness`); its stack on V_X is
+# kept (witness_frames), and the witness of each known bug without patch that crashes runs once on F for its stack: the
+# place of a bug whose catalogue entry gives no top frames (a signature verdict is strong on the pages when the
+# objective's stack has its place). Every execution runs with ASan's symbolizer of the checkout's nix-shell
+# (ASAN_SYMBOLIZER_PATH): stacks with function names.
 #
 # ValidationPrepare: the checkout (validation/tree), the builds (the libraries in a folder shared by the tasks, one
 # binary cached by the scheduler, both named after what they are made from rather than the commit) and
@@ -60,6 +64,12 @@ for entry in tomllib.load(open(sys.argv[1], "rb")).values():
     done
   done
   echo "${dev}";
+}
+
+# ValidationWitnessFrames <witness outcome file>: the stack of the first run that gave the bug's oracle (its frames as
+# tlspuffin's outcome gives them, function names with the symbolizer), JSON; null when none
+ValidationWitnessFrames() {
+  jq -c '[.[]? | select(.matches_oracle) | .outcomes[]? | .asan.frames? // empty | select(length > 0)][0] // null' "$1" 2> /dev/null || echo null;
 }
 
 # ValidationExecute <binary> <put> <trace> <tag>: one execution of an objective; prints its outcome (one JSON line):
@@ -216,7 +226,15 @@ ValidationPrepare() {
   candidates=$( jq -c '[.entries[] | select(.state == "active" and .patchable and .replayable)]' "${VALIDATION_WORK}/list.json" );
   unpatched=$( jq -c '[.entries[] | select(.state == "active" and (.patchable | not))]' "${VALIDATION_WORK}/list.json" );
 
-  # controls: each candidate's witness, when this commit has one (the binary reads the catalogue of this checkout)
+  # ASan's symbolizer, as the fuzzer and the replays have it in nix-shell (shell.nix: llvm): the executions of validation
+  # run the binary directly, and without it their stacks had no function name (each frame: the binary's file)
+  local symbolizer; symbolizer=$( cd "${tree}" && nix-shell --run 'command -v llvm-symbolizer' 2> /dev/null | tail -1 ) || symbolizer='';
+  [ -x "${symbolizer}" ] || symbolizer='';
+  [ -n "${symbolizer}" ] && local -x ASAN_SYMBOLIZER_PATH="${symbolizer}";
+
+  # controls: each candidate's witness, when this commit has one (the binary reads the catalogue of this checkout); its
+  # stack on the build without its patch (witness_frames: the reference of a signature verdict when the catalogue gives
+  # no top frames)
   local -x PUFFIN_BUILD_DIR="${tree}/puffin-build";
   local witnesses; witnesses=$( ASAN_OPTIONS="${VALIDATION_ASAN_DEFAULT}" "${binary}" catalogue --json 2> /dev/null | jq -c '[.witnesses[].entry] | unique' ) || witnesses='[]';
   local controls='[]' id;
@@ -233,15 +251,26 @@ ValidationPrepare() {
     good=$( jq -c '[.[].matches_oracle] | any' "${VALIDATION_WORK}/runs/control-${id}-${preset}-only-${id}.json" 2> /dev/null || echo null );
     bad=$( jq -c '[.[].matches_oracle] | any' "${VALIDATION_WORK}/runs/control-${id}-${fixAll}.json" 2> /dev/null || echo null );
     controls=$( jq -c --arg id "${id}" --argjson good "${good}" --argjson bad "${bad}" \
-      '. + [{ entry: $id, triggers_unpatched: $good, triggers_patched: $bad, ok: ($good == true and $bad == false) }]' <<< "${controls}" );
+        --argjson frames "$( ValidationWitnessFrames "${VALIDATION_WORK}/runs/control-${id}-${preset}-only-${id}.json" )" \
+      '. + [{ entry: $id, triggers_unpatched: $good, triggers_patched: $bad, ok: ($good == true and $bad == false), witness_frames: $frames }]' <<< "${controls}" );
+  done
+  # the known bugs without patch that crash: their witness once on the build with every patch (where they are), for
+  # their stack only (no control: nothing to compare it with)
+  for id in $( jq -r '.[] | select(.oracle.kind == "crash") | .id' <<< "${unpatched}" ); do
+    jq -e --arg id "${id}" 'index($id) != null' <<< "${witnesses}" > /dev/null || continue;
+    ASAN_OPTIONS="${VALIDATION_ASAN_DEFAULT}" timeout -k 10 "${VALIDATION_TIMEOUT:-120}" "${binary}" --put "${fixAll}" witness "${id}" \
+      --runs "${VALIDATION_RUNS:-3}" --outcome "${VALIDATION_WORK}/runs/stack-${id}-${fixAll}.json" \
+      < /dev/null > "${VALIDATION_WORK}/runs/stack-${id}-${fixAll}.log" 2>&1;
+    controls=$( jq -c --arg id "${id}" --argjson frames "$( ValidationWitnessFrames "${VALIDATION_WORK}/runs/stack-${id}-${fixAll}.json" )" \
+      '. + [{ entry: $id, ok: null, note: "no patch: its witness on the build with every patch, for its stack", witness_frames: $frames }]' <<< "${controls}" );
   done
 
   ValidationState ready '' "$( jq -n --arg binary "${binary}" --arg tree "${tree}" --arg lib "${lib}" --arg preset "${preset}" \
     --arg fixAll "${fixAll}" --arg source "${source}" --arg catalogueCommit "${catalogueCommit}" --arg cacheId "${cacheId}" \
     --argjson cached "${cached}" --argjson candidates "${candidates}" --argjson unpatched "${unpatched}" --argjson controls "${controls}" \
-    --slurpfile list "${VALIDATION_WORK}/list.json" \
+    --slurpfile list "${VALIDATION_WORK}/list.json" --arg symbolizer "${symbolizer}" \
     '{ binary: $binary, tree: $tree, lib: $lib, preset: $preset, fixAll: $fixAll, source: $source, catalogueCommit: $catalogueCommit,
-       cacheId: $cacheId, cached: $cached, candidates: $candidates, unpatched: $unpatched, controls: $controls,
+       cacheId: $cacheId, cached: $cached, candidates: $candidates, unpatched: $unpatched, controls: $controls, symbolizer: $symbolizer,
        entries: [$list[0].entries[] | { id, state, patchable, replayable, oracle }] }' )";
   return 0;
 }
@@ -257,6 +286,9 @@ ValidationEnv() {
   [ "$( jq -r .status "${state}" 2> /dev/null )" == ready ] || return 1;
   VALIDATION_BINARY=$( jq -r .binary "${state}" );
   export PUFFIN_BUILD_DIR; PUFFIN_BUILD_DIR="$( jq -r .tree "${state}" )/puffin-build";
+  # the symbolizer found when the validation was prepared: stacks with function names
+  local symbolizer; symbolizer=$( jq -r '.symbolizer // empty' "${state}" );
+  [ -n "${symbolizer}" ] && export ASAN_SYMBOLIZER_PATH="${symbolizer}";
   LAUNCH_FLAGS=''; LAUNCH_NOASLR=''; LAUNCH_ASAN_SET=false; LAUNCH_ASAN_OPTIONS='';
   # shellcheck disable=SC1091
   [ -r .currentlaunch ] && source .currentlaunch;
@@ -426,7 +458,9 @@ ValidateObjectives() {
      { commit: $commit, bench: { commit: ($deployed | orNull), jobscripts: ($jobscripts | orNull) }, vendor: $vendor, catalogue: { source: $source, commit: $catalogueCommit, hash: $list[0].catalogue },
        build: { name: $build[0].name, derived: $build[0].derived, fix: $build[0].fix, asan: $build[0].asan,
                 states: ($build[0].entries | map({ (.id): .state }) | add) },
-       validated_on: $validatedOn, builds: $list[0].validation_set, entries: ($list[0].entries | map({ (.id): { state, patchable, replayable, hash, build_hash, alias, oracle } }) | add),
+       validated_on: $validatedOn, builds: $list[0].validation_set,
+       entries: ($list[0].entries | map(. as $e | { ($e.id): (($e | { state, patchable, replayable, hash, build_hash, alias, oracle })
+                 + { witness_frames: ([$controls[] | select(.entry == $e.id) | .witness_frames | select(. != null)][0] // null) }) }) | add),
        controls: $controls, controls_ok: ([$controls[].ok | select(. != null)] | all), total: $total, objectives: $results }' > "${out}" || return 1;
   CreateArtefact "${VALIDATION_WORK}/runs" "${THEJOB_STEP_ID}/${THEJOB_STEP_ATTEMPT_ID}-validation" "commit_id:${COMMIT_ID}";
   ValidationCleanup;

@@ -1017,9 +1017,24 @@ OracleMatches() {
            and ($o.panic == null)) end)' <<< "$1" > /dev/null 2>&1;
 }
 
+# HasPlace <place "A < B < C"> <frames "a < b < c">: whether a crash's stack has a known bug's place, by the one rule of
+# the bench (common/signatures.js HasPlace, rule R3: its first frames outside the sanitizer runtime, libc and the fuzzer
+# are the place's, in order), asked of tools/js/has_place.js with the bench's qjs; the answers kept per place and frames
+# (a run can have thousands of objectives). 2 when it cannot be asked (said on stderr: never taken for "no")
+declare -gA HAS_PLACE_CACHE=();
+HasPlace() {
+  local key="$1"$'\t'"$2" rc;
+  if [ -z "${HAS_PLACE_CACHE[${key}]:-}" ]; then
+    "${THEJOB_TOOLS_PATH:-}/qjs" --std -m "${THEJOB_TOOLS_PATH:-}/js/has_place.js" "$1" "$2" 2> /dev/null; rc=$?;
+    if (( rc > 1 )); then echo "HasPlace: ${THEJOB_TOOLS_PATH:-}/js/has_place.js could not run (exit ${rc})" >&2; return 2; fi
+    HAS_PLACE_CACHE[${key}]=${rc};
+  fi
+  return "${HAS_PLACE_CACHE[${key}]}";
+}
+
 # TargetMatches <cve|kind|match> <kind: crash|claim> <detail> <frames "a < b < c">: true when that record (or replay
-# signature) is the expected bug: a crash with the frame among its top 3 frames, or the claim with that message; a
-# catalogue entry (kind "oracle"): its oracle (OracleMatches)
+# signature) is the expected bug: a crash whose stack has the target's place (match: "A < B < C", vuln_targets.json
+# place; HasPlace), or the claim with that message; a catalogue entry (kind "oracle"): its oracle (OracleMatches)
 TargetMatches() {
   local cve kind match; IFS='|' read -r cve kind match <<< "$1";
   [ -n "${kind}" ] || return 1;
@@ -1029,8 +1044,7 @@ TargetMatches() {
     [ "$2" == claim ] && [ "$3" == "${match}" ];
   else
     [ "$2" == crash ] || return 1;
-    local top; top=$( awk -F' < ' '{ for (i = 1; i <= NF && i <= 3; i++) print $i }' <<< "$4" );
-    grep -qF -- "${match}" <<< "${top}";
+    HasPlace "${match}" "$4";
   fi
 }
 

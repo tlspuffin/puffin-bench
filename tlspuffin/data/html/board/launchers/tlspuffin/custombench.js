@@ -22,6 +22,7 @@ const MARKS = ['*', '†', '‡', '§', '¶', '‖', '**', '††', '‡‡'];
 import { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation } from '../../../common/catalogue.js';
 import { esc, libraryName, duration } from '../../../common/format.js';
 import { TERMS, SignatureText } from '../../../common/verdicts.js';
+import { PlaceOf } from '../../../common/signatures.js';
 export { parseVersion, compareVersions, inRange, presentOn, activeOn, needsAsan, patchedAt, runOptions, confirmation };
 
 // the scheduler's store of saved benchmarks (scheduler/src/scheduler/api/benchmarks_api.hxx)
@@ -37,6 +38,7 @@ export class CustomBenchmark {
   #sha = null;
   #presets = null;              // { vendors: { <lib>: [ { name, version, asan, postauth, fix, ... } ] } } of the commit
   #catalogues = { commit: null, dev: null };
+  #witnessStacks = {};          // the stacks of the bugs' witnesses (objectives/witness_frames.json): their places
   #source = 'dev';              // the catalogue the bugs come from: 'dev' or 'commit'
   #times = null;                // the bench's times to find (runs/bench_times.json of the data folder), when there are
   #picked = new Map();          // ID -> { preset } of the ticked bugs
@@ -210,10 +212,12 @@ export class CustomBenchmark {
     this.#render();
     const get = url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null);
     Promise.all([get(`${this.#gitOrigin}/api/git/presets/tlspuffin/${sha}`), get(`${this.#gitOrigin}/api/git/catalogue/tlspuffin/${sha}`),
-                 get(`${this.#gitOrigin}/api/git/catalogue/tlspuffin/dev`)]).then(([presets, commit, dev]) => {
+                 get(`${this.#gitOrigin}/api/git/catalogue/tlspuffin/dev`),
+                 get(new URL('../../../objectives/witness_frames.json', import.meta.url))]).then(([presets, commit, dev, stacks]) => {
       if (this.#sha !== sha) return;
       this.#loading = false;
       this.#presets = presets;
+      this.#witnessStacks = stacks ?? {};
       this.#catalogues = { commit, dev };
       if (!presets || !commit) this.#error = 'git_restapi did not answer the presets or the catalogue of this commit';
       // dev's catalogue by default (what validation trusts), the commit's when dev has none
@@ -566,6 +570,8 @@ export class CustomBenchmark {
       }).join('') || '<tr><td colspan="6" class="jl-muted">Tick the bugs to look for above: one experiment each.</td></tr>');
     // the experiments whose finds cannot be validated by patch differential, and how they will be confirmed
     const describe = o => !o ? 'none' : SignatureText(o);
+    // its place, what the reports recognise a crash of it by (../../../common/signatures.js)
+    const place = x => PlaceOf(x.entry.top_frames, this.#witnessStacks[x.id]?.frames).join(' < ');
     this.#els.warnings.innerHTML = experiments.flatMap(x => {
       const label = esc(x.entry.alias ?? x.id), version = esc(x.preset.version);
       const twins = this.#sameSignature(x).map(y => esc(y.entry.alias ?? y.id));
@@ -577,8 +583,10 @@ export class CustomBenchmark {
       }
       if (!x.preset.patched) {
         return [`⚠ <b>${label}</b> has no patch at ${version}: a find is recognised by its signature only: the objective must reproduce, with
-          ${esc(describe(x.entry.oracle))}, on the build with every other patch (a weak signature: ${x.entry.oracle?.kind === 'claim'
-          ? 'any objective with this claim' : 'any such failure'} there is taken for it, whatever its stack)${twins.length ? `; ${twins.join(', ')}, left in that build with the same
+          ${esc(describe(x.entry.oracle))}, on the build with every other patch (during the run a weak signature: ${x.entry.oracle?.kind === 'claim'
+          ? 'any objective with this claim' : 'any such failure'} there is taken for it, whatever its stack${x.entry.oracle?.kind === 'crash'
+          && (x.entry.top_frames?.length || !x.entry.no_witness) ? `; the reports then tell it by its stack: strong, green, when the
+          objective's stack has its place, ${place(x) ? `<code>${esc(place(x))}</code>` : 'the first frames of its witness\'s stack'}` : ''})${twins.length ? `; ${twins.join(', ')}, left in that build with the same
           signature, would be taken for it` : ''}. A patch for it in tlspuffin's catalogue would make it a patch differential.`, ...noWitness];
       }
       return noWitness;

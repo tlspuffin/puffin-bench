@@ -6,6 +6,7 @@
 import '../board/nav.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
 import { UNCONFIRMED, TYPE_LABELS, FuzzerText, Mismatch, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, RunFailures, ExpectedConclusion, ExpectedChipTip, KnownByValidation, TargetText, AnalyseReport } from './bugs.js';
+import { PlaceOf, FrameName } from '../common/signatures.js';
 import { TERMS, VERDICTS, VERDICT_ORDER, NO_VERDICT, TAGS, LEVELS, SignatureText, SignatureWithStack, BenchText } from '../common/verdicts.js';
 
 // text for HTML (attribute values included), a count as people read it: first, the help panel below uses them
@@ -28,13 +29,19 @@ const CatalogueEntry = id => Object.values(CATALOGUE?.vendors ?? {}).map(v => v.
 // the signature of a bug of the catalogue: from the validation's record of it (report.libraries[].validation.entries),
 // else from the catalogue
 let ENTRY_ORACLES = {};
+// the stack of each bug's witness, as validation recorded it (report.libraries[].validation.entries[].witness_frames)
+let ENTRY_WITNESS = {};
 const EntryOracle = id => ENTRY_ORACLES[id] ?? CatalogueEntry(id)?.oracle ?? null;
+// the place of a bug, what a crash of it is recognised by (../common/signatures.js PlaceOf: its witness's stack, else
+// the catalogue's top frames); the only place the page shows or compares
+const EntryPlace = id => PlaceOf(CatalogueEntry(id)?.top_frames, ENTRY_WITNESS[id]);
 // a bug of the catalogue: "BUF · CVE-2022-39173", linked to its entry on the Bugs reference, its signature on hover
 function EntryName(id) {
   const entry = CatalogueEntry(id);
   const text = entry?.alias ? `${entry.alias} · ${id}` : id;
   const oracle = EntryOracle(id);
-  const frames = entry?.top_frames?.length ? `\ntop frames (shown, not used to decide): ${entry.top_frames.join(' < ')}` : '';
+  const place = oracle?.kind === 'crash' ? EntryPlace(id) : [];
+  const frames = place.length ? `\nits place, what a crash of it is recognised by: ${place.join(' < ')}` : '';
   return `<a href="${BUGS_PAGE}#${encodeURIComponent(id)}" target="_blank" rel="noopener" title="${esc(`${id}: its signature, ${SignatureText(oracle)}${frames}\nClick: every field of ${id} on the Bugs reference`)}">${esc(text)}</a>`;
 }
 const EntryNames = (ids, joiner = ' or ') => ids.map(EntryName).join(joiner);
@@ -49,6 +56,25 @@ function DisplayName(bug, short = false) {
   }
   return short ? ShortName(bug, CVES) : BugName(bug, CVES);
 }
+// The full signature that validates a known bug: its oracle in words, and its place (../common/signatures.js PlaceOf: the
+// first frames of its witness's stack, else the catalogue's top frames), the witness's stack with the place in bold; a
+// claim or a panic has no stack (weak)
+function FullSignature(id) {
+  const oracle = EntryOracle(id);
+  if (!oracle) return `${EntryName(id)}: <span class="muted">no signature</span>`;
+  const stack = ENTRY_WITNESS[id] ?? [];
+  const place = EntryPlace(id);
+  const inPlace = new Set(place);
+  const frames = stack.slice(0, 6).map(f => inPlace.has(FrameName(f)) ? `<b>${esc(f)}</b>` : esc(f)).join(' &lt; ');
+  const where = oracle.kind !== 'crash' ? ' <span class="muted">(one message, no stack: a weak signature)</span>'
+      : !place.length ? ' <span class="muted">(no place known: a weak signature)</span>'
+      : `, at <b>${esc(place.join(' < '))}</b> <span class="muted">(${stack.length ? `the first frames of its witness's stack: <span class="mono">${frames}</span>` : 'the catalogue\'s top frames'})</span>`;
+  return `${EntryName(id)}: ${esc(SignatureText(oracle))}${where}`;
+}
+// the known bugs a bug is or may be: those validation names, else the expected bug of its configuration, else the
+// catalogue's bugs with its signature
+const NamedBugs = bug => bug.validation?.ids?.length ? bug.validation.ids : bug.expected?.length ? bug.expected : bug.validation?.candidates ?? [];
+
 // a badge: the mark and words of a verdict (../common/verdicts.js), its meaning on click
 const Badge = (kind, html, tip, extra = '') => `<span class="val val-${kind}${extra}" data-click-tip="${esc(`${VERDICTS[kind].mark} ${tip}`)}">${VERDICTS[kind].mark} ${html}</span>`;
 // what each verdict says, as the badge of a part of a bug's objectives (BugValidation parts)
@@ -61,20 +87,22 @@ function ValidationPart(part, live, bug = null) {
       // the signature itself, and how much it tells
       const sigs = [...new Set(part.ids.map(id => SignatureText(EntryOracle(id))))].join(' or ');
       // strong: its stack has the top frames of the bugs named first (part.strong); weak: why
-      const tops = ids => [...new Set(ids.flatMap(id => CatalogueEntry(id)?.top_frames ?? []))];
+      const tops = ids => [...new Set(ids.flatMap(id => part.references?.[id] ?? EntryPlace(id)))];
       const crashes = part.ids.filter(id => EntryOracle(id)?.kind === 'crash');
-      const weak = !part.weak ? ` · with its stack (top frame ${tops(part.strong ?? []).join(' or ')})`
-          : !crashes.length ? ' · weak: one message, no stack'
-          : tops(crashes).length ? ` · weak: its stack has none of their top frames (${tops(crashes).join(', ')})`
-          : ` · weak: any ${sigs.replace(/^an? /, '')} matches`;
+      // the badge says the bug and how strong; its click: the signature, the frame, why weak
+      const label = (part.weak ? ' · weak' : ' with its stack') + (part.recognised ? ' · not validated' : '');
+      const how = !part.weak ? `its stack has the bug's place: ${tops(part.strong ?? []).join(' < ')}`
+          : !crashes.length ? 'weak: one message, no stack'
+          : tops(crashes).length ? `weak: its stack has none of their places (${tops(crashes).join(', ')})`
+          : `weak: any ${sigs.replace(/^an? /, '')} matches`;
       // the expected bug of its configuration with the same signature, not named: its patch is on the build with every
       // patch, which still gives the signature: not it (a custom benchmark of CVE-2021-3336 on 4.4.0: SIG and SKIP
       // have the same claim and no patch there)
       const same = id => JSON.stringify(EntryOracle(id)) === JSON.stringify(EntryOracle(part.ids[0]));
       const ruledOut = (bug?.expected ?? []).filter(id => !part.ids.includes(id) && EntryOracle(id) && same(id));
-      const notIt = ruledOut.length ? ` · not ${EntryNames(ruledOut)}: its patch does not remove it` : '';
-      return Badge('signature', `${EntryNames(part.ids)} · ${v.word} (${esc(sigs)})${weak}${notIt}${n}`,
-          `${v.tip}\nits signature: ${sigs}${part.weak ? `\nweak signature: ${TERMS.find(t => t[0] === 'weak signature')[1]}`
+      const notIt = ruledOut.length ? ` · not ${EntryNames(ruledOut)}` : '';
+      return Badge('signature', `${EntryNames(part.ids)} · ${v.word}${label}${notIt}${n}`,
+          `${part.recognised ? `recognised by its signature with its stack, not validated: against the catalogue of tlspuffin ${String(part.catalogue ?? '?').slice(0, 10)}${part.latest ? ' (the latest one: the commit of this task has none)' : ''}\n` : `${v.tip}\n`}its signature: ${sigs}\n${how}${part.weak ? `\nweak signature: ${TERMS.find(t => t[0] === 'weak signature')[1]}`
               : `\nstrong signature: ${TERMS.find(t => t[0] === 'strong signature')[1]}`}`
           + (ruledOut.length ? `\nnot ${ruledOut.join(', ')}, the expected bug, which has the same signature: its patch is on the build with every patch, where this objective still gives the signature` : ''),
           part.weak ? ' val-weak' : '');
@@ -88,8 +116,9 @@ function ValidationPart(part, live, bug = null) {
     case 'inconclusive': return Badge('inconclusive', `${v.word}${n}`, v.tip);
     case 'not-validated': return Badge('not-validated', `${v.word}${n}`, live ? 'not validated yet' : v.tip);
     default: {
-      const why = NO_VERDICT[part.why] ?? NO_VERDICT.missing;
-      return Badge('none', `${v.word}: ${esc(why)}${n}`, `no verdict\n${why}${part.detail ? `: ${part.detail}` : ''}${part.attempts?.length ? `\n${part.attempts.join(', ')}` : ''}`);
+      // not validated at this commit: the reason validation recorded, in place of the general one
+      const why = part.why === 'unsupported' && part.detail ? `not validated: ${part.detail}` : NO_VERDICT[part.why] ?? NO_VERDICT.missing;
+      return Badge('none', `${v.word}: ${esc(why)}${n}`, `no verdict\n${why}${part.detail && part.why !== 'unsupported' ? `: ${part.detail}` : ''}${part.attempts?.length ? `\n${part.attempts.join(', ')}` : ''}`);
     }
   }
 }
@@ -314,12 +343,12 @@ function LetterBadge(bug) {
 // The expected bug of a configuration and how it is recognised (vuln_targets.json); without one, the CVEs tlspuffin
 // declares for its build when the run recorded them (cli.vulnerabilities: recognised as 📋 known by their signature)
 function ExpectedCell(report, library, run) {
-  const rule = (t) => t.kind === 'claim' ? `the claim “${esc(t.match)}”` : `a crash with <code>${esc(t.match)}</code> among the top 3 frames`;
+  const rule = (t) => t.kind === 'claim' ? `the claim “${esc(t.match)}”` : `a crash whose stack has its place, <code>${esc((t.place ?? []).join(' < '))}</code>`;
   // a custom benchmark's experiment: the catalogue's bug it looks for, by its oracle
   const custom = (report.runs ?? []).find(r => r.library === library && r.cli?.custom?.target)?.cli?.custom ?? run?.cli?.custom;
   if (custom?.target) {
-    const stack = SignatureWithStack(custom.oracle, CatalogueEntry(custom.target)?.top_frames);
-    return `<b>${EntryName(custom.target)}</b> <span class="muted">(the experiment's target)</span><div class="muted">its signature: ${esc(SignatureText(custom.oracle))}${stack ? ' (with top frames: strong on this page when the stack has them)' : ' (weak: no stack)'}; recognised by validation: by patch when it has one at this version, else by its signature</div>`;
+    const stack = SignatureWithStack(custom.oracle, CatalogueEntry(custom.target)?.top_frames, !!CatalogueEntry(custom.target) && !CatalogueEntry(custom.target).no_witness);
+    return `<b>${EntryName(custom.target)}</b> <span class="muted">(the experiment's target)</span><div class="muted">its signature: ${esc(SignatureText(custom.oracle))}${stack ? ' (with its place: strong on this page when the stack has it)' : ' (weak: no stack)'}; recognised by validation: by patch when it has one at this version, else by its signature</div>`;
   }
   const target = report.targets?.[library];
   if (target) {
@@ -331,7 +360,7 @@ function ExpectedCell(report, library, run) {
     if (!declared.length) return '<span class="muted">none · no CVE declared for this build</span>';
     return `<span class="muted">none · declared for this build:</span> ${declared.map(cve => {
       const sig = report.cves?.[cve];
-      return `<span${sig ? ` data-click-tip="${esc(`${cve}: recognised by ${sig.kind === 'claim' ? 'the claim “' + sig.match + '”' : 'a crash with ' + sig.match + ' among the top 3 frames'} (📋 known, not new)`)}"` : ' title="no signature in vuln_targets.json: not recognised"'}>${esc(sig?.alias ?? cve)}${sig ? '' : ' ?'}</span>`;
+      return `<span${sig ? ` data-click-tip="${esc(`${cve}: recognised by ${sig.kind === 'claim' ? 'the claim “' + sig.match + '”' : 'a crash whose stack has its place, ' + (sig.place ?? []).join(' < ')} (📋 known, not new)`)}"` : ' title="no signature in vuln_targets.json: not recognised"'}>${esc(sig?.alias ?? cve)}${sig ? '' : ' ?'}</span>`;
     }).join(', ')}`;
   }
   return '<span class="muted">none</span>';
@@ -422,7 +451,7 @@ function ValidationTiles(bugs) {
   const has = (kind, f = () => true) => validated.filter(b => b.validation.parts.some(p => p.kind === kind && f(p))).length;
   const tile = (n, cls, text, tip) => n ? `<div class="tile ${cls}" data-click-tip="${esc(tip)}"><b>${count(n)}</b><span>${n === 1 ? text.replace(/^bugs /, 'bug ') : text}</span></div>` : '';
   return tile(has('patch'), 'val-tile', `bugs ${VERDICTS.patch.word}`, `${VERDICTS.patch.mark} ${VERDICTS.patch.tip}`)
-    + tile(has('signature', p => !p.weak), 'val-tile', `bugs ${VERDICTS.signature.word} and stack`, `${VERDICTS.signature.mark} ${VERDICTS.signature.tip}\nstrong signature: ${TERMS.find(t => t[0] === 'strong signature')[1]}`)
+    + tile(has('signature', p => !p.weak && !p.recognised), 'val-tile', `bugs ${VERDICTS.signature.word} and stack`, `${VERDICTS.signature.mark} ${VERDICTS.signature.tip}\nstrong signature: ${TERMS.find(t => t[0] === 'strong signature')[1]}`)
     + tile(has('signature', p => p.weak), 'warn', `bugs by a weak signature`, `${VERDICTS.signature.mark} ${VERDICTS.signature.tip}\nweak signature: ${TERMS.find(t => t[0] === 'weak signature')[1]}`)
     + tile(has('unpatched') + has('other'), 'warn', 'to review', `${VERDICTS.unpatched.mark} ${VERDICTS.unpatched.tip}\n${VERDICTS.other.mark} ${VERDICTS.other.tip}`)
     + tile(has('new'), 'val-new-tile', 'without known signature', `${VERDICTS.new.mark} ${VERDICTS.new.tip}`)
@@ -569,6 +598,7 @@ function BugRow(bug, open) {
         ${bug.first_trace ? `<div class="row"><span>first trace</span><span class="mono">${esc(bug.library)}/${esc(bug.run?.attempt)}-objective/${esc(bug.first_trace)}.trace</span></div>` : ''}
         <div class="row"><span>build</span><span>${esc(Build(bug.run)) || '<span class="muted">?</span>'}</span></div>
         <div class="row"><span>ASAN</span><span>${Asan(bug.run)}</span></div>
+        ${NamedBugs(bug).length ? `<div class="row" title="what validation recognises the bug by: its signature (oracle) and its place: a stack must crash there for a strong signature"><span>signature</span><span>${NamedBugs(bug).map(FullSignature).join('<br>')}</span></div>` : ''}
         ${fz ? `<div class="row"><span>fuzzer saw</span><span class="mono">${esc(FuzzerText(fz))}</span></div>` : ''}
         ${reasons.length ? `<div class="row"><span>not reproduced</span><span class="mono">${esc(reasons.join(', '))}</span></div>` : ''}
         ${tries ? `<div class="row"><span>replay tries</span><span>${esc(tries)}</span></div>` : ''}
@@ -693,6 +723,8 @@ async function Render() {
   // the signatures of the bugs validation knew (its record), before the catalogue's
   ENTRY_ORACLES = Object.assign({}, ...(report.libraries ?? []).map(l => Object.fromEntries(
       Object.entries(l.validation?.entries ?? {}).map(([id, e]) => [id, e?.oracle]).filter(([, o]) => o))));
+  ENTRY_WITNESS = Object.assign({}, ...(report.libraries ?? []).map(l => Object.fromEntries(
+      Object.entries(l.validation?.entries ?? {}).map(([id, e]) => [id, e?.witness_frames]).filter(([, f]) => f?.length))));
   // 🚨 new bugs: never seen for their library before this task (known_bugs.json next to the reports)
   const known = await fetch('known_bugs.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
   CVES = await LoadCves();
@@ -701,6 +733,18 @@ async function Render() {
   if (/^[0-9a-f]{7,40}$/.test(String(catalogueCommit ?? ''))) {
     CATALOGUE = await fetch(`${GIT_RESTAPI}/api/git/catalogue/tlspuffin/${catalogueCommit}`, { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null).then(c => c?.format === 'vulnerabilities.toml' ? c : null).catch(() => null);
+  }
+  // what objectives_report.sh added for this task (report_verdicts.js, catalogue_digest): the witnesses' stacks validation
+  // did not record here, and whether a bug given by commits is in this task's commit (from git): the page decides with
+  // the same data as Results and History
+  for (const [vendor, v] of Object.entries(report.catalogue_digest?.vendors ?? {})) {
+    for (const [id, e] of Object.entries(v.entries ?? {})) {
+      if (e.witness_frames?.length) ENTRY_WITNESS[id] ??= e.witness_frames;
+      const entry = CATALOGUE?.vendors?.[vendor]?.entries?.[id];
+      if (!entry) continue;
+      if (!entry.witness_frames?.length && e.witness_frames?.length) entry.witness_frames = e.witness_frames;
+      if (typeof e.affected_at_commit === 'boolean') entry.affected_at_commit = e.affected_at_commit;
+    }
   }
   // what the task found, as Results and History tell it (bugs.js AnalyseReport): the expected bug of each configuration
   // (vuln_targets.json's, a custom benchmark experiment's), the bugs and their validation verdicts, the new ones

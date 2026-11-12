@@ -10,7 +10,8 @@
 #     there (the catalogue's top frames), said beside it; the bug is 🚨 NEW;
 #   - the claim of a bug with a patch there, not removed by it (signature_of_patched): ⚠ to review;
 #   - a crash with the weak signature of a bug without patch (SDOS2: any ASan SEGV): ≈ weak, dashed, not named after it;
-#   - a crash none of whose objectives was validated: ○ the signature of the catalogue's bug, not validated;
+#   - a crash none of whose objectives was validated, whose stack has the place of a bug of the catalogue: recognised
+#     as it, ≈ by its signature with its stack · not validated, named after it;
 #   - a crash removed by the patch of a bug without giving its signature: ⚠ another signature, to review;
 #   - a crash the validation builds could not run: ⛔ could not replay, what failed on click;
 #   - objectives without verdict: ○ no verdict, why (a run without validation result, beyond those validated);
@@ -25,7 +26,7 @@ trap '[ -n "${server}" ] && kill "${server}" 2> /dev/null; rm -rf "${work}"' EXI
 pages="${work}/html/objectives"
 mkdir -p "${pages}" "${work}/html/board" "${work}/html/common" "${work}/html/jobsscripts/tlspuffin"
 command cp -f "${tools}/objectives_page/"{report.js,report.css,bugs.js} "${pages}/"
-command cp -f "${here}/../../data/html/common/"{commitinfo,verdicts}.js "${work}/html/common/"
+command cp -f "${here}/../../data/html/common/"*.js "${work}/html/common/"
 echo '' > "${work}/html/board/nav.js"
 echo '{}' > "${work}/html/jobsscripts/tlspuffin/vuln_targets.json"
 sha=b1d572b94052db08f752a1bb7e37b96814878855
@@ -35,7 +36,7 @@ cat > "${pages}/catalogue.json" <<EOF
   "CVE-2022-25638": { "alias": "SIG", "oracle": { "kind": "claim", "violation": "Authentication bypass" } },
   "CVE-2022-25640": { "alias": "SKIP", "oracle": { "kind": "claim", "violation": "Authentication bypass" } },
   "CVE-2022-42905": { "alias": "HEAP", "oracle": { "kind": "crash", "asan": "heap-buffer-overflow" }, "top_frames": ["AddPacketInfo"] },
-  "CVE-2022-39173": { "alias": "BUF", "oracle": { "kind": "crash", "asan": "stack-buffer-overflow" }, "top_frames": ["RefineSuites"] },
+  "CVE-2022-39173": { "alias": "BUF", "affected": "< 5.5.1", "oracle": { "kind": "crash", "asan": "stack-buffer-overflow" }, "top_frames": ["RefineSuites"] },
   "CVE-2022-38152": { "alias": "SDOS2", "oracle": { "kind": "crash", "asan": "SEGV" } },
   "CVE-2099-0001": { "alias": "UAF", "oracle": { "kind": "crash", "asan": "heap-use-after-free" }, "top_frames": ["UafPlace"] },
   "CVE-2022-38153": { "alias": "CDOS", "oracle": { "kind": "crash", "asan": "bad-free" }, "replayable": false },
@@ -46,6 +47,8 @@ cat > "${pages}/7.json" <<EOF
   "libraries": [{ "library": "custom_X", "runs": 2, "validation": { "catalogue": { "source": "commit", "commit": "${sha}" },
     "bench": [{ "commit": "c787eb89dd", "jobscripts": "2f35e8c1aa" }],
     "errors": [{ "attempt": 1, "error": "no validation result (its validation step failed or did not run)" }],
+    "entries": { "CVE-2022-38153": { "alias": "CDOS", "oracle": { "kind": "crash", "asan": "bad-free" }, "replayable": false,
+                                     "witness_frames": ["wolfSSL_Free", "AddSessionToCache", "AddSession"] } },
     "byTrace": {
     "0/a1": { "verdict": "confirmed", "entries": ["CVE-2021-3336"], "known_unpatched": [] },
     "0/a2": { "verdict": "confirmed", "entries": ["CVE-2021-3336"], "known_unpatched": [] },
@@ -110,12 +113,13 @@ def row(letter):
 claim = row('A')
 check('the claim: confirmed by patch x2', 'val val-patch' in claim and 'CVE-2021-3336</a> · confirmed by patch ×2' in claim)
 check('the claim: by its signature, SIG or SKIP x1, the signature shown, weak (one message, no stack)', 'val val-signature val-weak' in claim
-      and re.search(r'SIG · CVE-2022-25638</a> or <a[^>]*>SKIP · CVE-2022-25640</a> · by its signature \(the claim “Authentication bypass”\) · weak: one message, no stack ×1', claim) is not None)
+      and re.search(r'SIG · CVE-2022-25638</a> or <a[^>]*>SKIP · CVE-2022-25640</a> · by its signature · weak ×1', claim) is not None
+      and 'weak: one message, no stack' in claim and 'its signature: the claim “Authentication bypass”' in claim)
 check('a crash whose stack has the top frame of the bug its signature names: strong, green, named after it',
-      re.search(r'val val-signature"[^>]*>≈ <a[^>]*>UAF · CVE-2099-0001</a> · by its signature \(a crash with an ASan heap-use-after-free report\) · with its stack \(top frame UafPlace\) ×1', dom) is not None
+      re.search(r'val val-signature" data-click-tip="[^"]*its stack has the bug.s place: UafPlace[^"]*">≈ <a[^>]*>UAF · CVE-2099-0001</a> · by its signature with its stack ×1', dom) is not None
       and re.search(r'class="bugletter"><span class="chev"[^>]*>▸</span> UAF', dom) is not None)
 check('the same signature with another stack: weak, its stack without their top frames',
-      re.search(r'val val-signature val-weak[^>]*>≈ <a[^>]*>UAF · CVE-2099-0001</a> · by its signature \(a crash with an ASan heap-use-after-free report\) · weak: its stack has none of their top frames \(UafPlace\) ×1', dom) is not None)
+      re.search(r'val val-signature val-weak" data-click-tip="[^"]*weak: its stack has none of their places \(UafPlace\)[^"]*">≈ <a[^>]*>UAF · CVE-2099-0001</a> · by its signature · weak ×1', dom) is not None)
 check('the claim: not reproduced on the validation builds x1, 4 of 4 validated', '? not reproduced on the validation builds ×1' in claim and '4 of 4 objectives validated' in claim)
 check('the claim: names link to the Bugs reference, with their signature', 'bugs.html#CVE-2021-3336' in claim and 'its signature, the claim “Authentication bypass”' in claim)
 check('the claim: named after the bug confirmed by patch', re.search(r'class="bugletter"><span class="chev"[^>]*>▸</span> CVE-2021-3336</span>', claim) is not None)
@@ -125,10 +129,14 @@ check('a crash without known signature: 🚨 NEW BUG', dom.count('class="new-bug
 check('the claim of a bug patched there, not removed by its patch: to review',
       re.search(r'val val-unpatched[^>]*>⚠ signature of <a[^>]*>CVE-2024-5814</a>, not removed by its patch ×1', dom) is not None)
 check('a crash with the weak signature of SDOS2: weak, dashed, not named after it',
-      re.search(r'val val-signature val-weak[^>]*>≈ <a[^>]*>SDOS2 · CVE-2022-38152</a> · by its signature \(a crash with an ASan SEGV report\) · weak: any crash with an ASan SEGV report matches ×1', dom) is not None
+      re.search(r'val val-signature val-weak" data-click-tip="[^"]*weak: any crash with an ASan SEGV report matches[^"]*">≈ <a[^>]*>SDOS2 · CVE-2022-38152</a> · by its signature · weak ×1', dom) is not None
       and re.search(r'class="bugletter"><span class="chev"[^>]*>▸</span> SDOS2', dom) is None)
-check('a crash not validated: the signature of BUF, without proof',
-      re.search(r'val val-none[^>]*>○ the signature of <a[^>]*>BUF · CVE-2022-39173</a> · not validated', dom) is not None)
+check('a crash not validated whose stack has the place of BUF: recognised as BUF, strong, not validated, named after it',
+      re.search(r'val val-signature"[^>]*>≈ <a[^>]*>BUF · CVE-2022-39173</a> · by its signature with its stack · not validated ×1', dom) is not None
+      and re.search(r'class="bugletter"><span class="chev"[^>]*>▸</span> BUF<', dom) is not None)
+check("a bug's link: its place, what a crash of it is recognised by (common/signatures.js), never the catalogue's top frames alone",
+      'its place, what a crash of it is recognised by: UafPlace' in dom and 'not used to decide' not in dom
+      and 'its place, what a crash of it is recognised by: wolfSSL_Free &lt; AddSessionToCache &lt; AddSession' in dom)
 check('a crash removed by the patch of BUF without its signature: to review',
       re.search(r'val val-other[^>]*>⚠ removed by the patch of <a[^>]*>BUF · CVE-2022-39173</a>, another signature ×1', dom) is not None)
 check('a crash the validation builds could not run: could not replay, what failed on click',
@@ -141,6 +149,11 @@ for n, tile in [(1, 'bug confirmed by patch'), (1, 'bug by its signature and sta
                 (2, 'without known signature'), (1, 'could not replay')]:
     check('tile: %d %s' % (n, tile), '<b>%d</b><span>%s</span>' % (n, tile) in dom)
 check('a bug confirmed by validation is never flagged new', 'class="new-bug-badge"' not in claim)
+check("its column: the full signature of the bug, its place from the catalogue's top frames",
+      re.search(r'<span>signature</span><span><a[^>]*>UAF · CVE-2099-0001</a>: a crash with an ASan heap-use-after-free report, at <b>UafPlace</b>', dom) is not None)
+check("its column: the place from the first 3 frames of its witness's stack (R3), its stack shown, the place in bold",
+      re.search(r'<a[^>]*>CDOS · CVE-2022-38153</a>: a crash with an ASan bad-free report, at <b>wolfSSL_Free &lt; AddSessionToCache &lt; AddSession</b> <span class="muted">\(the first frames of its witness.s stack: <span class="mono"><b>wolfSSL_Free</b> &lt; <b>AddSessionToCache</b> &lt; <b>AddSession</b>', dom) is not None)
+check('its column: a claim has no stack', 'Authentication bypass” <span class="muted">(one message, no stack: a weak signature)' in dom)
 cdos = re.search(r'<details class="bug"[^>]*data-kind="no-replay"[^>]*>.*?</details>', dom, re.S)
 check('a bug known not to replay (CDOS): shown under its own filter, "does not replay, as known", no warning',
       cdos is not None and ' hidden' not in cdos.group(0)[:200] and 'data-kind="no-replay"' in dom.split('id="bugs"')[0]

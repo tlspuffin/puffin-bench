@@ -68,6 +68,7 @@ Run report_verdicts_test bash "${here}/report_verdicts_test.sh" "${qjs}"
 Run live_pill_test bash "${here}/live_pill_test.sh"
 Run asan_type_test bash "${here}/asan_type_test.sh"
 Run results_validation_test bash "${here}/results_validation_test.sh"
+Run signatures_test bash "${here}/signatures_test.sh" "${qjs}"
 
 echo
 echo "${passed} passed, ${#failed[@]} failed${failed[*]:+ (${failed[*]})}, ${#skipped[@]} skipped${skipped[*]:+ (${skipped[*]})}"

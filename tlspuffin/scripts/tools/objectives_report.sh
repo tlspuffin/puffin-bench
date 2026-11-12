@@ -241,11 +241,12 @@ Report() {
   [ -n "${info}" ] || info='{}';
   local cancelled=false;
   [[ "${J}" == */Canceled/* ]] && cancelled=true;
-  # VulnA/VulnB: the claims that are not their target (PR_common.sh OBJECTIVES_NOT_TARGETED), flagged by the page
+  # the claims set apart (PR_common.sh OBJECTIVES_NOT_TARGETED, each within its scope: library, versions below), for every
+  # job: the pages set them apart where a run looks for a target (bugs.js Bugs)
   jq --arg task "${task}" --arg commit "${commit}" --argjson info "${info}" --argjson cancelled "${cancelled}" \
       --argjson nt "$( NotTargetedJSON )" --argjson targets "$( Targets "${J}" )" --argjson cves "$( CveSignatures )" \
       '$info + { task: $task, commit: $commit, cancelled: $cancelled, runs: .,
-                 not_targeted: (if ($info.job_type // "") | test("^vuln-") then $nt else {} end), targets: $targets,
+                 not_targeted: $nt, targets: $targets,
                  cves: $cves }' \
       <<< "${libs}" > "${OUT}/${task}.json" || return 1;
   # the verdicts of bugs.js (the pages' code) in the report, for runs_report.py and the history page
@@ -370,13 +371,11 @@ TaskLinks() {
   done | jq -s 'add // {}' > "${links}.tmp" && mv "${links}.tmp" "${links}";
 }
 
-# ReportCatalogue <report json>: the file of the catalogue the report's validation used (else the task's commit's), as
-# the page loads it from git_restapi (PB_GIT_RESTAPI, default the local one): the top frames that make a signature
-# verdict strong. Cached per commit (a commit's catalogue does not change), with the answers without catalogue; nothing
-# printed when there is none
-ReportCatalogue() {
-  local commit; commit=$( jq -r '([.libraries[]?.validation?.catalogue?.commit | select(. != null)][0]) // .commit // empty' "$1" 2> /dev/null );
-  [[ "${commit}" =~ ^[0-9a-f]{7,40}$ ]] || return 0;
+# CatalogueFile <commit>: the file of tlspuffin's catalogue at a commit, from git_restapi (PB_GIT_RESTAPI, default the
+# local one), cached per commit (a commit's catalogue does not change), with the answers without catalogue; nothing printed
+# when the commit has none
+CatalogueFile() {
+  local commit="$1"; [[ "${commit}" =~ ^[0-9a-f]{7,40}$ ]] || return 0;
   local dir="${PB_ROOT}/data/catalogue-cache"; local file="${dir}/${commit}.json";
   if [ ! -s "${file}" ]; then
     mkdir -p "${dir}" || return 0;
@@ -387,11 +386,56 @@ ReportCatalogue() {
   return 0;
 }
 
-# Verdicts <report json>: the verdicts of the pages (report_verdicts.js with bugs.js and the report's catalogue) written
-# into the report
+# LatestCatalogue: the commit of the newest catalogue: dev's, else (until tlspuffin's catalogue is merged) that of the
+# open pull request updated last that has one, as the Bugs reference shows it; cached an hour; nothing when none
+LatestCatalogue() {
+  local api="${PB_GIT_RESTAPI:-http://127.0.0.1:10081}" latest="${PB_ROOT}/data/catalogue-cache/latest.txt" commit='' c;
+  if [ -s "${latest}" ] && [ -n "$( find "${latest}" -mmin -60 2> /dev/null )" ]; then cat "${latest}"; return 0; fi
+  commit=$( curl -sf --max-time 30 "${api}/api/git/catalogue/tlspuffin/dev" 2> /dev/null | jq -r 'select(.format == "vulnerabilities.toml") | .commit // empty' 2> /dev/null );
+  if [ -z "${commit}" ]; then
+    for c in $( curl -sf --max-time 30 "${api}/api/git/history/tlspuffin" 2> /dev/null | jq -r '[.PR[]? | select(.state == "open" and ((.id // "") | test("^[0-9a-f]{40}$")))]
+                 | sort_by(.updated_at // .date // "") | reverse | .[0:10][] | .id' 2> /dev/null ); do
+      [ -n "$( CatalogueFile "${c}" )" ] && { commit="${c}"; break; };
+    done
+  fi
+  [ -n "${commit}" ] || return 0;
+  mkdir -p "$( dirname "${latest}" )" && echo "${commit}" > "${latest}.tmp" && mv -f "${latest}.tmp" "${latest}";
+  echo "${commit}";
+}
+
+# CommitAffected <tlspuffin commit> <catalogue file>: the bugs the catalogue gives by commits (a bug of tlspuffin's
+# harness: affected_commits = "not containing <commit of its fix>") and whether that commit has them: { ID: true when it
+# lacks the fix, false when it contains it }, from git in the clone of git_restapi (PB_TLSPUFFIN_REPO, read only); a
+# commit or a fix git does not know is left out (not decided: not recognised)
+CommitAffected() {
+  local commit="$1" catalogue="$2" repo="${PB_TLSPUFFIN_REPO:-${PB_ROOT}/data/repo/tlspuffin/repo}" out='{}' id fix value;
+  if [[ "${commit}" =~ ^[0-9a-f]{7,40}$ ]] && [ -s "${catalogue}" ] && [ -d "${repo}" ] && git -C "${repo}" cat-file -e "${commit}^{commit}" 2> /dev/null; then
+    while IFS=$'\t' read -r id fix; do
+      git -C "${repo}" cat-file -e "${fix}^{commit}" 2> /dev/null || continue;
+      git -C "${repo}" merge-base --is-ancestor "${fix}" "${commit}" 2> /dev/null;
+      case $? in 0) value=false;; 1) value=true;; *) continue;; esac
+      out=$( jq -c --arg id "${id}" --argjson v "${value}" '. + { ($id): $v }' <<< "${out}" );
+    done < <( jq -r '.vendors[]?.entries // {} | to_entries[] | select((.value.affected_commits // "") | test("^not containing [0-9a-f]{7,40}$"))
+                     | [.key, (.value.affected_commits | sub("^not containing "; ""))] | @tsv' "${catalogue}" 2> /dev/null )
+  fi
+  echo "${out}";
+}
+
+# Verdicts <report json>: the verdicts of the pages (report_verdicts.js with bugs.js) written into the report, with the
+# catalogue the report's validation used (else its commit's; a commit without catalogue: the latest one,
+# PB_CATALOGUE_LATEST, which names its bugs by their signature with their stack, not validated) and the witnesses'
+# stacks computed once (tools/witness_stacks.py), for the reports validated before validation kept them
 Verdicts() {
-  local catalogue; catalogue=$( ReportCatalogue "$1" );
-  "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "$1" ${catalogue:+"${catalogue}"};
+  local commit catalogue latest='';
+  commit=$( jq -r '([.libraries[]?.validation?.catalogue?.commit | select(. != null)][0]) // .commit // empty' "$1" 2> /dev/null );
+  catalogue=$( CatalogueFile "${commit}" );
+  if [ -z "${catalogue}" ]; then
+    commit=$( LatestCatalogue ); catalogue=$( CatalogueFile "${commit}" ); [ -n "${catalogue}" ] && latest=1;
+  fi
+  local frames="${PB_ROOT}/data/catalogue-cache/witness_frames.json";
+  PB_CATALOGUE_LATEST="${latest}" PB_WITNESS_FRAMES="$( [ -r "${frames}" ] && echo "${frames}" )" \
+  PB_COMMIT_AFFECTED="$( CommitAffected "$( jq -r '.commit // empty' "$1" 2> /dev/null )" "${catalogue}" )" \
+    "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "$1" ${catalogue:+"${catalogue}"};
 }
 
 [ "${1:-}" == "--render" ] && { Render "$2" "$3"; exit $?; }
@@ -411,6 +455,19 @@ TaskLinks || status=1;
 # the registry of the bugs found so far, per library (🚨 new bug on the pages): known_bugs.json
 if [ "$1" == "--all" ] && [ -x "${PB_ROOT}/data/tools/qjs" ]; then
   "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/known_bugs.js" "${OUT}" > /dev/null || status=1;
+fi
+# the stacks of the bugs' witnesses, for the Bugs reference (next to the reports, served by the publisher):
+# witness_frames.json { <ID>: { frames, from } }, the newest validation that recorded it (its task), else the stacks
+# computed once (tools/witness_stacks.py)
+if [ "$1" == "--all" ]; then
+  stacks="${PB_ROOT}/data/catalogue-cache/witness_frames.json";
+  { for f in "${OUT}"/[0-9]*.json; do
+      jq -c '.task as $t | [.libraries[]?.validation?.entries // {} | to_entries[] | select(((.value.witness_frames // []) | length > 0) and .value.witness_frames_once != true)
+             | { id: .key, frames: .value.witness_frames, from: "the validation of task \($t)", task: $t }] | .[]' "${f}" 2> /dev/null;
+    done; } | jq -s --slurpfile once <( [ -r "${stacks}" ] && cat "${stacks}" || echo '{}' ) '
+        (($once[0] // {}) | with_entries(.value = { frames: .value.frames, from: "its witness, run once on \(.value.put // "a validation build")" }))
+        + (sort_by(.task) | map({ (.id): { frames, from } }) | add // {})' > "${OUT}/witness_frames.json.tmp" &&
+    mv -f "${OUT}/witness_frames.json.tmp" "${OUT}/witness_frames.json" || { rm -f "${OUT}/witness_frames.json.tmp"; status=1; };
 fi
 # the runs of each commit (Results' "🕘 N runs", /html/runs/): after the reports, which give the Vuln bugs
 if [ "$1" == "--all" ]; then

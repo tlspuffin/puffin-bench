@@ -11,6 +11,11 @@
 #     validation builds: known, its 🐞 plain, the bug's verdict "does not replay, as known" (no-replay);
 #   - with the catalogue of the validation (its second argument), its replayable flags and top frames go into the
 #     report's entries, for the readers without catalogue (Results): CDOS known not to replay from an older validation;
+#   - a bug's place is the first 3 frames of its witness's stack (R3, common/signatures.js): a crash there is a strong
+#     signature, elsewhere a weak one;
+#   - an older task, whose tlspuffin had no catalogue, read against the latest one (PB_CATALOGUE_LATEST): its crash at
+#     the place of a known bug is recognised as that bug (strong, not validated), known; elsewhere, not;
+#   - a bug of tlspuffin's harness, given by commits: recognised in a commit without its fix (from git), not after it;
 #   - TaskLinks (objectives_report.sh) writes those levels into task_links.json.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -29,13 +34,13 @@ run() { # <attempt> <declared JSON> <groups JSON> [<custom JSON>]
     groups: $g }'
 }
 heap='{ "type": "heap-buffer-overflow", "frames": ["AddPacketInfo", "DoTls13HandShakeMsgType"], "count": 2, "traces": ["h1", "h2"] }'
-segv='{ "type": "SEGV", "frames": ["__memmove_avx_unaligned_erms", "DoTls13ClientHello"], "count": 1, "traces": ["s1"],
+segv='{ "type": "SEGV", "frames": ["__memmove_avx_unaligned_erms", "DoTls13ClientHello", "DoTls13HandShakeMsgType"], "count": 1, "traces": ["s1"],
         "fuzzer": { "kind": "crash", "detail": "SIGSEGV", "frames": ["DoTls13ClientHello"] } }'
 segvElsewhere='{ "type": "SEGV", "frames": ["ParseCertRelative", "ProcessPeerCerts"], "count": 1, "traces": ["x1"] }'
 uaf='{ "type": "heap-use-after-free", "frames": ["FreeKeyExchange", "Caller"], "count": 1, "traces": ["u1"] }'
 noCrash='{ "type": "no-crash", "frames": [], "count": 3, "traces": ["z1", "z2", "z3"] }'
-cves='{ "CVE-2022-38152": { "alias": "SDOS2", "library": "wolfssl", "kind": "crash", "match": "DoTls13ClientHello" },
-        "CVE-2022-42905": { "alias": "HEAP", "library": "wolfssl", "kind": "crash", "match": "AddPacketInfo" } }'
+cves='{ "CVE-2022-38152": { "alias": "SDOS2", "library": "wolfssl", "kind": "crash", "place": ["DoTls13ClientHello", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] },
+        "CVE-2022-42905": { "alias": "HEAP", "library": "wolfssl", "kind": "crash", "place": ["AddPacketInfo", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] } }'
 report() { # <name> <job type> <runs JSON> [<validation JSON>]
   jq -n --arg t "$2" --argjson r "$3" --argjson v "${4:-null}" --argjson cves "${cves}" '{ task: "9", commit: "abc", job_type: $t,
     runs: $r, cves: $cves, targets: {},
@@ -94,6 +99,18 @@ printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/b
   'print(JSON.stringify(a.bugs.map(b => [!!b.expected, b.notTarget ?? null])));' > "${work}/apart.js"
 check 'a custom benchmark of CVE-2024-5814: its claim is its target, never set apart (+k ⦸)' \
   '[ "$( "${qjs}" --std -m "${work}/apart.js" "${work}/custom5814.json" )" == "[[true,null]]" ]'
+# the same claim where a run looks for a target (a Vuln flow launched as a live test, its configuration's target BUF): set
+# apart, as the job scripts do (named after its CVE, not unexpected); in a campaign (no target): a CVE of its build
+nt5814='{ "Negotiated cipher is not in agent'"'"'s configured ciphers list": { "cve": "CVE-2024-5814", "library": "wolfssl", "below": "5.7.2" } }'
+report livetest livetest "[$( run 0 '["CVE-2022-39173","CVE-2024-5814"]' "[${claim5814}]" )]"
+jq --argjson nt "${nt5814}" '.not_targeted = $nt | .targets = { WolfSSL: { cve: "CVE-2022-39173", kind: "crash", place: ["RefineSuites", "CheckPreSharedKeys", "DoTls13ClientHello"] } }' \
+  "${work}/livetest.json" > "${work}/livetest.tmp" && mv "${work}/livetest.tmp" "${work}/livetest.json"
+report campaign5814 campaign "[$( run 0 '["CVE-2024-5814"]' "[${claim5814}]" )]"
+jq --argjson nt "${nt5814}" '.not_targeted = $nt' "${work}/campaign5814.json" > "${work}/campaign5814.tmp" && mv "${work}/campaign5814.tmp" "${work}/campaign5814.json"
+check 'a run looking for a target, whatever its job (livetest): the claim of CVE-2024-5814 set apart there, not unexpected' \
+  '[ "$( "${qjs}" --std -m "${work}/apart.js" "${work}/livetest.json" )" == "[[false,\"CVE-2024-5814\"]]" ] && [ "$( verdicts livetest .verdicts.headline.level )" != "\"unexpected\"" ]'
+check 'a campaign (no target): the claim is not set apart' \
+  '[ "$( "${qjs}" --std -m "${work}/apart.js" "${work}/campaign5814.json" )" == "[[false,null]]" ]'
 check 'a custom benchmark before validation: its target by its signature (provisional until validation says)' \
   '[ "$( verdicts customlive "[.verdicts.conclusion.counted, .verdicts.conclusion.runs]" )" == "[1,1]" ]'
 
@@ -126,10 +143,58 @@ check 'without entries: the digest of the catalogue in the report, CDOS known no
   '[ "$( jq -c ".catalogue_digest.vendors.wolfssl.entries[\"CVE-2022-38153\"].replayable" "${work}/cdosnoentries.json" )" == false ] \
    && "${qjs}" --std -m "${work}/kind.js" "${work}/cdosnoentries.json" | grep -qF "[\"CVE-2022-38153\"]]]"'
 # a report of a commit without catalogue nor validation (an old Vuln group A task): the bench's table of CVEs says it
-jq '.libraries[0].validation = null | .cves = { "CVE-2022-38153": { alias: "CDOS", library: "wolfssl", kind: "crash", match: "AddSessionToCache", replayable: false } }' \
+jq '.libraries[0].validation = null | .cves = { "CVE-2022-38153": { alias: "CDOS", library: "wolfssl", kind: "crash", place: ["wolfSSL_Free", "AddSessionToCache", "AddSession"], replayable: false } }' \
   "${work}/cdos.json" > "${work}/cdosnocatalogue.json"
 check 'no catalogue, no validation: CDOS known not to replay from vuln_targets.json (report.cves)' \
   '"${qjs}" --std -m "${work}/kind.js" "${work}/cdosnocatalogue.json" | grep -qF "[\"CVE-2022-38153\"]]]"'
+# the stack of SDOS2's witness (tools/witness_stacks.py, PB_WITNESS_FRAMES): a SEGV where it crashes is a strong signature
+echo '{ "CVE-2022-38152": { "frames": ["__memmove_avx_unaligned_erms", "DoTls13ClientHello", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] } }' > "${work}/witness_frames.json"
+cp "${work}/weakhere.json" "${work}/strong.json"; cp "${work}/weak.json" "${work}/weakelsewhere.json"
+echo '{ "format": "vulnerabilities.toml", "vendors": { "wolfssl": { "entries": { "CVE-2022-38152": { "alias": "SDOS2", "affected": "< 5.5.0", "oracle": { "kind": "crash", "asan": "SEGV" } } } } } }' > "${work}/catalogue-sdos2.json"
+PB_WITNESS_FRAMES="${work}/witness_frames.json" "${qjs}" --std -m "${here}/../tools/report_verdicts.js" "${work}/strong.json" "${work}/catalogue-sdos2.json"
+PB_WITNESS_FRAMES="${work}/witness_frames.json" "${qjs}" --std -m "${here}/../tools/report_verdicts.js" "${work}/weakelsewhere.json" "${work}/catalogue-sdos2.json"
+printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/bugs.js';" \
+  'const a = AnalyseReport(JSON.parse(std.loadFile(scriptArgs[1])));' \
+  'print(JSON.stringify(a.bugs.map(b => b.validation?.parts?.filter(p => p.kind === "signature").map(p => [p.weak, p.references?.["CVE-2022-38152"]])).flat()));' > "${work}/strength.js"
+place='["DoTls13ClientHello","DoTls13HandShakeMsgType","DoTls13HandShakeMsg"]'
+check "SDOS2 without top frames in the catalogue: its place is its witness's first 3 frames (R3, the runtime and glibc's __memmove left out); a SEGV there is strong" \
+  '[ "$( "${qjs}" --std -m "${work}/strength.js" "${work}/strong.json" )" == "[[false,${place}]]" ]'
+check 'a SEGV elsewhere stays weak' \
+  '[ "$( "${qjs}" --std -m "${work}/strength.js" "${work}/weakelsewhere.json" )" == "[[true,${place}]]" ]'
+# an older task, whose tlspuffin had no catalogue: read against the latest one (objectives_report.sh, PB_CATALOGUE_LATEST),
+# its crash at SDOS2's place is recognised as SDOS2, not validated, known; a SEGV elsewhere is not
+report old perf "[$( run 0 null "[${segv}]" )]"
+report oldelsewhere perf "[$( run 0 null "[${segvElsewhere}]" )]"
+# the same crash on wolfSSL 5.8.0, which SDOS2 does not affect (< 5.5.0): never named SDOS2 (a new bug or a regression)
+jq '.runs[].cli.library.version = "580"' "${work}/old.json" > "${work}/oldnewer.json"
+for f in old oldelsewhere oldnewer; do
+  PB_CATALOGUE_LATEST=1 PB_WITNESS_FRAMES="${work}/witness_frames.json" "${qjs}" --std -m "${here}/../tools/report_verdicts.js" "${work}/${f}.json" "${work}/catalogue-sdos2.json"
+done
+printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/bugs.js';" \
+  'const r = JSON.parse(std.loadFile(scriptArgs[1])); const a = AnalyseReport(r);' \
+  'print(JSON.stringify([r.catalogue_digest?.latest, a.headline.level, a.bugs.flatMap(b => (b.validation?.parts ?? []).filter(p => p.recognised).map(p => [p.ids, p.weak, p.latest]))]));' > "${work}/recognised.js"
+check 'an older task without catalogue: its crash at the place of SDOS2 in the latest catalogue is recognised as SDOS2 (strong, not validated): known' \
+  '[ "$( "${qjs}" --std -m "${work}/recognised.js" "${work}/old.json" )" == "[true,\"known\",[[[\"CVE-2022-38152\"],false,true]]]" ]'
+# a bug of tlspuffin's harness, given by commits (affected_commits): recognised in a commit without its fix
+# (PB_COMMIT_AFFECTED, from git: objectives_report.sh CommitAffected), not in one that has it
+hkdf='{ "type": "global-buffer-overflow", "frames": ["MemcmpInterceptorCommon(void*,", "tls13_hkdf_expand_label_with_length", "tls13_hkdf_expand_label"], "count": 1, "traces": ["k1"] }'
+jq -nc --argjson g "[${hkdf}]" '{ task: "9", commit: "abc", job_type: "perf", cves: {}, targets: {},
+  runs: [{ library: "LibreSSL", attempt: 0, found: 1, replayed: 1, reports: 1, groups: $g,
+           cli: { vendor: "libressl:libressl333-asan", library: { name: "libressl", version: "333" } } }],
+  libraries: [{ library: "LibreSSL", runs: 1, outcomes: { "0": "success" }, validation: null }] }' > "${work}/harness.json"
+cp "${work}/harness.json" "${work}/harnessfixed.json"
+echo '{ "format": "vulnerabilities.toml", "vendors": { "libressl": { "entries": { "PUFFIN-HKDF": { "alias": "HKDFCLAIM", "bug_in_harness": true,
+  "affected_commits": "not containing 0123abc", "oracle": { "kind": "crash", "asan": "global-buffer-overflow" }, "top_frames": ["tls13_hkdf_expand_label_with_length"] } } } } }' > "${work}/catalogue-harness.json"
+PB_COMMIT_AFFECTED='{"PUFFIN-HKDF":true}' "${qjs}" --std -m "${here}/../tools/report_verdicts.js" "${work}/harness.json" "${work}/catalogue-harness.json"
+PB_COMMIT_AFFECTED='{"PUFFIN-HKDF":false}' "${qjs}" --std -m "${here}/../tools/report_verdicts.js" "${work}/harnessfixed.json" "${work}/catalogue-harness.json"
+check "a bug of tlspuffin's harness in a commit without its fix: recognised by its place, known" \
+  '[ "$( "${qjs}" --std -m "${work}/recognised.js" "${work}/harness.json" )" == "[false,\"known\",[[[\"PUFFIN-HKDF\"],false,false]]]" ] && jq -e ".verdicts.headline.level == \"known\"" "${work}/harness.json" > /dev/null'
+check "the same crash in a commit with the fix: not that bug" \
+  '[ "$( "${qjs}" --std -m "${work}/recognised.js" "${work}/harnessfixed.json" )" == "[false,\"unexpected\",[]]" ]'
+check 'an older task without catalogue: the same crash on a version SDOS2 does not affect is not SDOS2' \
+  '"${qjs}" --std -m "${work}/recognised.js" "${work}/oldnewer.json" | grep -qF ",[]]"'
+check 'an older task without catalogue: a SEGV elsewhere is recognised as no known bug (not known)' \
+  '[ "$( "${qjs}" --std -m "${work}/recognised.js" "${work}/oldelsewhere.json" )" == "[true,\"unexpected\",[]]" ]'
 check 'its verdict: does not replay, as known (CDOS), not inconclusive' \
   '[ "$( "${qjs}" --std -m "${work}/kind.js" "${work}/cdos.json" )" == "[[\"no-replay\",[\"CVE-2022-38153\"],[\"CVE-2022-38153\"]]]" ] \
    && [ "$( "${qjs}" --std -m "${work}/kind.js" "${work}/cdosold.json" )" == "[[\"no-replay\",[\"CVE-2022-38153\"],[\"CVE-2022-38153\"]]]" ]'

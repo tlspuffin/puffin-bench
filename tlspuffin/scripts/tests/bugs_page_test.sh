@@ -16,7 +16,7 @@ work=$( mktemp -d )
 trap 'rm -rf "${work}"' EXIT
 mkdir -p "${work}/html/board" "${work}/html/publisher"
 command cp -f "${bench}/tlspuffin/data/html/publisher/"{bugs.js,summary_config.js} "${work}/html/publisher/"
-mkdir -p "${work}/html/common" && command cp -f "${bench}/tlspuffin/data/html/common/"{catalogue,format,verdicts}.js "${work}/html/common/"
+mkdir -p "${work}/html/common" && command cp -f "${bench}/tlspuffin/data/html/common/"*.js "${work}/html/common/"
 echo '' > "${work}/html/board/nav.js"   # the navigation bar needs a real DOM
 echo '{ "type": "module" }' > "${work}/package.json"
 "${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${commit}" > "${work}/catalogue.json"
@@ -30,7 +30,8 @@ JSON
 export JOBS_DIR="${bench}/tlspuffin/data/html/jobsscripts/tlspuffin"
 # a registry of the bugs found so far (known_bugs.json): the same crash in two configurations of wolfSSL (HEAP of the
 # catalogue, by its ASan report type and top frame), a crash of OpenSSL none of the known bugs, the crash of the LibreSSL
-# harness of past commits (in the catalogue since PUFFIN-LIBRESSL333-HKDF-CLAIM), a claim set apart
+# harness of past commits (in the catalogue since PUFFIN-LIBRESSL333-HKDF-CLAIM), a claim set apart, SDOS2 found by a
+# custom benchmark, its stack starting in glibc (no top frames in the catalogue: its witness's place, witness_frames.json)
 cat > "${work}/known_bugs.json" <<'JSON'
 { "WolfSSL|crash|AddPacketInfo": { "task": "1790851747037", "started": "2026-10-01T10:49:07Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
   "wolfssl540-asan|crash|AddPacketInfo": { "task": "1791638282947", "started": "2026-10-10T08:00:00Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
@@ -38,8 +39,10 @@ cat > "${work}/known_bugs.json" <<'JSON'
   "OpenSSL|crash|ossl_not_a_known_function": { "task": "1790851749056", "started": "2026-10-01T12:00:00Z", "what": "heap-use-after-free: ossl_not_a_known_function < SSL_do_handshake" },
   "BUF|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237378849", "started": "2026-10-05T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
   "CDOS|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237386132", "started": "2026-10-06T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
-  "custom2_SKIP|claim|Authentication bypass": { "task": "1794327919866", "started": "2026-11-10T16:39:18Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "target": "CVE-2022-25640" } }
+  "custom2_SKIP|claim|Authentication bypass": { "task": "1794327919866", "started": "2026-11-10T16:39:18Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "target": "CVE-2022-25640" },
+  "custom3_SDOS2|crash|__memmove_avx_unaligned_erms": { "task": "1794473217387", "started": "2026-11-12T09:47:00Z", "what": "SEGV: __memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType", "vendor": "wolfssl", "target": "CVE-2022-38152" } }
 JSON
+echo '{ "CVE-2022-38152": { "frames": ["__memmove_avx_unaligned_erms", "DoTls13ClientHello", "DoTls13HandShakeMsgType"], "from": "the validation of task 1794483234047" } }' > "${work}/witness_frames.json"
 
 cat > "${work}/run.mjs" <<'EOF'
 import { readFileSync } from 'node:fs';
@@ -80,6 +83,7 @@ globalThis.fetch = async url => {
   }
   if (url.endsWith('vuln_targets.json')) return json(`${work}/vuln_targets.json`);
   if (url.endsWith('known_bugs.json')) return json(`${work}/known_bugs.json`);
+  if (url.endsWith('witness_frames.json')) return json(`${work}/witness_frames.json`);
   if (url.includes('/api/git/presets/')) return json(`${work}/presets.json`);
   const job = /jobsscripts\/tlspuffin\/(PR_vulnerabilities-group[AB]_cargo\.json)$/.exec(url);
   if (job) return json(`${process.env.JOBS_DIR}/${job[1]}`);
@@ -135,6 +139,16 @@ classes=$( grep -o '<tr class="[^"]*">' <<< "${registry}" | tr '\n' ' ' )
 unknown=$( grep -o '<tr class="unknown-bug">.\{0,400\}' <<< "${registry}" )
 [[ "${classes}" =~ ^(\<tr\ class=\"unknown-bug\"\>\ )+(\<tr\ class=\"\"\>\ )+$ ]] && grep -q 'ossl_not_a_known_function' <<< "${unknown}" &&
   echo "ok   (registry): the bugs none of the known ones first (OpenSSL)" || { echo "FAIL (registry): the unknown bugs are not first (${classes})"; fail=1; }
+# SDOS2 of a custom benchmark, its stack starting in glibc: recognised at its witness's place, its experiment's target
+sdos2=$( grep -o '<code>__memmove_avx_unaligned_erms</code>.\{0,700\}' <<< "${registry}" | head -1 )
+grep -q 'href="#CVE-2022-38152"' <<< "${sdos2}" && grep -q 'expected' <<< "${sdos2}" && ! grep -q 'not a known bug' <<< "${sdos2}" &&
+  echo "ok   (registry): SDOS2 crashing in glibc's memmove is its expected bug, at its witness's place (DoTls13ClientHello)" ||
+  { echo "FAIL (registry): SDOS2 in glibc's memmove: ${sdos2:0:300}"; fail=1; }
+grep -q "its place, in bold in its witness's stack: <code>__memmove_avx_unaligned_erms &lt; <b>DoTls13ClientHello</b>" <<< "${out}" &&
+  echo "ok   (dev): SDOS2's signature: its place, in bold in its witness's stack" || { echo "FAIL (dev): SDOS2's place not shown in its witness's stack"; fail=1; }
+# one place per bug in the signature column, the one the pages compare: never the catalogue's top frames beside it
+! grep -q '>top frames: <code>' <<< "${out}" && echo "ok   (dev): no second place (the catalogue's top frames) beside the place" ||
+  { echo "FAIL (dev): the catalogue's top frames shown beside the place"; fail=1; }
 # the crash of the LibreSSL harness: the catalogue's entry when it has one, linked to its card as a bug of the harness
 hkdf=$( jq -r '[.vendors.libressl.entries // {} | to_entries[] | select((.value.top_frames // []) | index("tls13_hkdf_expand_label_with_length")) | .key][0] // empty' "${work}/catalogue.json" )
 libre=$( grep -o '<code>tls13_hkdf_expand_label_with_length</code>.\{0,900\}' <<< "${registry}" | head -1 )

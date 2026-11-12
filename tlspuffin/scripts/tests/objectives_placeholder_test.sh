@@ -39,7 +39,7 @@ sed -i 's/live-1700000000001.json/live-1700000000003.json/' "${pages}/live-17000
 chrome=$( command -v google-chrome || command -v chromium || command -v chromium-browser || true )
 if [ -z "${chrome}" ]; then echo "SKIP the pages: no Chrome or Chromium"; exit "${fail}"; fi
 command cp -f "${scripts}/tools/objectives_page/"{report.js,report.css,bugs.js} "${pages}/"
-command cp -f "${scripts}/../data/html/common/"{commitinfo,verdicts}.js "${work}/html/common/"
+command cp -f "${scripts}/../data/html/common/"*.js "${work}/html/common/"
 echo '' > "${work}/html/board/nav.js"   # the navigation bar needs the bench
 mkdir -p "${work}/html/jobsscripts/tlspuffin" && echo '{}' > "${work}/html/jobsscripts/tlspuffin/vuln_targets.json"
 port=$( python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' )

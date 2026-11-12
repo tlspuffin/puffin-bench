@@ -31,6 +31,14 @@ const file = scriptArgs[1];
 let catalogue = null;
 try { catalogue = scriptArgs[2] ? JSON.parse(std.loadFile(scriptArgs[2])) : null; } catch (error) { catalogue = null; }
 if (catalogue?.format !== 'vulnerabilities.toml') catalogue = null;
+// the stacks of the witnesses of the bugs without top frames, computed once for the reports validated before validation
+// recorded them (tools/witness_stacks.py: PB_WITNESS_FRAMES, { ID: { frames } })
+let witnessFrames = {};
+try { witnessFrames = std.getenv('PB_WITNESS_FRAMES') ? JSON.parse(std.loadFile(std.getenv('PB_WITNESS_FRAMES'))) ?? {} : {}; } catch (error) { witnessFrames = {}; }
+// whether each bug given by commits (a bug of tlspuffin's harness: affected_commits) is in the report's commit, from git
+// (objectives_report.sh Verdicts: PB_COMMIT_AFFECTED, { ID: true when the commit lacks its fix })
+let affectedAtCommit = {};
+try { affectedAtCommit = JSON.parse(std.getenv('PB_COMMIT_AFFECTED') || '{}') ?? {}; } catch (error) { affectedAtCommit = {}; }
 // the catalogue's flags the readers of the report need without it (the objectives pages, Results): whether a bug's
 // objectives replay, its top frames (the strength of a signature verdict), into the validation's record of each entry
 const enrich = (report) => {
@@ -39,15 +47,28 @@ const enrich = (report) => {
   // frames), for a report whose validation has no entries (older ones, unsupported): AnalyseReport's catalogue when the
   // reader has none
   const vendors = new Set((report.runs ?? []).map(run => VendorOfRun(run)).filter(Boolean));
-  report.catalogue_digest = { format: catalogue.format, commit: catalogue.commit ?? null, vendors: Object.fromEntries(
+  // into the catalogue's entries, which the analysis below reads, as the digest gives them to the pages: one set of data
+  for (const v of Object.values(catalogue.vendors ?? {})) {
+    for (const [id, e] of Object.entries(v.entries ?? {})) {
+      if (!e.witness_frames?.length && witnessFrames[id]?.frames?.length) e.witness_frames = witnessFrames[id].frames;
+      if (typeof affectedAtCommit[id] === 'boolean') e.affected_at_commit = affectedAtCommit[id];
+    }
+  }
+  // latest: the report's commit has no catalogue, this is the newest one (PB_CATALOGUE_LATEST): it names the bugs by their
+  // signature with their stack, without validation
+  report.catalogue_digest = { format: catalogue.format, commit: catalogue.commit ?? null, latest: !!std.getenv('PB_CATALOGUE_LATEST'), vendors: Object.fromEntries(
       [...vendors].filter(v => catalogue.vendors?.[v]).map(v => [v, { entries: Object.fromEntries(Object.entries(catalogue.vendors[v].entries ?? {})
-          .map(([id, e]) => [id, { alias: e.alias ?? null, oracle: e.oracle ?? null, replayable: e.replayable ?? null, top_frames: e.top_frames ?? null }])) }])) };
+          .map(([id, e]) => [id, { alias: e.alias ?? null, oracle: e.oracle ?? null, replayable: e.replayable ?? null, top_frames: e.top_frames ?? null,
+                                   affected: e.affected ?? null, affected_commits: e.affected_commits ?? null,
+                                   affected_at_commit: e.affected_at_commit ?? null, witness_frames: e.witness_frames ?? null }])) }])) };
   for (const lib of report.libraries ?? []) {
     for (const [id, entry] of Object.entries(lib.validation?.entries ?? {})) {
       const known = Object.values(catalogue.vendors ?? {}).map(v => v.entries?.[id]).find(Boolean);
       if (!known || !entry) continue;
       if (entry.replayable == null && known.replayable != null) entry.replayable = known.replayable;
       if (!entry.top_frames && known.top_frames?.length) entry.top_frames = known.top_frames;
+      // (witness_frames_once: from the stacks computed once, not from this validation)
+      if (!entry.witness_frames && witnessFrames[id]?.frames?.length) { entry.witness_frames = witnessFrames[id].frames; entry.witness_frames_once = true; }
     }
   }
 };

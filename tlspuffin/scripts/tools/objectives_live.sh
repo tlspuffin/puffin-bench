@@ -155,7 +155,7 @@ LiveValidation() {
     base=$( basename "${file}" .json ); base="${base#validation-}"; attempt="${base##*-}"; lib="${base%-*}";
     out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --slurpfile v "${file}" '
         .[$lib] = ((.[$lib] // {}) | .catalogue = ($v[0].catalogue // .catalogue)
-          | .entries = ((.entries // {}) + ($v[0].entries // {} | map_values({ alias, oracle, replayable })))
+          | .entries = ((.entries // {}) + ($v[0].entries // {} | map_values({ alias, oracle, replayable, witness_frames })))
           | .bench = ((.bench // []) + (if $v[0].bench then [$v[0].bench | { commit, jobscripts }] else [] end) | unique)
           | .errors = ((.errors // []) + (if $v[0].error then [{ attempt: ($a | tonumber? // $a), error: $v[0].error }] else [] end))
           | .byTrace = ((.byTrace // {}) + ([$v[0].objectives[]? | { key: ($a + "/" + .trace),
@@ -392,7 +392,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
       '{ task: $task, task_url: $taskUrl, commit: $commit, name: $name, job_type: $jobType, live: true, updated: $updated,
          # when the next update comes (the page says it): the cron period, the replays of a call, this update
          refresh: $refresh,
-         not_targeted: (if $jobType | test("^vuln-") then $nt else {} end), targets: $targets, cves: $cves,
+         not_targeted: $nt, targets: $targets, cves: $cves,
          # every configuration with its number of runs, also the runs without objective yet (the 🎯 count: k/runs)
          libraries: ($libraries | map(. + (if $validation[.library] then { validation: $validation[.library] } else {} end))),
          runs: sort_by(.library, .attempt) }' \

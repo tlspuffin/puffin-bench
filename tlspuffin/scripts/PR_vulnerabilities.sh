@@ -151,7 +151,7 @@ TargetedNames() {
 # <UTC yyyymmdd-HHMMSSmmm>-<hash>), empty when none: the time to find, instead of the end of the experiment (the
 # monitor looks once a minute, then the fuzzer has to stop). With an expected bug declared (vuln_targets.json), an
 # objective is targeted when the fuzzer's record or its replay (objective-reports/, ExperimentReplayObjectives) is that
-# bug: a crash the fuzzer logged without backtrace counts when the replay shows the expected frame
+# bug: a crash the fuzzer logged without backtrace counts when the replay's stack has the target's place (TargetMatches)
 # An experiment naming its bug (target_bug): an objective of the bug's signature (record or replay) counts once validation
 # confirms it (ConfirmObjective, not decided by validation: as before; one it does not confirm is another bug), the
 # objectives taken oldest first, those after the first confirmed one counted without validation: the time to find is

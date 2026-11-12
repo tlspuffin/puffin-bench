@@ -10,6 +10,7 @@ import { urls } from './summary_config.js';
 import { presentOn, patchedAt, runOptions, confirmation, needsAsan } from '../common/catalogue.js';
 import { esc, libraryName, duration, VENDORS } from '../common/format.js';
 import { TERMS, VERDICTS, VERDICT_ORDER, TAGS, LEVELS, SignatureText, SignatureWithStack } from '../common/verdicts.js';
+import { FrameName, PlaceOf, HasPlace, PLACE_RULE } from '../common/signatures.js';
 
 const TARGETS = '/html/jobsscripts/tlspuffin/vuln_targets.json';
 const KNOWN = '/html/objectives/known_bugs.json';
@@ -24,8 +25,8 @@ const CATALOGUE = `${urls.git_restapi}/api/git/catalogue/tlspuffin/${catalogueRe
 // the configurations of Vuln group A and B, as deployed with the bench
 const JOBS = [['Vuln group A', 'vuln-a', '/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json'],
               ['Vuln group B', 'vuln-b', '/html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo.json']];
-const [targets, known, version, firstCatalogue, ...jobConfigs] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/version.json'),
-  load(CATALOGUE), ...JOBS.map(([, , url]) => load(url))]);
+const [targets, known, version, stacks, firstCatalogue, ...jobConfigs] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/version.json'),
+  load('/html/objectives/witness_frames.json'), load(CATALOGUE), ...JOBS.map(([, , url]) => load(url))]);
 let catalogue = firstCatalogue;
 // dev without catalogue (before tlspuffin pr/vuln-catalogue is merged): the catalogue of the open pull request updated
 // last that has one (git_restapi's history of tlspuffin), said so on the page
@@ -63,16 +64,17 @@ const cveLink = cve => `<a href="${NVD(cve)}" target="_blank" rel="noopener">${e
 // the CVE of a registry entry: the target of its configuration (the preset whose CVE has that alias) when its
 // rule matches, or a claim set apart; null otherwise
 function CveOf(library, b) {
-  const text = `${b.sig} ${b.what ?? ''}`;
   for (const [, t] of presets) {
     if (targets?._cves?.[t.cve]?.alias !== library) continue;
-    if (t.kind === 'claim' ? b.kind === 'claim' && b.sig === t.match : b.kind !== 'claim' && text.includes(t.match)) return { cve: t.cve, how: 'expected' };
+    if (t.kind === 'claim' ? b.kind === 'claim' && b.sig === t.match : b.kind !== 'claim' && HasPlace(t.place, stackOf(b))) return { cve: t.cve, how: 'expected' };
   }
   const nt = targets?._not_targeted?.[b.sig];
   if (b.kind === 'claim' && nt) return { cve: nt.cve ?? nt, how: nt.library ? `set apart on ${nt.library} < ${nt.below}` : 'set apart' };
   return null;
 }
-const rule = t => t.kind === 'claim' ? `claim <code>${esc(t.match)}</code>` : `crash with <code>${esc(t.match)}</code> among the top 3 frames`;
+const rule = t => t.kind === 'claim' ? `claim <code>${esc(t.match)}</code>` : `crash whose stack has its place, <code>${esc((t.place ?? []).join(' < '))}</code>`;
+// the stack of a registry entry, from its description ("heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType")
+const stackOf = b => String(b.what ?? '').replace(/^[^:]*:\s*/, '').split(' < ');
 
 // ---- tlspuffin's catalogue: an overview, then every entry in full (its fields: puffin-build/README.md of tlspuffin)
 const TLSPUFFIN = 'https://github.com/tlspuffin/tlspuffin';
@@ -103,13 +105,34 @@ const dl = rows => {
   return kept.length ? `<dl>${kept.map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join('')}</dl>` : '<p class="muted">—</p>';
 };
 const box = (title, body, cls = '') => `<div class="box ${cls}"><h4>${title}</h4>${body}</div>`;
-// a bug's signature (its oracle in the catalogue) in words: with its top frames, strong on the reports when a stack has
-// them; else weak (a claim, a panic, a crash told by its type alone)
-const signatureText = (o, frames = null) => !o ? '<span class="muted">none</span>'
-  : `${esc(SignatureText(o))} ${SignatureWithStack(o, frames)
+// the stacks of the bugs' witnesses (objectives/witness_frames.json, published by objectives_report.sh: { ID: { frames,
+// from } }), loaded with the page
+const witnessStacks = stacks ?? {};
+// the place of a bug, the frames a crash of it is recognised by, as every page decides it (../common/signatures.js)
+const placeOf = (id, e) => PlaceOf(e?.top_frames, witnessStacks[id]?.frames);
+// a bug's place in one line, what the pages compare a crash with (placeOf): in bold within its witness's stack when
+// validation recorded it, else the catalogue's top frames, said so; '' for a bug that is not a crash or has no place
+const placeText = (id, e, witness = !e?.no_witness) => {
+  if (e?.oracle?.kind !== 'crash') return '';
+  const stack = witnessStacks[id]?.frames ?? [], place = placeOf(id, e), inPlace = new Set(place);
+  if (stack.length) {
+    return `<div class="muted" title="${esc(`${PLACE_RULE}\nthe witness's stack: ${witnessStacks[id].from}, symbolized`)}">its place, in bold in its witness's stack: <code>${stack.slice(0, 8)
+      .map(f => inPlace.has(FrameName(f)) ? `<b>${esc(f)}</b>` : esc(f)).join(' &lt; ')}</code></div>`;
+  }
+  if (place.length) {
+    return `<div class="muted" title="${esc(PLACE_RULE)}">its place: <code><b>${esc(place.join(' < '))}</b></code> (the catalogue's top frames${witness
+      ? ', until a validation records its witness\'s stack' : ': it has no witness'})</div>`;
+  }
+  return witness ? `<div class="muted" title="${esc(PLACE_RULE)}">its place: the first frames of its witness's stack, once a validation records it</div>` : '';
+};
+// a bug's signature (its oracle in the catalogue) in words, and its place (placeText): strong on the reports when an
+// objective's stack has it, else weak (a claim, a panic, a crash told by its type alone)
+const signatureText = (o, e, id) => {
+  if (!o) return '<span class="muted">none</span>';
+  return `${esc(SignatureText(o))} ${SignatureWithStack(o, e?.top_frames, !e?.no_witness)
       ? `<span class="badge b-exp" title="${esc(TERMS.find(t => t[0] === 'strong signature')[1])}">with its stack</span>`
-      : `<span class="badge b-unexp" title="${esc(TERMS.find(t => t[0] === 'weak signature')[1])}">weak</span>`}`
-    + (frames?.length ? `<div class="muted" title="a stack with one of them makes a signature verdict strong on the reports">top frames: <code>${esc(frames.join(' < '))}</code></div>` : '');
+      : `<span class="badge b-unexp" title="${esc(TERMS.find(t => t[0] === 'weak signature')[1])}">weak</span>`}` + placeText(id, e);
+};
 // an upstream fix: a URL, or a commit of the library's repository (presets.toml)
 const upstreamLink = (repository, upstream) => {
   if (!upstream) return '<span class="muted">—</span>';
@@ -163,13 +186,17 @@ function entryCard(vendor, id, e) {
   ]);
   const o = e.oracle;
   const shows = dl([
-    ['signature', o ? `${signatureText(o)} <span class="muted">(the catalogue's oracle: ${o.kind === 'claim' ? 'the security oracle reports a violation' : 'the execution crashes: signal, sanitizer report or panic'})</span>`
+    ['signature', o ? `${signatureText(o, e, id)} <span class="muted">(the catalogue's oracle: ${o.kind === 'claim' ? 'the security oracle reports a violation' : 'the execution crashes: signal, sanitizer report or panic'})</span>`
       : '<span class="muted">none: its objectives cannot be recognised</span>'],
     ['signal', o?.signal ? `<code>${esc(o.signal)}</code>` : ''],
     ['ASan report', o?.asan ? `<code>${esc(o.asan)}</code>` : ''],
     ['violation', o?.violation ? `<code>${esc(o.violation)}</code>` : ''],
     ['panic', o?.panic ? `<code>${esc(o.panic)}</code>` : ''],
-    ['top frames', (e.top_frames ?? []).length ? `${codes(e.top_frames)} <span class="muted">(shown to people, never used to decide)</span>` : ''],
+    ['top frames', (e.top_frames ?? []).length ? `${codes(e.top_frames)} <span class="muted">(${witnessStacks[id]?.frames?.length
+      ? "the catalogue's field, not used: its place comes from its witness's stack" : "its place, until a validation records its witness's stack"})</span>` : ''],
+    ['stack of its witness', witnessStacks[id]?.frames?.length ? `<code class="stack">${witnessStacks[id].frames.map(f => placeOf(id, e).includes(FrameName(f)) ? `<b>${esc(f)}</b>` : esc(f)).join(' &lt; ')}</code>`
+      + `<div class="muted">${esc(witnessStacks[id].from)}, symbolized; in bold its place, what the pages recognise it by (${esc(PLACE_RULE)})</div>`
+      : e.oracle?.kind === 'crash' && !e.no_witness ? '<span class="muted">not recorded yet (the next validation of a build with this bug records it)</span>' : ''],
     ['objectives replay', e.replayable === false ? '<b>no</b>: objectives found by fuzzing do not reproduce on replay' : 'yes'],
     ['its witness also triggers', codes(e.also_triggers)],
     ['a bug of', e.bug_in_harness ? '<b>the fuzzing harness</b>, not of the library' : 'the library'],
@@ -237,8 +264,9 @@ const runOn = (vendor, id, e) => {
   if (!options.length) return '<span class="muted">no preset of this commit has it</span>';
   const one = (p, i) => `<span class="${i === 0 ? 'run-first' : ''}" title="${esc(p.name)}">${esc(p.version)}${p.asan ? ' · ASan' : needsAsan(e) ? ' · + ASan' : ''} · <code>${esc(p.name)}</code>`
     + `${p.patched ? '' : ' <span class="muted">(no patch)</span>'}${p.witness ? '' : ' <span class="muted">(witness does not reach it)</span>'}</span>`;
-  const shown = options.slice(0, 3).map(one).join('<br>');
-  return options.length > 3 ? `${shown}<details class="more"><summary>${options.length - 3} more</summary>${options.slice(3).map((p, i) => one(p, i + 3)).join('<br>')}</details>` : shown;
+  // the launcher's pick, the others folded
+  const shown = options.slice(0, 1).map(one).join('<br>');
+  return options.length > 1 ? `${shown}<details class="more"><summary>${options.length - 1} more</summary>${options.slice(1).map((p, i) => one(p, i + 1)).join('<br>')}</details>` : shown;
 };
 const timeToFind = (id, e) => {
   const t = benchTimes?.bugs?.[e.alias ?? id] ?? benchTimes?.bugs?.[id];
@@ -249,11 +277,18 @@ const timeToFind = (id, e) => {
 // the other bugs of the same library with the same signature: a stop on one of them may be taken for this one
 const sameSignature = (vendor, id, e) => e.oracle ? Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {})
   .filter(([other, o]) => other !== id && o.oracle && JSON.stringify(o.oracle) === JSON.stringify(e.oracle)).map(([other, o]) => o.alias ?? other) : [];
+// how a find of a bug is recognised, in short (✔ patch; ≈ strong or weak signature: strong when a crash has a place, the
+// catalogue's top frames or where its witness crashes; the fuzzer's record only; none), the details on hover
 const confirmedBy = (vendor, id, e) => {
   const how = confirmation(e);
   const twins = sameSignature(vendor, id, e);
-  return `<span class="badge ${how.kind === 'patch' ? 'b-exp' : 'b-unexp'}"${how.kind === 'signature' && e.no_patch ? ` title="${esc(e.no_patch)}"` : ''}>${esc(how.text)}</span>`
-    + (twins.length ? `<br><span class="muted">same signature as ${esc(twins.join(', '))}</span>` : '');
+  const strong = SignatureWithStack(e.oracle, e.top_frames, !e.no_witness);
+  const short = how.kind === 'patch' ? '✔ patch' : how.kind === 'signature' ? `≈ ${strong ? 'strong' : 'weak'} signature`
+      : how.kind === 'record' ? 'fuzzer\'s record only' : 'none';
+  const title = [how.text, how.kind === 'patch' ? `elsewhere: by its ${strong ? 'strong' : 'weak'} signature` : '',
+    how.kind === 'signature' && e.no_patch ? e.no_patch : '', twins.length ? `same signature as ${twins.join(', ')}` : ''].filter(Boolean).join('\n');
+  return `<span class="badge ${how.kind === 'patch' ? 'b-exp' : strong && how.kind === 'signature' ? 'b-strong' : 'b-unexp'}" title="${esc(title)}">${esc(short)}</span>`
+    + (twins.length ? `<div class="muted">same signature as ${esc(twins.join(', '))}</div>` : '');
 };
 const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <b>${esc(e.alias)}</b>` : ''}${e.find?.by_puffin ? ' <span class="star" title="first found by puffin">★</span>' : ''}
     <span class="tag">${esc(e.category)}</span><div class="summary">${esc(e.summary)}</div></td>
@@ -263,9 +298,10 @@ const overviewRow = ({ vendor, id, e }) => `<tr><td>${idLink(id)}${e.alias ? ` <
   <td class="nowrap">${timeToFind(id, e)}</td>
   <td>${confirmedBy(vendor, id, e)}</td>
   <td>${e.no_witness ? `<span class="badge b-unexp" title="${esc(e.no_witness)}">no witness</span>` : '<span class="badge b-exp">✓</span>'}</td>
-  <td>${signatureText(e.oracle, e.top_frames)}${e.replayable === false ? '<br><span class="muted">does not replay</span>' : ''}</td></tr>`;
-const OVERVIEW_HEAD = '<tr><th>bug</th><th>library</th><th>CVSS</th><th>run on <span class="muted">(presets of the commit)</span></th>'
-  + '<th>time to find on the bench ⁽ᵗ⁾</th><th>a find is recognised by</th><th>witness</th>'
+  <td>${signatureText(e.oracle, e, id)}${e.replayable === false ? '<br><span class="muted">does not replay</span>' : ''}</td></tr>`;
+const OVERVIEW_HEAD = '<colgroup><col class="c-bug"><col class="c-lib"><col class="c-cvss"><col class="c-runon"><col class="c-time"><col class="c-how"><col class="c-witness"><col class="c-sig"></colgroup>'
+  + '<tr><th>bug</th><th>library</th><th>CVSS</th><th>run on <span class="muted">(presets of the commit)</span></th>'
+  + '<th>time to find on the bench ⁽ᵗ⁾</th><th title="how validation recognises a find of this bug: ✔ by its patch (patch differential), else ≈ by its signature, strong when its crash has a place (the catalogue\'s top frames, or where its witness crashes), weak otherwise">recognised by</th><th>witness</th>'
   + `<th title="${esc(TERMS.find(t => t[0] === 'signature')[1])}">signature <span class="muted">(the catalogue's oracle)</span></th></tr>`;
 const overviewTable = list => `<table class="overview">${OVERVIEW_HEAD}${list.map(overviewRow).join('') || '<tr><td colspan="8" class="muted">none</td></tr>'}</table>`;
 // the filters of the overview: library, category, first found by puffin, bugs without witness
@@ -428,13 +464,15 @@ const vendorOf = name => {
 };
 // a crash's report type, from its description ("heap-buffer-overflow: AddPacketInfo < ..."; "crash: ..." without ASan)
 const reportType = b => b.kind === 'claim' ? null : (/^([a-z][a-z-]*):/.exec(b.what ?? '')?.[1] ?? null);
-// the bugs of the catalogue a bug of the registry is, for people: those of its library with its claim, or with its top
-// function among their top frames and the same ASan report type (when it has one)
+// the bugs of the catalogue a bug of the registry is, for people: those of its library with its claim, or whose place
+// its stack has (HasPlace, the one rule; the registry's description: SDOS2's finds crash in __memmove_avx_unaligned_erms,
+// called by DoTls13ClientHello) and the same ASan report type (when it has one)
 function catalogueMatch(vendor, b) {
   const entries = Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {});
   if (b.kind === 'claim') return entries.filter(([, e]) => e.oracle?.kind === 'claim' && e.oracle.violation === b.sig).map(([id]) => id);
   const type = reportType(b);
-  return entries.filter(([, e]) => e.oracle?.kind === 'crash' && (e.top_frames ?? []).includes(b.sig)
+  const stack = stackOf(b);
+  return entries.filter(([id, e]) => e.oracle?.kind === 'crash' && HasPlace(placeOf(id, e), stack)
     && (!type || type === 'crash' || !e.oracle.asan || e.oracle.asan === type)).map(([id]) => id);
 }
 const bugLink = id => {
@@ -479,7 +517,7 @@ function registrySection() {
     // the catalogue, when no rule of vuln_targets.json tells (a configuration without target, another library)
     const more = bug.rules.length ? [] : bug.ids;
     if (more.length) parts.push(`📚 ${more.map(id => bugLink(id) + harnessNote(id)).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
-      : 'its top function among the bug\'s top frames, same report type'})</span>`);
+      : 'its stack has the bug\'s place, same report type: a hint, the reports validate'})</span>`);
     return parts.join('<br>') || `<span class="badge b-new" title="${esc(TAGS.new.tip)}">${TAGS.new.mark} not a known bug</span>`;
   };
   const task = b => `<a href="/html/objectives/${esc(b.task)}.html">task ${esc(b.task)}</a>`;
@@ -493,7 +531,7 @@ function registrySection() {
       in a configuration with a target (BUF, SKIP…), when no earlier task had its signature there; in a plain version (e.g. Perf's wolfSSL 5.8.0), when it
       is none of the CVEs tlspuffin declares for that build (its vendorinfo: known minus fixed vulnerabilities) recognised by vuln_targets.json, which are shown
       as 📋 known; it is then new on every task until it is added there. A crash without location cannot be told apart: it never counts as new.
-      📚 here: the catalogue's bug with that claim, or with that function among its top frames (shown to people; validation decides by patch differential).</p></details>
+      📚 here: the catalogue's bug with that claim, or whose place its stack has (a hint for people, whatever the version; the reports name a find by validation, or by its stack among the bugs of the version it built).</p></details>
     <table class="registry"><tr><th>bug</th><th>what it is</th><th>found in</th><th>first seen</th><th>first report</th></tr>
     ${bugs.map(bug => `<tr class="${bug.known ? '' : 'unknown-bug'}">
       <td><span class="kind kind-${esc(bug.kind)}">${esc(bug.kind)}</span> <code>${esc(bug.sig)}</code>${reportType(bug.first) && reportType(bug.first) !== 'crash' ? ` <span class="muted">${esc(reportType(bug.first))}</span>` : ''}

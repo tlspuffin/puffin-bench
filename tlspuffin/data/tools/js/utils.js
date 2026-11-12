@@ -180,7 +180,8 @@ export function AttachValidation(libResult, attempt, library, attemptID, outPath
   if (validation.error) merged.errors.push({ attempt: attemptID, error: validation.error });
   if (validation.catalogue) merged.catalogue = validation.catalogue;
   Object.entries(validation.entries ?? {}).forEach(([id, entry]) => {
-    merged.entries[id] = { alias: entry?.alias ?? null, oracle: entry?.oracle ?? null, replayable: entry?.replayable ?? null };
+    merged.entries[id] = { alias: entry?.alias ?? null, oracle: entry?.oracle ?? null, replayable: entry?.replayable ?? null,
+                         witness_frames: entry?.witness_frames ?? null };
   });
   if (validation.bench && !merged.bench.some(b => b.commit === validation.bench.commit && b.jobscripts === validation.bench.jobscripts)) {
     merged.bench.push({ commit: validation.bench.commit ?? null, jobscripts: validation.bench.jobscripts ?? null });

@@ -19,9 +19,20 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .reload { white-space: nowrap; padding-top: 2px; }
 .reload button { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 4px 12px; font: inherit; cursor: pointer; }
 .reload button:disabled { background: #30363d; cursor: wait; }
-.overview .summary { color: #cfcfcf; max-width: 560px; font-size: 12px; }
+.overview .summary { color: #cfcfcf; font-size: 12px; }
+/* the columns: the bug and the signature wide (a few lines each), run on and how a find is recognised narrow */
+table.overview { table-layout: fixed; }
+.overview col.c-bug { width: 27%; } .overview col.c-lib { width: 6%; } .overview col.c-cvss { width: 4%; }
+.overview col.c-runon { width: 13%; } .overview col.c-time { width: 7%; } .overview col.c-how { width: 9%; }
+.overview col.c-witness { width: 5%; } .overview col.c-sig { width: 29%; }
+.overview td { overflow-wrap: anywhere; }
+.overview code { white-space: normal; overflow-wrap: anywhere; }
+.badge.b-strong { border-color: var(--green); color: #aff5b4; }
+code.stack { white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
 .overview .tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 4px; background: #262626; color: #bbb; font-size: 11px; }
-.overview td.runon { font-size: 12px; white-space: nowrap; }
+.overview td.runon { font-size: 12px; }
+/* a preset name or a version range breaks at its spaces only */
+.overview td.runon code { overflow-wrap: normal; word-break: keep-all; }
 .overview .run-first { font-weight: 600; }
 .overview details.more summary { cursor: pointer; color: var(--muted, #8b8b8b); font-size: 11px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 6px 0; font-size: 13px; }

@@ -4,7 +4,8 @@
 #   - OracleMatches: a catalogue entry's oracle against a fuzzer's record (claim message; crash signal and ASan report
 #     type) and against a replay ("ASan <type>");
 #   - ExpectedTarget: the experiment's target (target_bug, target_oracle) first, else the preset's (VULN_TARGETS);
-#     TargetMatches on both, the frame rule of VulnA unchanged;
+#     TargetMatches on both: a VulnA crash target by its place (HasPlace: common/signatures.js through
+#     tools/js/has_place.js and qjs, the rule of the pages), BUF's crash not taken for SDOS2;
 #   - ObjectiveTargeted from fuzzer records (FuzzerRecords lines -> FuzzerVerdict): the expected bug, another bug; a
 #     claim set apart (CVE-2024-5814 on wolfSSL < 5.7.2) does not count, but in the experiment that looks for it;
 #   - KnownVendorBuild: presets and builds derived from the catalogue, with the clone's presets.toml and
@@ -15,6 +16,13 @@ here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 clone="${1:?usage: custom_target_test.sh <tlspuffin clone> [<commit>]}"; commit="${2:-HEAD}"
 # shellcheck source=../PR_common.sh
 source "${here}/../PR_common.sh"
+# the bench's tools as installed (<data>/tools/{qjs,js} beside <data>/html/common): what HasPlace runs
+qjs="${QJS:-/srv/puffin-bench/data/tools/qjs}"
+[ -x "${qjs}" ] || { echo "SKIP: no qjs at ${qjs}"; exit 0; }
+data=$( mktemp -d ); trap 'rm -rf "${data}"' EXIT
+mkdir -p "${data}/tools" "${data}/html" && ln -s "${qjs}" "${data}/tools/qjs" &&
+  cp -r "${here}/../../data/tools/js" "${data}/tools/js" && cp -r "${here}/../../data/html/common" "${data}/html/common"
+export THEJOB_TOOLS_PATH="${data}/tools"
 
 fail=0
 expect() { # expect <description> <0|1> <command...>
@@ -47,10 +55,14 @@ expect 'signal oracle, other signal'                     1 OracleMatches "${SIGN
 expect 'no oracle'                                       1 OracleMatches 'null' crash 'SIGABRT'
 
 echo "--- ExpectedTarget, TargetMatches"
-declare -gA VULN_TARGETS=( ['wolfssl:wolfssl540-buf']='CVE-2022-39173|crash|RefineSuites' )
-same 'a VulnA preset: its target' "$( ExpectedTarget wolfssl:wolfssl540-buf )" 'CVE-2022-39173|crash|RefineSuites'
-expect 'VulnA frame rule, unchanged by the detail' 0 TargetMatches 'CVE-2022-39173|crash|RefineSuites' crash 'ASan stack-buffer-overflow' 'RefineSuites < DoTls13ClientHello'
-expect 'VulnA frame rule, another frame'         1 TargetMatches 'CVE-2022-39173|crash|RefineSuites' crash '' 'AddPacketInfo < DoTls13HandShakeMsgType'
+declare -gA VULN_TARGETS=( ['wolfssl:wolfssl540-buf']='CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' )
+same 'a VulnA preset: its target, its place' "$( ExpectedTarget wolfssl:wolfssl540-buf )" 'CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello'
+expect 'VulnA place, whatever the detail'        0 TargetMatches 'CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' crash 'ASan stack-buffer-overflow' 'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello'
+expect 'VulnA place, with an ASan frame first'   0 TargetMatches 'CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' crash '' '__asan_memcpy < RefineSuites < CheckPreSharedKeys'
+expect 'VulnA place, another crash'              1 TargetMatches 'CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' crash '' 'AddPacketInfo < DoTls13HandShakeMsgType'
+expect "BUF's crash is not SDOS2 (DoTls13ClientHello its 3rd frame)" 1 TargetMatches 'CVE-2022-38152|crash|DoTls13ClientHello < DoTls13HandShakeMsgType < DoTls13HandShakeMsg' crash '' 'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello'
+expect "SDOS2's crash in glibc's memmove is SDOS2" 0 TargetMatches 'CVE-2022-38152|crash|DoTls13ClientHello < DoTls13HandShakeMsgType < DoTls13HandShakeMsg' crash '' '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType'
+expect 'no tools: never a match'                 1 env THEJOB_TOOLS_PATH=/nonexistent bash -c 'source "$1"; TargetMatches "CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello" crash "" "RefineSuites < CheckPreSharedKeys < DoTls13ClientHello"' _ "${here}/../PR_common.sh"
 target_bug=CVE-2022-39173; target_oracle="${BUF}"
 same 'a custom experiment: its catalogue entry' "$( ExpectedTarget wolfssl:CVE-2022-39173 )" 'CVE-2022-39173|oracle|'
 expect 'oracle target, matching record'          0 TargetMatches "$( ExpectedTarget x )" crash 'SIGABRT · ASan stack-buffer-overflow' 'RefineSuites'
@@ -114,7 +126,7 @@ done
 
 echo "--- Vuln group A and B: their bug named, their rule kept"
 unset benchmark target_oracle; target_bug=CVE-2022-39173
-same 'a VulnA configuration naming its bug: the frame rule of its preset' "$( ExpectedTarget wolfssl:wolfssl540-buf )" 'CVE-2022-39173|crash|RefineSuites'
+same 'a VulnA configuration naming its bug: the rule of its preset' "$( ExpectedTarget wolfssl:wolfssl540-buf )" 'CVE-2022-39173|crash|RefineSuites < CheckPreSharedKeys < DoTls13ClientHello'
 same 'it is not a custom experiment' "$( CustomExperimentJSON )" null
 unset target_bug
 

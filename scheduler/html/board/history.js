@@ -144,13 +144,17 @@ const DateTime = (time) => new Date(time).toLocaleString(navigator.languages,
     { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const CoreHours = (value) => value >= 100 ? Math.round(value).toLocaleString('en-US') : value.toFixed(1);
 
+// the steps of a task: those that ended normally of all of them. A step that reached its timeout ran to its time
+// budget, which only a step given one can (the experiments): the normal end of a Perf or campaign run, and of a Vuln run
+// that did not find its bug in its time; it ended normally. Failed and cancelled steps did not.
 function Steps(task) {
   const steps = task.summary?.steps;
   if (!steps?.total) return null;
-  const good = steps.ok;
+  const good = steps.ok + (steps.timed_out ?? 0);
   const cls = good === steps.total ? 'ok' : (good === 0 ? 'fail' : 'mixed');
-  const title = [`${steps.ok} of ${steps.total} steps ended well`, steps.failed && `${steps.failed} failed`,
-    steps.timed_out && `${steps.timed_out} timed out`, steps.cancelled && `${steps.cancelled} cancelled`,
+  const title = [`${good} of ${steps.total} steps ended normally`
+      + (steps.timed_out ? ` (${steps.timed_out} of them ran to their time budget, as an experiment does)` : ''),
+    steps.failed && `${steps.failed} failed`, steps.cancelled && `${steps.cancelled} cancelled`,
     steps.other && `${steps.other} other`].filter(Boolean).join(', ');
   return { text: `${good}/${steps.total}`, cls, title };
 }
@@ -171,7 +175,7 @@ function SearchText(task) {
   return [task.name, task.id, task.user, task.type, PackageOf(task) ?? '', div.textContent, commit].join(' ').toLowerCase();
 }
 
-const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' })[type] ?? type;
+const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnC', 'campaign': 'Camp' })[type] ?? type;
 
 // a task whose objectives report found new bugs (task_links.json "new"): highlighted, with the title of the report
 const HasNewBugs = task => (state.taskLinks[task.id] ?? []).some(link => link.new > 0);
@@ -475,7 +479,7 @@ function RenderDrawer(task, finalTask, error) {
       <div>Task</div><div>${esc(task.id)} · <a href="#" class="copy">📋 copy link</a></div>
     </div>
     ${configs.length ? `<table class="configs"><tr><th>configuration</th><th>runs</th><th></th><th>duration</th></tr>
-      ${configs.map(c => `<tr><td>${esc(c.id)}</td><td data-click-tip="${esc(`${c.name}: ${c.ok} ok, ${c.failed} failed, ${c.timedOut} timed out, of ${c.total}`)}">${c.ok}/${c.total}</td>
+      ${configs.map(c => `<tr><td>${esc(c.id)}</td><td data-click-tip="${esc(`${c.name}: ${c.ok + c.timedOut} of ${c.total} ended normally (${c.ok} by themselves, ${c.timedOut} at their time budget), ${c.failed} failed`)}">${c.ok + c.timedOut}/${c.total}</td>
         <td><div class="bar"><i style="width:${100 * c.ok / c.total}%"></i><i class="failed" style="width:${100 * c.failed / c.total}%"></i><i class="timedout" style="width:${100 * c.timedOut / c.total}%"></i></div></td>
         <td>${c.max ? esc(c.min === c.max || Duration(c.min) === Duration(c.max) ? Duration(c.max) : `${Duration(c.min)}–${Duration(c.max)}`) : ''}${c.timedOut ? ' (timeouts)' : ''}</td></tr>`).join('')}</table>` : ''}
     <h3>Task card</h3>
