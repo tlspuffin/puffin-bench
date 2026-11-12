@@ -91,6 +91,10 @@ TargetedObjectiveFound() {
       if (( rc == 1 )); then
         ref_verdicts[${name}]=not-targeted;
         echo "objective ${name}: not targeted ($( NotTargetedCVE "$( FuzzerVerdict "${records}" "${name}" | cut -f2 )" "$( cat ./.build_info 2> /dev/null )" || echo '?' )), the experiment goes on" >&2;
+      elif (( rc == 4 )); then
+        # its place could not be checked (the bench's tools incomplete: HasPlace said why): left pending, said each
+        # time; never another bug, never the end of the experiment
+        echo "objective ${name}: its place could not be checked (has_place.js): left pending, the experiment cannot end on it" >&2;
       elif (( rc == 3 )); then
         # another bug than the expected one: kept, the replay at the end may still find the expected bug in it
         ref_verdicts[${name}]=not-targeted;
@@ -154,13 +158,14 @@ TargetedNames() {
 # <UTC yyyymmdd-HHMMSSmmm>-<hash>), empty when none: the time to find, instead of the end of the experiment (the
 # monitor looks once a minute, then the fuzzer has to stop). With an expected bug declared (vuln_targets.json), an
 # objective is targeted when the fuzzer's record or its replay (objective-reports/, ExperimentReplayObjectives) is that
-# bug: a crash the fuzzer logged without backtrace counts when the replay shows the expected frame
+# bug: a crash the fuzzer logged without backtrace counts when the replay's stack has the target's place (TargetMatches)
 # An experiment naming its bug (target_bug): an objective of the bug's signature (record or replay) counts once validation
 # confirms it (ConfirmObjective, not decided by validation: as before; one it does not confirm is another bug), the
 # objectives taken oldest first, those after the first confirmed one counted without validation: the time to find is
-# that of the first confirmed objective, when the fuzzer saved it.
+# that of the first confirmed objective, when the fuzzer saved it. Fifth field: the objectives whose place could not be
+# checked (HasPlace could not run): not counted, the counts cannot be trusted (ExperimentEnd fails).
 ObjectiveCounts() {
-  local dir="$1" trace name targeted=0 excluded=0 unexpected=0 first='' t records rc sig rtype rframes confirmedOne=false;
+  local dir="$1" trace name targeted=0 excluded=0 unexpected=0 unchecked=0 first='' t records rc sig rtype rframes confirmedOne=false;
   local target; target=$( ExpectedTarget "${vendor:-}" );
   records=$( FuzzerRecords "$( FuzzerLogDir "${dir}" )" );
   while IFS= read -r trace; do
@@ -171,9 +176,10 @@ ObjectiveCounts() {
       IFS=$'\t' read -r rtype rframes _ <<< "${sig}";
       case "${rtype}" in no-crash|replay-error) ;;
         security-violation) TargetMatches "${target}" claim "${rframes}" "" && rc=0;;
-        *) TargetMatches "${target}" crash "ASan ${rtype}" "${rframes}" && rc=0;;
+        *) TargetMatches "${target}" crash "ASan ${rtype}" "${rframes}"; case $? in 0) rc=0;; 2) rc=4;; esac;;
       esac
     fi
+    (( rc == 4 )) && { unchecked=$(( unchecked + 1 )); continue; };
     if (( rc == 0 )) && [ -n "${target_bug:-}" ] && ! ${confirmedOne}; then
       ConfirmObjective "${trace}" > /dev/null;
       case $? in 0) confirmedOne=true;; 1) rc=3;; esac
@@ -188,7 +194,7 @@ ObjectiveCounts() {
       [ -n "${t}" ] && { [ -z "${first}" ] || (( t < first )); } && first="${t}";
     fi
   done < <( find "${dir}/objective" -maxdepth 1 -type f -name '*.trace' ! -name '.*' 2> /dev/null | sort )
-  echo "${targeted} ${excluded} ${first:--} ${unexpected}";
+  echo "${targeted} ${excluded} ${first:--} ${unexpected} ${unchecked}";
 }
 
 Experiment () {
@@ -253,9 +259,16 @@ ExperimentEnd() {
   local statsJSON;
   if statsJSON=$( FindFile "${experiment_base}" "stats.json" "log/stats.json" ); then
     # targeted / not targeted objectives (OBJECTIVES_NOT_TARGETED): success needs a targeted one
-    local targeted excluded first unexpected;
-    read -r targeted excluded first unexpected <<< "$( ObjectiveCounts "${experiment_base}" )";
+    local targeted excluded first unexpected unchecked;
+    read -r targeted excluded first unexpected unchecked <<< "$( ObjectiveCounts "${experiment_base}" )";
     [ "${first}" == - ] && first='';
+    # objectives whose place could not be checked (the bench's tools incomplete): no count can be trusted, the step
+    # fails with why, rather than counting them as another bug
+    if (( ${unchecked:-0} > 0 )); then
+      echo "ExperimentEnd: the place of the expected bug could not be checked for ${unchecked} objective(s) (has_place.js or common/signatures.js missing from the bench's tools): no summary" >&2;
+      echo "{ \"error\": \"the place of the expected bug could not be checked for ${unchecked} objective(s): the bench's tools are incomplete\" }" > "${outFile}";
+      return 1;
+    fi
     local confirmation; confirmation=$( RunConfirmation );
     "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/vuln_experiment_end.js" task.json "${LIBAFL_VERSION}" "${statsJSON}" "${objective_count}" "${errorFilePresent}" "${experimentUUID}" "${outFile}" "${targeted:-${objective_count}}" "${excluded:-0}" "${first}" "${unexpected:-0}" "$( ExpectedTarget "${vendor:-}" | cut -d'|' -f1 )" "${confirmation}" >> "${THEJOB_USER_STATE_FILE}"
     RecordLoad "${outFile}"

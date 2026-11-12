@@ -17,8 +17,10 @@
     <li><b>⦸ Known CVEs set apart</b>: claims of a known bug that do not end an experiment on the versions it affects,
       each checked against its catalogue entry.</li>
     <li><b>🚨 Bugs found so far</b>: one row per bug (its claim, or the top function of its crash, in a library) of every
-      final objectives report: what it is (🎯 expected, ⦸ set apart, 📚 a bug of the catalogue) or 🚨 not a known bug
-      (first), and every configuration that found it.</li>
+      final objectives report: what it is (🎯 expected, ⦸ set apart, 📚 a bug of the catalogue: its claim, or a stack that
+      has its place, the first frames of its witness's stack, in order, without the sanitizer runtime and glibc's own
+      variants such as <code>__memmove_avx_unaligned_erms</code>) or 🚨 not a known bug (first), and every configuration
+      that found it.</li>
     <li><b>📖 Every bug in full</b> (folded): one card per bug with every field of its entry, its patches and their upstream
       fix, its CVSS vector, its TOML text with its comments. A link <code>#&lt;ID&gt;</code> (the tables above, the address)
       unfolds it.</li>

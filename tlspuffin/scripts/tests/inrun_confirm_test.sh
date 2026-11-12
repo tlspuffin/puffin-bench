@@ -68,7 +68,7 @@ check 't0 was not validated' "$( [ -e "validation/verdicts/${t0}.json" ] && echo
 check 't1, validated during the attempt' "$( jq -r '.verdict + " " + (.known_unpatched | join(",")) + " " + (.during_attempt | tostring)' "validation/verdicts/${t1}.json" )" 'not-patched CVE-2024-5814 true'
 
 echo "=== ExperimentEnd's counts"
-read -r targeted excluded first unexpected <<< "$( ObjectiveCounts "${step}/experiments/test" )"
+read -r targeted excluded first unexpected _ <<< "$( ObjectiveCounts "${step}/experiments/test" )"
 check 'targeted objectives' "${targeted}" 1
 check 'unexpected objectives (t0, t1)' "${unexpected}" 2
 check "the time to find: when the fuzzer saved t2" "${first}" "$( ms "${t2}" )"

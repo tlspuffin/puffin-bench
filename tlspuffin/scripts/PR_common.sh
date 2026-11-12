@@ -379,12 +379,15 @@ ExperimentSetupForCargo() {
   local vendorVulnerabilities='null';
   [ -s ./.vendor_vulnerabilities.json ] && vendorVulnerabilities=$( < ./.vendor_vulnerabilities.json );
 
+  # the release the build is of, as puffin-build recorded it ("5.10.0": the compact version of the preset's name, 5100,
+  # cannot say it); null without it (a Rust harness, commits before puffin-build)
+  local library_release; library_release=$( VendorRelease "${vendor}" );
   local build;
   build=$( BuildDescription "${cputs}" "${vendor}" "${ref_esfc_features}" "${library}" "${library_version}" );
   echo "${build}" > ./.build_info;
   echo "Build: ${build}";
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ), \"custom\": $( CustomExperimentJSON ) }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\", \"release\": $( [ -n "${library_release}" ] && echo "\"${library_release}\"" || echo null ) }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ), \"custom\": $( CustomExperimentJSON ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -1021,9 +1024,25 @@ OracleMatches() {
            and ($o.panic == null)) end)' <<< "$1" > /dev/null 2>&1;
 }
 
+# HasPlace <place "A < B < C"> <frames "a < b < c">: whether a crash's stack has a known bug's place, by the one rule of
+# the bench (common/signatures.js HasPlace, rule R3: its first frames outside the sanitizer runtime, libc and the fuzzer
+# are the place's, in order), asked of tools/js/has_place.js with the bench's qjs; the answers kept per place and frames
+# (a run can have thousands of objectives). 2 when it cannot be asked (said on stderr: never taken for "no")
+declare -gA HAS_PLACE_CACHE=();
+HasPlace() {
+  local key="$1"$'\t'"$2" rc;
+  if [ -z "${HAS_PLACE_CACHE[${key}]:-}" ]; then
+    "${THEJOB_TOOLS_PATH:-}/qjs" --std -m "${THEJOB_TOOLS_PATH:-}/js/has_place.js" "$1" "$2" 2> /dev/null; rc=$?;
+    if (( rc > 1 )); then echo "HasPlace: ${THEJOB_TOOLS_PATH:-}/js/has_place.js could not run (exit ${rc})" >&2; return 2; fi
+    HAS_PLACE_CACHE[${key}]=${rc};
+  fi
+  return "${HAS_PLACE_CACHE[${key}]}";
+}
+
 # TargetMatches <cve|kind|match> <kind: crash|claim> <detail> <frames "a < b < c">: true when that record (or replay
-# signature) is the expected bug: a crash with the frame among its top 3 frames, or the claim with that message; a
-# catalogue entry (kind "oracle"): its oracle (OracleMatches)
+# signature) is the expected bug: a crash whose stack has the target's place (match: "A < B < C", vuln_targets.json
+# place; HasPlace), or the claim with that message; a catalogue entry (kind "oracle"): its oracle (OracleMatches). 2:
+# the place could not be checked (HasPlace), neither yes nor no
 TargetMatches() {
   local cve kind match; IFS='|' read -r cve kind match <<< "$1";
   [ -n "${kind}" ] || return 1;
@@ -1033,15 +1052,15 @@ TargetMatches() {
     [ "$2" == claim ] && [ "$3" == "${match}" ];
   else
     [ "$2" == crash ] || return 1;
-    local top; top=$( awk -F' < ' '{ for (i = 1; i <= NF && i <= 3; i++) print $i }' <<< "$4" );
-    grep -qF -- "${match}" <<< "${top}";
+    HasPlace "${match}" "$4";
   fi
 }
 
 # ObjectiveTargeted <records (FuzzerRecords)> <objective name> [<expected target>]: from the fuzzer's record of the
 # objective, 0 targeted (the expected bug; without target declared: any bug but OBJECTIVES_NOT_TARGETED), 1 not
 # targeted (OBJECTIVES_NOT_TARGETED, but in an experiment looking for that very bug: target_bug), 2 no record of it in
-# the fuzzer's logs (yet), 3 another bug than the expected one
+# the fuzzer's logs (yet), 3 another bug than the expected one, 4 its place could not be checked (HasPlace could not
+# run: the bench's tools incomplete), never taken for another bug
 ObjectiveTargeted() {
   local verdict; verdict=$( FuzzerVerdict "$1" "$2" );
   [ -n "${verdict}" ] || return 2;
@@ -1051,7 +1070,8 @@ ObjectiveTargeted() {
   if [ "${kind}" == claim ]; then apart=$( NotTargetedCVE "${detail}" "$( cat ./.build_info 2> /dev/null )" ) || apart=''; fi
   [ -n "${apart}" ] && [ "${apart}" != "${target_bug:-}" ] && return 1;
   [ -z "${3:-}" ] && return 0;
-  TargetMatches "$3" "${kind}" "${detail}" "${frames}" && return 0;
+  TargetMatches "$3" "${kind}" "${detail}" "${frames}";
+  case $? in 0) return 0;; 2) return 4;; esac
   return 3;
 }
 
@@ -1456,6 +1476,15 @@ DetectVendorSources() {
     ref_sources+="${ref_sources:+, }{ \"name\": \"$( basename "${dir}" )\", \"repo\": \"${repo}\", \"ref\": \"${ref}\", \"commit\": $( [ -n "${commit}" ] && echo "\"${commit}\"" || echo null ) }";
   done
   ref_sources="[${ref_sources}]";
+}
+
+# VendorRelease <vendor preset "<library>:<name>">: the release of the library its build is of, dotted ("5.5.2"), from
+# puffin-build's record of the build (./vendor/<name>/.vendor_config: [sources] version); nothing when not recorded
+VendorRelease() {
+  local name="${1#*:}" config;
+  config="./vendor/${name}/.vendor_config";
+  [ -n "${name}" ] && [ -r "${config}" ] || return 0;
+  awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && $1 == "version" { gsub(/"/, "", $2); if ($2 ~ /^[0-9]+(\.[0-9]+)*[a-z]*$/) print $2; exit }' "${config}";
 }
 
 # DetectVendorVulnerabilities <vendor preset "<library>:<name>">: the vulnerabilities tlspuffin declares for that build,

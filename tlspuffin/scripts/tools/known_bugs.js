@@ -21,7 +21,7 @@ for (const name of names) {
 reports.sort((a, b) => (Date.parse(a.started ?? '') || Number(a.task)) - (Date.parse(b.started ?? '') || Number(b.task)));
 const known = {};
 for (const r of reports) {
-  for (const bug of Bugs(r.runs, r.not_targeted, r.targets)) {
+  for (const bug of Bugs(r.runs, r.not_targeted, r.targets, [], r.job_type)) {
     if (!(bug.reproduced > 0 || bug.fuzzer)) continue;
     const sig = BugSignature(bug);
     if (!sig) continue;  // a crash without location: not comparable across tasks

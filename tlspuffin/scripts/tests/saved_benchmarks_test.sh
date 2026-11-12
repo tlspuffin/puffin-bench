@@ -21,7 +21,7 @@ mkdir -p "${work}/html/board/custom/tlspuffin" "${work}/html/common" "${work}/gi
 "${bench}/git_restapi/scripts/tlspuffin_presets.sh" "${clone}" "${sha}" > "${work}/git/api/git/presets/tlspuffin/${sha}"
 echo '{ "commit": "0000000000000000000000000000000000000000", "format": "none" }' > "${work}/git/api/git/catalogue/tlspuffin/dev"
 command cp -f "${bench}/tlspuffin/data/html/board/custom/tlspuffin/custombench.js" "${work}/html/board/custom/tlspuffin/"
-command cp -f "${bench}/tlspuffin/data/html/common/"{catalogue,format,verdicts}.js "${work}/html/common/"
+command cp -f "${bench}/tlspuffin/data/html/common/"*.js "${work}/html/common/"
 cat > "${work}/test.html" <<EOF
 <!doctype html><html><head><meta charset="utf-8"><title>running</title></head><body><pre id="out"></pre>
 <script type="module">

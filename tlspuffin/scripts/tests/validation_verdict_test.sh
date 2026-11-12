@@ -88,4 +88,12 @@ check 'ConfirmObjective: 2 (undecided, the fuzzer record) for a target whose obj
   'rc=0; ( target_bug=R; ConfirmObjective "${work}/nothing.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 2 ] && grep -q "do not replay" "${work}/why"'
 check 'ConfirmObjective: 2 (undecided, the fuzzer record) for replays that could not run' \
   'rc=0; ( target_bug=X1; ConfirmObjective "${work}/usage.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 2 ] && grep -q "could not run" "${work}/why"'
+# the stack of a witness (ValidationWitnessFrames): with function names; never one whose frames are the binary's file
+# name (an execution without symbolizer: "validation-<hash>" x 8, which would make the binary's name a bug's place)
+echo '[{ "matches_oracle": true, "outcomes": [{ "asan": { "frames": ["validation-0c00", "validation-0c00", "validation-0c00"] } }] }]' > "${work}/unsym.json"
+echo '[{ "matches_oracle": true, "outcomes": [{ "asan": { "frames": ["RefineSuites", "CheckPreSharedKeys", "DoTls13ClientHello"] } }] }]' > "${work}/sym.json"
+check 'a witness stack without function names (the binary'"'"'s file name): not kept' \
+  '[ "$( ValidationWitnessFrames "${work}/unsym.json" /srv/cache/validation-0c00 )" == null ]'
+check 'a witness stack with function names: kept' \
+  '[ "$( ValidationWitnessFrames "${work}/sym.json" /srv/cache/validation-0c00 )" == "[\"RefineSuites\",\"CheckPreSharedKeys\",\"DoTls13ClientHello\"]" ]'
 exit "${fail}"

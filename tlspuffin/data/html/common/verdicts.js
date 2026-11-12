@@ -10,14 +10,15 @@ export const TERMS = [
   ['bug', 'the objectives with the same failure: the same ASan report type and top stack frames, or the same violated claim'],
   ['reproduced', 'a replay of the objective, on the build of its own run, gave that failure again (else: not reproduced, or a replay error when the replay could not run)'],
   ['fuzzer only', 'the fuzzer\'s own log recorded the failure when it saved the objective, but no replay reproduces it (the fuzzer runs every input in one process: state, memory layout)'],
-  ['signature', 'how tlspuffin\'s catalogue recognises a known bug (its oracle): a crash with a given ASan report type or signal, a violated claim with its message, a panic with its message; for some bugs, the top frames of their crash'],
-  ['strong signature', 'a crash with the bug\'s ASan report type whose stack has a top frame the catalogue gives for that bug: its own place, as well as a signature can tell (only a patch is certain); green'],
-  ['weak signature', 'a signature without stack: a claim or a panic (one message, which several bugs can share: Authentication bypass is CVE-2021-3336\'s, SIG\'s and SKIP\'s), or a crash told by its ASan report type or signal alone (no top frames in the catalogue, or a stack without them): it names a bug without telling it apart from another failure of the same kind; yellow'],
+  ['signature', 'how tlspuffin\'s catalogue recognises a known bug (its oracle): a crash with a given ASan report type or signal, a violated claim with its message, a panic with its message; for a crash, also its place: the first frames of the stack of its witness, else its top frames in the catalogue'],
+  ['strong signature', 'a crash with the bug\'s ASan report type whose stack has the bug\'s own place: its first 3 frames, outside the sanitizer runtime, libc and the fuzzer, are those of the bug\'s witness (validation runs it, symbolized), else its top frames in the catalogue, in order: as well as a signature can tell (only a patch is certain); green'],
+  ['weak signature', 'a signature without stack: a claim or a panic (one message, which several bugs can share: Authentication bypass is CVE-2021-3336\'s, SIG\'s and SKIP\'s), or a crash told by its ASan report type or signal alone (neither top frames in the catalogue nor a witness\'s stack, or a stack without them): it names a bug without telling it apart from another failure of the same kind; yellow'],
   ['validated', 'the objective was replayed on the validation builds (F: every known bug with a patch patched; V_X: F without the patch of X) and got a verdict'],
   ['confirmed', 'by patch differential only: the objective goes away with the patch of X and gives the signature of X without it; certain'],
   ['known bug', 'a bug of tlspuffin\'s catalogue (a CVE, an alias such as BUF), active at the version tested'],
   ['expected', 'for a configuration: its target (Vuln jobs), and the known bugs tlspuffin declares for the version it built'],
   ['unexpected', 'objectives in a configuration where no known bug is expected (no bug declared for its version), or a bug that is neither its target nor a known bug declared for it'],
+  ['recognised', 'a find without validation verdict (an older task, whose tlspuffin had no catalogue: then the latest catalogue; or objectives not validated) whose crash has the ASan report type and the place of a known bug in what its run built (its declared bugs, else the version it built): named after it, "≈ X · by its signature with its stack · not validated"; known, not proven (validation by patch would confirm it)'],
   ['new bug', 'a bug no one knows: on the build with every patch, the signature of no known bug; or, without validation, a signature no earlier task had and no known bug of its version'],
 ];
 
@@ -26,7 +27,7 @@ export const TERMS = [
 // pages, validation-<kind> on Results), tip (what it means, the first line repeats the badge).
 export const VERDICTS = {
   patch: { mark: '✔', word: 'confirmed by patch', tip: 'confirmed by patch differential\nthe patch of this bug removes the objective, and without it the objective gives its signature: it is this bug (certain)' },
-  signature: { mark: '≈', word: 'by its signature', tip: 'by its signature only\non the build with every patch, the objective gives the signature of a known bug without patch at this version: one of them; strong (green) when its stack has the top frames the catalogue gives for that bug, weak (yellow) otherwise: a claim, a panic, a crash told by its type alone (a patch would make it certain)' },
+  signature: { mark: '≈', word: 'by its signature', tip: 'by its signature only\non the build with every patch, the objective gives the signature of a known bug without patch at this version: one of them; strong (green) when its stack has that bug\'s place (the first frames of its witness\'s stack, else its top frames in the catalogue), weak (yellow) otherwise: a claim, a panic, a crash told by its type alone or elsewhere (a patch would make it certain)' },
   unpatched: { mark: '⚠', word: 'signature of a bug its patch does not remove', tip: 'the signature of a bug that has a patch here, not removed by it\nthe objective stays on the build with every patch: not this bug, or its patch is incomplete; to review' },
   new: { mark: '🚨', word: 'no known bug\'s signature', tip: 'no known bug\'s signature\nthe objective stays on the build with every patch, with the signature of no bug of the catalogue: a new bug, or one missing from the catalogue' },
   other: { mark: '⚠', word: 'another signature', tip: 'another signature\nthe patch of the bug(s) named removes the objective, but without it the objective does not give their signature: to review, never counted as them' },
@@ -44,7 +45,7 @@ export const NO_VERDICT = {
   missing: 'no validation result for its run (its validation step failed or did not run)',
   failed: 'the validation of its run failed',
   'not-chosen': 'not among the objectives validated in its run (at most 20 a run, the first of each bug first)',
-  unsupported: 'the commit has no catalogue: nothing to validate against',
+  unsupported: 'not validated at this commit (the reason follows: its tlspuffin has no catalogue, or dev, whose catalogue validation trusts, has none yet); its crashes are still recognised by their stack against the latest catalogue',
 };
 
 // The verdict JSON of one objective ({ verdict, entries, known_unpatched, signature_of_patched, … }) as a kind of
@@ -64,7 +65,7 @@ export function VerdictKind(v) {
 // What a bug is for its task (bugs.js Bugs, NewBugs): the tags beside its symptom
 export const TAGS = {
   expected: { mark: '🎯', word: 'expected', tip: 'the bug this configuration is meant to find (its target)' },
-  apart: { mark: '⦸', word: 'set apart', tip: 'a known CVE of old library versions that is never a target: it does not end a run' },
+  apart: { mark: '⦸', word: 'set apart', tip: 'a known CVE of old library versions that is never a target: in a run that looks for a target (a Vuln job, or a configuration with a target), it does not end the run and is named after its CVE' },
   known: { mark: '📋', word: 'known', tip: 'a CVE tlspuffin declares for what this configuration built, whose signature the bug has: not a new bug' },
   unexpected: { mark: '⚠', word: 'unexpected', tip: 'neither the target of its configuration nor a known bug declared for it' },
   new: { mark: '🚨', word: 'NEW BUG', tip: 'a bug no one knows (see "new bug")' },
@@ -80,9 +81,10 @@ export const LEVELS = {
   unclear: { mark: '', word: 'nothing reproduced', tip: 'objectives, but no replay reproduced a bug and the fuzzer recorded none' },
 };
 
-// Whether a signature can tell its bug apart by the stack (strong on the reports when the stack has these top frames): a
-// crash for which the catalogue gives top frames; any other is weak (a claim, a panic, a crash told by its type alone)
-export const SignatureWithStack = (oracle, topFrames) => oracle?.kind === 'crash' && (topFrames ?? []).length > 0;
+// Whether a signature can tell its bug apart by the stack (strong on the reports when the stack has the bug's place): a
+// crash for which the catalogue gives top frames, or that has a witness (validation records where it crashes); any other
+// is weak (a claim, a panic, a crash told by its type alone)
+export const SignatureWithStack = (oracle, topFrames, witness = false) => oracle?.kind === 'crash' && ((topFrames ?? []).length > 0 || witness);
 
 // A signature (the catalogue's oracle { kind, asan, signal, violation, panic }) in words, e.g. "a crash with an ASan
 // SEGV report", "the claim “Authentication bypass”"

@@ -373,8 +373,10 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     const verdicts = (bug.validation?.parts ?? []).filter(part => part.kind !== 'none').map(part => {
       const v = VERDICTS[part.kind] ?? VERDICTS.none;
       const ids = part.ids.join(part.kind === 'signature' ? ' or ' : ', ');
-      const sig = part.kind === 'signature' ? ` (${[...new Set(part.ids.map(id => SignatureText(bug.validation.oracles?.[id])))].join(' or ')})${part.weak ? ' · weak' : ' · with its stack'}` : '';
-      return ` <span class="objective-validation validation-${EscapeAttribute(part.kind)}${part.kind === 'signature' && part.weak ? ' validation-weak' : ''}" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${EscapeAttribute(ids ? `${ids} · ${v.word}` : v.word)}${EscapeAttribute(sig)} ×${part.count}</span>`;
+      // the bug and how strong; its signature in the hover
+      const signature = part.kind === 'signature' ? [...new Set(part.ids.map(id => SignatureText(bug.validation.oracles?.[id])))].join(' or ') : '';
+      const sig = part.kind === 'signature' ? (part.weak ? ' · weak' : ' with its stack') + (part.recognised ? ' · not validated' : '') : '';
+      return ` <span class="objective-validation validation-${EscapeAttribute(part.kind)}${part.kind === 'signature' && part.weak ? ' validation-weak' : ''}" title="${EscapeAttribute(`${v.mark} ${v.tip}${signature ? `\nits signature: ${signature}` : ''}`)}">${v.mark} ${EscapeAttribute(ids ? `${ids} · ${v.word}` : v.word)}${EscapeAttribute(sig)} ×${part.count}</span>`;
     }).join('');
     return `<div class="lib-objective lib-bug">
         <a class="objective-letter" href="${ObjectivesPageURL(taskID)}#bug-${bug.letter}" target="_blank" rel="noopener"

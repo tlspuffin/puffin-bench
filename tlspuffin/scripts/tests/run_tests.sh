@@ -78,6 +78,7 @@ Run fuzzer_records_awk_test bash "${here}/fuzzer_records_awk_test.sh"
 Run objectives_live_nix_test bash "${here}/objectives_live_nix_test.sh"
 Run crash_stats_test bash "${here}/crash_stats_test.sh"
 Run ab_scripts_test bash "${here}/ab_scripts_test.sh"
+Run signatures_test bash "${here}/signatures_test.sh" "${qjs}"
 
 echo
 echo "${passed} passed, ${#failed[@]} failed${failed[*]:+ (${failed[*]})}, ${#skipped[@]} skipped${skipped[*]:+ (${skipped[*]})}"
