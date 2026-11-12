@@ -62,7 +62,9 @@ Check codec_warn  2f38bf22aee802509663609fa4ca84b8634e5574^1 false
 Check codec_warn  origin/dev                               true
 Check wolfssl_reseed_warn 29e90ea7816e582d84fd3928156b84b033808549 true
 Check wolfssl_reseed_warn 29e90ea7816e582d84fd3928156b84b033808549^1 false
-Check wolfssl_reseed_warn origin/dev                       true
+Check wolfssl_reseed_warn 5d7156f55b4a06c62b8d38b5f64c1819a79de862^1 true
+Check wolfssl_reseed_warn 5d7156f55b4a06c62b8d38b5f64c1819a79de862 false
+Check wolfssl_reseed_warn origin/dev                       false
 Check codec_warn  origin/pr/quiet-eval-errors       false
 Check wolfssl_reseed_warn origin/pr/quiet-eval-errors false
 Check wolfssl_reseed_error 2a0619f4ad4324cd264c76ead7e5ca208212d8c1 true
@@ -79,6 +81,8 @@ Check wolfssl_descriptor_info e13983d6a6e186cde04fffeb12914f06b4ff9b68 false
 Check boringssl_clear_info 8d799887b891b0fa7f8ae34f3b5152a4757bb4cb true
 Check boringssl_clear_info 2f38bf22aee802509663609fa4ca84b8634e5574 true
 Check boringssl_clear_info 8d799887b891b0fa7f8ae34f3b5152a4757bb4cb^1 false
+Check boringssl_clear_info 5d7156f55b4a06c62b8d38b5f64c1819a79de862^1 true
+Check boringssl_clear_info 5d7156f55b4a06c62b8d38b5f64c1819a79de862 false
 Check toml_cli_locked c3a6d8a94af81ebd5f24d9420cb6c2cf17fb690b true
 Check toml_cli_locked 1957fba63754933fa99a2ed26d2acee1d8cc9ab1 true
 Check toml_cli_locked 5586c58b12a7bee021d3ae9df242df89ebefae0f false
