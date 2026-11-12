@@ -521,7 +521,7 @@ uiSaveTpl.onclick = function() {
 headerToolbar.appendChild(uiSaveTpl);
 UIElt.push(uiSaveTpl);
 
-// the help is the ❔ of the bench's top bar (board/nav.js), which shows this template as the help of the page
+// the help is the ❔ of the top bar (board/frame.js), which shows this template as the help of the page
 const helpTemplate = document.createElement('template');
 helpTemplate.id = 'help-panel';
 helpTemplate.innerHTML = HELP_HTML;

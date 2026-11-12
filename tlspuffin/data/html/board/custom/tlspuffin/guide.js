@@ -1,5 +1,6 @@
-// Guide of the bench, shown by the help panel of the navigation bar (nav.js, tab "puffin-bench guide").
-// Each page documents itself in its own <template id="help-panel"> (tab "This page").
+// Guide of the bench: the tab "puffin-bench guide" of the help panel of every page (board/help.js, added by plugin.js).
+// Each page documents itself in its own <template id="help-panel"> (tab "This page"); what tlspuffin adds to the pages
+// of the scheduler is told here.
 export const benchGuide = `
 <h2>What puffin-bench is</h2>
 <p>A test bench for the <b>tlspuffin</b> fuzzer (and <b>sshpuffin</b>): it builds a given commit of the fuzzer,
@@ -32,6 +33,27 @@ are made comparable by the <i>compat rules</i> (see below).</p>
 <b>puffin-bench</b> is the deployed version of the bench (link to the commit). <b>🔄</b> refreshes the page,
 <b>❔</b> or <kbd>?</kbd> opens this help, <kbd>Esc</kbd> closes it. Links between the pages keep the address you typed
 (alias, SSH tunnel, localhost).</p>
+
+<h2>On the pages of the Scheduler</h2>
+<ul>
+  <li><b>Task card</b> (Scheduler, History, task page): the title is the job type and the commit
+    (<code>Perf@5c588a #540</code>), or the custom name with the commit; the arguments line shows the commit when it
+    is not in the title, the package, the compat warnings. The monitor line of an attempt sums up its last message
+    (executions, corpus, objectives); the corpus is flagged when it has not grown for 60 min.</li>
+  <li><b>Objectives</b>: an attempt that found objectives is highlighted (not in VulnA/VulnB, which look for known
+    bugs: a VulnA run ends when it finds the CVE of its configuration, the other objectives go on being collected),
+    and the task gets a button to its objectives page: live while it runs, its final report once it ended (written
+    within 10 minutes; the live page meanwhile). On the task page, the chip of an attempt counts its objectives.</li>
+  <li><b>Estimated times</b>: the <i>context</i> of a tlspuffin task is its commit.</li>
+  <li><b>History</b>: the search also matches the commit, the PR, the message and the package. <b>package</b>: the
+    package of the tasks (read from each task, kept by the browser; a task without one is tlspuffin).
+    <b>🐞 with objectives</b>: the tasks with an objectives page; 🐞 (gold) opens it, plain for VulnA/VulnB, 🎯 the
+    conclusion of a Vuln task, a task whose report found new bugs is yellow. 🔄 also reads the new objectives
+    pages.</li>
+  <li><b>Task page</b>: <b>↻ Relaunch as template</b> of a task started automatically (for a commit or a PR, no launcher
+    record) fills in its job type and commit, the other settings at their defaults; <b>🕘 N runs</b> when its commit
+    was run several times (every task of that commit and type, compared).</li>
+</ul>
 
 <h2>Keyboard</h2>
 <ul>

@@ -35,7 +35,7 @@ Two things trip up a first-time install, verified against `main.cxx` and each su
    terminate called after throwing an instance of 'std::filesystem::filesystem_error'
      what():  filesystem error: cannot make canonical path: No such file or directory [tools]
    ```
-   `Validate()` checks these paths in a fixed order and stops at the first missing one — expect to iterate (create one, rerun, see the next one named) rather than getting the full list of missing paths in a single run. `Config::Validate()` *does* auto-create a few things once its root exists: `<html>/board/`, `<html>/board/custom/`, `<html>/board/launchers/`, `<html>/jobsscripts/`, and `<exportPath>/Canceled/` — but never the six roots themselves.
+   `Validate()` checks these paths in a fixed order and stops at the first missing one — expect to iterate (create one, rerun, see the next one named) rather than getting the full list of missing paths in a single run. `Config::Validate()` *does* auto-create a few things once its root exists: `<html>/board/`, `<html>/board/custom/`, `<html>/jobsscripts/`, and `<exportPath>/Canceled/` — but never the six roots themselves.
 
 Practical sequence for a fresh checkout, run from the repository root (where `html/` and `scripts/` already exist as source):
 ```bash
@@ -203,15 +203,16 @@ If `cores_.size()` or `nbCores` exceeds the number of cores actually present on 
 
 ---
 
-## Job Launcher / Board Extension Points
+## Board Plugins / Extension Points
 
-The web dashboard's job-launcher UI is not driven by a server-side config key — it is a set of files the operator drops under the `html` root after `Config::Validate()` has created the empty extension directories:
+The job launcher and everything a project adds to the pages of the board are not driven by a server-side config key — they are files the installer of a project (or the operator) puts under the `html` root, in the directories `Config::Validate()` creates empty:
 
-- `<html>/board/launchers/` — per-project launcher modules (see `docs/board-job-launcher.md`)
-- `<html>/board/custom/` — optional `header.html` fetched by `board.js` to inject a custom header fragment, and optional `task_links.json` fetched by `history.js` for extra buttons on the history cards
-- `<html>/jobsscripts/` — served at `/files/jobsscripts/...`; where flow JSON / step scripts / extra files referenced by a launcher module typically live
+- `<html>/board/custom/config.js` — the projects whose plugins are loaded (`config.projects`); absent: no plugin, and the pages work without
+- `<html>/board/custom/<project>/` — the plugin of a project (`plugin.js`) and its files (see `docs/board-job-launcher.md`)
+- `<html>/board/custom/header.html` — optional header fragment injected by `board.js` into the board, independent of the plugins
+- `<html>/jobsscripts/` — served at `/files/jobsscripts/...`; where flow JSON / step scripts / extra files referenced by a launcher typically live
 
-None of these are populated by the server itself and none are part of the embedded-resource extraction described in `docs/build.md`. See `docs/board-job-launcher.md` for the full mechanism and file formats.
+None of these are populated by the server itself and none are part of the embedded-resource extraction described in `docs/build.md` (`--force-install` does not touch them). See `docs/board-job-launcher.md` for the full mechanism and the plugin contract.
 
 ---
 

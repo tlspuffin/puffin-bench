@@ -3,7 +3,7 @@
 // task_url?, libraries?, runs: [{ library, attempt, found, replayed, reports, groups, cli, asan }] }).
 // The page is organized by bug: the groups of every run with the same type and stack frames are one bug.
 
-import '../board/nav.js';
+import '../board/frame.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
 import { UNCONFIRMED, TYPE_LABELS, Bugs, ExpectedRuns, NewBugs, FuzzerText, Mismatch, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, BugsHeadline, RunFailures, ExpectedConclusion, ExpectedChipTip } from './bugs.js';
 
@@ -14,7 +14,7 @@ let REPORT_LIBRARIES = [];
 // the job type of the report (perf, vuln-a…): why a run did not succeed depends on it (RunFailures)
 let REPORT_JOB_TYPE = null;
 
-// help of this page, shown by the ❔ of the top bar (nav.js reads <template id="help-panel"> when it opens)
+// help of this page, shown by the ❔ of the top bar (board/help.js reads <template id="help-panel"> when it opens)
 const help = document.createElement('template');
 help.id = 'help-panel';
 help.innerHTML = `
@@ -636,7 +636,7 @@ async function Render() {
   }));
   // a link to one bug (…/<task>.html#bug-C)
   ShowBug(location.hash, false);
-  // Esc (top bar, board/nav.js): fold the open bugs
+  // Esc (top bar, board/frame.js): fold the open bugs
   window.addEventListener('pb-escape', (event) => {
     if ((event.detail?.layer !== 'panel') || event.defaultPrevented) return;
     const open = root.querySelectorAll('.bug[open]');

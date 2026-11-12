@@ -1,54 +1,240 @@
-# Scheduler — Board Job Launcher
+# Scheduler — Board Plugins and Job Launcher
 
-This document covers the dashboard's job-launcher `+` button: what actually ships in this repository (`html/board/launchers/launchers.js` + `launchers.css`), the plugin contract it expects, and the server-side `/api/task/new` contract that any launcher plugin ultimately has to satisfy.
+The pages of the scheduler (the board, the task page, History) know no project. What a project adds to them — its
+job launcher (the `+` button), its descriptions of the tasks and of their monitor messages, its buttons, filters and
+help, and the top bar of its bench — comes from a **plugin** that the project installs under `<html>/board/custom/`.
+Without any plugin the pages work on their own: their top bar shows the refresh, the help and the status light of the
+scheduler, and the tasks are shown by their name and arguments.
 
-**Read this first**: unlike an earlier revision of this document, no concrete job launcher (job-type registry, commit picker, campaign fields, composite jobs, etc.) ships with this repository. `git ls-files html/board/launchers/` shows only `launchers.css` and `launchers.js` — no `config.js`, no `<project>/joblauncher.js`, no `jobsconfig.json`, no `git.json`. The pieces described below as "shipped" are the actual, current `launchers.js` source; the pieces described as "plugin contract" are inferred from what that source requires of a plugin, not from any example that exists in-tree.
+This document covers what the scheduler ships for that (`frame.js`, `help.js`, `health.js`, `plugins.js`,
+`launchers.css`), the plugin contract, and the server-side `/api/task/new` contract that a launcher ultimately has to
+satisfy. The plugin of tlspuffin (`tlspuffin/data/html/board/custom/tlspuffin/`, installed by the tlspuffin installer)
+is described in [tlspuffin/docs/web-assets.md](../../tlspuffin/docs/web-assets.md).
 
 ---
 
-## What Ships: `launchers.js`
+## What Ships
 
-`html/board/board.js` imports `./launchers/launchers.js` as a side-effecting module (`import './launchers/launchers.js';`) — it self-installs a floating `+` button (`#new-task`, styled by `launchers.css`) in the bottom-right corner of the board.
+These files are embedded in the scheduler binary and extracted under `<html>/board/` (see `docs/build.md`):
 
-On load, `launchers.js`:
+| File | Role |
+|---|---|
+| `frame.js` | The frame of a page: the top bar, its refresh and help buttons, the keys, the layers of Esc; loads the plugins and lets them add their items |
+| `help.js` | The hover helps (`data-help`) and the help panel (tabs: "This page", then those of the plugins) |
+| `health.js` | The status light of the scheduler (`GET /api/health`) and the check a launcher makes before submitting |
+| `plugins.js` | The loader of the plugins, the routing of their hooks, the `+` button |
+| `launchers.css` | The style of the `+` button and of its menu |
+| `tips.js` | One look for every hover (imported by `frame.js`) |
 
-1. Injects `launchers.css` as a `<link>`.
-2. `import`s `./config.js` and reads `config.projects` — expected to be an array of project-name strings.
-3. For each name `p` in `config.projects`, dynamically `import()`s `./${p}/joblauncher.js` and instantiates `new module.JobLauncher()`. The project name doubles as both the subdirectory to import from and the label shown in the menu — there is no separate display-label field.
-4. Wires the `+` button:
-   - **Exactly one project registered**: clicking `+` calls that project's `launcher.open()` directly — no menu.
-   - **More than one**: clicking `+` shows a small popup menu (one button per project label); clicking an entry closes the menu and calls that project's `.open()`.
-   - Clicking outside an open menu closes it.
+A page loads `frame.js` once, as its first script. The pages of the scheduler also import `plugins.js` for the hooks.
 
-```js
-// launchers.js, actual current logic
-const mods = await Promise.all(config.projects.map(p => import(`./${p}/joblauncher.js`)));
-export const launchers = mods.map((m, i) => {
-  const instance = new m.JobLauncher();
-  return { label: config.projects[i], open: () => instance.open() };
-});
+### `frame.js` — the top bar
+
+On load (at once, or on `DOMContentLoaded`) it builds a bar `nav.pb-nav` at the top of the body, unless the page is
+shown inside another one (an iframe) or already has a bar. The bar has, from left to right: a place `start` for the
+plugins, a spacer, a place `end` for the plugins, the status light (when the page names a scheduler), 🔄 and ❔. It
+sets `--pb-nav-height: 34px` on the document, for the sticky headers of the pages
+(`top: var(--pb-nav-height, 0px)`). Then it imports `plugins.js` and calls `frame.barItems` of every plugin and adds
+their `frame.helpTabs` to the help panel.
+
+`ShowSchedulerHealth(url = window.location.origin)` (exported) shows the status light of the scheduler at `url` and makes
+it the scheduler of `CheckScheduler`. The pages of the scheduler call it with their own origin, which stays right
+through an alias or an SSH tunnel; a page served by another service has no way to know where the scheduler is, so a
+plugin that knows it calls it there (tlspuffin: the default ports of the bench).
+
+Events and keys, on `window`:
+
+| Event / key | Meaning |
+|---|---|
+| `pb-refresh` (cancelable) | sent by 🔄 and Cmd/Ctrl+R; a page with its own refresh handles it and calls `preventDefault()`, otherwise the page is reloaded |
+| `pb-refresh-state` | sent by a page, `{ detail: { level: 'gold' \| '', title } }`: colours 🔄 and sets its title (e.g. a refresh that costs GitHub credits) |
+| `pb-modal-refresh` (cancelable) | sent first on Cmd/Ctrl+R: a popup refreshes itself instead of the page (e.g. the logs window) |
+| `pb-escape` (cancelable) | sent on Esc, `{ detail: { layer } }`, layer by layer until one calls `preventDefault()`: `'help'` (the help panel), `'modal'` (logs, launcher, click windows), `'panel'` (a drawer, unfolded panels); a text field loses the focus |
+| `pb-help` | sent by the help panel, `{ detail: { open } }` |
+| `?` | opens or closes the help panel (not in a text field) |
+
+A key a page already handled (`defaultPrevented`) is left alone.
+
+### `help.js` — hovers and help panel
+
+- `new Help(texts)`: an element with `data-help="<key>"` shows `texts[key]` on hover after 500 ms. The pages pass
+  `{ ...helpTexts, ...Plugins.helpTexts }`: their own keys and those of the plugins.
+- The help panel (❔ or `?`): its first tab "This page" shows the page's `<template id="help-panel">` (or "No help for
+  this page"); the plugins add theirs with `AddHelpTab({ label, html })` (`html`: HTML text, or a function — maybe
+  async — giving it). While it is open, the elements with a hover help are outlined (help mode). `ToggleHelp(open)` and
+  `IsHelpOpen()` are exported.
+
+### `health.js` — status light of the scheduler
+
+`HealthPill()` polls `<scheduler>/api/health` every 10 s and on every `pb-refresh` (8 s deadline per request): 🟢 up,
+🟠 slow or busy, 🔴 no answer; the details on click. A scheduler older than `/api/health` (404) is shown up.
+`CheckScheduler()` reads it once and returns `{ health, warning }`, `warning` being what a launcher should tell the user
+before submitting (null when the scheduler looks healthy). `SetSchedulerURL(url)` names the scheduler (the origin of
+the page by default); `frame.js`'s `ShowSchedulerHealth` calls it.
+
+### `plugins.js` — loader and routing
+
+On load it:
+
+1. injects `launchers.css`;
+2. imports `./custom/config.js` and reads `config.projects`, the names of the projects in order; absent or invalid:
+   no plugin, and no error;
+3. imports `./custom/<name>/plugin.js` for each name and takes its default export; a plugin that does not load is
+   left out with a warning in the console;
+4. merges the `helpTexts` of the plugins (a key defined twice: warning, the last one wins).
+
+The launcher of a plugin is created on first use only (its form is built then), so that the pages of other services
+that load the plugins do not build it.
+
+The `+` button (`BuildUI()`, called by the board): none without a launcher; with one launcher, a click opens it; with
+several, a small menu of their names. The board also opens a launcher from its address:
+`board.html#launch=<project>&<key>=<value>…` calls `open()` of that project's launcher with the other parameters
+(`{ key: value, … }`), which the project reads — e.g. a page of the project that proposes to launch a task.
+
+## Installation
+
+Nothing under `<html>/board/custom/` is shipped or extracted by the scheduler, and `--force-install` never touches it.
+`Config::Validate()` only creates the empty directory.
+
+```
+<html>/board/custom/
+├── config.js                export { config }, config = { projects: ['<name>', …] }   (written by the project)
+├── <name>/plugin.js         the plugin of the project: export default { … }            (written by the project)
+├── <name>/…                 its other files: modules, styles, and data files it reads
+└── header.html              optional, independent of the plugins (below)
 ```
 
-`launchers.js` also exports `DescribeTask(task)`: if the project's `JobLauncher` has an optional `describeTask(task)` method (async, returning `{ title, commit }` HTML or `null`), the board, the task page and the history use it to show a task by more than its name — the launcher that started the task (`task.launcher.project`), or else the first one that answers. tlspuffin's launcher returns the commit line of the task (commit, PR, message; see `installer/docs/web-assets.md`); `title` replaces the task name, `commit` the value of its `COMMIT_ID` argument (shown without its label). Without the method, tasks show their name. `describeTask` may also return `args: { KEY: { bare, level: 'warning', label, hidden } }`: how the board shows each task argument on its one-line argument list (`bare`: the value without its key; `level: 'warning'`: on its own highlighted line).
+A plugin may read data files written next to it by other tools of its project (tlspuffin: `task_links.json`, written by
+its objectives report); the installer of the project writes its own files and leaves those alone.
 
-Likewise `DescribeMonitor(task, message)` (synchronous) uses an optional `describeMonitor(task, message)` of the launcher: it returns `{ summary, level, text, highlight, taskLink }` — `summary` the one-line HTML shown under a running attempt instead of its monitor message, `level` (`error`, `warning`, `success`) the color of its marker, `text` the message shown in full on click, `highlight` (`objective`, `error`) to make the attempt (and its square in the step header) stand out, and `taskLink` (`{ key, count, url, label, title, highlight }`) a button in the task's state strip: the links of the same `key` are merged over the attempts, their `count`s summed into the `{count}` of `label` (tlspuffin: `🎉 14 objectives · live ↗`, to the live objectives page). Without it, the board shows the first line of the message, and the whole message on click.
+`header.html` is a separate extension point, for the machine rather than a project: `board.js` fetches
+`custom/header.html` and puts it in `#custom_header` on the board. Absent, the fetch gets an empty 404 and nothing is
+shown.
 
-Nothing else in `launchers.js` is job-type-, campaign-, or commit-picker-specific — all of that lives inside each project's own `joblauncher.js`, which this repository does not provide.
+Pages of other services can load the same frame and plugins: the services of a bench share one `html` root, so a page of
+the publisher loads `/html/board/frame.js` and vis_comparator serves `board/…` from that root for every protocol
+(`request_handler.cxx`). Their plugins are then those of `<html>/board/custom/`.
 
-## The Plugin Contract (inferred, not shipped)
+## The Plugin Contract
 
-To add a job launcher for a project `myproj`, based strictly on what `launchers.js` requires:
+`custom/<name>/plugin.js` exports an object; every part is optional:
 
-1. Create `html/board/launchers/config.js` exporting `config.projects`, e.g. `export const config = { projects: ["myproj"] };`.
-2. Create `html/board/launchers/myproj/joblauncher.js` exporting a `JobLauncher` class with a no-throw, no-arg constructor and an `open()` method (called when the user picks `myproj` from the menu, or immediately if it's the only registered project). Everything past that point — modal markup, job-type selection, commit picker, form validation, and the actual submission — is entirely up to that module; `launchers.js` does not constrain it further.
-3. Whatever flow JSON / step script / auxiliary files the launcher needs, serve them from `<html>/jobsscripts/` (created empty by `Config::Validate()`, reachable at `GET /files/jobsscripts/...`) or embed them directly in the plugin module.
-4. Since none of these files are part of the embedded-resource set (`docs/build.md`), nothing here is touched by `--force-install` — you own the files once you drop them under `<html>/board/launchers/`.
+```js
+export default {
+  launcher,   // a class: the launch form and the descriptions of the project's tasks
+  helpTexts,  // { key: text }: hover helps of the elements with data-help="<key>" the plugin creates
+  frame,      // { barItems(slots), helpTabs: [{ label, html }] }
+  history,    // { load(tasks), card(task), typeLabel(task), filters: [...], stats(tasks) }
+  task,       // { relaunch(task), links(task, steps) }
+  taskcard,   // { resultsLink(task, link) }
+};
+```
 
-This mirrors the other declared extension point, `<html>/board/custom/header.html`, which `board.js` fetches (`fetch('custom/header.html')`) to inject a custom header fragment into `#custom_header` — also not shipped, also silently a no-op (fetch failure is swallowed) if absent. The history page has a third one, `<html>/board/custom/task_links.json`: per task id, buttons added to that task's card (`label`, `url` relative to the history page, `title`, optional `level: "warning"` for an orange button), opened in a new tab; absent means none.
+### `launcher`
+
+A class with a constructor without arguments, created on first use, and these methods (only `open` is required):
+
+| Method | Returns | Used by |
+|---|---|---|
+| `open(params)` | — | the `+` button (no params), a relaunch (`task.launcher.custom`, or what `task.relaunch` gave), `board.html#launch=…` (its parameters) |
+| `describeTask(task)` (async) | `{ title, commit, custom, search, args }` or `null` | board, task page, History |
+| `describeMonitor(task, message)` (sync) | `{ summary, level, text, highlight, badge, taskLink }` or `null` | board, task page, History (task cards) |
+| `describeSettings(task)` (sync) | `[{ label, html }]` or `null` | task page |
+| `prefetchTasks(tasks)` (async) | — | History, before describing many tasks |
+
+`describeTask`: `title` (HTML) replaces the name of the task; `commit` (HTML) is its commit line, shown for the argument
+marked `commitLine`; `custom` its custom name; `search` more words for the search of History; `args` how to show each
+argument on the one-line argument list of a card and in the drawer of History:
+`{ KEY: { bare, level, label, hidden, inTitle, commitLine } }` — `bare` its value alone, `level: 'warning'` on its own
+highlighted line with `label`, `hidden` not shown, `inTitle` not repeated when the title of the project is shown,
+`commitLine` shown as `commit`. Without a description, a task shows its name and its arguments as `KEY=value`.
+History calls it with `{ id, name, type, args }` (its lists carry no more); the other pages with the whole task.
+
+`describeMonitor`: `summary` (HTML) is the line shown for the last message of an attempt instead of its first line;
+`level` (`'error'`, `'warning'`, `'success'`) the colour of its marker; `text` the message shown in full on click;
+`highlight` (`'notable'` or `'error'`) makes the attempt and its square in the step header stand out; `badge`
+(`{ text, title }`) is shown on the chip of the attempt on the task page; `taskLink`
+(`{ key, label, url, title, count, highlight, pending }`) is a button of the task: on its card (state strip) and on the
+task page, the links of the same `key` are merged over the attempts and their `count`s summed into the `{count}` of
+`label`. `pending` (`{ label, title, fallback: { url, label, title } }`): while the page at `url` does not exist (a page
+written after the task, e.g. a final report), the button opens `fallback.url` if that page exists, else shows
+`pending.label` without link.
+
+### `frame`
+
+`barItems({ bar, start, end })` adds the plugin's items to the top bar: `start` on the left, `end` on the right before
+the status light and the buttons. `helpTabs` are added to the help panel after "This page".
+
+### `history`
+
+| Hook | Returns | Meaning |
+|---|---|---|
+| `load(tasks)` (async) | — | called each time History reads its list, before it renders: reads what the other hooks need (e.g. its data files; its style for the page) |
+| `card(task)` | `{ buttons: [{ label, url, title, cls }], cls }` or `null` | buttons of the task's row and drawer (`url` relative to the History page, opened in a new tab), a class added to its row |
+| `typeLabel(task)` | `{ label, cls }` or `null` | the job type as shown on its badge and in the type filter, a class of the badge |
+| `filters` | `[{ label, values, single, group, match(task, value) }]` | filters of the list, shown as chips |
+| `stats(tasks)` | HTML or `null` | added to the counts of the last 30 days (`tasks`: those tasks) |
+
+A filter with `values` (an array, or a function of the tasks giving it) shows one chip per value: several may be
+selected, a task matching any of them; with `single: true`, one value at a time after an "all" chip, selected by
+default. A filter without `values` is one chip, on or off. `group: 'users' | 'types' | 'states'` shows its chips with
+that group of History; otherwise they come first in the row.
+
+While a filter is on, History calls its `match` for **every** task shown, whatever its project: `match` returns `false`
+for a task its plugin does not know, so a task of another project is left out. The active filters and the groups of
+History combine (and); a group with nothing selected does not filter.
+
+### `task` and `taskcard`
+
+| Hook | Returns | Meaning |
+|---|---|---|
+| `task.relaunch(task)` | `{ custom, title }` or `null` | "↻ Relaunch as template" of the task page, for a task without launcher record (started by the API or a script): `custom` is given to `open()` of the plugin's launcher, `title` explains it |
+| `task.links(task, steps)` | `[{ label, url, title, hidden, update(element) }]` or `null` | more links of the task page; `update` (maybe async) may change the link once shown (e.g. show it after reading a count) |
+| `taskcard.resultsLink(task, link)` | a link or `null` | the link to the published results of the task, from its `publish_link` (`null`: the link as it is) |
+
+### Two kinds of hooks, and their routing
+
+- **Hooks of a page** — `helpTexts`, `frame`, `prefetchTasks`, `history.load`, `history.filters`, `history.stats`:
+  every plugin contributes.
+- **Hooks of a task** — `describeTask`, `describeMonitor`, `describeSettings`, `history.card`, `history.typeLabel`,
+  `task.relaunch`, `task.links`, `taskcard.resultsLink`: one plugin answers. When the task names its project
+  (`task.launcher.project`, below) only that plugin is asked; otherwise the plugins are asked in the order of
+  `custom/config.js` and the first answer that is not `null` is taken. A plugin returns `null` for a task it does not
+  know. (A task without launcher record goes to the first plugin that knows it; with one project installed, that is
+  always the right one.)
+
+A hook that throws is logged in the console and counts as `null`.
+
+### The launcher record of a task
+
+A launcher records itself in the task it submits: a top-level key `launcher` of its flow JSON,
+`{ "project": "<name>", "custom": { … } }`, `custom` being what its form needs to open again with the same settings.
+The scheduler keeps that object as it is (anything but an object is recorded as `{}`) and returns it as `launcher` in the
+task's JSON (`/api/tasks/running`, `/api/task/<id>/state`, `/api/task/<id>/final_state`). The pages route the task's
+hooks by `launcher.project`, and their relaunch buttons (the `...` menu of a card, the drawer of History, the task
+page) call `open(launcher.custom)` of that project's launcher.
+
+### A minimal plugin
+
+```js
+// <html>/board/custom/myproj/plugin.js, with config.js = { projects: ['myproj'] }
+class Launcher {
+  open(params) { /* show a form; on submit, POST /api/task/new (below) with "launcher": { project: 'myproj', … } */ }
+  async describeTask(task) {
+    return task.job_type === 'build' ? { title: `🔨 ${task.name}` } : null;
+  }
+}
+export default {
+  launcher: Launcher,
+  history: { typeLabel: (task) => task.type === 'build' ? { label: 'Build', cls: '' } : null },
+};
+```
 
 ## Flow JSON Shape (for reference)
 
-Whatever a `joblauncher.js` plugin submits as the `config` part of `/api/task/new` is a **flow JSON** document — the same format the scheduling engine consumes directly via `POST /api/task/new`. Real examples ship under `samples/jobs/tests/*.json`. For example, `samples/jobs/tests/test_publish.json`:
+Whatever a launcher submits as the `config` part of `/api/task/new` is a **flow JSON** document — the same format the
+scheduling engine consumes directly via `POST /api/task/new`. Real examples ship under `samples/jobs/tests/*.json`. For
+example, `samples/jobs/tests/test_publish.json`:
 
 ```json
 {
@@ -70,11 +256,14 @@ Whatever a `joblauncher.js` plugin submits as the `config` part of `/api/task/ne
 }
 ```
 
-`publish.storage` and `publish.goal` (and any other flow field) support `${VAR}` substitution from the `args[...]` the launcher POSTs alongside the flow — see below. `publish.server` must name a key under the server's `schedule.publisher` config section (see `docs/configuration.md`).
+`publish.storage` and `publish.goal` (and any other flow field) support `${VAR}` substitution from the `args[...]` the
+launcher POSTs alongside the flow — see below. `publish.server` must name a key under the server's `schedule.publisher`
+config section (see `docs/configuration.md`). A launcher adds its record as a top-level `launcher` key (above).
 
 ## Server-Side Contract: `POST /api/task/new`
 
-This part **is** real, current code (`ns_Server::RequestHandlerTaskNew::handleRequest`, `src/scheduler/server/request_handler.cxx`) — any launcher plugin, present or future, has to assemble a `multipart/form-data` body matching it:
+This part is real, current code (`ns_Server::RequestHandlerTaskNew::handleRequest`,
+`src/scheduler/server/request_handler.cxx`) — any launcher has to assemble a `multipart/form-data` body matching it:
 
 | Form field | Required | Meaning |
 |---|---|---|
@@ -85,18 +274,17 @@ This part **is** real, current code (`ns_Server::RequestHandlerTaskNew::handleRe
 | `script` | **yes** | The step script file (bash, sourced by `executor.sh`/`functions.sh`). Same failure mode if absent. |
 | `files[]` | no, repeatable | Extra files (patches, configs, etc.), keyed by their uploaded filename. |
 | `args[<KEY>]` | no, repeatable | Free-form key/value pairs, parsed by stripping the `args[...]` wrapper off each form field name. Duplicate keys throw a 500 (`"args[] value duplicate key found"`). These become the `${KEY}` substitution variables available inside the flow JSON. |
-| `runtime[<KEY>]` | no, repeatable | Same parsing as `args[...]` (`runtime[...]` wrapper stripped), merged into the task's runtime/step configuration ahead of dispatch. Duplicate keys throw the analogous 500. |
+| `runtime[<KEY>]` | no, repeatable | Field names `runtime[RUNTIME_<KEY>]`: the values of the `${RUNTIME_<KEY>}` placeholders of the flow JSON (`NB_RUN`, `NB_CORES`, `TIMEOUT`, `MEMORY_CORE`, `MEMORY_CONSUMPTION`, `RUN_SELECT`, `RUN_CONFIG`, `PRIORITY`), substituted textually before the flow JSON is parsed. Duplicate keys throw the analogous 500. |
 
-On success the handler returns `{"success": true, "task_id": "<id>"}`; on any exception, HTTP 500 with `{"success": false, "error": "<message>"}`.
+On success the handler returns `{"success": true, "task_id": "<id>"}`; on any exception, HTTP 500 with
+`{"success": false, "error": "<message>"}`.
 
-All board API routes, including `/api/task/new`, go through `ManageCORS`, which sets `Access-Control-Allow-Origin: *` on every response — so a launcher plugin can be served from, or POST to, an origin other than the board's own. Preflight is handled too: any `OPTIONS` request is dispatched to a dedicated `RequestHandlerOptions` (matched on method alone, independent of the URI), which answers `200 OK` with the CORS headers. See `docs/api.md` for the full CORS/OPTIONS picture.
+All board API routes, including `/api/task/new`, go through `ManageCORS`, which sets `Access-Control-Allow-Origin: *`
+on every response — so a launcher can be served from, or POST to, an origin other than the board's own. Preflight is
+handled too: any `OPTIONS` request is dispatched to a dedicated `RequestHandlerOptions` (matched on method alone,
+independent of the URI), which answers `200 OK` with the CORS headers. See `docs/api.md` for the full CORS/OPTIONS
+picture.
 
-## Building a Working Launcher
-
-Since the plugin isn't provided, if you're standing one up from scratch the practical shape (derived from the contract above, not copied from any existing UI) is:
-
-1. `JobLauncher.open()` renders a modal: job-type selector, a way to pick or type a commit/reference, and whatever campaign-style parameters your `args`/`runtime` fields need.
-2. On submit, `fetch()` your flow JSON and step script (e.g. from `/files/jobsscripts/...`), build a `FormData` with the fields in the table above, and `POST` it to `/api/task/new`.
-3. Handle the JSON `{success, task_id}` / `{success: false, error}` response to give the user feedback.
-
-There is nothing in the current codebase constraining how the commit picker, campaign fields, or multi-job composition work beyond this — that entire UI layer is project-specific and lives outside this repository's shipped `html/board/` tree.
+A launcher should check the scheduler before submitting (`CheckScheduler()` of `health.js`): a submission waits for the
+schedule lock, so a busy or stopping scheduler is then named plainly instead of surfacing later as an opaque network
+error.

@@ -106,17 +106,9 @@ Additionally, path components are concatenated into the shell command without qu
 
 ---
 
-## Board launcher extension point has no in-repo example or fallback
-
-**Current:** `html/board/launchers/launchers.js` unconditionally imports `./config.js` (for `config.projects`) at module top level, and `board.js` unconditionally imports `launchers.js`. Neither `launchers/config.js` nor any `launchers/<project>/joblauncher.js` exists anywhere in this repository or is installed by `Server::Config::Validate()` — the launcher menu is a pure per-deployment plugin point. On a fresh install (`--force-install` / `--only-install`) with no operator-supplied `config.js`, that ES module import fails to resolve, which fails the whole `launchers.js` module and, transitively, `board.js`'s import of it — the dashboard's module graph does not load at all until an operator supplies their own `launchers/config.js` and `launchers/<project>/joblauncher.js`.
-
-**Improvement:** Ship a minimal example project, or make `board.js`'s import of `launchers.js` (and `launchers.js`'s import of `config.js`) tolerant of a missing config — e.g. a dynamic `import()` with a catch that renders an explicit "no launchers configured" empty state — so a fresh install's dashboard isn't broken out of the box.
-
----
-
 ## History view — no pagination, no virtualisation
 
-**Current:** `GET /api/user/<u>/<t>/tasks` returns every task recorded for that pair in a single response — the route takes no offset/limit and no time range. The board's history view renders whatever comes back as one DOM subtree per task, with no windowing: `BuildTimesLine()` (`html/board/history.js`) builds the whole list into a `DocumentFragment` and commits it with one `replaceChildren()`, which keeps insertion down to a single reflow but leaves node creation proportional to the task count. Past roughly 10 000 tasks the view freezes for seconds on every render and sort change; 100 000 is unusable.
+**Current:** `GET /api/user/<u>/<t>/tasks` returns every task recorded for that pair in a single response — the route takes no offset/limit and no time range. The board's history view renders whatever comes back as one DOM subtree per task, with no windowing: `RenderList()` (`html/board/history.js`) builds the whole list into a `DocumentFragment` and commits it with one `replaceChildren()`, which keeps insertion down to a single reflow but leaves node creation proportional to the task count. Past roughly 10 000 tasks the view freezes for seconds on every render and sort change; 100 000 is unusable.
 
 The aggregated **All** view compounds this on the request side: it issues one `tasks` call per user × job\_type pair, ten in flight at a time, and merges the responses client-side. Server side each of those calls also prunes stale entries and may rewrite `users.json` wholesale. That is correct under concurrency — `UsersAPI::UserTasks()` takes `lockDB_` shared to read and upgrades to a unique lock around `SaveNoLock()` — but the parallel calls serialise on that one mutex, and each rewrite covers the entire index rather than the pair that changed.
 

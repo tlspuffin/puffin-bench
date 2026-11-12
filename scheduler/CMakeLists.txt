@@ -149,8 +149,8 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.css" "${CMAKE_
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/board.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_js.h" Board_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/taskcard.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_css.h" TaskCard_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/taskcard.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_js.h" TaskCard_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/launchers.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h" Launchers_CSS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers/launchers.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h" Launchers_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/launchers.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers_css.h" Launchers_CSS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/plugins.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/plugins_js.h" Plugins_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.html" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_html.h" Task_HTML)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_css.h" Task_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/task.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_js.h" Task_JS)
@@ -158,10 +158,9 @@ EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.html" "${CMA
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.css" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h" History_CSS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/history.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h" History_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/help.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h" Help_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/hostlinks.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/hostlinks_js.h" HostLinks_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/frame.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/frame_js.h" Frame_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/health.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/health_js.h" Health_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/tips.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/tips_js.h" Tips_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/nav.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/nav_js.h" Nav_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/html/board/navhelp.js" "${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/navhelp_js.h" NavHelp_JS)
 
 set(SCHEDULER_SRC 
   src/scheduler/config.cxx 
@@ -183,10 +182,10 @@ set(SCHEDULER_SRC
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/dropmenu_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/board_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/taskcard_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers/launchers_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/launchers_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/plugins_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/history_js.h 
   ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_html.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_css.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/task_js.h 
-  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/hostlinks_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/tips_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/nav_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/navhelp_js.h 
+  ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/help_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/frame_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/health_js.h ${CMAKE_SOURCE_DIR}/embeded/scheduler/html/board/tips_js.h 
   ${GENERATED_VERSION_C}
 )
 

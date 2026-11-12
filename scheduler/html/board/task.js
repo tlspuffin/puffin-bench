@@ -1,11 +1,15 @@
-import './nav.js';
+import { ShowSchedulerHealth } from './frame.js';
 import { Help, helpTexts } from './help.js';
-import { TaskCard, ResultsLink } from './taskcard.js';
+import { TaskCard, ResultsLink, TaskLinkElement } from './taskcard.js';
 import { logsManager } from './logsmanager.js';
-import * as Launchers from './launchers/launchers.js';
+import * as Plugins from './plugins.js';
 
-// One task, running or finished: header (commit line, state, times), actions (relaunch as template, results,
-// objectives, artefacts; priority and cancel while it runs), settings (readable, then every argument as given), the
+// the status light of this scheduler in the top bar
+ShowSchedulerHealth();
+
+// One task, running or finished: header (title of its project, state, times), actions (relaunch as template, results,
+// the buttons and links of its project, artefacts; priority and cancel while it runs), settings (readable, then every
+// argument as given), the
 // steps as a grid (one row per step, one column per configuration, a chip per attempt), and the Scheduler's card of the
 // task with every detail (monitor messages, exit codes, per-step actions).
 
@@ -102,7 +106,7 @@ const STATES = {
 };
 
 async function RenderHeader(task, steps) {
-  const description = await Launchers.DescribeTask(task).catch(() => null);
+  const description = await Plugins.DescribeTask(task).catch(() => null);
   document.getElementById('task-title').innerHTML = description?.title ?? esc(task.name || `task ${task.id}`);
   document.title = `${(task.name || `task ${task.id}`)} · task`;
 
@@ -130,19 +134,23 @@ async function RenderHeader(task, steps) {
   return { running: ['running', 'waiting', 'scheduled', 'cancelling'].includes(state) && !task.request_cancel };
 }
 
-// the objectives of the task, from the monitor summaries of its attempts (see launchers.js DescribeMonitor)
-function Objectives(task, steps) {
-  let count = 0;
-  let link = null;
+// the buttons of the task gathered from the monitor summaries of its attempts (see plugins.js DescribeMonitor): one per
+// key, its count summed over the attempts
+function TaskLinks(task, steps) {
+  const links = new Map();
   for (const step of steps) {
     if (!step.message_from_run) continue;
-    const description = Launchers.DescribeMonitor(task, step.message_from_run);
-    const taskLink = description?.taskLink;
-    if (taskLink?.key !== 'objectives') continue;
-    count += taskLink.count ?? 0;
-    link = taskLink;
+    const taskLink = Plugins.DescribeMonitor(task, step.message_from_run)?.taskLink;
+    if (!taskLink?.key) continue;
+    const known = links.get(taskLink.key);
+    if (known) {
+      known.count += taskLink.count ?? 0;
+      known.url ??= taskLink.url;
+    } else {
+      links.set(taskLink.key, { ...taskLink, count: taskLink.count ?? 0 });
+    }
   }
-  return link ? { ...link, count } : null;
+  return [...links.values()];
 }
 
 async function RenderActions(task, steps, running) {
@@ -169,62 +177,32 @@ async function RenderActions(task, steps, running) {
     return a;
   };
 
-  // a task started automatically (a commit, a PR) has no launcher record: the template is rebuilt from its arguments
-  // (job type, commit, campaign); the other settings are the launcher's defaults
-  const argOf = key => (task.args ?? []).find(arg => arg.key === key)?.value;
-  const recorded = Launchers.launchers.find(launcher => launcher.label === task.launcher?.project);
-  const entry = recorded ?? Launchers.launchers.find(launcher => launcher.label === (argOf('PACKAGE') || 'tlspuffin'));
-  if (entry) {
-    const custom = recorded ? (task.launcher?.custom ?? null)
-        : { jobType: ['vuln-a', 'vuln-b', 'perf', 'campaign'].includes(task.job_type) ? task.job_type : null,
-            commit: argOf('COMMIT_ID') ?? null, campaignId: argOf('CAMPAIGN_ID') ?? '' };
+  // the launcher the task was started with, pre-filled with its settings; a task started otherwise (no launcher
+  // record): the template its project rebuilds from its arguments
+  const recorded = Plugins.launchers.find(launcher => launcher.label === task.launcher?.project);
+  const rebuilt = recorded ? null : Plugins.TaskRelaunch(task);
+  if (recorded || rebuilt) {
+    const entry = recorded ?? rebuilt.launcher;
+    const custom = recorded ? (task.launcher?.custom ?? null) : (rebuilt.custom ?? null);
     button('↻ Relaunch as template', 'primary', () => entry.open(custom), recorded
         ? 'The launcher, pre-filled with every setting of this task: edit any field, then launch'
-        : 'This task was started automatically (no launcher record): the launcher with its job type and commit, the other settings at their defaults; check them, then launch');
+        : (rebuilt.title || 'The launcher with the settings its project could read from this task; check them, then launch'));
   }
   if (task.publish_link && !task.cancelled) link('📊 Results ↗', ResultsLink(task), 'The published results of this task: its card on Results, marked');
-  // 🕘 N runs: the other tasks of the same commit and type kept by the publisher (its /html/runs/ page, written by
-  // runs_report.py): shown when there are several, the index read from the publisher of the results link
-  const commitId = (task.args ?? []).find(arg => arg.key === 'COMMIT_ID')?.value;
-  if (task.publish_link && commitId) {
-    const type = /^vuln/i.test(task.job_type ?? '') ? 'Vuln' : /^perf/i.test(task.job_type ?? '') ? 'Perf' : null;
-    let origin = null;
-    try { origin = new URL(task.publish_link, window.location.href).origin; } catch (error) {}
-    if (type && origin) {
-      const runs = link('🕘 runs', `${origin}/html/runs/runs.html#commit=${encodeURIComponent(commitId)}&tab=PR/${type}`,
-          'Every task of this commit and type kept by the publisher, with the puffin-bench version of each (new tab)');
-      runs.hidden = true;
-      fetch(`${origin}/html/runs/index.json`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null).then(index => {
-        const entry = index?.[commitId] ?? Object.entries(index ?? {}).find(([c]) => c.startsWith(commitId))?.[1];
-        const count = entry?.[`PR/${type}`];
-        if (count > 1) { runs.textContent = `🕘 ${count} runs`; runs.hidden = false; }
-      });
+  // more links of its project (plugins.js TaskLinks)
+  for (const item of Plugins.TaskLinks(task, steps)) {
+    if (!item?.url) continue;
+    const a = link(item.label ?? '', item.url, item.title);
+    a.hidden = !!item.hidden;
+    if (typeof item.update === 'function') {
+      Promise.resolve().then(() => item.update(a)).catch(error => console.warn('task.links update', error));
     }
   }
-
-  const objectives = Objectives(task, steps);
-  if (objectives?.url) {
-    const label = String(objectives.label ?? '{count} objectives').replace('{count}', objectives.count.toLocaleString('en-US'));
-    const a = link(`🐞 ${label.replace(/^🎉\s*/, '')}`, objectives.url, objectives.title);
-    if (objectives.pending) {
-      // the final report is written a few minutes after the end of the task
-      fetch(objectives.url, { cache: 'no-store' }).then(r => r.ok).catch(() => true).then(async exists => {
-        if (exists) return;
-        // the live page, kept until the final report is written
-        const liveURL = objectives.url.replace(/\/(\d+)\.html$/, '/live-$1.html');
-        if (await fetch(liveURL, { cache: 'no-store' }).then(r => r.ok).catch(() => false)) {
-          a.href = liveURL;
-          a.textContent = `${a.textContent} · live ⏳`;
-          a.title = 'The final report is being written (within minutes of the end of the task): the live objectives page meanwhile';
-          return;
-        }
-        a.removeAttribute('href');
-        a.textContent = `🐞 ${String(objectives.pending.label).replace('{count}', objectives.count.toLocaleString('en-US')).replace(/^🎉\s*/, '')}`;
-        a.title = objectives.pending.title ?? '';
-      });
-    }
+  // the buttons gathered from the monitor summaries of its attempts (e.g. a page of the project about the task)
+  for (const taskLink of TaskLinks(task, steps)) {
+    if (taskLink.url) box.appendChild(TaskLinkElement(taskLink, 'task-btn'));
   }
-  if (taskId) link('⬇️ Artefacts', `/api/task/${taskId}/artefacts`, 'Logs, outputs of every attempt, objectives and their replay reports', `${taskId}-artefacts.tgz`);
+  if (taskId) link('⬇️ Artefacts', `/api/task/${taskId}/artefacts`, 'Logs and outputs of every attempt', `${taskId}-artefacts.tgz`);
   const copy = button('🔗 Copy link', 'ghost', async () => {
     try { await navigator.clipboard.writeText(window.location.href); copy.textContent = '✓ Copied'; }
     catch (error) { copy.textContent = 'Copy failed'; }
@@ -260,7 +238,7 @@ async function RenderActions(task, steps, running) {
 // ── Settings ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function RenderSettings(task) {
-  const rows = [...(Launchers.DescribeSettings(task) ?? [])];
+  const rows = [...(Plugins.DescribeSettings(task) ?? [])];
   // every argument as it was given: nothing of the task's settings is hidden by the readable form above
   const args = (task.args ?? []).filter(arg => arg?.key).map(arg => `<span class="chip mono">${esc(arg.key)}=${esc(arg.value)}</span>`);
   rows.push({ label: 'all arguments', html: args.join('') || '<span class="task-hint">none</span>', wide: true });
@@ -278,9 +256,10 @@ function Chip(task, step) {
   chip.className = `att ${state}`;
   let text = state === 'pending' ? 'pending' : state === 'running' ? `▶ ${Duration((Date.now() - start) / 1000)}`
       : Duration(((end || start) - start) / 1000);
-  const monitor = step.message_from_run ? Launchers.DescribeMonitor(task, step.message_from_run) : null;
-  const found = monitor?.taskLink?.key === 'objectives' ? monitor.taskLink.count : 0;
-  chip.innerHTML = esc(text) + (found ? ` <b class="obj" title="objectives found by this attempt">${esc(found)}</b>` : '');
+  const monitor = step.message_from_run ? Plugins.DescribeMonitor(task, step.message_from_run) : null;
+  // the badge of its project (e.g. what the attempt found)
+  const badge = monitor?.badge?.text ? ` <b class="badge" title="${esc(monitor.badge.title ?? '')}">${esc(monitor.badge.text)}</b>` : '';
+  chip.innerHTML = esc(text) + badge;
   if (monitor?.highlight) chip.classList.add(`highlight-${monitor.highlight}`);
   const summary = monitor?.summary ? monitor.summary.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
   chip.title = [`${step.name} ${step.id} · attempt ${step.attempt_id ?? 0}: ${step.state}`,
@@ -349,12 +328,12 @@ async function Refresh() {
 }
 
 function Main() {
-  new Help({ ...helpTexts, ...Launchers.helpTexts });
+  new Help({ ...helpTexts, ...Plugins.helpTexts });
   window.addEventListener('pb-refresh', (event) => { event.preventDefault(); Refresh(); });
   taskId = GetQueryParam('id');
   dataUrl = taskId ? `/api/task/${taskId}/state` : GetQueryParam('data');
-  taskCard = new TaskCard({ onRefresh: Refresh, launchers: Launchers.launchers, describeTask: Launchers.DescribeTask,
-    describeMonitor: Launchers.DescribeMonitor });
+  taskCard = new TaskCard({ onRefresh: Refresh, launchers: Plugins.launchers, describeTask: Plugins.DescribeTask,
+    describeMonitor: Plugins.DescribeMonitor });
   Refresh();
 }
 

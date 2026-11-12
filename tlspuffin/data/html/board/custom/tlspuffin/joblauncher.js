@@ -1,15 +1,21 @@
 import { config } from './config.js'
 import { ListInput } from './widget-listinput.js'
 import { resolveCommits, parseTaskName, commitLineHTML } from '../../../common/commitinfo.js'
-import { CheckScheduler } from '../../nav.js'
+import { CheckScheduler } from '../../health.js'
 
-const link = document.createElement('link');
-link.rel  = 'stylesheet';
-link.href = new URL('./joblauncher.css', import.meta.url);
-document.head.appendChild(link);
+// its style, once a launcher is created (the pages of the scheduler): the other pages that load the plugin (Results,
+// reports) keep their own look of the commit lines
+function LoadStyle() {
+  if (document.querySelector('link[data-joblauncher]')) return;
+  const link = document.createElement('link');
+  link.rel  = 'stylesheet';
+  link.href = new URL('./joblauncher.css', import.meta.url);
+  link.dataset.joblauncher = '';
+  document.head.appendChild(link);
+}
 
-// Registered by the board's launchers.js into its help system (keys are
-// prefixed with the project name to avoid collisions between launchers).
+// Registered by the board's plugins.js into its help system (see plugin.js; keys are
+// prefixed with the project name to avoid collisions between plugins).
 export const helpTexts = {
   'tlspuffin.name':       'Task name. Filled in from the job type and commit until you edit it.',
   'tlspuffin.user':       'Your name, recorded with the task. Remembered in this browser.',
@@ -92,6 +98,7 @@ export class JobLauncher {
   #tabBtns             = {};
 
   constructor() {
+    LoadStyle();
     if (config?.commitsUrl == null) {
       console.error('Fatal error, missing commitsUrl in config.js')
       return;
@@ -102,7 +109,7 @@ export class JobLauncher {
       launchUrl:     '/api/task/new',
     };
     this.#buildDOM();
-    // Esc (top bar, board/nav.js): the commit list first, then the launcher
+    // Esc (top bar, board/frame.js): the commit list first, then the launcher
     window.addEventListener('pb-escape', (event) => {
       if ((event.detail?.layer !== 'modal') || event.defaultPrevented || !this.#overlay.classList.contains('open')) return;
       event.preventDefault();
@@ -111,7 +118,12 @@ export class JobLauncher {
     });
   }
 
+  // custom: the settings of a previous task (task.launcher.custom), or the parameters of the board's
+  // #launch=tlspuffin&job=<job type>&commit=<sha> (e.g. "no Perf run" of Results)
   open(custom = null)  {
+    if (custom && ('job' in custom) && !('jobType' in custom)) {
+      custom = { jobType: custom.job || null, commit: custom.commit || null };
+    }
     this.#overlay.classList.add('open');
     this.#refreshCampaignPlaceholder();
     const commitsPromise = this.#loadCommits();
@@ -131,7 +143,7 @@ export class JobLauncher {
   }
 
   // One-line summary of a MonitorExperiment message (PR_common.sh) for the board, the task page and the history (see
-  // launchers.js DescribeMonitor): corpus, objectives (link to the live objectives page), errors, logs, ASAN, stats
+  // plugins.js DescribeMonitor): corpus, objectives (link to the live objectives page), errors, logs, ASAN, stats
   // age; the details in the hovers; the message without its #MONITOR_JSON line for the full view.
   // level: 'error' (fuzzing errors), 'warning' (stale stats, log volume, ASAN not instrumented), 'success'
   // (objectives found). null when the message is not a MonitorExperiment one.
@@ -218,17 +230,23 @@ export class JobLauncher {
     const url = live && !running ? live.replace(/\/live-(\d+)\.html$/, '/$1.html') : live;
     return {
       summary: chips.join(' · '), level, text: readable,
-      // objectives found: the attempt stands out (not in VulnA/VulnB, where they are expected), and the task gets a
-      // button to its objectives page
-      highlight: found && !expected ? 'objective' : null,
+      // objectives found: the attempt stands out (not in VulnA/VulnB, where they are expected), its chip on the task
+      // page counts them, and the task gets a button to its objectives page
+      highlight: found && !expected ? 'notable' : null,
+      badge: found ? { text: count(facts.objectives.count), title: 'objectives found by this attempt' } : null,
       taskLink: found ? {
-        key: 'objectives', count: facts.objectives.count, url, highlight: expected ? null : 'objective',
+        key: 'objectives', count: facts.objectives.count, url, highlight: expected ? null : 'notable',
         label: `${expected ? '' : '🎉 '}{count} objectives${!url ? '' : running ? ' · live ↗' : ' · report ↗'}`,
         title: running ? 'Objectives of the running attempts; click: live objectives of this task, replayed and grouped by bug'
             : 'Objectives of the task; click: its final report, replayed and grouped by bug',
         pending: url && !running ? {
           label: `${expected ? '' : '🎉 '}{count} objectives · report pending`,
           title: 'The final report of the objectives is written within 10 minutes of the end of the task',
+          // the live page, kept until the final report is written
+          fallback: live ? {
+            url: live, label: `${expected ? '' : '🎉 '}{count} objectives · live ⏳`,
+            title: 'The final report is being written (within minutes of the end of the task): the live objectives page meanwhile',
+          } : null,
         } : null,
       } : null,
     };
@@ -238,7 +256,7 @@ export class JobLauncher {
     return ['vuln-a', 'vuln-b'].includes(task?.job_type);
   }
 
-  // The settings of a tlspuffin task for the task page (see launchers.js DescribeSettings): job type, commit, package,
+  // The settings of a tlspuffin task for the task page (see plugins.js DescribeSettings): job type, commit, package,
   // timeout, configurations and attempts, campaign settings, compat rules. From the launcher settings it was started
   // with (task.launcher.custom) and its arguments; what is unknown is left out (the page also lists every argument).
   describeSettings(task) {
@@ -324,10 +342,11 @@ export class JobLauncher {
     };
   }
 
-  // Description of a tlspuffin task for the board, the task page and the history (see launchers.js DescribeTask):
+  // Description of a tlspuffin task for the board, the task page and the history (see plugins.js DescribeTask):
   //   title:  "Perf@dcf9ff #453 [TLS:Mapper] reduce …" for a default name ("Performance - <commit>"), or the custom
   //           name followed by the commit line ("my test · Perf@dcf9ff #453 …"; the type is unknown then)
-  //   commit: the commit line without prefix, for the COMMIT_ID argument
+  //   commit: the commit line without prefix, shown instead of the COMMIT_ID argument
+  //   search: the hover of the commit line (full id, PR, date, whole message), for the search of the history
   // The commit comes from the COMMIT_ID argument, or from the task name (the history only has the name).
   async describeTask(task) {
     const fromArgs = (task?.args ?? []).find(arg => arg.key === 'COMMIT_ID')?.value;
@@ -340,12 +359,18 @@ export class JobLauncher {
     // custom names: the type from the launcher settings, else the job type (board: job_type, history: type)
     const jobType = task?.launcher?.custom?.jobType ?? task?.job_type ?? task?.type;
     const prefix = type || JOB_TYPE_PREFIXES[jobType] || '';
+    const title = commitLineHTML(desc, { prefix, custom });
+    const holder = document.createElement('div');
+    holder.innerHTML = title;
     return {
       custom,
-      title: commitLineHTML(desc, { prefix, custom }),
+      title,
       commit: commitLineHTML(desc, { max: 80 }),
-      // how the board shows the arguments: the package alone, the compat warning on its own line
+      search: holder.querySelector('.commit-line')?.getAttribute('title') ?? '',
+      // how the board shows the arguments: the commit as its commit line (not repeated when the title shows it), the
+      // package alone, the compat warning on its own line
       args: {
+        COMMIT_ID: { commitLine: true, inTitle: true },
         PACKAGE: { bare: true },
         COMPAT_WARNING: { level: 'warning', label: 'compat' },
       },

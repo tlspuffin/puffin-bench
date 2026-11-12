@@ -68,7 +68,7 @@ main()
 
   3. config.Validate(forceInstall)
        — server_: canonicalize html_ (and TLS key/cert/CA if secure_), create
-         html_/board, html_/board/custom, html_/board/launchers, html_/jobsscripts,
+         html_/board, html_/board/custom, html_/jobsscripts,
          install embedded board files (see "Board Dashboard" below)
        — schedule_: canonicalize toolsPath_/runPath_/userPath_/exportPath_
          (these must already exist — Validate() does not create them),
@@ -158,9 +158,9 @@ The board is a browser-based dashboard served as static files under `/files/boar
 ### Embedding and installation
 
 The core board files are embedded in the server binary at build time as C string literals via `EmbedTextFileScript` (`CMakeTextEmbedding.cmake`), listed in `CMakeLists.txt`:
-`board.html`, `board.css`, `board.js`, `taskcard.css`, `taskcard.js`, `logsmanager.js`, `terminal.js`, `clipboard.js`, `dropmenu.js`, `help.js`, `tips.js`, `task.html`, `task.css`, `task.js`, `history.html`, `history.css`, `history.js`, and `launchers/launchers.css` / `launchers/launchers.js`.
+`board.html`, `board.css`, `board.js`, `taskcard.css`, `taskcard.js`, `logsmanager.js`, `terminal.js`, `clipboard.js`, `dropmenu.js`, `frame.js`, `help.js`, `health.js`, `tips.js`, `plugins.js`, `launchers.css`, `task.html`, `task.css`, `task.js`, `history.html`, `history.css`, `history.js`.
 
-On startup, `ns_Server::Config::Validate()` extracts these into `<html_>/board/` (and creates the empty `<html_>/board/custom/`, `<html_>/board/launchers/`, `<html_>/jobsscripts/` directories) if the files are absent, or unconditionally if `--force-install` was passed.
+On startup, `ns_Server::Config::Validate()` extracts these into `<html_>/board/` (and creates the empty `<html_>/board/custom/` and `<html_>/jobsscripts/` directories) if the files are absent, or unconditionally if `--force-install` was passed. `<html_>/board/custom/` holds the plugins of the projects (`docs/board-job-launcher.md`), which the scheduler never writes.
 
 ### Static file serving
 
@@ -172,19 +172,21 @@ The board is accessible at `GET /files/board/board.html`.
 
 | Module | Role |
 |--------|------|
-| `board.js` | Entry point: polls `GET /api/tasks/running`, renders the running-step list and per-executor CPU/memory/storage stats, instantiates `TaskCard` and imports `launchers/launchers.js` |
-| `taskcard.js` | Renders a single task card with step details, log modal, step attempt info |
-| `launchers/launchers.js` | Generic launcher menu (the `+` button). It reads a **project registry from `./config.js`** (`config.projects`, a list of project names) and dynamically imports `./<project>/joblauncher.js` for each — one menu entry per project. Neither `config.js` nor any `<project>/` subfolder ships in this repository; they are a per-deployment extension point supplied alongside the board install |
+| `frame.js` | The frame of every page, loaded first: the top bar (🔄, ❔, the status light of a scheduler named by `ShowSchedulerHealth`, the items of the plugins), the keys (Cmd/Ctrl+R, `?`, Esc) and their events (`pb-refresh`, `pb-escape` by layer, …); also loaded by the pages of the other services of a bench |
+| `plugins.js` | Loader of the plugins of the projects (`custom/config.js`, `custom/<project>/plugin.js`, absent = none), the routing of their hooks (a task's hooks to the plugin of its project), the `+` button (none without a launcher); see `docs/board-job-launcher.md` |
+| `health.js` | Status light of the scheduler (`GET /api/health`) and `CheckScheduler()`, the check a launcher makes before submitting |
+| `board.js` | Entry point: polls `GET /api/tasks/running`, renders the running-step list and per-executor CPU/memory/storage stats, instantiates `TaskCard` with the hooks of `plugins.js`, builds the `+` button, opens a launcher from `#launch=<project>&…` |
+| `taskcard.js` | Renders a single task card with step details, log modal, step attempt info; the description, arguments, monitor summaries and buttons of a task as its plugin gives them |
 | `terminal.js` | Scrollable in-browser log viewer |
 | `logsmanager.js` | Log chunk fetching/streaming helpers (offset-based) used by the log modal |
 | `clipboard.js` | Small "copy to clipboard" helper |
 | `dropmenu.js` | Drop-down menu widget (task actions) |
-| `help.js` | Help texts of the board's hovers (`data-help` keys) |
+| `help.js` | Hover helps of the pages (`data-help` keys, with those of the plugins) and the help panel (tabs: "This page", then those of the plugins; outlines the elements with a hover help while open) |
 | `tips.js` | One look for every hover: an element's `title` is shown in a styled panel (title line, `key: value` grid, ⚠/✓ lines) instead of the browser's plain tooltip |
-| `task.html` / `task.js` / `task.css` | Single-task detail view |
-| `history.html` / `history.js` / `history.css` | Task history view: browses archived tasks per user and job type (`GET /api/user/<u>/job_types`, `GET /api/user/<u>/<t>/tasks`), renders a timeline sortable on start time (`id`) or end time (`end_timestamp`), and loads the selected task through `GET /api/task/<id>/final_state`. An extra **All** entry in the user menu aggregates every user client-side — one request per user × job\_type pair, ten in flight at a time — optionally filtered on a single job type; in that mode each card also shows which user and job type it came from. The page opens in that mode (every user, every job type). Cards get extra buttons from the optional `<html>/board/custom/task_links.json` (`{ "<task id>": [{ "label", "url" (relative to the page), "title", "level" }] }`, `"level": "warning"` drawing the button orange instead of red), each opening its URL in a new tab. See `roadmap.md` for the scaling limit this pattern carries |
+| `task.html` / `task.js` / `task.css` | Single-task detail view: header, actions (relaunch as template, results, the links and buttons of its plugin), settings, a grid of steps × configurations, the task card |
+| `history.html` / `history.js` / `history.css` | Task history view: browses archived tasks per user and job type (`GET /api/user/<u>/job_types`, `GET /api/user/<u>/<t>/tasks`), renders every finished task of every user in one list grouped by day, sortable on start time (`id`) or end time (`end_timestamp`), and loads the selected task through `GET /api/task/<id>/final_state` into a drawer. The list is gathered client-side — one request per user × job\_type pair, ten in flight at a time. Filters: a search, chips of users, job types and states, and the filters of the plugins; the plugins also add buttons and a class to the rows, name the job types and add to the counts (`history` hooks, `docs/board-job-launcher.md`). See `roadmap.md` for the scaling limit this pattern carries |
 
-Drift note: an earlier revision of this documentation set referenced `html/board/joblauncher.js` and `board/launchers/tlspuffin/jobsconfig.json` as if a single fixed job launcher shipped with the scheduler. That was never accurate for this codebase: the launcher is a generic per-project plugin loader (`launchers/launchers.js` + `launchers/<project>/joblauncher.js`), and no `jobs_config.json`/`jobsconfig.json` file exists anywhere in this repository. See `docs/board-job-launcher.md` for the actual mechanism.
+The scheduler ships no job launcher and nothing of a project: the launcher of a project, and all it adds to the pages, is a plugin under `<html>/board/custom/<project>/`, installed by the project (tlspuffin: `tlspuffin/data/html/board/custom/tlspuffin/`). See `docs/board-job-launcher.md` for the mechanism.
 
 ---
 

@@ -82,23 +82,19 @@
     <p>The <b>...</b> menu of a task changes its priority, cancels it, or starts a new task from the same launcher.</p>
 
     <h2>New task</h2>
-    <p>The <b>+</b> button at the bottom right starts a new task from one of the configured projects. Results (“no Perf run”) and a task page (↻ Relaunch as template) open the same launcher, pre-filled.</p>
+    <p>The <b>+</b> button at the bottom right starts a new task from one of the configured projects (none without a project). A task page (↻ Relaunch as template), and the pages of a project, open the same launcher, pre-filled.</p>
 
     <h2>A task card</h2>
     <ul>
-      <li>Title: job type and commit (<code>Perf@5c588a #540</code>), or the custom name with the commit; a click opens the task page.</li>
-      <li>Arguments on one line (the commit when it is not in the title, the package, compat warnings).</li>
+      <li>Title: as its project describes the task (else its name); a click opens the task page.</li>
+      <li>Arguments on one line, as its project shows them (what the title already shows is not repeated, warnings on their own lines).</li>
       <li>One block per step: a square per attempt in its header, one line per configuration, then one line per attempt (cores on hover, duration, exit code, logs).</li>
-      <li>Monitor: one line summarizing the last message of the attempt (executions, corpus, objectives); the corpus turns red when it has not grown for 60 min; click for the full message.</li>
-      <li>VulnA: a run ends when it finds the CVE of its configuration (other objectives go on being collected).</li>
-<li>An attempt that found objectives is highlighted (not in VulnA/VulnB, which look for known bugs), and the task
-        gets a button to its objectives page: live while it runs, its final report once it ended. The top bar shows
-        🐞 when running tasks found objectives.</li>
+      <li>Monitor: one line summarizing the last message of the attempt, by its project (else its first line); click for the full message. An attempt its project finds notable is highlighted, and the task may get buttons from its project.</li>
       <li>📋 copies the link to the task page, 📊 opens its published results, <b>...</b> holds the actions.</li>
     </ul>
 
     <h2>Estimated times</h2>
-    <p>Each step is estimated at the median of the last 5 runs of the same step and configuration <b>in the same context</b> (for tlspuffin: the same commit; the job scripts change over time); without 2 of them, the median of the last 15 runs in other contexts that did not time out (a timeout mostly means the bug is not at that commit); runs with the same number of cores first; always capped by the timeout. A running step past its estimate is expected to run to its timeout when that kind of step has timed out before (in its context first), else to end within a minute. A scheduled task starts when enough cores are free for its first step.</p>
+    <p>Each step is estimated at the median of the last 5 runs of the same step and configuration <b>in the same context</b> (the <code>duration_context</code> of its job, by default its arguments: e.g. the same commit); without 2 of them, the median of the last 15 runs in other contexts that did not time out; runs with the same number of cores first; always capped by the timeout. A running step past its estimate is expected to run to its timeout when that kind of step has timed out before (in its context first), else to end within a minute. A scheduled task starts when enough cores are free for its first step.</p>
 
     <p>Details: an element with the <span style="cursor:context-menu;text-decoration:underline dotted">box cursor</span> (an arrow with a small box) opens a small window on <b>click</b> (Esc or a click elsewhere closes it); an element with the <span style="cursor:help;text-decoration:underline dotted">? cursor</span>, a link or a button explains itself on <b>hover</b> (after half a second). Press <b>?</b> to toggle this panel.</p>
   </template>

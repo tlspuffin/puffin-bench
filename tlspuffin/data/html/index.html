@@ -5,7 +5,7 @@
     <title>PUFFIN Bench</title>
     <style>body { background: #000; }</style>
     <script>
-      // Landing page: every page of the bench has the navigation bar on top (board/nav.js), so this page only
+      // Landing page: every page of the bench has the top bar (board/frame.js, tlspuffin plugin), so this page only
       // opens one: the scheduler board, or #results, #analyzer, #history (optionally /<package>, e.g. #results/sshpuffin).
       const host = window.location.hostname;
       const [service, pkg = 'tlspuffin'] = window.location.hash.slice(1).split('/');

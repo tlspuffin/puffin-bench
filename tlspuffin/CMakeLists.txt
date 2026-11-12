@@ -114,8 +114,8 @@ EmbedBinaryTargetAsm(vis_comparator "${CMAKE_SOURCE_DIR}/embeded/installer/binar
 EmbedBinaryTargetAsm(vis_comparator-static "${CMAKE_SOURCE_DIR}/embeded/installer/binary/vis_comparator_blob-static.s" VisComparator_Binary)
 
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/config/config.json" "${CMAKE_SOURCE_DIR}/embeded/installer/config/scheduler_config_json.c" SchedulerConfig_JSON)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/board/launchers/config.js" "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/config_js.c" LaunchersConfig_JS)
-EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/board/launchers/tlspuffin/config.js" "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/tlspuffin/config_js.c" LaunchersTLSPuffinConfig_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/board/custom/config.js" "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/config_js.c" PluginsConfig_JS)
+EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/board/custom/tlspuffin/config.js" "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/tlspuffin/config_js.c" TLSPuffinPluginConfig_JS)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/config/git_restapi-config.json" "${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.c" GitRestAPIConfig_JSON)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/config/publisher_config.json" "${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.c" PublishConfig_JSON)
 EmbedTextFileScript("${CMAKE_CURRENT_SOURCE_DIR}/data/html/publisher/summary_config.js" "${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.c" PublishSummaryConfig_JS)
@@ -143,8 +143,10 @@ add_custom_target(generate_tlspuffin_scripts ALL
 )
 
 EmbedDirectory("${CMAKE_CURRENT_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/embeded/installer/files.c" InstallFiles
-  FILES html/board/launchers/tlspuffin/widget-listinput.js html/board/launchers/tlspuffin/joblauncher.css html/board/launchers/tlspuffin/joblauncher.js 
-  html/board/launchers/tlspuffin/jobsconfig.json
+  FILES html/board/custom/tlspuffin/widget-listinput.js html/board/custom/tlspuffin/joblauncher.css html/board/custom/tlspuffin/joblauncher.js 
+  html/board/custom/tlspuffin/jobsconfig.json html/board/custom/tlspuffin/plugin.js html/board/custom/tlspuffin/bar.js
+  html/board/custom/tlspuffin/hostlinks.js html/board/custom/tlspuffin/guide.js
+  html/board/custom/tlspuffin/history.js html/board/custom/tlspuffin/history.css
   html/jobsscripts/tlspuffin/PR_campaign.json html/jobsscripts/tlspuffin/PR_perf_cargo.json html/jobsscripts/tlspuffin/PR_perf_full.sh 
   html/jobsscripts/tlspuffin/PR_vulnerabilities_full.sh html/jobsscripts/tlspuffin/PR_vulnerabilities-groupA_cargo.json html/jobsscripts/tlspuffin/PR_vulnerabilities-groupB_cargo.json
   html/jobsscripts/tlspuffin/shell.nix html/jobsscripts/tlspuffin/wolfssl_put.c.patch html/jobsscripts/tlspuffin/vuln_targets.json tools/qjs 
@@ -171,8 +173,8 @@ add_library(installer.lib OBJECT src/installer/main.cxx
     "${CMAKE_SOURCE_DIR}/embeded/installer/files.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/samples.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/config/scheduler_config_json.c"
-    "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/config_js.c"
-    "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/tlspuffin/config_js.c"
+    "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/config_js.c"
+    "${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/tlspuffin/config_js.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.c"
     "${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.c" 
@@ -192,8 +194,8 @@ add_executable(installer
     ${CMAKE_SOURCE_DIR}/embeded/installer/files.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/samples.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/scheduler_config_json.h
-    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/config_js.h
-    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/tlspuffin/config_js.h
+    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/config_js.h
+    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/tlspuffin/config_js.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.h 
@@ -215,8 +217,8 @@ add_executable(installer-static
     ${CMAKE_SOURCE_DIR}/embeded/installer/files.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/samples.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/scheduler_config_json.h
-    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/config_js.h
-    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/launchers/tlspuffin/config_js.h
+    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/config_js.h
+    ${CMAKE_SOURCE_DIR}/embeded/installer/html/board/custom/tlspuffin/config_js.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/git_restapi_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/config/publisher_config_json.h
     ${CMAKE_SOURCE_DIR}/embeded/installer/html/publisher/summary_config_js.h 

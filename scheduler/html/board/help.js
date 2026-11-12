@@ -1,3 +1,10 @@
+// Help of the pages, two parts:
+// - hovers: an element with data-help="<key>" shows the text of that key (helpTexts, and those of the plugins) after
+//   500 ms, as every hover (tips.js); a page creates one Help with its texts;
+// - the help panel (❔ of the top bar or the ? key, frame.js): tabs, "This page" first (the page's
+//   <template id="help-panel">, read when the panel opens), then the tabs of the plugins (AddHelpTab). While it is
+//   open, the elements with a hover help are outlined (help mode). Esc closes it before any other popup (pb-escape,
+//   layer 'help'). Its state is sent on window: "pb-help" with { detail: { open } }.
 import { FormatTip } from './tips.js';
 export const helpTexts = {
   'task.quicklink': 'Click: copy the link of the task page · Cmd/Ctrl+click or middle click: open it in a new tab',
@@ -28,9 +35,9 @@ export const helpTexts = {
   'board.storage': 'Used space on this storage. Yellow above 50%, red above 80%.',
   'launcher.new': 'Start a new task: choose a project, then fill in its launch form',
   'launcher.project': 'Open the launch form of this project',
-  'history.stats': 'Finished tasks in total · in the last 30 days: number of tasks · their core-hours (cores × run time of their steps) · how many found objectives (🐞)',
-  'history.search': 'Matches the commit, PR, message, task name, id, user, type and package (all the words)',
-  'history.filter': 'Show only this package (all | tlspuffin | sshpuffin), these users, types or states; with none selected in a group, the group does not filter',
+  'history.stats': 'Finished tasks in total · in the last 30 days: number of tasks · their core-hours (cores × run time of their steps), then what the projects count',
+  'history.search': 'Matches the task name, id, user, type and what its project shows of it (all the words)',
+  'history.filter': 'Show only these users, types or states, or what the filters of the projects select; with none selected in a group, the group does not filter',
   'history.sort': 'Sort the timeline by start or end time. Tasks are grouped under the date of the chosen time.',
   'history.card': 'Show the details of this task on the right: actions, times, arguments, configurations, task card',
   'history.delete': 'Delete this task\'s archived results, including the copy on the publish server. Cannot be undone.',
@@ -39,23 +46,21 @@ export const helpTexts = {
   'history.alljobtype': 'Show the finished tasks of every user for this job type',
 };
 
+const helpModeClass = '_hp_HelpMode';
+
+// ── Hovers ───────────────────────────────────────────────────────────────────────────────────────────────────
+
 export class Help {
   static { Help.#CreateStyle(); }
-  static #styleDefault = { 'visible': '_hp_Visible', 'tooltip': '_hp_Tooltip',  'url': '_hp_Url', 
-      'panel': '_hp_Panel', 'panelOpen': '_hp_PanelOpen', 'panelClose': '_hp_PanelClose', 
-      'helpMode': '_hp_HelpMode'
-   };
+  static #styleDefault = { 'visible': '_hp_Visible', 'tooltip': '_hp_Tooltip',  'url': '_hp_Url' };
 
   #style;
   #texts;
   #tooltip;
   #timer = null;
   #current;
-  #panel;
-  #toggle;
-  
-  // templateId: <template> holding the page help, toggleId: button opening the panel
-  constructor(texts = {}, style = {}, templateId = null, toggleId = null) {
+
+  constructor(texts = {}, style = {}) {
     this.#style = { ...Help.#styleDefault, ...style};
     this.#texts = texts;
 
@@ -65,8 +70,6 @@ export class Help {
     document.body.appendChild(this.#tooltip);
 
     this.#current = null;
-    this.#panel = null;
-    this.#toggle = null;
 
     document.addEventListener('pointerover', this.#Show.bind(this));
     document.addEventListener('pointerout', this.#Leave.bind(this));
@@ -74,76 +77,6 @@ export class Help {
     document.addEventListener('focusout', this.#Leave.bind(this));
     document.addEventListener('click', this.#Hide.bind(this), true);
     window.addEventListener('scroll', this.#Hide.bind(this), true);
-
-    if ((templateId !== null) && (toggleId !== null)) {
-      this.#EnablePanel(templateId, toggleId);
-    }
-  }
-
-  TogglePanel() {
-    if (this.#panel?.classList.contains(this.#style.panelOpen)) {
-      this.ClosePanel();
-    } else {
-      this.OpenPanel();
-    }
-  }
-
-  OpenPanel() {
-    if (!this.#panel) {
-      return;
-    }
-    const MARGIN = 8;
-    const top = Math.max(0, this.#toggle.getBoundingClientRect().bottom + MARGIN);
-    this.#panel.style.top = top + 'px';
-    this.#panel.classList.add(this.#style.panelOpen);
-    document.body.classList.add(this.#style.helpMode);
-    this.#toggle.setAttribute('aria-expanded', 'true');
-  }
-
-  ClosePanel() {
-    if (!this.#panel) {
-      return;
-    }
-    this.#panel.classList.remove(this.#style.panelOpen);
-    document.body.classList.remove(this.#style.helpMode);
-    this.#toggle.setAttribute('aria-expanded', 'false');
-  }
-
-  #EnablePanel(templateId, toggleId) {
-    const template = document.getElementById(templateId);
-    const toggle = document.getElementById(toggleId);
-    if (!template || !toggle) {
-      console.warn(`Help: panel "${templateId}" or toggle "${toggleId}" not found`);
-      return;
-    }
-    this.#panel = document.createElement('aside');
-    this.#panel.className = this.#style.panel;
-    this.#panel.setAttribute('aria-label', 'Help');
-
-    const close = document.createElement('button');
-    close.className = this.#style.panelClose;
-    close.textContent = '✕';
-    close.onclick = this.ClosePanel.bind(this);
-
-    this.#panel.append(close, template.content.cloneNode(true));
-    document.body.appendChild(this.#panel);
-
-    this.#toggle = toggle;
-    this.#toggle.setAttribute('aria-expanded', 'false');
-    this.#toggle.onclick = this.TogglePanel.bind(this);
-    document.addEventListener('keydown', this.#KeyDown.bind(this));
-  }
-
-  #KeyDown(event) {
-    if (event.target.closest?.('input, textarea, select, [contenteditable]')) {
-      return;
-    }
-    if (event.key === '?') {
-      event.preventDefault();
-      this.TogglePanel();
-    } else if (event.key === 'Escape') {
-      this.ClosePanel();
-    }
   }
 
   #Show(event) {
@@ -237,51 +170,125 @@ export class Help {
         font-size: 11px;
         word-break: break-all;
       }
-
-      ._hp_Panel {
-        position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        width: min(380px, 100vw);
-        box-sizing: border-box;
-        overflow-y: auto;
-        padding: 16px 20px;
-        background: #1f1f1f;
-        border-left: 1px solid #555;
-        box-shadow: -8px 0 24px rgba(0,0,0,0.45);
-        color: #ddd;
-        font-size: 13px;
-        line-height: 1.5;
-        z-index: 9000;
-        transform: translateX(100%);
-        visibility: hidden;
-        transition: transform 0.2s ease, visibility 0.2s;
-      }
-      ._hp_PanelOpen {
-        transform: translateX(0);
-        visibility: visible;
-      }
-      ._hp_PanelClose {
-        position: absolute;
-        top: 10px;
-        right: 12px;
-        background: none;
-        border: none;
-        color: #aaa;
-        font-size: 16px;
-        cursor: pointer;
-      }
-      ._hp_Panel h2 {
-        margin: 16px 0 6px;
-        color: #fff;
-        font-size: 14px;
-      }
-      ._hp_HelpMode [data-help] {
-        outline: 1px dashed rgba(102, 126, 234, 0.7);
-        outline-offset: 2px;
-      }
     `;
     document.head.appendChild(style);
   }
 };
+
+// ── Help panel ───────────────────────────────────────────────────────────────────────────────────────────────
+
+const panelStyle = `
+.pb-help { position: fixed; z-index: 1001; top: var(--pb-nav-height, 0px); right: 0; bottom: 0; width: min(620px, 100vw);
+  display: none; flex-direction: column; background: #111; color: #e0e0e0; border-left: 1px solid #333;
+  box-shadow: -8px 0 24px #000a; font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  box-sizing: border-box; }
+.pb-help.open { display: flex; }
+.pb-help * { box-sizing: border-box; }
+.pb-help .pb-help-tabs { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid #262626; }
+.pb-help .pb-help-tabs button { padding: 3px 12px; border: 1px solid #333; border-radius: 999px; background: transparent;
+  color: #bbb; font: inherit; cursor: pointer; }
+.pb-help .pb-help-tabs button.on { background: #1d2a52; border-color: #4b6bd6; color: #fff; }
+.pb-help .pb-help-tabs .pb-help-close { margin-left: auto; border: none; font-size: 15px; }
+.pb-help .pb-help-body { flex: 1; overflow: auto; padding: 4px 16px 24px; }
+.pb-help h2 { font-size: 14px; color: #fff; margin: 16px 0 4px; border-bottom: 1px solid #262626; padding-bottom: 2px; }
+.pb-help h3, .pb-help h4 { font-size: 13px; color: #ddd; margin: 10px 0 2px; }
+.pb-help p { margin: 4px 0; }
+.pb-help ul { margin: 4px 0; padding-left: 20px; }
+.pb-help li { margin: 2px 0; }
+.pb-help code, .pb-help kbd { font: 12px ui-monospace, Menlo, monospace; background: #1f1f1f; border: 1px solid #2a2a2a;
+  border-radius: 4px; padding: 0 4px; }
+.pb-help table { border-collapse: collapse; margin: 4px 0; width: 100%; }
+.pb-help th, .pb-help td { text-align: left; padding: 2px 6px; border-bottom: 1px solid #222; vertical-align: top; }
+.pb-help th { color: #8b8b8b; font-weight: 600; }
+.pb-help a { color: #58a6ff; }
+.pb-help .pb-help-none { color: #8b8b8b; font-style: italic; margin-top: 12px; }
+.${helpModeClass} [data-help] { outline: 1px dashed rgba(102, 126, 234, 0.7); outline-offset: 2px; }
+`;
+
+// the tabs: "This page", then those of the plugins ({ label, html: HTML text, or a function giving it, maybe async })
+const tabs = [{ label: 'This page', html: PageHelp }];
+let current = 0;
+let panel = null;
+
+function PageHelp() {
+  const template = document.getElementById('help-panel');
+  if (template) return template.content.cloneNode(true);
+  return `<p class="pb-help-none">No help for this page${tabs.length > 1 ? ': see the other tabs' : ''}.</p>`;
+}
+
+export function AddHelpTab(tab) {
+  if (!tab?.label || (tab.html == null)) {
+    console.warn('Help: a tab needs a label and its html', tab);
+    return;
+  }
+  tabs.push(tab);
+  if (panel) RenderTabs();
+}
+
+function Panel() {
+  if (panel) return panel;
+  const css = document.createElement('style');
+  css.textContent = panelStyle;
+  document.head.appendChild(css);
+
+  panel = document.createElement('aside');
+  panel.className = 'pb-help';
+  panel.setAttribute('aria-label', 'Help');
+  panel.innerHTML = '<div class="pb-help-tabs"></div><div class="pb-help-body"></div>';
+  document.body.appendChild(panel);
+  RenderTabs();
+  return panel;
+}
+
+function RenderTabs() {
+  const bar = panel.querySelector('.pb-help-tabs');
+  bar.replaceChildren(...tabs.map((tab, i) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = tab.label;
+    button.classList.toggle('on', i === current);
+    button.onclick = () => { current = i; RenderTabs(); RenderBody(); };
+    return button;
+  }));
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'pb-help-close';
+  close.title = 'Close (Esc)';
+  close.textContent = '✕';
+  close.onclick = () => ToggleHelp(false);
+  bar.appendChild(close);
+}
+
+async function RenderBody() {
+  const body = panel.querySelector('.pb-help-body');
+  const tab = tabs[current] ?? tabs[0];
+  try {
+    const content = await (typeof tab.html === 'function' ? tab.html() : tab.html);
+    if (content instanceof Node) body.replaceChildren(content);
+    else body.innerHTML = String(content ?? '');
+  } catch (error) {
+    body.textContent = `This help could not be loaded: ${error.message}`;
+  }
+  body.scrollTop = 0;
+}
+
+export function IsHelpOpen() {
+  return !!panel?.classList.contains('open');
+}
+
+// open (true), close (false) or switch (null) the help panel
+export async function ToggleHelp(open = null) {
+  const show = open ?? !IsHelpOpen();
+  if (!show && !panel) return;
+  Panel().classList.toggle('open', show);
+  document.body.classList.toggle(helpModeClass, show);
+  window.dispatchEvent(new CustomEvent('pb-help', { detail: { open: show } }));
+  if (show) await RenderBody();
+}
+
+// Esc: the help panel first
+window.addEventListener('pb-escape', (event) => {
+  if ((event.detail?.layer !== 'help') || event.defaultPrevented || !IsHelpOpen()) return;
+  event.preventDefault();
+  ToggleHelp(false);
+});

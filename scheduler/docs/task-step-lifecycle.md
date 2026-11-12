@@ -388,7 +388,8 @@ entirely in the executor, see [executor.md](executor.md).
 
 Top-level keys: `name`, `publish`, `configurations` (optional), `flow`, `priority` (optional),
 `args` (optional), `executor_name` (optional), `duration_context` (optional, see "Estimated start
-and end times" below).
+and end times" below), `launcher` (optional: the record of the launcher that submitted the task, kept as is, see
+[board-job-launcher.md](board-job-launcher.md)).
 
 Dependencies between steps are implicit from position in the `flow` array.
 

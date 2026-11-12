@@ -20,7 +20,7 @@ import zipfile
 PB_ROOT = os.environ.get('PB_ROOT', '/srv/puffin-bench')
 REPORTS = f'{PB_ROOT}/data/html/objectives'
 STORAGE = f'{PB_ROOT}/data/publisher'
-LINKS = f'{PB_ROOT}/data/html/board/custom/task_links.json'
+LINKS = f'{PB_ROOT}/data/html/board/custom/tlspuffin/task_links.json'
 CACHE = f'{PB_ROOT}/data/runs-cache'
 
 

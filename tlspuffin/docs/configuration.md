@@ -52,10 +52,10 @@ Anything other than `Y`/`y` aborts with exit 0 and writes nothing. There is no f
 | `${ROOT_PATH}` | `--rootpath` (may be empty if `--binpath`/`--datapath` were used instead) | *(reserved — not referenced by any current template)* |
 | `${BINARY_PATH}` | resolved `binpath` | `scheduler.service` (`WorkingDirectory`, `ExecStart`) |
 | `${DATA_PATH}` | resolved `datapath` | `config.json`, `git_restapi-config.json`, `publisher_config.json`, `vis_comparator-config.json` |
-| `${GIT_RESTAPI_PORT}` | `--port-git` | `git_restapi-config.json`, `launchers/tlspuffin/config.js`, `publisher/summary_config.js` |
-| `${SCHEDULER_PORT}` | `--port-scheduler` | `config.json`, `index.html` |
-| `${PUBLISHER_PORT}` | `--port-publisher` | `publisher_config.json`, `index.html` |
-| `${VIS_COMPARATOR_PORT}` | `--port-vis` | `vis_comparator-config.json`, `index.html`, `publisher/summary_config.js` |
+| `${GIT_RESTAPI_PORT}` | `--port-git` | `git_restapi-config.json`, `board/custom/tlspuffin/config.js`, `publisher/summary_config.js` |
+| `${SCHEDULER_PORT}` | `--port-scheduler` | `config.json`, `publisher/summary_config.js` |
+| `${PUBLISHER_PORT}` | `--port-publisher` | `publisher_config.json` |
+| `${VIS_COMPARATOR_PORT}` | `--port-vis` | `vis_comparator-config.json`, `publisher/summary_config.js` |
 | `${NB_CORES}` | `--nb-cores` (or the default) | `config.json` |
 | `${USERNAME}` | `--username` (or the default) | `scheduler.service` |
 
@@ -66,12 +66,12 @@ Anything other than `Y`/`y` aborts with exit 0 and writes nothing. There is no f
 | Template (embedded) | Written to | Overwrite gate |
 |---|---|---|
 | `config/config.json` | `<binpath>/config.json` | `--force-config` |
-| `data/html/board/launchers/config.js` | `<datapath>/html/board/launchers/config.js` | `--force-config` |
-| `data/html/board/launchers/tlspuffin/config.js` | `<datapath>/html/board/launchers/tlspuffin/config.js` | `--force-config` |
+| `data/html/board/custom/config.js` | `<datapath>/html/board/custom/config.js` | `--force-config` |
+| `data/html/board/custom/tlspuffin/config.js` | `<datapath>/html/board/custom/tlspuffin/config.js` | `--force-config` |
 | `config/git_restapi-config.json` | `<binpath>/git_restapi-config.json` | `--force-config` |
 | `config/publisher_config.json` | `<binpath>/publisher_config.json` | `--force-config` |
 | `data/html/publisher/summary_config.js` | `<datapath>/html/publisher/summary_config.js` | `--force-config` |
-| `data/html/index.html` | `<datapath>/html/index.html` | `--force-config` |
+| `data/html/index.html` | `<datapath>/html/index.html` | `--force-config` or `--force-files` (a page, not a configuration) |
 | `data/publisher/tlspuffin/.rules` | `<datapath>/publisher/tlspuffin/.rules` | `--force-config` |
 | `data/publisher/sshpuffin/.rules` | `<datapath>/publisher/sshpuffin/.rules` | `--force-config` |
 | `config/vis_comparator-config.json` | `<binpath>/vis_comparator-config.json` | `--force-config` |

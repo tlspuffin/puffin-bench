@@ -4,25 +4,63 @@
 
 ## Landing Page (`index.html`)
 
-A static page installed to `<datapath>/html/index.html`, with `${SCHEDULER_PORT}`/`${PUBLISHER_PORT}`/`${VIS_COMPARATOR_PORT}` resolved by the installer at install time (see [configuration.md](configuration.md)). It renders a left-hand nav (`#navitems`) built from a hardcoded `services` array — Scheduler board, Publisher results, vis_comparator, and the scheduler's history page — each opening in the `#content` iframe; the Scheduler board is shown first. Purely navigational; no data processing of its own.
+A static page installed to `<datapath>/html/index.html`. Every page of the bench has the top bar of the bench (the
+plugin below), so this page only redirects: to the scheduler board, or with `#results`, `#analyzer`, `#history`
+(optionally `/<package>`, e.g. `#results/sshpuffin`) to that page, on the default ports of the services (10082,
+10083, 10084) and the host of the page. No data processing of its own.
 
-## Job Launcher (`board/launchers/`)
+## Board Plugin (`board/custom/`)
 
-`board/launchers/` holds two layers: a generic, per-project plugin registry directly under it, and the concrete tlspuffin launcher one level down in `board/launchers/tlspuffin/`.
+The scheduler's pages know no project (see [scheduler/docs/board-job-launcher.md](../../scheduler/docs/board-job-launcher.md),
+the plugin contract): what tlspuffin adds to them — its job launcher, the descriptions of its tasks and monitor
+messages, its buttons and filters in History, its links on the task page, the top bar of the bench and its guide — is
+its plugin, installed under `<datapath>/html/board/custom/`. The pages of the other services (Results, Bugs, the
+objectives reports, Runs, Analyzer) load the same frame (`board/frame.js`) and so the same plugin: they all share the
+`html` root.
 
-- **`config.js`** (directly under `board/launchers/`) — `{ projects: ['tlspuffin'] }`, the plugin registry consumed by the scheduler's own `board/launchers/launchers.js`, which drives the "+" button's launcher menu and dynamically `import()`s `./<project>/joblauncher.js` for each listed project.
+- **`config.js`** — `{ projects: ['tlspuffin'] }`: the projects whose plugins the scheduler's `board/plugins.js` loads.
+- **`tlspuffin/plugin.js`** — the plugin: `launcher` (a subclass of `JobLauncher` whose task descriptions also give the
+  package to the search of History), `helpTexts` (those of `joblauncher.js`), `frame` (`bar.js`, and the tab
+  "puffin-bench guide" of the help panel from `guide.js`), `history` (`history.js`), `task` (`relaunch`: the template of
+  a task started without the launcher, from its job type, `COMMIT_ID` and `CAMPAIGN_ID`; `links`: **🕘 N runs**, the
+  other tasks of the same commit and type kept by the publisher, from its `/html/runs/index.json`, shown when there are
+  several) and `taskcard` (`resultsLink`: the published results with `&commit=<COMMIT_ID>`, so that Results shows the
+  card of the commit when the publisher keeps a newer task of the same libraries).
+- **`tlspuffin/bar.js`** — the items of the top bar: the bench (🐡 puffin-bench and its deployed version, from
+  `version.json`), the services (Scheduler, Results, Analyzer, History; keys `g` then `s`/`r`/`a`/`h`) on the default
+  ports and the host of the page, the yellow pill of the objectives found live (`/html/objectives/live.json`, not for
+  VulnA/VulnB), the package shown by Results and Analyzer. On a page of another service it shows the status light of the
+  scheduler on its default port; the scheduler's own pages show it at their address. It imports `hostlinks.js`: the
+  links to this machine (a loopback host, or a port of the services) follow the address typed in the browser.
+- **`tlspuffin/guide.js`** — the guide of the bench (pages, workflow, job types, words, symbols, services), including
+  what tlspuffin adds to the pages of the scheduler.
+- **`tlspuffin/history.js`** / **`history.css`** — on History: the buttons of a task from `task_links.json` (🐞 its
+  objectives report, gold, plain for VulnA/VulnB whose objectives are expected, outlined when no bug is confirmed;
+  🎯 the conclusion of a Vuln task, green / amber / red; a report with new bugs highlights the task and puts its title
+  before the button); the package of each task (its `PACKAGE` argument, tlspuffin without one; read from the final
+  state of the tasks and kept by the browser); the filters `all | tlspuffin | sshpuffin` (one at a time) and
+  `🐞 with objectives` (with the states); the short job types (Perf, VulnA, VulnB, Camp) and their colours; the number
+  of tasks with objectives in the counts.
+- **`tlspuffin/task_links.json`** — not installed: written by `scripts/tools/objectives_report.sh` after each call
+  (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)); urls relative to the History page.
+- **`tlspuffin/version.json`** — not installed: the deployed version of the bench, written by
+  `scripts/test_machine/deploy.sh`; read by the top bar, by the Bugs page and by the job scripts (`SummaryAddBench`,
+  `scripts/PR_common.sh`), which record it in each summary.
 
-The tlspuffin launcher itself, under `board/launchers/tlspuffin/`, is a self-contained UI module, embedded into the scheduler's board page, that builds and submits a `POST /api/task/new` multipart request — the same request shape described in the root [README](../../README.md#usage).
+### The job launcher (`tlspuffin/joblauncher.js`)
+
+The launcher builds and submits a `POST /api/task/new` multipart request — the same request shape described in the root
+[README](../../README.md#usage).
 
 - **`tlspuffin/config.js`** — one constant: `commitsUrl`, pointing at git_restapi's `/api/git/history/tlspuffin` (port resolved by the installer). Consumed only by `joblauncher.js`.
 - **`tlspuffin/jobsconfig.json`** — declares the five job types offered in the launcher UI (`vuln-a`, `vuln-b`, `perf`, `evaluate-pr`, `campaign`), each naming which flow-config/step-script/support-files to fetch from `<datapath>/html/jobsscripts/tlspuffin/` (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)) and submit as the task's `config`/`script`/`files[]` parts. `evaluate-pr` is a **composite**: it has no `config`/`script` of its own, only `"composite": ["vuln-a", "perf"]`, meaning the launcher submits two separate tasks and reports on both.
-- **`tlspuffin/joblauncher.js`** (`JobLauncher` class, styled by `tlspuffin/joblauncher.css`) — builds its own modal DOM (no framework), then:
-  1. Fetches `jobsconfig.json` to populate the job-type chips, and the commit history from `commitsUrl` to populate a searchable, tabbed commit picker (`main/dev`, `PR`, `branches`, `All`) — PR data can be refreshed on demand against git_restapi's `?refresh=all`/`?refresh=local` (rate-limited GitHub API calls, credit/reset info surfaced in the refresh button's tooltip).
-  2. For `campaign` jobs, exposes extra fields (timeout, vendor/features/impl, per-attempt core/memory limits) that get folded into `runtime[RUNTIME_*]` form fields — these are the `${RUNTIME_*}` placeholders `PR_campaign.json` expects (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)); this substitution is entirely client-side JS template literals, unrelated to the installer's own `${...}` substitution.
-  3. On launch, fetches the job's `config`/`script`/`files` as blobs and posts them as multipart form parts alongside `args[COMMIT_ID]`, `args[PACKAGE]`, and (for campaigns) `args[CAMPAIGN_ID]`/`args[SAVE_CORPUS]`/`args[DISABLE_KILL_ON_HANG]`.
-  4. `describeTask(task)` — called by the scheduler's board, task page and history (through `launchers.js`'s `DescribeTask`; the scheduler itself stays project-agnostic): resolves the task's commit (`COMMIT_ID` argument, or the commit id in the task name) with git_restapi and returns the commit line for the task title (`Perf@5c588a #540 [title]`, or `my test · Perf@…` for a custom name; type from the default name or the job type) and for the `COMMIT_ID` argument. An unknown commit (or git_restapi down) keeps the task name.
-
-  5. `describeMonitor(task, message)` — the one-line summary of a running experiment on the board: corpus size and age (⚠️ amber after 60 min without a new entry), objectives (🎉, linked to the live objectives page; plain, without 🎉, in VulnA/VulnB tasks, which look for known bugs), fuzzing errors and crashes, log volume, ASAN, age of the stats; the details in the hovers, the full message on click; red for errors, amber for warnings (stale stats, log volume, ASAN not instrumented). An attempt that found objectives is highlighted (gold box, gold square in the step header, 🎉 pill; not in VulnA/VulnB), and the task's state strip gets a `🎉 N objectives · live ↗` button (objectives of all its attempts) to the live objectives page; once the task is finished, `· report ↗` to its final page, or `· report pending` until `objectives_report.sh` has written it. It reads the `#MONITOR_JSON` line that `MonitorExperiment` (`scripts/PR_common.sh`) appends to its message, or the message text for runs started before that line existed.
+- **`tlspuffin/joblauncher.js`** (`JobLauncher` class, styled by `tlspuffin/joblauncher.css`, loaded when the launcher is created — only on the pages of the scheduler, so that the other pages keep their own look of the commit lines) — builds its own modal DOM (no framework), then:
+  1. Fetches `jobsconfig.json` to populate the job-type chips, and the commit history from `commitsUrl` to populate a searchable, tabbed commit picker (`main/dev`, `PR`, `branches`, `All`) — PR data can be refreshed on demand against git_restapi's `?refresh=all`/`?refresh=local` (rate-limited GitHub API calls, credit/reset info surfaced in the refresh button's tooltip). `open(custom)` pre-fills the form with the settings of a previous task (`task.launcher.custom`), or with `{ job, commit }` from the board's `#launch=tlspuffin&job=<job type>&commit=<sha>` (e.g. "no Perf run" on Results).
+  2. For `campaign` jobs, exposes extra fields (timeout, vendor/features/impl, per-attempt core/memory limits) that get folded into `runtime[RUNTIME_*]` form fields — these are the `${RUNTIME_*}` placeholders `PR_campaign.json` expects (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)), substituted by the scheduler when it creates the task, unrelated to the installer's own `${...}` substitution.
+  3. On launch, checks the scheduler (`CheckScheduler()` of `board/health.js`), fetches the job's `config`/`script`/`files` as blobs and posts them as multipart form parts alongside `args[COMMIT_ID]`, `args[PACKAGE]`, and (for campaigns) `args[CAMPAIGN_ID]`/`args[SAVE_CORPUS]`/`args[DISABLE_KILL_ON_HANG]`. Its record, `"launcher": { "project": "tlspuffin", "custom": { … } }` (every setting of the form), is inserted as text at the start of the flow JSON, which cannot be parsed before the scheduler resolves its `${RUNTIME_*}`.
+  4. `describeTask(task)` — called by the scheduler's board, task page and history (through `plugins.js`'s `DescribeTask`; the scheduler itself stays project-agnostic): resolves the task's commit (`COMMIT_ID` argument, or the commit id in the task name) with git_restapi and returns the commit line for the task title (`Perf@5c588a #540 [title]`, or `my test · Perf@…` for a custom name; type from the default name or the job type), the commit line shown for the `COMMIT_ID` argument (`commitLine`, not repeated when the title shows it: `inTitle`), the hover of its commit line for the search of History (full id, PR, date, whole message), and how to show `PACKAGE` (its value alone) and `COMPAT_WARNING` (a warning line). An unknown commit (or git_restapi down) keeps the task name.
+  5. `describeMonitor(task, message)` — the one-line summary of a running experiment on the board: corpus size and age (⚠️ amber after 60 min without a new entry), objectives (🎉, linked to the live objectives page; plain, without 🎉, in VulnA/VulnB tasks, which look for known bugs), fuzzing errors and crashes, log volume, ASAN, age of the stats; the details in the hovers, the full message on click; red for errors, amber for warnings (stale stats, log volume, ASAN not instrumented). An attempt that found objectives is highlighted (`notable`: gold box, gold square in the step header; not in VulnA/VulnB) and its chip on the task page counts them (`badge`); the task gets a `🎉 N objectives · live ↗` button (objectives of all its attempts, on its card and on its task page) to the live objectives page; once the task is finished, `· report ↗` to its final page — until `objectives_report.sh` has written it, the live page (`· live ⏳`) while it exists, else `· report pending`. It reads the `#MONITOR_JSON` line that `MonitorExperiment` (`scripts/PR_common.sh`) appends to its message, or the message text for runs started before that line existed.
+  6. `describeSettings(task)` — the settings of the task in readable form for the task page: job type, commit, package, timeout, configurations, attempts × cores, vendor (and the preset a `:latest-asan` vendor ran with), features, parameters, campaign, compat rules applied, LibAFL.
 
 ## Commit Context (`common/commitinfo.js`)
 

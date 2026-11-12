@@ -21,7 +21,7 @@
     <h2>Settings</h2>
     <div class="task-settings" id="task-settings"></div>
 
-    <h2>Steps <span class="task-hint">— an attempt: its duration (and the objectives it found); hover: details; click: its logs</span></h2>
+    <h2>Steps <span class="task-hint">— an attempt: its duration (and what its project counts in it); hover: details; click: its logs</span></h2>
     <div class="task-steps-scroll"><table class="task-steps" id="task-steps"></table></div>
 
     <details class="task-classic" open>
@@ -38,9 +38,9 @@
 
     <h2>Header and actions</h2>
     <ul>
-      <li>Job type and commit (<code>VulnA@5c588a #540 message</code>), the state of the task, who started it, when it started and ended, its duration and steps.</li>
-      <li><b>↻ Relaunch as template</b>: the launcher, pre-filled with every setting of this task (job type, commit, package, vendor, features, parameters, timeout, cores…); edit any field, then launch. An edited field is outlined. A task started automatically (for a commit or a PR) has no launcher record: its job type and commit are filled in, the other settings are the defaults.</li>
-      <li>📊 its published results, <b>🕘 N runs</b> (when its commit was run several times: every task of that commit and type, compared), 🐞 its objectives (live page while it runs, final report once it ended), ⬇️ its artefacts (logs, outputs of every attempt, objectives and their replay reports), 🔗 a link to this page.</li>
+      <li>The task as its project describes it (else its name), the state of the task, who started it, when it started and ended, its duration and steps.</li>
+      <li><b>↻ Relaunch as template</b>: the launcher, pre-filled with every setting of this task; edit any field, then launch. A task started without the launcher (no launcher record): the settings its project reads from the task, the others at their defaults.</li>
+      <li>📊 its published results, the links and buttons of its project, ⬇️ its artefacts (logs and outputs of every attempt), 🔗 a link to this page.</li>
       <li>While it runs: its priority and ✖ cancel.</li>
       <li>Once it ended: <b>💣 Delete</b> its archived results, here and on the publisher; Results then shows the previous run of the same commit and type, if any.</li>
     </ul>
@@ -50,7 +50,7 @@
 
     <h2>Steps</h2>
     <ul>
-      <li>One row per step (Init, Build, Experiment…), one column per configuration (library); a chip per attempt: its duration, the number of objectives it found.</li>
+      <li>One row per step, one column per configuration; a chip per attempt: its duration, and what its project counts in it.</li>
       <li>Colours: <span class="att done">done</span> <span class="att running">running</span> <span class="att pending">pending</span> <span class="att timedout">timed out</span> <span class="att cancelled">cancelled</span> <span class="att failed">failed</span>.</li>
       <li>Hover a chip: state, exit code, cores, start and end, the summary of its monitor message. Click: its logs.</li>
     </ul>

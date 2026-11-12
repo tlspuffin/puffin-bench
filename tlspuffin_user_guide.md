@@ -48,7 +48,7 @@ Ports above are the installer's defaults (`--port-git`/`--port-scheduler`/`--por
 
 ## Job types
 
-The following job types are declared in `jobsconfig.json`, served with the rest of the tlspuffin job-launcher UI (installed under `<datapath>/html/board/launchers/tlspuffin/` — see [installer/docs/web-assets.md](installer/docs/web-assets.md)):
+The following job types are declared in `jobsconfig.json`, served with the rest of the tlspuffin job-launcher UI, part of the tlspuffin plugin of the board (installed under `<datapath>/html/board/custom/tlspuffin/` — see [tlspuffin/docs/web-assets.md](tlspuffin/docs/web-assets.md)):
 
 | Label in UI | Job type key | Flow JSON | Purpose |
 |-------------|--------------|-----------|---------|

@@ -13,7 +13,7 @@
 // - click (data-click-tip, or OpenClickTip(anchor, html) from the code): an element that does nothing else on click
 //   opens a small window with its information; the cursor is "context-menu" (an arrow with a small box). The window
 //   stays until another click, Esc, or a click on the element again.
-// Imported once by nav.js, which every page loads.
+// Imported once by frame.js, which every page loads.
 
 const DELAY_MS = 500;
 const esc = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -199,7 +199,7 @@ document.addEventListener('click', (event) => {
   }
   if (clickTip && !clickTip.contains(event.target)) CloseClickTip();
 }, true);
-// Esc (nav.js: pb-escape, the topmost layer first): closes the window, and only it
+// Esc (frame.js: pb-escape, the topmost layer first): closes the window, and only it
 window.addEventListener('pb-escape', (event) => {
   if (!clickTip || event.defaultPrevented || (event.detail?.layer && event.detail.layer !== 'modal')) return;
   event.preventDefault();

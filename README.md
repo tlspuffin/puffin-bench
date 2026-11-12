@@ -311,7 +311,7 @@ Open the board dashboard:
 http://<host>:10082/files/board/board.html
 ```
 
-Click **+** to submit a job: select a job type, pick a commit from the Git REST API, launch. The board streams live stdout/stderr per step.
+Click **+** to submit a job: select a job type, pick a commit from the Git REST API, launch. The board streams live stdout/stderr per step. The launcher, and what the pages show of tlspuffin (the top bar of the bench, the commit lines, the objectives), come from the tlspuffin plugin of the board, written by the installer under `<datapath>/html/board/custom/` (see [tlspuffin/docs/web-assets.md](tlspuffin/docs/web-assets.md) and [scheduler/docs/board-job-launcher.md](scheduler/docs/board-job-launcher.md)).
 
 Browse published results:
 

@@ -1,14 +1,45 @@
 import { logsManager } from './logsmanager.js';
 import { Clipboard } from './clipboard.js';
 import { DropMenu } from './dropmenu.js';
+import * as Plugins from './plugins.js';
 
-// The published results of a task (publish_link: the Results page at #<task id>), with its commit (&commit=<sha>):
-// Results shows the card of the commit when the publisher keeps a newer task of the same libraries instead
+// The published results of a task: its publish_link, as its project's plugin makes it (plugins.js ResultsLink)
 export function ResultsLink(task) {
   const link = task?.publish_link || null;
-  const commit = (task?.args ?? []).find(arg => arg.key === 'COMMIT_ID')?.value;
-  if (!link || !/^[0-9a-f]{7,40}$/i.test(commit ?? '') || !/#[^#&=]+$/.test(link)) return link;
-  return `${link}&commit=${commit}`;
+  return link ? Plugins.ResultsLink(task, link) : null;
+}
+
+// A button of a task gathered from the monitor summaries of its attempts (describeMonitor taskLink, see plugins.js):
+// its label with the count of every attempt, a link to its page; a page written later (pending) is shown without
+// link, or with its fallback page, until it exists
+export function TaskLinkElement(link, className) {
+  const count = (link.count ?? 0).toLocaleString('en-US');
+  const label = (text) => String(text ?? '').replace('{count}', count);
+  const button = document.createElement(link.url ? 'a' : 'span');
+  button.className = `${className} ${link.highlight ? `highlight-${link.highlight}` : ''}`;
+  button.textContent = label(link.label);
+  button.title = link.title ?? '';
+  if (link.url) {
+    button.href = link.url;
+    button.target = '_blank';
+    button.rel = 'noopener';
+  }
+  if (link.url && link.pending) {
+    TaskCard.PageExists(link.url).then(async exists => {
+      if (exists) return;
+      const fallback = link.pending.fallback;
+      if (fallback?.url && await TaskCard.PageExists(fallback.url)) {
+        button.href = fallback.url;
+        button.textContent = label(fallback.label ?? link.label);
+        button.title = fallback.title ?? '';
+        return;
+      }
+      button.removeAttribute('href');
+      button.textContent = label(link.pending.label);
+      button.title = link.pending.title ?? '';
+    });
+  }
+  return button;
 }
 
 export class TaskCard {
@@ -24,9 +55,9 @@ export class TaskCard {
   /**
    * @param {object}   options
    * @param {function} [options.onRefresh]      — called after a cancel action
-   * @param {function} [options.describeTask]   — async task -> { title, commit } HTML or null (see launchers.js)
+   * @param {function} [options.describeTask]   — async task -> { title, commit } HTML or null (see plugins.js)
    * @param {function} [options.describeMonitor] — (task, message) -> { summary HTML, level } or null: one-line summary
-   *                                               of a step's monitor message (see launchers.js)
+   *                                               of a step's monitor message (see plugins.js)
    */
   constructor(options = {}) {
     this.#onRefresh = options.onRefresh ?? (() => {});
@@ -374,7 +405,7 @@ export class TaskCard {
           const square = document.createElement('span');
           square.className = `card-step-square state-${String(attempt.state).toLowerCase()}`;
           if ((attempt.state === 'Done') && (attempt.exit_code !== 0)) square.classList.add('failed');
-          // highlighted by its monitor summary (e.g. objectives found): visible when the step is folded
+          // highlighted by its monitor summary (e.g. the run found something): visible when the step is folded
           if (attempt.message_from_run && this.#describeMonitor) {
             try {
               const highlight = this.#describeMonitor(task, attempt.message_from_run)?.highlight;
@@ -419,33 +450,13 @@ export class TaskCard {
     return div;
   }
 
-  // Buttons of the task's state strip gathered from the monitor summaries of its attempts (taskLink: e.g. the live
-  // objectives page with the objectives of every running attempt)
+  // Buttons of the task's state strip gathered from the monitor summaries of its attempts (taskLink: e.g. a page of
+  // the project about the task, with a count summed over its attempts)
   #RenderTaskLinks(strip) {
     if (this.#taskLinks.size === 0) return;
     const box = document.createElement('div');
     box.className = 'card-task-links-strip';
-    for (const link of this.#taskLinks.values()) {
-      const button = document.createElement(link.url ? 'a' : 'span');
-      button.className = `card-task-link-badge ${link.highlight ? `highlight-${link.highlight}` : ''}`;
-      button.textContent = String(link.label ?? '').replace('{count}', link.count.toLocaleString('en-US'));
-      button.title = link.title ?? '';
-      if (link.url) {
-        button.href = link.url;
-        button.target = '_blank';
-        button.rel = 'noopener';
-      }
-      // a page written later (e.g. the final objectives report): shown as pending, without link, until it exists
-      if (link.url && link.pending) {
-        TaskCard.#PageExists(link.url).then(exists => {
-          if (exists) return;
-          button.removeAttribute('href');
-          button.textContent = String(link.pending.label ?? '').replace('{count}', link.count.toLocaleString('en-US'));
-          button.title = link.pending.title ?? '';
-        });
-      }
-      box.appendChild(button);
-    }
+    for (const link of this.#taskLinks.values()) box.appendChild(TaskLinkElement(link, 'card-task-link-badge'));
     strip.appendChild(box);
   }
 
@@ -453,7 +464,7 @@ export class TaskCard {
   // after a minute (the cards are redrawn at every refresh of the board)
   static #pages = new Map();
 
-  static #PageExists(url) {
+  static PageExists(url) {
     const known = TaskCard.#pages.get(url);
     if (known && (known.exists || (Date.now() - known.time < 60000))) return known.promise;
     const entry = { time: Date.now(), exists: false };
@@ -559,10 +570,10 @@ export class TaskCard {
     return div;
   }
 
-  // Task arguments in one line: "KEY=value · …", a bare value for the keys the project marks so (PACKAGE:
-  // "tlspuffin"), warnings on their own lines; the full values in the hovers.
-  // description (see options.describeTask): { commit, args: { KEY: { bare, level: 'warning', label, hidden } } };
-  // titled: the title shows the commit line, so COMMIT_ID is not repeated
+  // Task arguments in one line: "KEY=value · …", a bare value for the keys the project marks so, the commit line for
+  // the one it marks commitLine, warnings on their own lines; the full values in the hovers.
+  // description (see options.describeTask): { commit, args: { KEY: { bare, level: 'warning', label, hidden, inTitle,
+  // commitLine } } }; titled: the title of the project is shown, so the arguments marked inTitle are not repeated
   #RenderArgs(container, task, description, titled) {
     container.replaceChildren();
     const options = description?.args ?? {};
@@ -571,7 +582,7 @@ export class TaskCard {
     const shorten = (text, max = 60) => text.length > max ? text.slice(0, max - 1) + '…' : text;
     for (const arg of task.args ?? []) {
       const option = options[arg.key] ?? {};
-      if (option.hidden || ((arg.key === 'COMMIT_ID') && titled)) {
+      if (option.hidden || (option.inTitle && titled)) {
         continue;
       }
       if (option.level === 'warning') {
@@ -584,7 +595,7 @@ export class TaskCard {
       const item = document.createElement('span');
       item.className = 'card-task-arg';
       item.title = `${arg.key}=${arg.value}`;
-      if ((arg.key === 'COMMIT_ID') && description?.commit) {
+      if (option.commitLine && description?.commit) {
         item.innerHTML = description.commit;
       } else {
         item.textContent = option.bare ? shorten(arg.value) : `${arg.key}=${shorten(arg.value)}`;
@@ -672,7 +683,7 @@ export class TaskCard {
 
   // Monitor message of an attempt: one line (the project's summary, or the first line of the message), the full
   // message on click
-  // attempt: the attempt's element, highlighted when the summary asks for it (e.g. objectives found)
+  // attempt: the attempt's element, highlighted when the summary asks for it (e.g. the run found something)
   #CreateMonitor(message, attempt = null) {
     const monitor = document.createElement('div');
     monitor.className = 'card-attempt-monitor';
