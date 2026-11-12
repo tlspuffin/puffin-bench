@@ -82,9 +82,9 @@ are made comparable by the <i>compat rules</i> (see below).</p>
     cores by default (the rest stays with the users); the Scheduler's <b>change max</b> sets another maximum for a
     while.</td></tr>
   <tr><td><b>Estimated times</b></td><td>A step is estimated at the median of the last 5 runs of the same step and
-    configuration on the same commit; else of the last 15 runs on other commits that did not time out; capped by its
-    timeout. A running step past its estimate: to its timeout if that kind of step timed out before, else within a
-    minute.</td></tr>
+    configuration on the same commit; else of the last 15 runs on other commits that did not time out; runs with the
+    same number of cores first; capped by its timeout. A running step past its estimate: to its timeout if that kind of
+    step timed out before, else within a minute. An estimate stays an estimate.</td></tr>
   <tr><td><b>Objective</b></td><td>An input saved by the fuzzer because it triggered the oracle: a crash, an
     AddressSanitizer error, a security claim violation.</td></tr>
   <tr><td><b>Replay</b></td><td>Each objective is run again with exactly the binary, flags and environment of the

@@ -98,7 +98,7 @@
     </ul>
 
     <h2>Estimated times</h2>
-    <p>Each step is estimated at the median of the last 5 runs of the same step and configuration <b>on the same commit</b> (the job scripts change over time); without 2 of them, the median of the last 15 runs on other commits that did not time out (a timeout mostly means the bug is not at that commit); always capped by the timeout. A running step past its estimate is expected to run to its timeout when that kind of step has timed out before (on its commit first), else to end within a minute. A scheduled task starts when enough cores are free for its first step.</p>
+    <p>Each step is estimated at the median of the last 5 runs of the same step and configuration <b>in the same context</b> (for tlspuffin: the same commit; the job scripts change over time); without 2 of them, the median of the last 15 runs in other contexts that did not time out (a timeout mostly means the bug is not at that commit); runs with the same number of cores first; always capped by the timeout. A running step past its estimate is expected to run to its timeout when that kind of step has timed out before (in its context first), else to end within a minute. A scheduled task starts when enough cores are free for its first step.</p>
 
     <p>Details: an element with the <span style="cursor:context-menu;text-decoration:underline dotted">box cursor</span> (an arrow with a small box) opens a small window on <b>click</b> (Esc or a click elsewhere closes it); an element with the <span style="cursor:help;text-decoration:underline dotted">? cursor</span>, a link or a button explains itself on <b>hover</b> (after half a second). Press <b>?</b> to toggle this panel.</p>
   </template>

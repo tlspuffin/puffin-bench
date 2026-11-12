@@ -387,7 +387,8 @@ entirely in the executor, see [executor.md](executor.md).
 ## Task JSON Format (flow definition, submitted by client)
 
 Top-level keys: `name`, `publish`, `configurations` (optional), `flow`, `priority` (optional),
-`args` (optional), `executor_name` (optional).
+`args` (optional), `executor_name` (optional), `duration_context` (optional, see "Estimated start
+and end times" below).
 
 Dependencies between steps are implicit from position in the `flow` array.
 
@@ -467,21 +468,33 @@ read back on the next start.
 It needs how long each step takes: `DurationHistory` (`schedule/duration_history.cxx`) learns it from
 the steps that finished.
 
-- A kind of step is its task `job_type`, its step name and its configuration id (`perf|ExperimentWithCargo|OpenSSL`).
-  The last 60 finished runs of each are kept with their commit and whether they timed out (Done, failed
-  or timed out; cancelled steps and launch errors are ignored), in `<exportPath>/step_durations.json`.
-  On the first start without that file, or with its older format, they are learned from `steps_done.json`.
-- Estimated duration of a step on commit C, capped by the step timeout:
-  1. the median of the last 5 runs on C (from 2 of them): the job scripts change over time, and a
-     commit's own runs say best how long it takes;
+- A kind of step is its task `job_type`, its step name and a digest of its arguments (the `args` of its
+  configuration, after the overrides; independent of their order): `perf|ExperimentWithCargo|9f2c4e1a…`.
+  The last 60 finished runs of each are kept (Done, failed or timed out; cancelled steps and launch errors
+  are ignored) with their duration, their duration context, their number of cores and whether they timed
+  out, in `<exportPath>/duration_history.json`. On a start without that file, they are learned from
+  `steps_done.json` (whose entries carry the task's `duration_context`; older entries have none).
+- The **duration context** of a task says which runs are expected to last the same. It comes from the
+  job's top-level `duration_context`, resolved against the task's arguments (`"${COMMIT_ID}"`: the runs
+  of the same commit; tlspuffin's jobs use it), stored as its MD5. `""` means none. Without the key, it
+  is the MD5 of all the task's arguments (sorted `key=value;`): the runs with exactly the same
+  arguments, e.g. a task relaunched as a template. It is saved with the task (`Task::ToJSON`), hence in
+  `steps_done.json`.
+- Estimated duration of a step, capped by the step timeout; at each level, the runs with the step's
+  number of cores are used when there are at least 2 of them, else all the runs of that level:
+  1. the median of the last 5 runs with the task's duration context (from 2 of them; not with an empty
+     context): the job scripts change over time, and e.g. a commit's own runs say best how long it takes;
   2. else the median of the last 15 runs that did not time out (a timeout mostly means "the expected bug
      is not at that commit", not a typical duration);
   3. else the median of the last 15 runs;
   otherwise the timeout, or 10 minutes for a step without timeout.
 - A running step ends at its start plus the estimated duration. Past its estimate, it ends at its timeout
-  when this kind of step has timed out before (on C, or on any commit when C has no run), else a minute
-  from now.
+  when this kind of step has timed out before (in its duration context, or in any context when its
+  context has no run), else a minute from now.
 - A task ends with the estimated end of its last steps.
+
+An estimate stays an estimate: e.g. a campaign whose timeout is longer than that of the previous
+campaigns of its commit is first estimated at their median, then, once past it, at its own timeout.
 
 Steps that stop early, like a vulnerability search that ends when it finds its objective, are therefore
 estimated from their real durations instead of their timeout.

@@ -349,6 +349,7 @@ Build() {
 | `priority` | no | `int64`; higher runs sooner. Often supplied as `${RUNTIME_PRIORITY}` |
 | `configurations` | no | Object of named, reusable `configuration` blocks, referenced from `run` |
 | `publish` | no | `{ "server": "<publisher name>", "storage": "...", "goal": "...", "check_server_certificat": bool }` |
+| `duration_context` | no | Which runs of this job are expected to last the same, for the estimated times (see [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times"). `${VAR}` placeholders resolve against the task's `args[KEY]`, e.g. `"${COMMIT_ID}"`: runs of the same commit. `""`: no such runs (estimates from all the runs of a step). Absent: the runs with exactly the same task arguments |
 
 **Runtime placeholder substitution.** Before the flow JSON is parsed, the scheduler textually substitutes a **fixed** set of `${RUNTIME_*}` placeholders (`Schedule::AddTask()`), sourced from the `runtime[KEY]` multipart fields of the submit request, with defaults if omitted:
 

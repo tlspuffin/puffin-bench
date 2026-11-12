@@ -196,7 +196,7 @@ The removal goes entry by entry and stops between two files when the process exi
 
 ## `DurationHistory` (`schedule/duration_history.hxx` / `.cxx`)
 
-Process-wide singleton (`Instance()`) that learns how long each kind of step takes, for the estimated start and end times of the board. `Load(exportPath)` reads `<exportPath>/step_durations.json` at start (from the `Schedule` constructor), or seeds it from `steps_done.json`; `Add(step)` records each finished step (from `ManageEndOfStep()`); `Estimate(step)` and `EstimatedEnd(step, now)` are used by `Executor::EstimatedStepsStartTime()`. The rules (kinds of steps, medians, timeouts) are in [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times".
+Process-wide singleton (`Instance()`) that learns how long each kind of step takes, for the estimated start and end times of the board. `Load(exportPath)` reads `<exportPath>/duration_history.json` at start (from the `Schedule` constructor), or seeds it from `steps_done.json`; `Add(step)` records each finished step (from `ManageEndOfStep()`); `Estimate(step)` and `EstimatedEnd(step, now)` are used by `Executor::EstimatedStepsStartTime()`. The rules (kinds of steps, duration contexts, medians, timeouts) are in [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times". The duration context of a task is computed by `Task` (its `duration_context_`), not here.
 
 ---
 
