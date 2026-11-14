@@ -197,6 +197,23 @@ LiveValidation() {
   echo "${out}";
 }
 
+# LiveLibraries <task dir> <state JSON>: every configuration with its number of runs, also the runs without objective
+# yet (the 🎯 count: k/runs), and the target of a custom benchmark's experiment as it recorded it (cli.custom of
+# output/cli-<library>.json, as the final report has it): a configuration without objective counts in 🎯 too
+LiveLibraries() {
+  local taskDir="$1" taskJSON="$2" libs library custom;
+  libs=$( jq -c '[.task.steps | (if type == "object" then [.[]] else . end)[]
+      | select(.name | IN("ExperimentWithCargo", "TwinExperiment"))] | group_by(.id)
+      | map({ library: .[0].id, runs: (map(if .name == "TwinExperiment" then 2 else 1 end) | add) })' <<< "${taskJSON}" 2> /dev/null ) || libs='[]';
+  jq -e 'type == "array"' <<< "${libs}" > /dev/null 2>&1 || libs='[]';
+  while read -r library; do
+    custom=$( jq -c '.custom // empty | select(.target)' "${taskDir}/output/cli-${library}.json" 2> /dev/null );
+    [ -n "${custom}" ] || continue;
+    libs=$( jq -c --arg lib "${library}" --argjson custom "${custom}" 'map(if .library == $lib then . + { cli: { custom: $custom } } else . end)' <<< "${libs}" );
+  done < <( jq -r '.[].library' <<< "${libs}" );
+  echo "${libs}";
+}
+
 # Commit and name of a task, from its state ($1, JSON of /api/task/<id>/state): its arguments are [{key, value}]
 TaskInfo() {
   jq -r '[([.task.args[]? | select(.key? == "COMMIT_ID") | .value] + [.task.args.COMMIT_ID? // empty])[0] // "?",
@@ -386,14 +403,12 @@ for taskDir in "${RUNS}"/[0-9]*; do
       --argjson cves "$( jq -c -f "${TOOLS}/objectives_page/cve_signatures.jq" "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" 2> /dev/null || echo '{}' )" \
       --argjson targets "$( jq -c --slurpfile t "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" '[.task.steps | (if type == "object" then [.[]] else . end)[]
           | select(.name == "ExperimentWithCargo") | { (.id): (.args.vendor // "") }] | add // {} | with_entries(.value = $t[0][.value]) | with_entries(select(.value != null))' <<< "${taskJSON}" 2> /dev/null || echo '{}' )" \
-      --argjson libraries "$( jq -c '[.task.steps | (if type == "object" then [.[]] else . end)[]
-          | select(.name | IN("ExperimentWithCargo", "TwinExperiment"))] | group_by(.id)
-          | map({ library: .[0].id, runs: (map(if .name == "TwinExperiment" then 2 else 1 end) | add) })' <<< "${taskJSON}" 2> /dev/null || echo '[]' )" \
+      --argjson libraries "$( LiveLibraries "${taskDir}" "${taskJSON}" )" \
       '{ task: $task, task_url: $taskUrl, commit: $commit, name: $name, job_type: $jobType, live: true, updated: $updated,
          # when the next update comes (the page says it): the cron period, the replays of a call, this update
          refresh: $refresh,
          not_targeted: $nt, targets: $targets, cves: $cves,
-         # every configuration with its number of runs, also the runs without objective yet (the 🎯 count: k/runs)
+         # every configuration with its number of runs and its custom target (LiveLibraries)
          libraries: ($libraries | map(. + (if $validation[.library] then { validation: $validation[.library] } else {} end))),
          runs: sort_by(.library, .attempt) }' \
       <<< "${runs}" > "${OUT}/live-${task}.json";

@@ -62,20 +62,22 @@ function OracleMatchesGroup(oracle, group) {
   return asanOk && signalOk && (fz?.kind === 'crash' || !['no-crash', 'replay-error', 'security-violation', 'panic'].includes(group.type));
 }
 
-// CustomTargets(runs): the targets of a custom benchmark's experiments (their runs' cli.custom: the catalogue's bug and
-// its signature), as targets of their configuration: { library: { cve, kind, oracle, custom: true } }
-function CustomTargets(runs) {
+// CustomTargets(runs, libraries): the targets of a custom benchmark's experiments (cli.custom, as the experiment recorded
+// it: the catalogue's bug and its signature), as targets of their configuration: { library: { cve, kind, oracle,
+// custom: true } }. From the configurations (libraries[].cli) as well as from the runs with objectives: a configuration
+// whose runs found nothing has its target too, its 🎯 0/n (else it would not count, and the task would look all found)
+function CustomTargets(runs, libraries) {
   const out = {};
-  for (const run of runs ?? []) {
-    const c = run.cli?.custom;
-    if (c?.target && !out[run.library]) out[run.library] = { cve: c.target, kind: c.oracle?.kind ?? null, oracle: c.oracle ?? null, custom: true };
+  for (const { library, cli } of [...(runs ?? []), ...(libraries ?? [])]) {
+    const c = cli?.custom;
+    if (c?.target && !out[library]) out[library] = { cve: c.target, kind: c.oracle?.kind ?? null, oracle: c.oracle ?? null, custom: true };
   }
   return out;
 }
 // ReportTargets(report): the expected bug of each configuration of a report: vuln_targets.json's (report.targets) and
 // those of a custom benchmark's experiments
 function ReportTargets(report) {
-  return { ...(report?.targets ?? {}), ...CustomTargets(report?.runs) };
+  return { ...(report?.targets ?? {}), ...CustomTargets(report?.runs, report?.libraries) };
 }
 // TargetText(target): how a configuration's expected bug is recognised, in words
 export function TargetText(t) {

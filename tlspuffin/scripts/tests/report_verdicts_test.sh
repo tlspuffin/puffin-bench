@@ -5,7 +5,8 @@
 #   - Perf with objectives on a version that declares no known bug: unexpected, its 🐞 gold (new when one is a real bug);
 #   - a bug the validation finds with no known bug's signature: new (🚨), its 🐞 red, whatever the registry;
 #   - a weak signature (SDOS2: any ASan SEGV) does not make a crash elsewhere known: new by its stack;
-#   - a custom benchmark's experiments get their 🎯 (their target, recognised by validation; by its signature before);
+#   - a custom benchmark's experiments get their 🎯 (their target, recognised by validation; by its signature before),
+#     also a configuration whose runs found nothing (🎯 0/n: the task is not all found);
 #   - objectives but nothing reproduced and no fuzzer record: unclear, its 🐞 outlined (warning);
 #   - a target known not to replay (CDOS, replayable = false), found by the fuzzer's record, inconclusive on the
 #     validation builds: known, its 🐞 plain, the bug's verdict "does not replay, as known" (no-replay);
@@ -87,6 +88,12 @@ report custom vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}
   "$( validation '{ "0/s1": { "verdict": "not-patched", "known_unpatched": ["CVE-2022-38152"] }, "1/u1": { "verdict": "not-patched", "known_unpatched": [] } }' )"
 check 'a custom benchmark: its 🎯, the runs whose objectives validation names its target' \
   '[ "$( verdicts custom "[.verdicts.conclusion.configurations, .verdicts.conclusion.counted, .verdicts.conclusion.runs, (.verdicts.libraries.WolfSSL.found | join(\",\"))]" )" == "[1,1,2,\"0\"]" ]'
+# a configuration of the same benchmark whose runs found nothing (no run in runs[]: its target only in its entry,
+# libraries[].cli.custom, as objectives_report.sh and objectives_live.sh LiveLibraries record it): 🎯 0/1, not left out
+jq --argjson c "${custom}" '.libraries += [{ library: "Empty", runs: 1, ends: { "0": "TimedOut" }, outcomes: { "0": "fail" },
+    cli: { vendor: "wolfssl:wolfssl540-sdos2-asan-only-CVE-2022-38152", custom: $c } }]' "${work}/custom.json" > "${work}/customempty.json"
+check 'a custom configuration whose runs found nothing: its 🎯 0/1 counts (the task is not all found)' \
+  '[ "$( verdicts customempty "[.verdicts.conclusion.configurations, .verdicts.conclusion.hit, .verdicts.conclusion.runs, .verdicts.conclusion.level, .verdicts.libraries.Empty.cve, (.verdicts.libraries.Empty.runs | length), (.verdicts.libraries.Empty.found | length)]" )" == "[2,1,3,\"none\",\"CVE-2022-38152\",1,0]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'

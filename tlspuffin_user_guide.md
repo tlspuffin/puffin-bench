@@ -621,7 +621,8 @@ makes the experiment "unsupported" instead of running for nothing. When the vali
 (⛔ could not replay), validation does not decide: the fuzzer's record does, as on a commit without the catalogue.
 The objectives page, Results and History give each experiment its 🎯 (runs that found its target, as for Vuln group
 A): an objective is the target when validation names the target for it, else, until validation says, when it has the
-target's signature.
+target's signature. An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
+it, `cli-<experiment>.json`): the task's conclusion counts it, never "all found" without it.
 
 ## Performance configurations
 
