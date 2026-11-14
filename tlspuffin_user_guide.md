@@ -500,9 +500,12 @@ bug's verdict on the pages is its strongest part; the words and badges are in [W
 Each validation file records the bench that made it (`bench`: the deployed version and the commit of the job scripts),
 shown below the tiles of the objectives page and on the validation line of Results; a run with objectives and no
 validation file is an error of its configuration ("no validation result"), and its objectives show "no verdict" with
-why. An experiment that names its bug (custom benchmarks, Vuln group A and B) prepares its validation in a step before
-it (`PrepareValidation`), so that the run ends on a find only once validation recognises it; during the run, a bug
-without patch is recognised by its oracle alone (weak).
+why. An experiment that names its bug (custom benchmarks, Vuln group A and B) has its validation prepared before its
+attempts (`PrepareValidationOnce`, each attempt's `PrepareValidation` taking a copy), so that the run ends on a find
+only once validation recognises it: by patch differential, else (no patch at that version) by its signature on the
+build with every patch, a crash at the bug's place only (that of its witness's stack); when validation cannot tell (no
+witness stack, the bug's controls failed, replays that could not run, objectives that do not replay), the fuzzer's
+record decides.
 
 ### The place of a bug (rule R3)
 
@@ -579,8 +582,9 @@ puffin-build/README.md).
 The **Bugs reference** page shows dev's catalogue; while dev has none, that of the open pull request updated last that
 has one (said so at the top), and `?commit=<sha>` any commit's. Its overview gives each bug as the launcher's custom
 benchmarks do: the presets of the catalogue's commit it can run on (the first: the one the launcher picks), the bench's
-time to find it (Vuln group A/B, `runs/bench_times.json`), how a find is recognised (✔ confirmed by its patch, ≈ its
-signature only: weak, the oracle alone decides during the run; the fuzzer's record), its **signature** (the catalogue's
+time to find it (Vuln group A/B, `runs/bench_times.json`), how a find is recognised (✔ confirmed by its patch; ≈ its
+signature only, without patch: a crash with a witness at its place, strong, else by its message or its type alone, weak;
+the fuzzer's record), its **signature** (the catalogue's
 oracle in words, "with its stack" for a crash with top frames or a witness, which make a verdict strong on the reports,
 else "weak"; its place, the one the pages compare: in bold in its witness's stack, else the catalogue's top frames, said so; the witnesses' stacks: `objectives/witness_frames.json`, published by the
 cron from the validations) and the bugs with the same signature; filters by library,
@@ -619,8 +623,8 @@ and from each bug):
 6. **Other known bugs in the build**: **patch them** (recommended: `<preset>-only-<ID>`, the build keeps only the bug
    looked for, besides the known bugs without patch at that version) or **keep the preset as it is** (only the fixes of
    its own list; the fuzzer may find one of the other known bugs first, which does not end the attempt). **What will
-   run** lists each experiment's vendor, build, flags, the signature it stops on ("weak" where it alone decides: no
-   patch at that version) and the known bugs left in its build, and warns when one of them has the same signature (a stop on it is not
+   run** lists each experiment's vendor, build, flags, the signature it stops on (without patch at that version: "at its
+   place" for a crash with a witness, "weak" where its message or its type alone decides) and the known bugs left in its build, and warns when one of them has the same signature (a stop on it is not
    a find).
 7. **Benchmark**: its name. The experiments are named `<benchmark>_<alias or ID>` (e.g. `VulnC_BUF`): launching it again
    with the same name continues their series on Results. The definition is recorded with the task ("New task…" from it
@@ -631,8 +635,10 @@ and from each bug):
 Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report) and its validation set
 (before the attempt, cached), runs with the bug's flags, and stops only on a recognised find: an objective whose signature
 is the bug's oracle is replayed on the validation builds while the fuzzer goes on, and ends the attempt when validation
-recognises it (confirmed by patch differential; a bug without patch: its signature on the build with every patch); one
-it does not recognise leaves the attempt going. The time to find is when the fuzzer saved the first recognised objective (its name),
+recognises it (confirmed by patch differential; a bug without patch: its signature on the build with every patch, and
+for a crash its stack at the bug's place, from its witness's stack); one it does not recognise leaves the attempt going,
+and so does one whose place cannot be checked (the bench's tools incomplete: said in the step's log each time, and the
+step fails at its end). The time to find is when the fuzzer saved the first recognised objective (its name),
 not when the attempt stopped. A preset that turns out not to have the bug (a PUT capability the launcher cannot know)
 makes the experiment "unsupported" instead of running for nothing. When the validation builds cannot run an objective
 (⛔ could not replay), validation does not decide: the fuzzer's record does, as on a commit without the catalogue.

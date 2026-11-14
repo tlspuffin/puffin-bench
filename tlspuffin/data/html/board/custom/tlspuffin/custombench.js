@@ -527,7 +527,7 @@ export class CustomBenchmark {
       + '<th title="CVSS: the base score of the bug">CVSS</th>'
       + '<th title="run on: the presets of the commit that have the bug (version, build options, ASan); the safest first: a version where it has a patch">run on</th>'
       + `<th title="time to find on the bench: median of the Vuln group A/B attempts that found it, found/attempts; hover a value for its task">time to find on the bench${this.#times ? ' ⁽ᵗ⁾' : ''}</th>`
-      + '<th title="a find is recognised by: how validation recognises a find of this bug (✔ confirmed by its patch: patch differential; else ≈ by its signature only: weak, the oracle alone decides during the run, without stack)">a find is recognised by</th></tr>'
+      + '<th title="a find is recognised by: how validation recognises a find of this bug (✔ confirmed by its patch: patch differential; else ≈ by its signature only, on the build with every patch: a crash with a witness at its place, the first 3 frames of its witness\'s stack; weak by its message or its type alone: a claim, a panic, a crash without witness)">a find is recognised by</th></tr>'
       + libs.filter(lib => library.some(x => x.lib === lib)).map(lib => group(`${esc(libraryName(lib))} — ${library.filter(x => x.lib === lib).length} bug(s)`,
           library.filter(x => x.lib === lib))).join('')
       + group('🔧 Bugs of the fuzzing harness', harness)
@@ -550,8 +550,11 @@ export class CustomBenchmark {
 
   #renderRuns() {
     const experiments = this.#experiments();
-    // weak where the signature alone decides (no patch at that version: during the run, the oracle, no stack)
-    const signature = (o, x) => !o ? '—' : `${esc(SignatureText(o))}${!x.preset.patched ? ` <span class="jl-badge warn" title="${esc(TERMS.find(t => t[0] === 'weak signature')[1])}">weak</span>` : ''}`;
+    // no patch at that version: a crash with a witness stops an attempt at its place only (the first 3 frames of its
+    // witness's stack); weak where its message or its type alone decides (a claim, a panic, a crash without witness)
+    const weak = x => !x.preset.patched && (x.entry.oracle?.kind !== 'crash' || x.entry.no_witness);
+    const signature = (o, x) => !o ? '—' : `${esc(SignatureText(o))}${weak(x) ? ` <span class="jl-badge warn" title="${esc(TERMS.find(t => t[0] === 'weak signature')[1])}">weak</span>`
+      : !x.preset.patched ? ` <span class="jl-muted" title="no patch at this version: a crash of its type ends an attempt only at its place, the first 3 frames of its witness's stack">at its place</span>` : ''}`;
     this.#els.runs.innerHTML = '<tr><th title="experiment: <benchmark>_<bug>, its name on Results">experiment</th>'
       + '<th title="vendor: the build given to mk_vendor (<preset>-only-<ID>: every other bug with a patch patched)">vendor</th>'
       + '<th title="build: library, version, ASan and the bugs patched">build</th>'
@@ -582,11 +585,16 @@ export class CustomBenchmark {
         return [...noWitness, `⚠ <b>${label}</b>: its objectives do not replay on their own: a find is the fuzzer's own record of ${esc(describe(x.entry.oracle))}, not validated.`];
       }
       if (!x.preset.patched) {
+        const crash = x.entry.oracle?.kind === 'crash';
+        // a crash with a witness: at its place only, during the run too (PR_validate.sh ConfirmObjective); else weak
+        const how = crash && !x.entry.no_witness
+          ? `a crash of its type at its place only, ${place(x) ? `<code>${esc(place(x))}</code>` : 'the first 3 frames of its witness\'s stack'}:
+            one elsewhere leaves the attempt going`
+          : `a weak signature: ${x.entry.oracle?.kind === 'claim' ? 'any objective with this claim' : 'any such failure'} there is taken for it,
+            whatever its stack${crash && x.entry.top_frames?.length ? `; the reports then tell it by its stack: strong, green, when the
+            objective's stack has its place, <code>${esc(place(x))}</code>` : ''}`;
         return [`⚠ <b>${label}</b> has no patch at ${version}: a find is recognised by its signature only: the objective must reproduce, with
-          ${esc(describe(x.entry.oracle))}, on the build with every other patch (during the run a weak signature: ${x.entry.oracle?.kind === 'claim'
-          ? 'any objective with this claim' : 'any such failure'} there is taken for it, whatever its stack${x.entry.oracle?.kind === 'crash'
-          && (x.entry.top_frames?.length || !x.entry.no_witness) ? `; the reports then tell it by its stack: strong, green, when the
-          objective's stack has its place, ${place(x) ? `<code>${esc(place(x))}</code>` : 'the first frames of its witness\'s stack'}` : ''})${twins.length ? `; ${twins.join(', ')}, left in that build with the same
+          ${esc(describe(x.entry.oracle))}, on the build with every other patch (${how})${twins.length ? `; ${twins.join(', ')}, left in that build with the same
           signature, would be taken for it` : ''}. A patch for it in tlspuffin's catalogue would make it a patch differential.`, ...noWitness];
       }
       return noWitness;

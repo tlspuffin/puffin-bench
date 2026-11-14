@@ -74,6 +74,13 @@ cli 'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' '__asan_memcpy < Re
   cli 'DoTls13ClientHello < DoTls13HandShakeMsgType < DoTls13HandShakeMsg' '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType' &&
   echo "ok   tools/js/has_place.js answers as the module (BUF with ASan's frame first, BUF not SDOS2, SDOS2 in glibc)" ||
   { echo "FAIL tools/js/has_place.js does not answer as the module"; fail=1; }
+# --witness: the place of a witness's stack (PlaceOf), for ConfirmObjective (a target named by its signature only)
+"${qjs}" --std -m "${data}/tools/js/has_place.js" --witness '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType < DoTls13HandShakeMsg < ProcessReplyEx' \
+    '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType' &&
+  ! "${qjs}" --std -m "${data}/tools/js/has_place.js" --witness '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType < DoTls13HandShakeMsg' \
+    'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' &&
+  echo "ok   tools/js/has_place.js --witness: the place of a witness's stack (SDOS2's: its crash in glibc's memmove, not BUF's)" ||
+  { echo "FAIL tools/js/has_place.js --witness does not answer as PlaceOf and HasPlace"; fail=1; }
 sed -n '/^TargetMatches()/,/^}/p' "${here}/../PR_common.sh" | grep -q 'HasPlace ' && grep -q 'js/has_place.js' "${here}/../PR_common.sh" &&
   echo "ok   PR_common.sh TargetMatches asks HasPlace (tools/js/has_place.js)" || { echo "FAIL PR_common.sh TargetMatches has a rule of its own"; fail=1; }
 # the frame rule of before (a frame among the first 3), nowhere

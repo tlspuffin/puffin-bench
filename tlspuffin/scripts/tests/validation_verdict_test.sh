@@ -38,6 +38,8 @@ case "${name}|${put}" in
   tmo\|p-only-X2|setup\|p-only-X2) o='{"outcome":"crash","asan":{"type":"heap-buffer-overflow"}}';;
   vfail\|p-only-X2|vfail1\|p-only-X2) echo "error while loading shared libraries: libwolfssl.so: cannot open shared object file: No such file or directory" >&2; exit 127;;
   segv\|p-fix-all) o='{"outcome":"crash","signal":"SIGSEGV","asan":{"type":"SEGV"}}';;
+  segvat\|p-fix-all) o='{"outcome":"crash","signal":"SIGSEGV","asan":{"type":"SEGV","frames":["__memmove_avx_unaligned_erms","DoTls13ClientHello","DoTls13HandShakeMsgType"]}}';;
+  segvelse\|p-fix-all) o='{"outcome":"crash","signal":"SIGSEGV","asan":{"type":"SEGV","frames":["ParseOther","Caller","Outer"]}}';;
   newcrash\|p-fix-all) o='{"outcome":"crash","asan":{"type":"heap-use-after-free"}}';;
   claimf\|p-fix-all) o='{"outcome":"claim","violation":"Authentication bypass"}';;
   heapf\|p-fix-all) o='{"outcome":"crash","asan":{"type":"heap-buffer-overflow"}}';;
@@ -96,4 +98,21 @@ check 'a witness stack without function names (the binary'"'"'s file name): not 
   '[ "$( ValidationWitnessFrames "${work}/unsym.json" /srv/cache/validation-0c00 )" == null ]'
 check 'a witness stack with function names: kept' \
   '[ "$( ValidationWitnessFrames "${work}/sym.json" /srv/cache/validation-0c00 )" == "[\"RefineSuites\",\"CheckPreSharedKeys\",\"DoTls13ClientHello\"]" ]'
+# in-run, a target without patch at this version named by its signature only (U, a crash): the experiment ends on it
+# only when the execution's stack has its place, that of its witness's stack; not known: the fuzzer's record
+qjs="${QJS:-/srv/puffin-bench/data/tools/qjs}"
+if [ -x "${qjs}" ]; then
+  mkdir -p "${work}/install/tools" "${work}/install/html" && ln -s "${qjs}" "${work}/install/tools/qjs"
+  command cp -r "${here}/../../data/tools/js" "${work}/install/tools/js" && command cp -r "${here}/../../data/html/common" "${work}/install/html/common"
+  export THEJOB_TOOLS_PATH="${work}/install/tools"
+  jq '.controls = [{ entry: "U", ok: null, note: "no patch", witness_frames: ["__memmove_avx_unaligned_erms", "DoTls13ClientHello", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] }]' \
+    validation/state.json > validation/state.tmp && mv validation/state.tmp validation/state.json
+  check 'ConfirmObjective: 0 for U at its place (its witness'"'"'s first frames)' \
+    '( target_bug=U; ConfirmObjective "${work}/segvat.trace" > "${work}/why" ); [ $? == 0 ] && grep -q "at its place" "${work}/why"'
+  check 'ConfirmObjective: 1 for a crash of U'"'"'s type elsewhere: another crash of its type, the experiment goes on' \
+    'touch "${work}/segvelse.trace"; rc=0; ( target_bug=U; ConfirmObjective "${work}/segvelse.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 1 ] && grep -q "not at its place" "${work}/why"'
+  jq '.controls = []' validation/state.json > validation/state.tmp && mv validation/state.tmp validation/state.json
+  check 'ConfirmObjective: 2 (the fuzzer record) when the place of U is not known' \
+    'touch "${work}/segvat2.trace"; rm -f validation/verdicts/segvat.json; rc=0; ( target_bug=U; ConfirmObjective "${work}/segvat.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 2 ] && grep -q "not known" "${work}/why"'
+fi
 exit "${fail}"

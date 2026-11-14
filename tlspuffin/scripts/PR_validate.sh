@@ -351,6 +351,15 @@ ValidationVerdict() {
   echo "${result}";
 }
 
+# HasWitnessPlace <witness's stack "a < b < …"> <frames "a < b < c">: HasPlace with the place of a witness's stack
+# (common/signatures.js PlaceOf, through tools/js/has_place.js --witness): 0 yes, 1 no, 2 cannot tell (said)
+HasWitnessPlace() {
+  local rc;
+  "${THEJOB_TOOLS_PATH:-}/qjs" --std -m "${THEJOB_TOOLS_PATH:-}/js/has_place.js" --witness "$1" "$2" 2> /dev/null; rc=$?;
+  if (( rc > 1 )); then echo "HasWitnessPlace: ${THEJOB_TOOLS_PATH:-}/js/has_place.js could not run (exit ${rc})" >&2; return 2; fi
+  return "${rc}";
+}
+
 # ConfirmObjective <trace>: whether an objective of an experiment naming its bug is that bug (target_bug), by its
 # verdict: 0 confirmed, by patch differential when the target has a patch at this version, else by its signature on the
 # build with every patch (verdict not-patched, the target named); 1 not confirmed (another bug, not reproduced); 2 not
@@ -369,9 +378,23 @@ ConfirmObjective() {
   if jq -e '.candidate' <<< "${target}" > /dev/null; then
     jq -e --arg id "${target_bug}" '.verdict == "confirmed" and (.entries | index($id) != null)' <<< "${verdict}" > /dev/null &&
       { echo "confirmed by patch differential"; return 0; };
-  else
-    jq -e --arg id "${target_bug}" '.verdict == "not-patched" and ((.known_unpatched // []) | index($id) != null)' <<< "${verdict}" > /dev/null &&
-      { echo "its signature on the build with every patch (no patch for it)"; return 0; };
+  elif jq -e --arg id "${target_bug}" '.verdict == "not-patched" and ((.known_unpatched // []) | index($id) != null)' <<< "${verdict}" > /dev/null; then
+    # no patch for it at this version: its signature on the build with every patch; for a crash, any crash of its ASan
+    # type has it: the execution's stack must have the target's place too, that of its witness's stack recorded when the
+    # validation was prepared (rule R3, HasWitnessPlace), else the experiment does not end on it
+    if [ "$( jq -r --arg id "${target_bug}" '[.unpatched[] | select(.id == $id) | .oracle.kind][0] // ""' "${state}" )" != crash ]; then
+      echo "its signature on the build with every patch (no patch for it)"; return 0;
+    fi
+    local witness frames;
+    witness=$( jq -r --arg id "${target_bug}" '[.controls[] | select(.entry == $id) | .witness_frames | select(. != null and length > 0)][0] // [] | join(" < ")' "${state}" );
+    frames=$( jq -r '[.f[]? | select(.outcome == "crash") | .asan.frames // [] | select(length > 0)][0] // [] | join(" < ")' <<< "${verdict}" );
+    [ -n "${witness}" ] || { echo "its signature on the build with every patch (no patch for it), its place not known (no witness stack): the fuzzer's record"; return 2; };
+    HasWitnessPlace "${witness}" "${frames}";
+    case $? in
+      0) echo "its signature at its place on the build with every patch (no patch for it)"; return 0;;
+      1) echo "its signature on the build with every patch (no patch for it), but not at its place: another crash of its type"; return 1;;
+      *) echo "its signature on the build with every patch (no patch for it), its place could not be checked: the fuzzer's record"; return 2;;
+    esac
   fi
   jq -e '.verdict == "error"' <<< "${verdict}" > /dev/null &&
     { echo "the replays could not run ($( jq -r '.failure.message // "no outcome"' <<< "${verdict}" )): the fuzzer's record"; return 2; };

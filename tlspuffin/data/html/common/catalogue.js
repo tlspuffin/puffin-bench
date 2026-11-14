@@ -66,13 +66,20 @@ export function runOptions(id, entry, presets) {
                    || (a.fix?.length ?? 0) - (b.fix?.length ?? 0) || a.name.length - b.name.length);
 }
 // how validation recognises a find of a bug: confirmed by its patch (patch differential), by its signature only (no
-// patch; weak: during the run the oracle alone decides, no stack), the fuzzer's own record (its objectives do not
-// replay), or not at all (no signature); text: what the pages show, in the words of verdicts.js
+// patch: on the build with every patch, a crash with a witness at its place, the first 3 frames of its witness's stack,
+// also during the run; weak, by its message or its type alone: a claim, a panic, a crash without witness), the fuzzer's
+// own record (its objectives do not replay), or not at all (no signature); text: what the pages show, in the words of
+// verdicts.js
 export function confirmation(entry) {
   if (!entry.oracle) return { kind: 'none', text: 'no signature: cannot be recognised' };
   if (entry.replayable === false) return { kind: 'record', text: 'the fuzzer\'s record only: not replayable' };
   if ((entry.patches ?? []).length) return { kind: 'patch', text: `✔ confirmed by its patch (${entry.patches.map(p => p.versions ?? p.commits ?? '').join(' · ')})` };
-  // during the run, the oracle alone (no stack): weak, whatever its kind
+  // a crash with a witness: at its place, the first 3 frames of its witness's stack (recorded when the validation is
+  // prepared; PR_validate.sh ConfirmObjective during the run, bugs.js on the pages)
+  if (entry.oracle.kind === 'crash' && !entry.no_witness) {
+    return { kind: 'signature', weak: false, text: '≈ by its signature only: no patch (a crash of its type at its place, the first 3 frames of its witness\'s stack)' };
+  }
+  // else its message or its type alone: weak
   const any = entry.oracle.kind === 'claim' ? 'any objective with this claim' : entry.oracle.kind === 'panic' ? 'any such panic' : 'any such crash';
   return { kind: 'signature', weak: true, text: `≈ by its signature only: no patch (weak: ${any})` };
 }
