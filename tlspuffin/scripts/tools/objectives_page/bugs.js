@@ -678,11 +678,18 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   const firstOf = (field, id) => [...Object.values(byLib).map(v => v.entries?.[id]?.[field]), ...Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id]?.[field])]
       .find(t => t?.length) ?? [];
   const topFramesOf = id => PlaceOf(firstOf('top_frames', id), firstOf('witness_frames', id));
-  const verdicts = [], without = [];
+  // the verdicts of its objectives, by name; those without verdict counted per run, every objective of the run (the
+  // report names at most TRACES_PER_GROUP of a group: objectives_report.sh), not only those it names
+  const verdicts = [], withVerdict = new Map();
   for (const o of objectives) {
     const v = byLib[o.library]?.byTrace?.[`${o.attempt}/${o.name}`];
-    if (v) verdicts.push(v); else if (byLib[o.library]) without.push(o);
+    if (!v) continue;
+    verdicts.push(v);
+    withVerdict.set(`${o.library}|${o.attempt}`, (withVerdict.get(`${o.library}|${o.attempt}`) ?? 0) + 1);
   }
+  const without = (bug.runs ?? []).filter(r => byLib[r.library])
+      .map(r => ({ library: r.library, attempt: r.attempt, count: (r.count ?? 0) - (withVerdict.get(`${r.library}|${r.attempt}`) ?? 0) }))
+      .filter(w => w.count > 0);
   const vendor = VendorOfRun(bug.run) ?? VendorOfRun(bug.runs?.[0]);
   const candidates = catalogue && vendor ? SignatureEntries(bug, catalogue, vendor) : [];
   // without verdict (not validated, or its commit has no catalogue: then the latest catalogue, report_verdicts.js), the
@@ -697,7 +704,7 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   // the known bugs it is whose objectives do not replay on their own (NoReplay)
   const noReplay = NoReplay(bug, libraries, catalogue);
   const counts = verdicts.reduce((c, v) => ({ ...c, [v.verdict]: (c[v.verdict] ?? 0) + 1 }), {});
-  const base = { validated: verdicts.length, objectives: objectives.length || bug.count, counts, candidates,
+  const base = { validated: verdicts.length, objectives: bug.count, counts, candidates,
                  during: verdicts.some(v => v.during_attempt), oracles: {} };
   if (!verdicts.length && !without.length && !recognised.length) return candidates.length ? { ...base, kind: null, ids: [], parts: [] } : null;
   // its objectives by what validation says of each (one claim can be several bugs: CVE-2021-3336 and SIG, SKIP on
@@ -715,10 +722,10 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   const named = new Set(verdicts.flatMap(v => v.known_unpatched ?? []));
   const lookalikes = candidates.filter(id => !named.has(id));
   const parts = [];
-  const add = (kind, ids, extra = {}) => {
+  const add = (kind, ids, extra = {}, n = 1) => {
     const part = parts.find(p => p.kind === kind && p.ids.join() === ids.join() && (p.why ?? '') === (extra.why ?? ''));
-    if (part) { part.count += 1; return part; }
-    const created = { kind, ids, count: 1, ...extra };
+    if (part) { part.count += n; return part; }
+    const created = { kind, ids, count: n, ...extra };
     parts.push(created);
     return created;
   };
@@ -739,7 +746,7 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
         : error ? (/no validation result/.test(error.error ?? '') ? 'missing' : 'failed')
         : lib.unsupported ? 'unsupported'
         : Object.keys(lib.byTrace ?? {}).some(key => key.startsWith(`${o.attempt}/`)) ? 'not-chosen' : 'missing';
-    const part = add('none', [], { why });
+    const part = add('none', [], { why }, o.count);
     if (error && why === 'failed') part.detail ??= error.error;
     // why validation could not run at this commit, as it recorded it (its tlspuffin has no catalogue; dev has none yet)
     if (why === 'unsupported' && typeof lib.unsupported === 'string') part.detail ??= lib.unsupported;

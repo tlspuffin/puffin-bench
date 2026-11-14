@@ -248,4 +248,34 @@ check('the note: "Of 9 objectives: 7 not replayed.", nothing of replays that did
 check('not "seen only by the fuzzer" (a replay that did not reproduce it): nothing was replayed', 'seen only by the fuzzer' not in dom)
 sys.exit(fail)
 PY
+# a bug of more objectives than the report names (at most 50 a group: objectives_report.sh TRACES_PER_GROUP): its
+# validation line and its badges count all its objectives
+python3 -I - "${pages}/10.json" <<'PY'
+import json, sys
+names = [f'n{i}' for i in range(50)]
+json.dump({ 'task': '10', 'commit': 'b1d572b94052db08f752a1bb7e37b96814878855', 'name': 'Vuln C - test', 'job_type': 'vuln-custom',
+  'libraries': [{ 'library': 'custom_Y', 'runs': 1, 'validation': { 'catalogue': { 'source': 'commit', 'commit': 'b1d572b94052db08f752a1bb7e37b96814878855' },
+     'byTrace': { '0/n0': { 'verdict': 'confirmed', 'entries': ['CVE-2022-39173'], 'known_unpatched': [] },
+                  '0/n1': { 'verdict': 'confirmed', 'entries': ['CVE-2022-39173'], 'known_unpatched': [] } } } }],
+  'runs': [{ 'library': 'custom_Y', 'attempt': 0, 'found': 60, 'replayed': 60, 'reports': 60,
+    'cli': { 'vendor': 'wolfssl:wolfssl540-asan-only-CVE-2022-39173', 'library': { 'name': 'wolfssl', 'version': '540' } },
+    'groups': [{ 'type': 'stack-buffer-overflow', 'frames': ['RefineSuites', 'CheckPreSharedKeys', 'DoTls13ClientHello'], 'count': 60,
+                 'traces': names, 'excerpt': '' }] }] }, open(sys.argv[1], 'w'))
+PY
+sed 's/data-json="7.json"/data-json="10.json"/' "${pages}/7.html" > "${pages}/10.html"
+timeout 90 "${chrome}" --headless=new --disable-gpu --no-sandbox --user-data-dir="${work}/chrome" --virtual-time-budget=10000 \
+  --dump-dom "http://127.0.0.1:${port}/html/objectives/10.html" > "${work}/dom10.html" 2> /dev/null || true
+python3 -I - "${work}/dom10.html" <<'PY' || status=1
+import re, sys
+dom = open(sys.argv[1], encoding='utf-8').read()
+fail = 0
+def check(what, ok):
+    global fail
+    print(('ok   ' if ok else 'FAIL ') + what)
+    if not ok: fail = 1
+check('a bug of 60 objectives, 50 named, 2 validated: "2 of 60 objectives validated"', '2 of 60 objectives validated' in dom)
+check('its objectives without verdict: all 58 of them, not only the 48 named',
+      re.search(r'○ no verdict: not among the objectives validated in its run[^<]*×58', dom) is not None)
+sys.exit(fail)
+PY
 exit "${status}"
