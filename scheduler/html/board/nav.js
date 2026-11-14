@@ -75,6 +75,7 @@ const style = `
   font-weight: 700; text-decoration: none; line-height: 1.2; }
 .pb-nav a.pb-live:hover { background: #ffd54d; text-decoration: none; }
 .pb-nav a.pb-live.unconfirmed { background: transparent; color: #ffb74d; border: 1px solid #f08c00; }
+.pb-nav a.pb-live.new { background: #d32f2f; color: #fff; border: 1px solid #ff5252; }
 @keyframes pb-spin { to { transform: rotate(360deg); } }
 
 .pb-help { position: fixed; z-index: 1001; top: 34px; right: 0; bottom: 0; width: min(620px, 100vw); display: none;
@@ -194,10 +195,12 @@ function Health(nav) {
   return pill;
 }
 
-// Objectives found by running tasks (objectives/live.json, written every 5 minutes by objectives_live.sh): a yellow
-// pill next to the services, to the live objectives page. VulnA/VulnB tasks look for known bugs: their objectives
-// are expected and not announced. Outlined while no replay confirmed a bug.
-const objectivesExpected = new Set(['vuln-a', 'vuln-b']);
+// Objectives found by running tasks (objectives/live.json, written every 5 minutes by objectives_live.sh): a pill next
+// to the services, to the live objectives page, for the tasks whose live report finds what History colours (the level
+// of the report, report_verdicts.js): red with 🚨 for a new bug, yellow for unexpected objectives (where no known bug is
+// expected, or bugs other than those expected), outlined while no replay reproduced a bug; a task whose bugs are all
+// known, or without level, is not announced.
+const Announced = task => ['new', 'unexpected'].includes(task.level);
 
 function LiveObjectives(nav, after) {
   const pill = document.createElement('a');
@@ -212,14 +215,17 @@ function LiveObjectives(nav, after) {
     try {
       const response = await fetch(`${Base(ports.publisher)}/html/objectives/live.json`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const tasks = ((await response.json())?.tasks ?? []).filter(task => !objectivesExpected.has(task.job_type));
+      const tasks = ((await response.json())?.tasks ?? []).filter(Announced);
       const bugs = tasks.reduce((sum, task) => sum + (task.bugs ?? 0), 0);
+      const newBugs = tasks.reduce((sum, task) => sum + (task.new ?? 0), 0);
       pill.hidden = tasks.length === 0;
       pill.classList.toggle('unconfirmed', bugs === 0);
-      pill.textContent = bugs > 0 ? `\u{1F41E} ${bugs} bug${bugs > 1 ? 's' : ''} found live (${tasks.length} task${tasks.length > 1 ? 's' : ''})`
-          : `\u{1F41E} live objectives (${tasks.length} task${tasks.length > 1 ? 's' : ''}, none confirmed)`;
-      pill.title = ['Running tasks with objectives (not VulnA/VulnB), replayed and grouped by bug:',
-          ...tasks.map(task => `${task.name}: ${task.found} found, ${task.bugs ?? 0} bug(s)`), 'Click: live objectives page']
+      pill.classList.toggle('new', newBugs > 0);
+      pill.textContent = newBugs > 0 ? `\u{1F6A8} ${newBugs} new bug${newBugs > 1 ? 's' : ''} found live (${tasks.length} task${tasks.length > 1 ? 's' : ''})`
+          : bugs > 0 ? `\u{1F41E} ${bugs} bug${bugs > 1 ? 's' : ''} found live (${tasks.length} task${tasks.length > 1 ? 's' : ''})`
+          : `\u{1F41E} live objectives (${tasks.length} task${tasks.length > 1 ? 's' : ''}, none reproduced)`;
+      pill.title = ['Running tasks whose objectives are not all known bugs expected there (new: red; unexpected: yellow), replayed and grouped by bug:',
+          ...tasks.map(task => `${task.name}: ${task.found} found, ${task.bugs ?? 0} bug(s)${task.level ? `, ${task.level}` : ''}`), 'Click: live objectives page']
           .join('\n');
     } catch (error) {
       pill.hidden = true;
@@ -307,6 +313,14 @@ function Build() {
   const css = document.createElement('style');
   css.textContent = style;
   document.head.appendChild(css);
+  // the bench's icon, for every page under the bar (without one, each service answered the browser's /favicon.ico
+  // with a 404, an error in the console of its first page)
+  if (!document.querySelector('link[rel~="icon"]')) {
+    const icon = document.createElement('link');
+    icon.rel = 'icon';
+    icon.href = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🐡</text></svg>')}`;
+    document.head.appendChild(icon);
+  }
 
   const nav = document.createElement('nav');
   nav.className = 'pb-nav';

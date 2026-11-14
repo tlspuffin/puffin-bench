@@ -5,6 +5,7 @@
 #include "../step.hxx"
 #include "../../../utils/logs.hxx"
 #include "../../../utils/rapidjson.hxx"
+#include "../../../utils/shell.hxx"
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -886,10 +887,11 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
         _exit(-1);
       }
 
+      // the step's arguments, as shell assignments that keep each value as given (functions.sh evaluates them)
       std::ofstream stepParameters = std::ofstream(localData->step_parameters_file_, std::ios::trunc);
-      for(auto const& [ key, value ]: step.args_) {
-        stepParameters << key << "=\"" << value << "\" ";
-      }
+      stepParameters << ShellAssignments(step.args_, [&step](std::string const& name) {
+        LOGE_CHILD("step " << step.ID() << ": argument '" << name << "' skipped, not a shell variable name");
+      });
       stepParameters.close();
 
       std::ofstream stepLauncher = std::ofstream(localData->launcher_file_, std::ios::trunc);

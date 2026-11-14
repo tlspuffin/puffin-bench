@@ -51,6 +51,9 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   static auto regexUserTasksList = std::regex(R"(/api/user/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)/tasks$)");
   static auto regexCacheGet = std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))");
   static auto regexCachePut = std::regex(R"(/api/cache/([a-zA-Z0-9_-]+))");
+  // saved benchmarks of a project's launcher: GET the list, PUT or DELETE one (api/benchmarks_api.hxx)
+  static auto regexBenchmarks = std::regex(R"(/api/benchmarks/([A-Za-z0-9_-]+))");
+  static auto regexBenchmark = std::regex(R"(/api/benchmarks/([A-Za-z0-9_-]+)/([A-Za-z0-9-]+))");
 
   try {
     if (method == "GET") {
@@ -79,6 +82,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         requestHandler = new RequestHandlerUserJobsTypeList(matches[1].str());
       } else if (std::regex_match(uri, matches, regexUserTasksList)) {
         requestHandler = new RequestHandlerUserTasksList(matches[1].str(), matches[2].str());
+      } else if (std::regex_match(uri, matches, regexBenchmarks)) {
+        requestHandler = new RequestHandlerBenchmarksList(matches[1].str());
       } else if (uri.find("/files/") == 0) {
         requestHandler = new RequestHandlerFiles("/files");
       }
@@ -90,7 +95,9 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       }
     } else if (method == "PUT") {
       std::smatch matches;
-      if (std::regex_match(uri, matches, regexCachePut)) {
+      if (std::regex_match(uri, matches, regexBenchmark)) {
+        requestHandler = new RequestHandlerBenchmarkSave(matches[1].str(), matches[2].str());
+      } else if (std::regex_match(uri, matches, regexCachePut)) {
         requestHandler = new RequestHandlerCachePut(matches[1].str());
       }
     } else if (method == "PATCH") {
@@ -106,6 +113,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
       std::smatch matches;
       if (std::regex_match(uri, matches, regexTaskCancelOrDelete)) {
         requestHandler = new RequestHandlerTaskCancelOrDelete(matches[1].str());
+      } else if (std::regex_match(uri, matches, regexBenchmark)) {
+        requestHandler = new RequestHandlerBenchmarkDelete(matches[1].str(), matches[2].str());
       } else if (std::regex_match(uri, matches, regexTaskCancelStep)) {
         requestHandler = new RequestHandlerTaskCancelStep(
             matches[1].str(), matches[2].str());

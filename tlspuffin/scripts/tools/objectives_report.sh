@@ -24,7 +24,7 @@ OUT="${PB_ROOT}/data/html/objectives"
 # traces of each group of objectives kept next to its page, for download (<task>-traces/<library>/<run>/)
 TRACES_PER_GROUP=50
 SCRIPTS="$( cd "$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )/.." && pwd )"
-source <( sed -n '/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${SCRIPTS}/PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${SCRIPTS}/PR_common.sh" )
 # the expected bugs of the Vuln jobs and the CVEs set apart (the one file to edit)
 TARGETS_JSON="${SCRIPTS}/../data/html/jobsscripts/tlspuffin/vuln_targets.json"
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)
@@ -183,7 +183,7 @@ Report() {
         '. + [{ library: $lib, attempt: $a, found: $found, replayed: $replayed, traces_dir: $traces,
           fuzzer_logs: { files: $logFiles, records: $recordCount },
           reports: ([$groups[] | select(.type != "no-crash" and .type != "replay-error" and .type != "not-replayed") | .count] | add // 0), groups: $groups,
-          cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities}), asan: $cli.asan.instrumented }]' <<< "${libs}" );
+          cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities, custom}), asan: $cli.asan.instrumented }]' <<< "${libs}" );
   # (a twin step, TwinExperimentEnd of PR_perf.sh, ends the two runs 2k and 2k+1 of its attempt k: its output has both,
   # each line prefixed with its run, so their replays are counted from their reports)
   done < <( jq -r '.task.steps[] | select(.name == "ExperimentEnd" or .name == "TwinExperimentEnd")
@@ -204,14 +204,20 @@ Report() {
       | { key: (.id | tostring), value: { cve: (.expected_cve // null), targeted: (.nb_objective_targeted // null) } }] | from_entries)' <<< "${summary}" );
   [ -n "${outcomes}" ] || outcomes='{}';
   [ -n "${script}" ] || script='{}';
+  # the validation of each configuration's objectives against tlspuffin's catalogue (ValidateObjectives, merged by the
+  # summary scripts: counts per verdict, confirmed entries, known bugs without patch, controls, the catalogue's commit,
+  # and the verdict of each validated objective by "<attempt>/<trace>"), as Results shows it
+  local validation; validation=$( jq -c 'map_values(.validation // null) | with_entries(select(.value != null))' <<< "${summary}" );
+  [ -n "${validation}" ] || validation='{}';
   local info;
-  info=$( jq -c --arg board "${BOARD_URL}" --argjson outcomes "${outcomes}" --argjson script "${script}" '
+  info=$( jq -c --arg board "${BOARD_URL}" --argjson outcomes "${outcomes}" --argjson script "${script}" --argjson validation "${validation}" '
       [.task.steps[]] as $steps
       | ([.task.steps[] | .time_points_ms // [] | .[] | select(. > 0)]) as $times
       | { name: (.task.name // ""), user: (.task.user // ""), job_type: (.task.job_type // ""),
           started: (if ($times | length) > 0 then ($times | min / 1000 | floor | todate) else null end),
           ended: (if ($times | length) > 0 then ($times | max / 1000 | floor | todate) else null end),
-          task_url: "\($board)/files/board/task.html?id=\(.task.id // "")",
+          # no link to a task page without the id of the task (task.html?id= is an empty page)
+          task_url: (if .task.id then "\($board)/files/board/task.html?id=\(.task.id)" else null end),
           # the runs of each configuration: one per experiment step, two per twin step (TwinExperiment: runs 2k, 2k+1)
           libraries: ([.task.steps[] | select(.name == "ExperimentWithCargo" or .name == "TwinExperiment")] | group_by(.id)
             | map((first(.[] | .user_run_state // "" | split("\n")[] | (try fromjson catch null)
@@ -222,7 +228,7 @@ Report() {
                   # how the scheduler ended each run (attempt: Done, TimedOut, Failed, Cancelled…): a run that found its
                   # bug and did not end Done is counted, without a time to find (untimed, Results says why)
                   ends: ($runs | sort_by(.attempt_id) | map({ key: (.attempt_id | tostring), value: .state }) | from_entries),
-                  cli: ($cli // {} | {build, cputs, vendor, features, library, vulnerabilities}) }))
+                  cli: ($cli // {} | {build, cputs, vendor, features, library, vulnerabilities, custom}) }))
           # the errors of the end-of-run summaries (vuln_experiment_end.js, in the run state of its step, e.g. "Error
           # with stats.json"), per configuration and attempt: a run without summary has no metrics, Results says why (not
           # for twin steps: the state of a TwinExperimentEnd holds both runs; their summaries keep their own errors)
@@ -230,19 +236,21 @@ Report() {
               | { key: (.attempt_id | tostring), value: first(.user_run_state // "" | split("\n")[]
                   | (try fromjson catch null) | select(type == "object" and (.error | type) == "string") | .error) }]
               | from_entries) } + (if $outcomes[.library] then { outcomes: $outcomes[.library] } else {} end)
-              + (if $script[.library] then { script: $script[.library] } else {} end)) }' "${J}" 2> /dev/null ) || info='{}';
+              + (if $script[.library] then { script: $script[.library] } else {} end)
+              + (if $validation[.library] then { validation: $validation[.library] } else {} end)) }' "${J}" 2> /dev/null ) || info='{}';
   [ -n "${info}" ] || info='{}';
   local cancelled=false;
   [[ "${J}" == */Canceled/* ]] && cancelled=true;
-  # VulnA/VulnB: the claims that are not their target (PR_common.sh OBJECTIVES_NOT_TARGETED), flagged by the page
+  # the claims set apart (PR_common.sh OBJECTIVES_NOT_TARGETED, each within its scope: library, versions below), for every
+  # job: the pages set them apart where a run looks for a target (bugs.js Bugs)
   jq --arg task "${task}" --arg commit "${commit}" --argjson info "${info}" --argjson cancelled "${cancelled}" \
       --argjson nt "$( NotTargetedJSON )" --argjson targets "$( Targets "${J}" )" --argjson cves "$( CveSignatures )" \
       '$info + { task: $task, commit: $commit, cancelled: $cancelled, runs: .,
-                 not_targeted: (if ($info.job_type // "") | test("^vuln-") then $nt else {} end), targets: $targets,
+                 not_targeted: $nt, targets: $targets,
                  cves: $cves }' \
       <<< "${libs}" > "${OUT}/${task}.json" || return 1;
   # the verdicts of bugs.js (the pages' code) in the report, for runs_report.py and the history page
-  "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "${OUT}/${task}.json" || return 1;
+  Verdicts "${OUT}/${task}.json" || return 1;
   Render "${OUT}/${task}.json" "${OUT}/${task}.html" || return 1;
   echo "${task}: $( jq -r '[.runs[] | "\(.library) run \(.attempt): \(.reports) report(s) in \(.groups | length) group(s)"] | join("; ") | if . == "" then "no objective" else . end' "${OUT}/${task}.json" )";
   echo "  ${URL}/html/objectives/${task}.html";
@@ -267,7 +275,8 @@ CveSignatures() {
 # Render <json> <html>: page of the objectives of a task ({task, commit, name, live?, updated?, user?, job_type?,
 # started?, ended?, cancelled?, task_url?, libraries?, runs: [...]}): a small page that loads report.js and report.css
 # (objectives_page/, copied next to the pages), which render the JSON in the browser, organized by bug.
-# Each run may carry cli ({build, cputs, vendor, features, library, vulnerabilities} of cli-<library>.json) and asan.
+# Each run may carry cli ({build, cputs, vendor, features, library, vulnerabilities, custom: a custom benchmark's target} of
+# cli-<library>.json) and asan.
 Render() {
   local dir; dir="$( dirname "$2" )";
   local asset;
@@ -299,14 +308,16 @@ AllTasks() {
     [ -f "${J%.json}.zip" ] || continue;
     # first the tasks without a final report (none, or the last live page kept until it, see objectives_live.sh),
     # then the reports older than what makes them: the export, this script, the signatures (ObjectiveSignature,
-    # PR_common.sh), the expected bugs (vuln_targets.json) and the verdicts (report_verdicts.js with bugs.js)
+    # PR_common.sh), the expected bugs (vuln_targets.json) and the verdicts (report_verdicts.js with bugs.js and the
+    # words of common/verdicts.js)
     first=1;
     if [ ! -e "${OUT}/${id}.html" ] || grep -q '"pending_final": *true' "${OUT}/${id}.json" 2> /dev/null; then
       first=0;
     elif [ "${OUT}/${id}.html" -nt "${J}" ] && [ "${OUT}/${id}.html" -nt "${BASH_SOURCE[0]}" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/PR_common.sh" ] && [ "${OUT}/${id}.html" -nt "${TARGETS_JSON}" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/report_verdicts.js" ] &&
-        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/objectives_page/bugs.js" ]; then
+        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/objectives_page/bugs.js" ] &&
+        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/common/verdicts.js" ]; then
       continue;
     fi
     # a task with objectives, or a Vuln task (its 🎯 also when no run saved any objective: 0/n)
@@ -343,21 +354,92 @@ TaskLinks() {
                       + (if .cancelled then "\ncancelled: the task was cancelled; its runs that had not started are not counted" else "" end)
                       + "\ngreen: every run; amber: every configuration, not every run; red: a configuration in no run\nClick: the objectives report (new tab)") }
                else empty end),
-              (if (.runs | length) > 0 then { label: "🐞", url: "../objectives/\($id).html", source: "objectives_report",
+              (if (.runs | length) > 0 then { label: (if ($v.headline.new // 0) > 0 then "🚨 🐞" else "🐞" end),
+                  url: "../objectives/\($id).html", source: "objectives_report",
                   count: $v.bugs.objectives, bugs: $v.bugs.count,
                   # the new bugs and the title of the report (bugs.js BugsHeadline): the history page highlights the task
                   new: (if ($v.headline.new // 0) > 0 then $v.headline.new else null end),
                   headline: (if ($v.headline.new // 0) > 0 then $v.headline.text else null end),
-                  level: (if $v.bugs.confirmed > 0 then null else "warning" end),
-                  title: (if $v.bugs.confirmed > 0
-                          then "🐞 \($v.bugs.objectives) objectives, \($v.bugs.count) bug(s), \($v.bugs.confirmed) objectives reproduced by a replay\nClick: the objectives report, grouped by bug (new tab)"
-                          else "🐞 \($v.bugs.objectives) objectives, but no replay reproduced a bug (not reproduced, timed out or could not run)\nClick: the objectives report (new tab)" end) }
+                  # its colour (report_verdicts.js history: the level of the task): new (🚨, red), unexpected (gold),
+                  # nothing reproduced (warning), known bugs (plain: also those found by the fuzzer alone, CDOS); a report
+                  # without levels: warning when no replay reproduced a bug
+                  level: (if ($v.history | type) == "object" then $v.history.level
+                          else (if $v.bugs.confirmed > 0 then null else "warning" end) end),
+                  title: ($v.history.title // "🐞 \($v.bugs.objectives) objectives, \($v.bugs.count) bug(s)\nClick: the objectives report (new tab)") }
                  | with_entries(select(.value != null))
                else empty end) ]) }' "${f}";
   done | jq -s 'add // {}' > "${links}.tmp" && mv "${links}.tmp" "${links}";
 }
 
+# CatalogueFile <commit>: the file of tlspuffin's catalogue at a commit, from git_restapi (PB_GIT_RESTAPI, default the
+# local one), cached per commit (a commit's catalogue does not change), with the answers without catalogue; nothing printed
+# when the commit has none
+CatalogueFile() {
+  local commit="$1"; [[ "${commit}" =~ ^[0-9a-f]{7,40}$ ]] || return 0;
+  local dir="${PB_ROOT}/data/catalogue-cache"; local file="${dir}/${commit}.json";
+  if [ ! -s "${file}" ]; then
+    mkdir -p "${dir}" || return 0;
+    curl -sf --max-time 30 "${PB_GIT_RESTAPI:-http://127.0.0.1:10081}/api/git/catalogue/tlspuffin/${commit}" > "${file}.tmp" 2> /dev/null &&
+        jq -e 'type == "object"' "${file}.tmp" > /dev/null 2>&1 && mv -f "${file}.tmp" "${file}" || { rm -f "${file}.tmp"; return 0; };
+  fi
+  jq -e '.format == "vulnerabilities.toml"' "${file}" > /dev/null 2>&1 && echo "${file}";
+  return 0;
+}
+
+# LatestCatalogue: the commit of the newest catalogue: dev's, else (until tlspuffin's catalogue is merged) that of the
+# open pull request updated last that has one, as the Bugs reference shows it; cached an hour; nothing when none
+LatestCatalogue() {
+  local api="${PB_GIT_RESTAPI:-http://127.0.0.1:10081}" latest="${PB_ROOT}/data/catalogue-cache/latest.txt" commit='' c;
+  if [ -s "${latest}" ] && [ -n "$( find "${latest}" -mmin -60 2> /dev/null )" ]; then cat "${latest}"; return 0; fi
+  commit=$( curl -sf --max-time 30 "${api}/api/git/catalogue/tlspuffin/dev" 2> /dev/null | jq -r 'select(.format == "vulnerabilities.toml") | .commit // empty' 2> /dev/null );
+  if [ -z "${commit}" ]; then
+    for c in $( curl -sf --max-time 30 "${api}/api/git/history/tlspuffin" 2> /dev/null | jq -r '[.PR[]? | select(.state == "open" and ((.id // "") | test("^[0-9a-f]{40}$")))]
+                 | sort_by(.updated_at // .date // "") | reverse | .[0:10][] | .id' 2> /dev/null ); do
+      [ -n "$( CatalogueFile "${c}" )" ] && { commit="${c}"; break; };
+    done
+  fi
+  [ -n "${commit}" ] || return 0;
+  mkdir -p "$( dirname "${latest}" )" && echo "${commit}" > "${latest}.tmp" && mv -f "${latest}.tmp" "${latest}";
+  echo "${commit}";
+}
+
+# CommitAffected <tlspuffin commit> <catalogue file>: the bugs the catalogue gives by commits (a bug of tlspuffin's
+# harness: affected_commits = "not containing <commit of its fix>") and whether that commit has them: { ID: true when it
+# lacks the fix, false when it contains it }, from git in the clone of git_restapi (PB_TLSPUFFIN_REPO, read only); a
+# commit or a fix git does not know is left out (not decided: not recognised)
+CommitAffected() {
+  local commit="$1" catalogue="$2" repo="${PB_TLSPUFFIN_REPO:-${PB_ROOT}/data/repo/tlspuffin/repo}" out='{}' id fix value;
+  if [[ "${commit}" =~ ^[0-9a-f]{7,40}$ ]] && [ -s "${catalogue}" ] && [ -d "${repo}" ] && git -C "${repo}" cat-file -e "${commit}^{commit}" 2> /dev/null; then
+    while IFS=$'\t' read -r id fix; do
+      git -C "${repo}" cat-file -e "${fix}^{commit}" 2> /dev/null || continue;
+      git -C "${repo}" merge-base --is-ancestor "${fix}" "${commit}" 2> /dev/null;
+      case $? in 0) value=false;; 1) value=true;; *) continue;; esac
+      out=$( jq -c --arg id "${id}" --argjson v "${value}" '. + { ($id): $v }' <<< "${out}" );
+    done < <( jq -r '.vendors[]?.entries // {} | to_entries[] | select((.value.affected_commits // "") | test("^not containing [0-9a-f]{7,40}$"))
+                     | [.key, (.value.affected_commits | sub("^not containing "; ""))] | @tsv' "${catalogue}" 2> /dev/null )
+  fi
+  echo "${out}";
+}
+
+# Verdicts <report json>: the verdicts of the pages (report_verdicts.js with bugs.js) written into the report, with the
+# catalogue the report's validation used (else its commit's; a commit without catalogue: the latest one,
+# PB_CATALOGUE_LATEST, which names its bugs by their signature with their stack, not validated) and the witnesses'
+# stacks computed once (tools/witness_stacks.py), for the reports validated before validation kept them
+Verdicts() {
+  local commit catalogue latest='';
+  commit=$( jq -r '([.libraries[]?.validation?.catalogue?.commit | select(. != null)][0]) // .commit // empty' "$1" 2> /dev/null );
+  catalogue=$( CatalogueFile "${commit}" );
+  if [ -z "${catalogue}" ]; then
+    commit=$( LatestCatalogue ); catalogue=$( CatalogueFile "${commit}" ); [ -n "${catalogue}" ] && latest=1;
+  fi
+  local frames="${PB_ROOT}/data/catalogue-cache/witness_frames.json";
+  PB_CATALOGUE_LATEST="${latest}" PB_WITNESS_FRAMES="$( [ -r "${frames}" ] && echo "${frames}" )" \
+  PB_COMMIT_AFFECTED="$( CommitAffected "$( jq -r '.commit // empty' "$1" 2> /dev/null )" "${catalogue}" )" \
+    "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "$1" ${catalogue:+"${catalogue}"};
+}
+
 [ "${1:-}" == "--render" ] && { Render "$2" "$3"; exit $?; }
+[ "${1:-}" == "--verdicts" ] && { Verdicts "$2"; exit $?; }
 (( $# > 0 )) || { echo "Usage: $0 <task id> ... | --all" >&2; exit 1; }
 tasks=( "$@" );
 # one --all at a time (cron every 10 minutes): after an update of this script every page is rewritten, which can take
@@ -373,6 +455,19 @@ TaskLinks || status=1;
 # the registry of the bugs found so far, per library (🚨 new bug on the pages): known_bugs.json
 if [ "$1" == "--all" ] && [ -x "${PB_ROOT}/data/tools/qjs" ]; then
   "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/known_bugs.js" "${OUT}" > /dev/null || status=1;
+fi
+# the stacks of the bugs' witnesses, for the Bugs reference (next to the reports, served by the publisher):
+# witness_frames.json { <ID>: { frames, from } }, the newest validation that recorded it (its task), else the stacks
+# computed once (tools/witness_stacks.py)
+if [ "$1" == "--all" ]; then
+  stacks="${PB_ROOT}/data/catalogue-cache/witness_frames.json";
+  { for f in "${OUT}"/[0-9]*.json; do
+      jq -c '.task as $t | [.libraries[]?.validation?.entries // {} | to_entries[] | select(((.value.witness_frames // []) | length > 0) and .value.witness_frames_once != true)
+             | { id: .key, frames: .value.witness_frames, from: "the validation of task \($t)", task: $t }] | .[]' "${f}" 2> /dev/null;
+    done; } | jq -s --slurpfile once <( [ -r "${stacks}" ] && cat "${stacks}" || echo '{}' ) '
+        (($once[0] // {}) | with_entries(.value = { frames: .value.frames, from: "its witness, run once on \(.value.put // "a validation build")" }))
+        + (sort_by(.task) | map({ (.id): { frames, from } }) | add // {})' > "${OUT}/witness_frames.json.tmp" &&
+    mv -f "${OUT}/witness_frames.json.tmp" "${OUT}/witness_frames.json" || { rm -f "${OUT}/witness_frames.json.tmp"; status=1; };
 fi
 # the runs of each commit (Results' "🕘 N runs", /html/runs/): after the reports, which give the Vuln bugs
 if [ "$1" == "--all" ]; then

@@ -887,11 +887,17 @@
   font-size: 15px;
 }
 
-/* attempt highlighted by its monitor summary (objective: the run found what it looks for) */
+/* attempt highlighted by its monitor summary (objective: objectives its report calls unexpected; new: a new bug) */
 .card-attempt-item.card-attempt-highlight.highlight-objective {
   background: rgba(255, 196, 0, 0.16);
   border: 1px solid #ffc400;
   border-left: 4px solid #ffc400;
+}
+
+.card-attempt-item.card-attempt-highlight.highlight-new {
+  background: rgba(255, 82, 82, 0.16);
+  border: 1px solid #ff5252;
+  border-left: 4px solid #ff5252;
 }
 
 .card-attempt-item.card-attempt-highlight.highlight-error {
@@ -923,6 +929,12 @@
   box-shadow: 0 0 8px rgba(255, 196, 0, 0.6);
 }
 
+.card-task-link-badge.highlight-new {
+  background: #d32f2f;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(255, 82, 82, 0.6);
+}
+
 a.card-task-link-badge:hover {
   filter: brightness(1.1);
   text-decoration: underline;
@@ -931,6 +943,11 @@ a.card-task-link-badge:hover {
 .card-step-square.highlight-objective {
   background: #ffc400;
   box-shadow: 0 0 5px #ffc400;
+}
+
+.card-step-square.highlight-new {
+  background: #ff5252;
+  box-shadow: 0 0 5px #ff5252;
 }
 /* logs viewer: an output without content */
 .tab-btn.empty, .tab-btn:disabled { opacity: .4; cursor: not-allowed; }

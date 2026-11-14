@@ -13,12 +13,16 @@
 #   PB_PUBLIC_URL   base URL of the publisher (default http://<host>:10083)
 #   PB_LIVE_BUDGET  seconds of replays per call (default 240)
 #   PB_LIVE_TIMEOUT timeout of a replay in seconds (default 60)
+#   PB_LIVE_EVERY   seconds between two calls, the cron period (default 300): the pages say when the next update comes
+#   PB_REPORT_EVERY seconds between two calls of objectives_report.sh --all (default 600), for the same
 
 set -u
 PB_ROOT="${PB_ROOT:-/srv/puffin-bench}"
 URL="${PB_PUBLIC_URL:-http://$( hostname -f 2> /dev/null || hostname ):10083}"
 BOARD_URL="${PB_BOARD_URL:-http://$( hostname -f 2> /dev/null || hostname ):10082}"
 BUDGET="${PB_LIVE_BUDGET:-240}"
+EVERY="${PB_LIVE_EVERY:-300}"
+REPORT_EVERY="${PB_REPORT_EVERY:-600}"
 REPLAY_TIMEOUT="${PB_LIVE_TIMEOUT:-60}"
 # a replay that ends without confirming a bug is tried again, up to this many times: a memory corruption in a library
 # built without ASAN crashes or not depending on the memory layout
@@ -28,7 +32,7 @@ STATE="${PB_ROOT}/data/objectives-live"
 RUNS="${PB_ROOT}/data/runs"
 API="${PB_SCHEDULER_API:-http://127.0.0.1:10082}"
 TOOLS="$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )"
-source <( sed -n '/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${TOOLS}/../PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${TOOLS}/../PR_common.sh" )
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)
 declare -gA OBJECTIVES_NOT_TARGETED=()
 source <( jq -r '"OBJECTIVES_NOT_TARGETED=(", (._not_targeted // {} | to_entries[] | "  [\(.key | @sh)]=\("\(.value.cve)|\(.value.library // "")|\(.value.below // "")" | @sh)"), ")"' "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" 2> /dev/null )
@@ -123,7 +127,7 @@ Replay() {
 TaskActive() {
   local state rc;
   state=$( curl -s --max-time 20 "${API}/api/task/$1/state" ) && [ -n "${state}" ] || return 2;
-  jq -e '((.success // true) != false) and ([.. | objects | .state? | strings] | any(. == "Running" or . == "Pending"))' \
+  jq -e '(.success != false) and ([.. | objects | .state? | strings] | any(. == "Running" or . == "Pending"))' \
       <<< "${state}" > /dev/null 2>&1;
   rc=$?;
   (( rc <= 1 )) && return "${rc}" || return 2;
@@ -133,10 +137,81 @@ TaskActive() {
 StepLibrary() {
   local stateJSON="$1" key="$2" expName="$3";
   local lib;
-  lib=$( jq -r --arg k "/${key}" '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment"))
+  lib=$( jq -r --arg k "/${key}" '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment", "PerfObjectives"))
       | select((.executor_data.run_path // "") | endswith($k)) | .id][0] // empty' <<< "${stateJSON}" 2> /dev/null );
   [ -n "${lib}" ] || lib=$( grep -oiE 'boringssl|openssl|libressl|wolfssl|libssh' <<< "${expName}" | tail -1 );
   echo "${lib:-${expName}}";
+}
+
+# LiveValidation <task dir> <state JSON>: the validation of the task's objectives so far, per configuration, in the
+# shape of the final report's (the summary scripts' AttachValidation): the verdicts of the attempts that ended
+# (output/validation-<library>-<attempt>.json, ValidateObjectives) and those given during the running attempts
+# (executor/<step>/validation/verdicts/, ConfirmObjective), each by "<attempt>/<trace>", with the catalogue they rest on,
+# the bugs it knew (entries: alias, signature), the bench that validated and the errors of the ended attempts
+LiveValidation() {
+  local taskDir="$1" taskJSON="$2" out='{}' file base lib attempt dir key;
+  for file in "${taskDir}"/output/validation-*-*.json; do
+    [ -s "${file}" ] || continue;
+    base=$( basename "${file}" .json ); base="${base#validation-}"; attempt="${base##*-}"; lib="${base%-*}";
+    out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --slurpfile v "${file}" '
+        .[$lib] = ((.[$lib] // {}) | .catalogue = ($v[0].catalogue // .catalogue)
+          | .entries = ((.entries // {}) + ($v[0].entries // {} | map_values({ alias, oracle, replayable, witness_frames })))
+          | .bench = ((.bench // []) + (if $v[0].bench then [$v[0].bench | { commit, jobscripts }] else [] end) | unique)
+          | .errors = ((.errors // []) + (if $v[0].error then [{ attempt: ($a | tonumber? // $a), error: $v[0].error }] else [] end))
+          | .byTrace = ((.byTrace // {}) + ([$v[0].objectives[]? | { key: ($a + "/" + .trace),
+              value: ({ verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
+                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)
+                + (if (.signature_of_patched // []) | length > 0 then { signature_of_patched } else {} end)
+                + (if .failure then { failure } else {} end)) }] | from_entries)))' \
+        <<< "${out}" 2> /dev/null ) || out='{}';
+  done
+  # the verdicts being given (custom benchmarks, VulnA/B: during the run; any flow: while ValidateObjectives runs), in
+  # <step dir>/validation, or <step dir>/run-<n>/validation for the runs of Perf validated after all of them
+  # (PerfObjectives, PR_perf.sh: after the runs, not during them). A verdict already in the result of an ended attempt
+  # (above) is kept.
+  local runDir run during;
+  for dir in "${taskDir}"/executor/*/validation/verdicts "${taskDir}"/executor/*/run-[0-9]*/validation/verdicts; do
+    [ -d "${dir}" ] || continue;
+    runDir=$( dirname "$( dirname "${dir}" )" ); run=''; during=true;
+    if [[ "$( basename "${runDir}" )" == run-[0-9]* ]]; then
+      run=$( basename "${runDir}" ); run="${run#run-}"; during=false;
+      runDir=$( dirname "${runDir}" );
+    fi
+    key=$( basename "${runDir}" ); attempt="${run:-${key##*-}}";
+    lib=$( StepLibrary "${taskJSON}" "${key}" "" );
+    [ -n "${lib}" ] || continue;
+    for file in "${dir}"/*.json; do
+      [ -s "${file}" ] || continue;
+      out=$( jq -c --arg lib "${lib}" --arg a "${attempt}" --argjson during "${during}" --slurpfile v "${file}" \
+          --slurpfile s "$( dirname "${dir}" )/state.json" '
+          .[$lib] = ((.[$lib] // {})
+            | .catalogue = (.catalogue // ($s[0] | if .catalogueCommit then { source, commit: .catalogueCommit } else null end))
+            | .byTrace[$a + "/" + $v[0].trace] //= ($v[0] | { verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
+                + (if $during then { during_attempt: true } else {} end)
+                + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)
+                + (if (.signature_of_patched // []) | length > 0 then { signature_of_patched } else {} end)
+                + (if .failure then { failure } else {} end)))' \
+          <<< "${out}" 2> /dev/null ) || continue;
+    done
+  done
+  echo "${out}";
+}
+
+# LiveLibraries <task dir> <state JSON>: every configuration with its number of runs, also the runs without objective
+# yet (the 🎯 count: k/runs), and the target of a custom benchmark's experiment as it recorded it (cli.custom of
+# output/cli-<library>.json, as the final report has it): a configuration without objective counts in 🎯 too
+LiveLibraries() {
+  local taskDir="$1" taskJSON="$2" libs library custom;
+  libs=$( jq -c '[.task.steps | (if type == "object" then [.[]] else . end)[]
+      | select(.name | IN("ExperimentWithCargo", "TwinExperiment"))] | group_by(.id)
+      | map({ library: .[0].id, runs: (map(if .name == "TwinExperiment" then 2 else 1 end) | add) })' <<< "${taskJSON}" 2> /dev/null ) || libs='[]';
+  jq -e 'type == "array"' <<< "${libs}" > /dev/null 2>&1 || libs='[]';
+  while read -r library; do
+    custom=$( jq -c '.custom // empty | select(.target)' "${taskDir}/output/cli-${library}.json" 2> /dev/null );
+    [ -n "${custom}" ] || continue;
+    libs=$( jq -c --arg lib "${library}" --argjson custom "${custom}" 'map(if .library == $lib then . + { cli: { custom: $custom } } else . end)' <<< "${libs}" );
+  done < <( jq -r '.[].library' <<< "${libs}" );
+  echo "${libs}";
 }
 
 # Commit and name of a task, from its state ($1, JSON of /api/task/<id>/state): its arguments are [{key, value}]
@@ -162,6 +237,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
   while IFS= read -r objDir; do
     expDir=$( dirname "${objDir}" );
     runDir=$( dirname "$( dirname "${expDir}" )" );
+    # an ended run set up again after all the runs (PerfObjectives, PR_perf.sh): counted from its archive
+    [ -e "${runDir}/.after_runs" ] && continue;
     stepDir="${runDir}"; run='';
     if [[ "$( basename "${runDir}" )" == twin[01] ]]; then
       stepDir=$( dirname "${runDir}" );
@@ -312,26 +389,32 @@ for taskDir in "${RUNS}"/[0-9]*; do
         --argjson cli "${cli}" --arg traces "live-${task}-traces/${library}/${attempt}" \
         '. + [{ library: $lib, attempt: $a, found: $found, replayed: ([$g[] | select(.type != "not-replayed") | .count] | add // 0), traces_dir: $traces,
                 reports: ([$g[] | select(.type != "no-crash" and .type != "replay-error" and .type != "not-replayed") | .count] | add // 0), groups: $g,
-                cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities}), asan: $cli.asan.instrumented }]' <<< "${runs}" );
+                cli: ($cli | {build, cputs, vendor, features, library, vulnerabilities, custom}), asan: $cli.asan.instrumented }]' <<< "${runs}" );
   done
   [ "$( jq length <<< "${runs}" )" -gt 0 ] || continue;
   IFS=$'\t' read -r commit name <<< "$( TaskInfo "${taskJSON}" )";
   jq --arg task "${task}" --arg name "${name}" --arg commit "${commit}" --arg updated "$( date '+%F %T' )" \
+      --argjson validation "$( LiveValidation "${taskDir}" "${taskJSON}" )" \
+      --argjson refresh "$( jq -n --argjson e "${EVERY}" --argjson b "${BUDGET}" --argjson r "${REPORT_EVERY}" --argjson now "$( date +%s )" \
+          '{ live_every_s: $e, live_budget_s: $b, report_every_s: $r, updated_epoch: $now }' )" \
       --arg taskUrl "${BOARD_URL}/files/board/task.html?id=${task}" \
       --arg jobType "$( jq -r '.task.job_type // ""' <<< "${taskJSON}" 2> /dev/null )" \
       --argjson nt "$( NotTargetedJSON )" \
       --argjson cves "$( jq -c -f "${TOOLS}/objectives_page/cve_signatures.jq" "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" 2> /dev/null || echo '{}' )" \
       --argjson targets "$( jq -c --slurpfile t "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" '[.task.steps | (if type == "object" then [.[]] else . end)[]
           | select(.name == "ExperimentWithCargo") | { (.id): (.args.vendor // "") }] | add // {} | with_entries(.value = $t[0][.value]) | with_entries(select(.value != null))' <<< "${taskJSON}" 2> /dev/null || echo '{}' )" \
-      --argjson libraries "$( jq -c '[.task.steps | (if type == "object" then [.[]] else . end)[]
-          | select(.name | IN("ExperimentWithCargo", "TwinExperiment"))] | group_by(.id)
-          | map({ library: .[0].id, runs: (map(if .name == "TwinExperiment" then 2 else 1 end) | add) })' <<< "${taskJSON}" 2> /dev/null || echo '[]' )" \
+      --argjson libraries "$( LiveLibraries "${taskDir}" "${taskJSON}" )" \
       '{ task: $task, task_url: $taskUrl, commit: $commit, name: $name, job_type: $jobType, live: true, updated: $updated,
-         not_targeted: (if $jobType | test("^vuln-") then $nt else {} end), targets: $targets, cves: $cves,
-         # every configuration with its number of runs, also the runs without objective yet (the 🎯 count: k/runs)
-         libraries: $libraries,
+         # when the next update comes (the page says it): the cron period, the replays of a call, this update
+         refresh: $refresh,
+         not_targeted: $nt, targets: $targets, cves: $cves,
+         # every configuration with its number of runs and its custom target (LiveLibraries)
+         libraries: ($libraries | map(. + (if $validation[.library] then { validation: $validation[.library] } else {} end))),
          runs: sort_by(.library, .attempt) }' \
       <<< "${runs}" > "${OUT}/live-${task}.json";
+  # the verdicts of the pages (report_verdicts.js with bugs.js): the level of the task for the pill of the top bar, as
+  # History has it for a finished task (a failure leaves the report without them: the pill falls back to its counts)
+  bash "${TOOLS}/objectives_report.sh" --verdicts "${OUT}/live-${task}.json" 2> /dev/null || true;
   bash "${TOOLS}/objectives_report.sh" --render "${OUT}/live-${task}.json" "${OUT}/live-${task}.html";
   # row of live.html and of the top bar pill (nav.js): counts of the task; configurations = its experiment steps
   nconf=$( jq '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment")) | .id] | unique | length' \
@@ -345,6 +428,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
                found: ([$l.runs[].found] | add // 0), replayed: ([$l.runs[].replayed] | add // 0),
                reproduced: ([$l.runs[].reports] | add // 0),
                bugs: ($confirmed | unique | length),
+               # the level of the task (report_verdicts.js): new, unexpected, known, unclear; null without verdicts
+               level: ($l.verdicts.headline.level // null), new: ($l.verdicts.headline.new // 0),
                hit: ([$l.runs[] | select(any(.groups[]; .type != "no-crash" and .type != "replay-error")) | .library] | unique),
                configurations: ([$nconf, ([$l.runs[].library] | unique | length)] | max) }]' <<< "${liveTasks}" ) ||
       liveTasks='[]';

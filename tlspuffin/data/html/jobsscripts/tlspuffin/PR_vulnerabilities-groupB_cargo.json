@@ -8,6 +8,7 @@
     "SDOS1": {
       "args": {
       "experiment": "SDOS1",
+        "target_bug": "CVE-2021-3449",
         "features": "openssl111j",
         "vendor": "openssl:openssl111j"
       }
@@ -15,6 +16,7 @@
     "SIG": {
       "args": {
       "experiment": "SIG",
+        "target_bug": "CVE-2022-25638",
         "features": "wolfssl510,fix-CVE-2022-25640,fix-CVE-2022-39173",
         "vendor": "wolfssl:wolfssl510-sig"
       }
@@ -46,6 +48,12 @@
         "step": "ForcedBuild"
       },
       {
+        "step": "PrepareValidation",
+        "configuration": {
+          "nb_cores": 4
+        }
+      },
+      {
         "step": "ExperimentWithCargo",
         "configuration": {
           "timeout": "${RUNTIME_TIMEOUT}"
@@ -58,6 +66,12 @@
       },
       {
         "step": "ExperimentEnd"
+      },
+      {
+        "step": "ValidateObjectives",
+        "configuration": {
+          "nb_cores": 4
+        }
       }
     ],
     {

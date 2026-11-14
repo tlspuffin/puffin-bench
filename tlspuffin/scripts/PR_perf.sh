@@ -47,6 +47,8 @@ ExperimentEnd() {
     echo '{ "error": "stats.json not found" }' > "${outFile}"
   fi
   (( objective_count > 0 )) || return 0;
+  # a twin step's runs: replayed after all the runs (PerfObjectives), not while other runs measure
+  [ -n "${OBJECTIVES_AFTER_RUNS:-}" ] && return 0;
   ExperimentReplayObjectives "${experiment_base}" 100 120;
 
   return 0;
@@ -119,6 +121,9 @@ TwinLaunch() {
   # (the replays need .currentcmd and run what .currentlaunch records)
   echo "exec ${PREFIX_FAKETIME} ${binary}" > .currentcmd
   ExperimentSaveExecution "${binary}" "${extra_flags}" false
+  # (kept until the task ends, for the replays and the validation after the runs, whose folders are gone: PerfObjectives)
+  local kept="${THEJOB_OUT_PATH}/launch-${THEJOB_STEP_ID}-${THEJOB_STEP_ATTEMPT_ID}"
+  mkdir -p "${kept}" && cp .currentcmd .currentlaunch "${kept}/"
   THEJOB_STDERR_PATH="${PWD}/.fuzzer_stderr" ExperimentSaveLaunchInfo
   $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" \
       2> >( tee -a ./.fuzzer_stderr >&2 ) &
@@ -178,7 +183,74 @@ TwinExperiment() {
   TwinEach TwinRun
 }
 
-TwinExperimentEnd() { TwinEach ExperimentEnd; }
+TwinExperimentEnd() { OBJECTIVES_AFTER_RUNS=1 TwinEach ExperimentEnd; }
+
+# PerfObjectives: what a run's objectives need beyond its end, for every run of the library once all of them ended (a
+# group of the flow of its own, between the twin runs and SummaryRun: nothing of it runs while runs measure): their
+# replays (ExperimentReplayObjectives: objectives-<library>-<run>.json, <library>/<run>-objective-reports, as
+# ExperimentEnd would) and their validation (ValidateObjectives, PR_validate.sh: validation-<library>-<run>.json,
+# <library>/<run>-validation). The folder of a run is gone by then: each run is set up again in run-<n> from what stays
+# until the task ends, its objectives and fuzzer logs among the task's artefacts (<library>/<run>-objective, -log), the
+# shared build (TwinRunDir) and its launch record (launch-<library>-<run>, TwinLaunch). The first run with objectives
+# prepares the validation alone (checkout, builds, controls); the others take its state, THEJOB_NB_CORES runs at once
+# (each replays and executes one objective at a time). The step has PERF_OBJECTIVES_BUDGET seconds (7200) for all its
+# runs, a deadline: a run gets the replays that fit in what is left when it starts (at most 100, of up to 120 s each),
+# then the validation time (VALIDATION_BUDGET) left after them and after its preparation (VALIDATION_DEADLINE); past it,
+# its objectives are recorded as not validated, without replay. It can go past the deadline by the executions of one
+# objective (validation looks at the time between objectives) and by the first preparation (its builds).
+PerfObjectives() {
+  local artefacts="${THEJOB_ARTEFACTS_PATH}/${THEJOB_STEP_ID}" objectives run dir prepared='' rc=0 n
+  [ -r "$( SharedBuildDir )/.unsupported" ] && { echo "Skipped: $( < "$( SharedBuildDir )/.unsupported" )"; return 0; }
+  local deadline=$(( SECONDS + ${PERF_OBJECTIVES_BUDGET:-7200} )) parallel=$(( ${THEJOB_NB_CORES:-1} > 0 ? ${THEJOB_NB_CORES:-1} : 1 ))
+  local -a runs=() counts=()
+  for objectives in $( find "${artefacts}" -maxdepth 1 -type d -name '[0-9]*-objective' 2> /dev/null | sort -V ); do
+    run=$( basename "${objectives}" -objective )
+    dir="${PWD}/run-${run}"
+    rm -rf "${dir}" && mkdir -p "${dir}/experiments/perf" || { rc=1; continue; }
+    # (the live pages count these objectives from their archive: objectives_live.sh skips the folder)
+    touch "${dir}/.after_runs"
+    cp -a "${objectives}" "${dir}/experiments/perf/objective" || { rc=1; continue; }
+    [ -d "${artefacts}/${run}-log" ] && ln -sfn "${artefacts}/${run}-log" "${dir}/experiments/perf/log"
+    if [ -r "${THEJOB_OUT_PATH}/launch-${THEJOB_STEP_ID}-${run}/.currentlaunch" ]; then
+      cp "${THEJOB_OUT_PATH}/launch-${THEJOB_STEP_ID}-${run}/".current{cmd,launch} "${dir}/"
+    fi
+    runs+=( "${run}" ); counts+=( "$( find "${objectives}" -maxdepth 1 -type f -name '*.trace' ! -name '.*' | wc -l )" )
+  done
+  local i
+  for i in "${!runs[@]}"; do
+    run="${runs[i]}"; n="${counts[i]}"; dir="${PWD}/run-${run}"
+    if [ -n "${prepared}" ]; then
+      # the validation prepared: its files (state.json, the listings of the validation set ValidateObjectives records)
+      # and its controls, the checkout removed once at the end
+      mkdir -p "${dir}/validation/runs" "${dir}/validation/verdicts" &&
+        find "${prepared}" -maxdepth 1 -type f -exec cp {} "${dir}/validation/" \; &&
+        find "${prepared}/runs" -maxdepth 1 -name 'control-*' -exec cp {} "${dir}/validation/runs/" \;
+      while (( $( jobs -rp | wc -l ) >= parallel )); do wait -n || true; done
+      PerfObjectivesRun "${dir}" "${run}" "${n}" "${deadline}" &
+    else
+      PerfObjectivesRun "${dir}" "${run}" "${n}" "${deadline}"
+      [ -s "${dir}/validation/state.json" ] && prepared="${dir}/validation"
+    fi
+  done
+  wait
+  for run in "${runs[@]}"; do [ "$( cat "${PWD}/run-${run}/.status" 2> /dev/null )" == 0 ] || rc=1; done
+  [ -n "${prepared}" ] && ( cd "$( dirname "${prepared}" )" && ValidationCleanup )
+  return ${rc}
+}
+
+# PerfObjectivesRun <run folder> <run> <objectives> <deadline ($SECONDS)>: the replays and the validation of one run (in
+# a subshell: its run number, its folder), not past the deadline; its status in <run folder>/.status
+PerfObjectivesRun() {
+  local dir="$1" run="$2" n="$3" deadline="$4" status=0
+  local left=$(( deadline - SECONDS )); (( left < 0 )) && left=0
+  local replays=$(( left / 120 )); (( replays > 100 )) && replays=100
+  echo "Run ${run}: ${n} objective(s), ${replays} replay(s) at most, then the validation until the deadline (${left} s left)"
+  ( cd "${dir}" && TwinRunDir > /dev/null && export THEJOB_STEP_ATTEMPT_ID="${run}" &&
+      { (( n == 0 || replays == 0 )) || ExperimentReplayObjectives "${dir}/experiments/perf" "${replays}" 120; } &&
+      VALIDATION_KEEP_CHECKOUT=1 VALIDATION_DEADLINE="${deadline}" ValidateObjectives ) || status=1
+  echo "${status}" > "${dir}/.status"
+  return "${status}"
+}
 
 # MonitorExperiment of both runs: their messages one after the other, and the facts of the two for the board (one
 # #MONITOR_JSON line: counts added up, the oldest stats and corpus, the newest objectives)

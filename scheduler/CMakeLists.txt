@@ -174,7 +174,7 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/executor/output_ring.cxx
   src/scheduler/system/linux_cores.cxx src/scheduler/system/cpu_topology.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx
   src/scheduler/system/linux.cxx
-  src/scheduler/api/schedule_api.cxx src/scheduler/api/users_api.cxx
+  src/scheduler/api/schedule_api.cxx src/scheduler/api/users_api.cxx src/scheduler/api/benchmarks_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
   src/scheduler/schedule/monitor/monitor.cxx src/scheduler/schedule/monitor/task.cxx
   src/scheduler/schedule/archiver.cxx
@@ -207,3 +207,9 @@ add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 add_executable(testOutputRing src/test_output_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 add_executable(testCpuTopology src/test_cpu_topology.cxx src/scheduler/system/cpu_topology.cxx)
+# the step arguments as the executor writes them and functions.sh reads them: build/scheduler/testStepParameters
+add_executable(testStepParameters src/test_step_parameters.cxx)
+target_compile_definitions(testStepParameters PRIVATE FUNCTIONS_SH="${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh")
+# the saved benchmarks of the board: build/scheduler/testBenchmarksAPI
+add_executable(testBenchmarksAPI src/test_benchmarks_api.cxx src/scheduler/api/benchmarks_api.cxx src/utils/logs.cxx)
+target_link_libraries(testBenchmarksAPI PRIVATE ${RapidjsonTN})

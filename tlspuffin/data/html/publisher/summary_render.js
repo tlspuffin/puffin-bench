@@ -3,6 +3,8 @@ import { GraphOverview } from './summary_graphoverview.js';
 import { GraphCompare } from './summary_graphcompare.js';
 import { MetricsCampaign } from './summary_metricscampaign.js';
 import { describeCommit, commitLineHTML } from '../common/commitinfo.js';
+import { BenchmarkOf, ExperimentLabel, OrderLibraries } from './summary_benchmarks.js';
+import { VERDICTS, VERDICT_ORDER, VerdictKind, BenchText, TAGS, SignatureText } from '../common/verdicts.js';
 
 // open pull requests of the git_restapi history, for the PR of each commit (see SetPullRequests)
 let pullRequests = [];
@@ -120,15 +122,58 @@ function GetObjectivesButton(status) {
   const confirmed = ConfirmedObjectives(objectives);
   const counts = `${objectives.total} objective(s), ${distinct} distinct`;
   const title = confirmed > 0
-      ? `${counts}, ${confirmed} replay(s) confirmed a bug. Click to show them, grouped by bug`
-      : `${counts}, none confirmed: no replay reproduced a bug (not reproduced, timed out or could not run). `
+      ? `${counts}, ${confirmed} replay(s) reproduced a bug. Click to show them, grouped by bug`
+      : `${counts}, none reproduced (not reproduced, timed out or could not run). `
         + 'Click to show them';
   return `<button type="button" class="lib-objectives${confirmed > 0 ? '' : ' unconfirmed'}" title="${EscapeAttribute(title)}">`
        + `🐞 ${objectives.total} (${distinct})</button>`;
 }
 
+// The validation of the objectives against tlspuffin's catalogue (ValidateObjectives, merged per library by the
+// summary scripts): one line, and the verdict of a trace, in the words of every page (../common/verdicts.js)
+// noReplay: the objectives ("<attempt>/<trace>") of bugs known not to replay (bugs.js NoReplay: CDOS), whose inconclusive
+// verdicts are as expected
+function ValidationLine(validation, noReplay = new Set()) {
+  if (!validation) return '';
+  if (validation.unsupported) return `<div class="lib-validation muted">Not validated: ${EscapeAttribute(validation.unsupported)}.</div>`;
+  const catalogue = validation.catalogue
+    ? `${validation.catalogue.source === 'dev' ? 'dev' : 'the commit\'s own catalogue'} at ${EscapeAttribute(String(validation.catalogue.commit ?? '').slice(0, 10))}` : '';
+  const count = (map) => Object.entries(map ?? {}).map(([id, n]) => `${EscapeAttribute(id)}${n > 1 ? ` ×${n}` : ''}`).join(', ');
+  // the objectives by kind of verdict (VerdictKind: what the validation recorded)
+  const kinds = {};
+  const traces = Object.entries(validation.byTrace ?? {});
+  if (traces.length) traces.forEach(([key, v]) => {
+    const raw = VerdictKind(v), kind = raw === 'inconclusive' && noReplay.has(key) ? 'no-replay' : raw;
+    kinds[kind] = (kinds[kind] ?? 0) + 1;
+  });
+  else Object.entries(validation.verdicts ?? {}).forEach(([verdict, n]) => { const kind = VerdictKind({ verdict }); kinds[kind] = (kinds[kind] ?? 0) + n; });
+  const parts = Object.entries(kinds).sort(([a], [b]) => VERDICT_ORDER.indexOf(a) - VERDICT_ORDER.indexOf(b)).map(([kind, n]) => {
+    const v = VERDICTS[kind] ?? VERDICTS.none;
+    const detail = kind === 'patch' ? count(validation.confirmed) : kind === 'signature' ? count(validation.known_unpatched) : '';
+    return `<span class="validation-${EscapeAttribute(kind)}" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${n} ${EscapeAttribute(v.word)}${detail ? ` (${detail})` : ''}</span>`;
+  });
+  const controls = (validation.controls_failed ?? []).length
+    ? ` · <b class="validation-controls-failed" title="the witness of a candidate bug did not behave on the validation builds: verdicts not trusted">controls failed (runs ${EscapeAttribute(validation.controls_failed.join(', '))})</b>` : '';
+  const errors = (validation.errors ?? []).length ? ` · <b class="validation-error">⚠ ${validation.errors.map(e => `run ${EscapeAttribute(e.attempt)}: ${EscapeAttribute(e.error)}`).join('; ')}</b>` : '';
+  const bench = BenchText(validation.bench);
+  return `<div class="lib-validation">Validated against tlspuffin's catalogue${catalogue ? ` (${catalogue})` : ''}: ${parts.join(' · ') || 'no objective validated'}${controls}${errors}${bench ? ` · <span class="muted">${EscapeAttribute(bench)}</span>` : ''}.</div>`;
+}
+function ValidationBadge(validation, trace) {
+  const v = validation?.byTrace?.[trace];
+  if (!v) return '';
+  const kind = VerdictKind(v);
+  const words = VERDICTS[kind] ?? VERDICTS.none;
+  const ids = kind === 'patch' ? (v.entries ?? []).join(', ')
+    : kind === 'signature' ? (v.known_unpatched ?? []).join(' or ')
+    : kind === 'unpatched' ? (v.signature_of_patched ?? []).join(', ')
+    : kind === 'other' ? (v.other_signature ?? []).join(', ') : '';
+  const failure = kind === 'error' && v.failure?.message ? `\n${v.failure.message}` : '';
+  return ` <span class="objective-validation validation-${EscapeAttribute(kind)}" title="${EscapeAttribute(`${words.mark} ${words.tip}${failure}`)}">${words.mark} ${EscapeAttribute(ids ? `${ids} · ${words.word}` : words.word)}</span>`;
+}
+
 // taskID: task of the results, for the link to its full objectives page (objectives_report.sh)
-function ObjectivesPanel(objectives, taskID = null) {
+// validation: the library's validation of its objectives (summary scripts' AttachValidation), if any
+function ObjectivesPanel(objectives, taskID = null, validation = null) {
   const panel = document.createElement('div');
   panel.className = 'lib-objectives-panel';
   panel.hidden = true;
@@ -138,14 +183,15 @@ function ObjectivesPanel(objectives, taskID = null) {
       + `${objectives.distinct ?? groups.length} distinct${shown}. `
       + (taskID ? `<a class="lib-objectives-report" href="${ObjectivesPageURL(taskID)}" target="_blank" rel="noopener" `
           + `title="All the objectives of the task, grouped by bug, with their reports (new tab)">Full report ↗</a> · ` : '')
-      + `traces: artefacts <code>&lt;library&gt;/&lt;run&gt;-objective-reports</code> and <code>-objective</code>.</div>`;
+      + `traces: artefacts <code>&lt;library&gt;/&lt;run&gt;-objective-reports</code> and <code>-objective</code>.</div>`
+      + ValidationLine(validation);
   const rows = groups.map(group => {
     const frames = (group.frames ?? []).map(EscapeAttribute).join(' &lt; ') || '—';
     const attempts = (group.attempts ?? []).join(', ');
     return `<details class="lib-objective">
         <summary><b>${group.count} ×</b> <span class="objective-type objective-${EscapeAttribute(group.type)}">${EscapeAttribute(group.type)}</span>
           <span class="objective-frames">${frames}</span>
-          <span class="objective-runs">runs ${EscapeAttribute(attempts)}</span></summary>
+          <span class="objective-runs">runs ${EscapeAttribute(attempts)}</span>${ValidationBadge(validation, `${group.first_attempt}/${group.first_trace}`)}</summary>
         <div class="objective-trace">first: run ${EscapeAttribute(group.first_attempt)}, ${EscapeAttribute(group.first_trace)}.trace</div>
         <pre>${EscapeAttribute(group.excerpt ?? '')}</pre>
       </details>`;
@@ -177,13 +223,14 @@ function ReportBugs(taskID) {
         }
         const report = await response.json();
         reportSource.set(taskID, live || report.pending_final ? `live-${taskID}` : String(taskID));
-        const bugs = module.Bugs(report.runs ?? [], report.not_targeted, report.targets);
-        // 🚨 new bugs (bugs.js NewBugs: per configuration with a target; in a plain version, none of its declared CVEs)
-        // read once for the page (it was fetched again for every report)
+        // the registry of the bugs found so far, read once for the page (it was fetched again for every report)
         knownBugs ??= fetch('/html/objectives/known_bugs.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
         const known = await knownBugs;
-        module.NewBugs?.(bugs, known, report.task, report);
-        bugs.expectedRuns = module.ExpectedRuns?.(report.runs ?? [], report.targets, report.libraries) ?? {};
+        // what the objectives page tells of the task (bugs.js AnalyseReport): its bugs with their validation verdicts,
+        // 🚨 the new ones, 🎯 the runs that found their expected bug (custom benchmarks included)
+        const analysis = module.AnalyseReport(report, known);
+        const bugs = analysis.bugs;
+        bugs.expectedRuns = analysis.expectedRuns;
         // how the scheduler ended each run, per configuration (reports written from 2026-10-09 on)
         bugs.runEnds = Object.fromEntries((report.libraries ?? []).map(lib => [lib.library, lib.ends ?? null]));
         bugs.endErrors = Object.fromEntries((report.libraries ?? []).map(lib => [lib.library, lib.end_errors ?? null]));
@@ -309,26 +356,44 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     return;
   }
   const total = own.reduce((sum, entry) => sum + entry.count, 0);
-  const notReproduced = own.reduce((sum, entry) => sum + entry.count - entry.reproduced, 0);
+  // not reproduced by their replay, but those of the bugs known not to replay (CDOS: as expected)
+  const notReproduced = own.filter(entry => !(entry.bug.noReplay ?? []).length).reduce((sum, entry) => sum + entry.count - entry.reproduced, 0);
   const rows = own.map(({ bug, runs, count, reproduced }) => {
     const kind = bug.type;
     const where = (bug.frames ?? []).map(EscapeAttribute).join(' &lt; ') || EscapeAttribute(bug.summary || '—');
     const missing = count - reproduced;
-    const badge = ((reproduced === 0 && bug.fuzzer) ? ' <span class="objective-warn" title="The fuzzer recorded it; no replay reproduces it">⚠ not reproduced</span>'
+    // a bug known not to replay (the catalogue's replayable = false: CDOS): its objectives not reproduced, as expected
+    const noReplay = (bug.noReplay ?? []).length > 0;
+    const badge = (noReplay && reproduced === 0 ? ` <span class="objective-validation validation-no-replay" title="${EscapeAttribute(`${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].tip}`)}">${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].word}</span>`
+        : (reproduced === 0 && bug.fuzzer) ? ' <span class="objective-warn" title="The fuzzer recorded it; no replay reproduces it">⚠ not reproduced</span>'
         : missing ? ` <span class="objective-warn">⚠ ${missing} not reproduced</span>` : '')
         + (bug.notTarget ? ` <span class="objective-not-target" title="Not the CVE this job looks for (another known CVE of the library); it does not end the experiment">not the target · ${EscapeAttribute(bug.notTarget)}</span>` : '');
+    // what the validation says of its objectives (bugs.js BugValidation, the parts of the objectives page), in the
+    // words of the pages
+    const verdicts = (bug.validation?.parts ?? []).filter(part => part.kind !== 'none').map(part => {
+      const v = VERDICTS[part.kind] ?? VERDICTS.none;
+      const ids = part.ids.join(part.kind === 'signature' ? ' or ' : ', ');
+      // the bug and how strong; its signature in the hover
+      const signature = part.kind === 'signature' ? [...new Set(part.ids.map(id => SignatureText(bug.validation.oracles?.[id])))].join(' or ') : '';
+      const sig = part.kind === 'signature' ? (part.weak ? ' · weak' : ' with its stack') + (part.recognised ? ' · not validated' : '') : '';
+      return ` <span class="objective-validation validation-${EscapeAttribute(part.kind)}${part.kind === 'signature' && part.weak ? ' validation-weak' : ''}" title="${EscapeAttribute(`${v.mark} ${v.tip}${signature ? `\nits signature: ${signature}` : ''}`)}">${v.mark} ${EscapeAttribute(ids ? `${ids} · ${v.word}` : v.word)}${EscapeAttribute(sig)} ×${part.count}</span>`;
+    }).join('');
     return `<div class="lib-objective lib-bug">
         <a class="objective-letter" href="${ObjectivesPageURL(taskID)}#bug-${bug.letter}" target="_blank" rel="noopener"
            title="${EscapeAttribute(module.BugName?.(bug, bugs.cves) ?? 'Bug ' + bug.letter)} of the objectives report (new tab)">${EscapeAttribute(module.BugName?.(bug, bugs.cves) ?? 'Bug ' + bug.letter)}</a>
-        <b>${count} ×</b> <span class="objective-type objective-${EscapeAttribute(kind)}">${EscapeAttribute(module.TYPE_LABELS[kind] ?? kind)}</span>${badge}${bug.expected ? ` <span class="objective-expected">🎯 ${EscapeAttribute(bug.expected.join(', '))}</span>` : ''}${bug.isNew?.includes(library) ? ' <span class="objective-new">🚨 NEW BUG</span>' : ''}${bug.unexpected ? ' <span class="objective-warn">⚠ unexpected</span>' : ''}
+        <b>${count} ×</b> <span class="objective-type objective-${EscapeAttribute(kind)}">${EscapeAttribute(module.TYPE_LABELS[kind] ?? kind)}</span>${badge}${bug.expected ? ` <span class="objective-expected" title="${EscapeAttribute(TAGS.expected.tip)}">${TAGS.expected.mark} ${EscapeAttribute(bug.expected.join(', '))}</span>` : ''}${bug.isNew?.includes(library) ? ` <span class="objective-new" title="${EscapeAttribute(TAGS.new.tip)}">${TAGS.new.mark} ${TAGS.new.word}</span>` : ''}${bug.unexpected ? ` <span class="objective-warn" title="${EscapeAttribute(TAGS.unexpected.tip)}">${TAGS.unexpected.mark} ${TAGS.unexpected.word}</span>` : ''}${verdicts}
         <span class="objective-frames">${where}${bug.framesFromFuzzer ? ' <span class="muted">(fuzzer\'s backtrace)</span>' : ''}</span>
         <span class="objective-runs">runs ${runs.map(run => EscapeAttribute(run.attempt)).join(', ')}</span>
       </div>`;
   }).join('');
+  // the objectives of the bugs known not to replay (CDOS): not reproduced, as expected
+  const noReplayTraces = new Set(own.filter(entry => (entry.bug.noReplay ?? []).length)
+      .flatMap(entry => (entry.bug.objectives ?? []).filter(o => o.library === library).map(o => `${o.attempt}/${o.name}`)));
   if (panel && own.length) panel.innerHTML = `<div class="lib-objectives-info">${total} objective(s), ${own.length} bug(s)`
       + (notReproduced ? `, ${notReproduced} not reproduced by their replay` : '') + ` — as in the `
       + `<a class="lib-objectives-report" href="${ObjectivesPageURL(taskID)}" target="_blank" rel="noopener">objectives report ↗</a>`
-      + ` (a bug is what the fuzzer recorded; the report has the replays and the fuzzer's logs).</div>` + rows;
+      + ` (a bug is what the fuzzer recorded; the report has the replays and the fuzzer's logs).</div>`
+      + ValidationLine(status?.validation, noReplayTraces) + rows;
   // the expected bug of this configuration (vuln_targets.json): 🎯 runs that found it / runs (bugs.js ExpectedRuns, the
   // count of the objectives report), · k untimed those of them that did not succeed (no time to find), then the others
   // counted with the run states of the summary this row shows (the same as the outcomes of the report, which a report
@@ -341,8 +406,10 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     const notTarget = own.filter(e => e.bug.notTarget).reduce((s, e) => s + e.count, 0);
     const unexpected = own.filter(e => e.bug.unexpected).reduce((s, e) => s + e.count, 0);
     // "· no replay" inside the chip: the expected bug was not reproduced by a replay in every run that found it (the fuzzer's log
-    // is the evidence there, e.g. CDOS's crash in the session cache, which depends on the fuzzer's in-process state)
-    const notReproduced = expected.found.size - (expected.reproduced?.size ?? expected.found.size);
+    // is the evidence there); not for a bug known not to replay (CDOS: its crash in the session cache depends on the
+    // fuzzer's in-process state), which is as expected
+    const targetNoReplay = own.some(entry => (entry.bug.noReplay ?? []).includes(expected.target?.cve));
+    const notReproduced = targetNoReplay ? 0 : expected.found.size - (expected.reproduced?.size ?? expected.found.size);
     const counted = expected.counted ?? expected.found, untimed = expected.untimed ?? [];
     button.innerHTML = `🎯 ${counted.size}/${expected.runs.size}`
         + (untimed.length ? ` <span class="badge-untimed">· ${untimed.length} untimed</span>` : '')
@@ -366,12 +433,13 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     // one hover for the whole chip (its parts have none): one line per mark (bugs.js, as on the objectives report)
     button.title = (module.ExpectedChipTip?.(library, { ...expected, counted, untimed }, {
         why: attempt => NotCountedReason(attempt, status?.runs, bugs.runEnds?.[library], bugs.endErrors?.[library]),
-        notReproduced, notTarget, unexpected, alias: bugs.cves?.[expected.target.cve]?.alias ?? '' }) ?? `🎯 ${expected.target.cve}`)
+        notReproduced, notTarget, unexpected, alias: bugs.cves?.[expected.target.cve]?.alias ?? '', noReplay: targetNoReplay }) ?? `🎯 ${expected.target.cve}`)
         + (own.length ? '\nClick: the bugs of the configuration' : '\nno objective in any run of this configuration');
     delete button.dataset.placeholder;
   } else if (button) {
     button.textContent = `🐞 ${total} (${own.length})`;
-    const confirmed = own.some(entry => entry.reproduced > 0);
+    // reproduced by a replay, or known not to replay (as expected)
+    const confirmed = own.some(entry => entry.reproduced > 0 || (entry.bug.noReplay ?? []).length > 0);
     button.classList.toggle('unconfirmed', !confirmed);
     button.title = `${total} objective(s), ${own.length} bug(s) as in the objectives report` + (notReproduced ? `, ${notReproduced} not reproduced` : '') + '. Click to show them';
   }
@@ -381,10 +449,10 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
   }
 }
 
-// 🐞 at the end of the line of a type (run on … · bench … · vs …): the objectives report of its task, when it has one
-async function AddReportBug(runInfo, taskID, libs = []) {
-  const result = await ReportBugs(taskID);
-  if (!result) return;
+// 🐞 at the end of the line of a type (run on … · bench … · vs …): the objectives report of its task, when it has one;
+// one per task when the block comes from several (VulnA, VulnB, custom benchmarks), in the order of the table (each task
+// at its first configuration): placed at once, shown when its report answers (they answer in any order)
+function AddReportBug(runInfo, taskID, libs = []) {
   const sep = document.createElement('span');
   sep.className = 'type-bugs-sep';
   sep.textContent = ' · ';
@@ -396,7 +464,12 @@ async function AddReportBug(runInfo, taskID, libs = []) {
   link.rel = 'noopener';
   link.title = `Bug report of task ${taskID}${libs.length ? ` (${libs.join(', ')})` : ''}: its bugs, objectives, replays and traces (new tab)`;
   link.addEventListener('click', (event) => event.stopPropagation());
+  sep.hidden = link.hidden = true;
   runInfo.append(sep, link);
+  ReportBugs(taskID).then(result => {
+    if (result) sep.hidden = link.hidden = false;
+    else { sep.remove(); link.remove(); }
+  });
 }
 
 // Page written by scripts/tools/objectives_report.sh, served by the publisher
@@ -704,11 +777,21 @@ function CreateActionButtons(typeData, type) {
   const actions = document.createElement('div');
   actions.className = 'actions';
 
-  const tasks = GetReferencedTasks(typeData);
+  let tasks = GetReferencedTasks(typeData);
+  // no library with results (every experiment of the task failed or was unsupported): the tasks of the index, so that
+  // their steps and logs stay one click away
+  if (!tasks.length) {
+    const seen = new Set();
+    tasks = Object.values(typeData?.index?.files ?? {})
+      .filter(task => task?.task_id && !seen.has(task.task_id) && seen.add(task.task_id))
+      .map(task => ({ task, libs: ['no results'] }));
+  }
+  // no task known: no button (a link without task id opens an empty task page)
+  if (!tasks.length) return actions;
 
-  // Fallback: no tasks array or single task → direct buttons
-  if (tasks.length <= 1) {
-    const taskId = tasks.length === 1 ? tasks[0].task.task_id : '';
+  // a single task → direct buttons
+  if (tasks.length === 1) {
+    const taskId = tasks[0].task.task_id;
     actions.innerHTML = `
       <button class="btn-details" onclick="ShowDetails('${taskId}')" title="📊 Details\nopens: the task on the board, its steps, logs and artefacts (new tab)">📊 Details</button>
       <button class="btn-download" onclick="DownloadResults('${taskId}')" title="⬇️ Download\nfile: the artefacts of the task (.tgz)">⬇️ Download</button>
@@ -781,7 +864,12 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
     // without objective has none, final or live)
     const withObjectives = Object.values(typeData.status ?? {}).some(s => (s?.objectives?.total ?? 0) > 0 || s?.flag_objective);
     if (type === 'Vuln' || withObjectives) {
-      for (const [id, libs] of [...byTask.entries()].sort()) AddReportBug(runInfo, id, byTask.size > 1 ? libs : []);
+      // in the order of the table: each task at its first configuration there
+      const order = OrderLibraries(type, Object.entries(typeData.metrics ?? {})).map(([name]) => name);
+      const rank = libs => Math.min(...libs.map(lib => order.indexOf(lib)).filter(i => i >= 0), Infinity);
+      for (const [id, libs] of [...byTask.entries()].sort(([a, x], [b, y]) => rank(x) - rank(y) || String(a).localeCompare(String(b)))) {
+        AddReportBug(runInfo, id, byTask.size > 1 ? libs : []);
+      }
     }
   }
   AddRunsChip(typeHeaders, typeData.commit_id, type);
@@ -848,7 +936,8 @@ function RenderTypeSection(config, project, type, typeData, label, allMetrics, c
 function RenderLibrariesTable(config, project, type, typeData) {
   const table = document.createElement('table');
   table.className = 'libs-table';
-  const libraries = Object.entries(typeData.metrics).sort((a, b) => a[0].localeCompare(b[0]));
+  // custom Vuln benchmarks (<benchmark>_<bug>): after the others, one block per benchmark (summary_benchmarks.js)
+  const libraries = OrderLibraries(type, Object.entries(typeData.metrics));
   const columns = [...new Set(libraries.flatMap(([, metrics]) => Object.keys(metrics)
       .filter(field => !field.startsWith('fail_') && field !== 'ratio_success_execution' && (metrics[field]?.length ?? 0) > 0)))];
 
@@ -858,7 +947,17 @@ function RenderLibrariesTable(config, project, type, typeData) {
   table.appendChild(head);
   const nbColumns = 3 + columns.length;
 
+  let currentBenchmark = '';
   for (const [libName, metrics] of libraries) {
+    const benchmark = BenchmarkOf(type, libName);
+    if (benchmark && benchmark !== currentBenchmark) {
+      const header = document.createElement('tr');
+      header.className = 'benchmark-row';
+      header.innerHTML = `<td colspan="${nbColumns}">🧪 <b>${EscapeAttribute(benchmark)}</b> — custom benchmark: one experiment per known bug, `
+          + `compared across commits on the same experiment</td>`;
+      table.appendChild(header);
+    }
+    currentBenchmark = benchmark;
     const status = typeData.status[libName];
     const successCount = status?.success ?? '?';
     const totalRuns = status?.state.length ?? '?';
@@ -881,7 +980,7 @@ function RenderLibrariesTable(config, project, type, typeData) {
 
     const libNameLabel = (type == 'Perf')
         ? `<a href="${config.vis_comparator_perf(project, typeData.commit_id, libName)}">${EscapeAttribute(libName)}</a>`
-        : EscapeAttribute(libName);
+        : `<span title="${EscapeAttribute(libName)}">${EscapeAttribute(ExperimentLabel(type, libName))}</span>`;
 
     const row = document.createElement('tr');
     row.className = 'lib-row';
@@ -944,7 +1043,7 @@ function RenderLibrariesTable(config, project, type, typeData) {
     // objectives grouped by bug: a full-width row under the library, opened by its 🐞 button
     const objectivesButton = row.querySelector('.lib-objectives');
     if ((objectivesButton !== null) && (objectivesButton.tagName === 'BUTTON')) {
-      const panel = ObjectivesPanel(status.objectives, libTaskID);
+      const panel = ObjectivesPanel(status.objectives, libTaskID, status.validation);
       panel.hidden = false;
       if (ConfirmedObjectives(status.objectives) === 0) panel.classList.add('unconfirmed');
       // the same bugs as the objectives report of the task, when it exists (else the groups of the summary above)
@@ -1387,10 +1486,12 @@ export function RenderCampaigns(config, project, commit, allMetrics, container) 
 /*****************************************/
 
 export function ShowDetails(config, taskID) {
+  if (!taskID) return;
   window.open(`${config.taskInfoURL}?id=${taskID}`);
 }
 
 export function DownloadResults(config, taskID) {
+  if (!taskID) return;
   const a = document.createElement('a');
   a.href = config.artefactURL(taskID);
   a.download = `${taskID}-artefacts.tgz`;

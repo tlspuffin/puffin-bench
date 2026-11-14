@@ -42,6 +42,12 @@
       },
       {
         "step": "ExperimentEnd"
+      },
+      {
+        "step": "ValidateObjectives",
+        "configuration": {
+          "nb_cores": 4
+        }
       }
     ],
     {

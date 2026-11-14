@@ -142,6 +142,53 @@ export function AttachObjectives(libResult, attempt, library, attemptID, outPath
   libResult.objectives = merged;
 }
 
+// Validation of the objectives of an attempt against tlspuffin's catalogue (validation-<library>-<attempt>.json, see
+// ValidateObjectives): the attempt keeps its counts per verdict, the library merges them, with the entries confirmed,
+// the known bugs without patch named, the controls, the catalogue the verdicts rest on, the bugs it knew (alias and
+// signature: entries) and the bench that validated (bench: its versions, deployed and job scripts); byTrace gives the
+// verdict of each validated objective, by "<attempt>/<trace>" (the pages show it beside the replay groups), with what
+// failed for an "error". An attempt with objectives and no validation file is an error of the library ("no validation
+// result"): its objectives have no verdict, the pages say why.
+export function AttachValidation(libResult, attempt, library, attemptID, outPath) {
+  const validation = ReadJSON(`${outPath}/validation-${library}-${attemptID}.json`, {});
+  const merged = libResult.validation ?? { verdicts: {}, confirmed: {}, known_unpatched: {}, controls_failed: [],
+                                           unsupported: null, errors: [], catalogue: null, byTrace: {}, entries: {}, bench: [] };
+  if (validation === null) {
+    const objectives = Math.max(attempt?.global?.tEnd?.objective_size ?? 0,
+                                ...(attempt?.clients ?? []).map(client => client?.tEnd?.objective_size ?? 0));
+    if (objectives > 0) {
+      merged.errors.push({ attempt: attemptID, error: 'no validation result (its validation step failed or did not run)' });
+      libResult.validation = merged;
+    }
+    return;
+  }
+  const verdicts = {};
+  (validation.objectives ?? []).forEach(o => { verdicts[o.verdict] = (verdicts[o.verdict] ?? 0) + 1; });
+  attempt.validation = { verdicts, controls_ok: validation.controls_ok ?? null,
+                         unsupported: validation.unsupported ?? null, error: validation.error ?? null };
+  Object.entries(verdicts).forEach(([verdict, count]) => { merged.verdicts[verdict] = (merged.verdicts[verdict] ?? 0) + count; });
+  (validation.objectives ?? []).forEach(o => {
+    (o.entries ?? []).forEach(id => { merged.confirmed[id] = (merged.confirmed[id] ?? 0) + 1; });
+    (o.known_unpatched ?? []).forEach(id => { merged.known_unpatched[id] = (merged.known_unpatched[id] ?? 0) + 1; });
+    merged.byTrace[`${attemptID}/${o.trace}`] = { verdict: o.verdict, entries: o.entries ?? [], known_unpatched: o.known_unpatched ?? [],
+                                                  ...(o.other_signature?.length ? { other_signature: o.other_signature } : {}),
+                                                  ...(o.signature_of_patched?.length ? { signature_of_patched: o.signature_of_patched } : {}),
+                                                  ...(o.failure ? { failure: o.failure } : {}) };
+  });
+  if (validation.controls_ok === false) merged.controls_failed.push(attemptID);
+  if (validation.unsupported) merged.unsupported = validation.unsupported;
+  if (validation.error) merged.errors.push({ attempt: attemptID, error: validation.error });
+  if (validation.catalogue) merged.catalogue = validation.catalogue;
+  Object.entries(validation.entries ?? {}).forEach(([id, entry]) => {
+    merged.entries[id] = { alias: entry?.alias ?? null, oracle: entry?.oracle ?? null, replayable: entry?.replayable ?? null,
+                         witness_frames: entry?.witness_frames ?? null };
+  });
+  if (validation.bench && !merged.bench.some(b => b.commit === validation.bench.commit && b.jobscripts === validation.bench.jobscripts)) {
+    merged.bench.push({ commit: validation.bench.commit ?? null, jobscripts: validation.bench.jobscripts ?? null });
+  }
+  libResult.validation = merged;
+}
+
 function Utf8ByteLength(str) {
   let bytes = 0;
   for (let i = 0; i < str.length; i++) {

@@ -60,8 +60,9 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
   }
   variables.emplace("task_id", std::to_string(id_));
   name_ = ResolveVariables(name_, variables);
+  // letters, digits and @ - _ . space, and / for branch names (pr/vuln-catalogue); a name is never part of a path
   name_.erase(std::remove_if(name_.begin(), name_.end(), [](char c) {
-    return !std::isalnum(c) && c != '@' && c != '-' && c != '_' && c != '.' && c != ' ';
+    return !std::isalnum(c) && c != '@' && c != '-' && c != '_' && c != '.' && c != ' ' && c != '/';
   }), name_.end());
 
   executor_name_ = GetOrDefault<std::string>(
@@ -322,7 +323,11 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
     steps_file_.close();
   }
 
-  if (IsPending()) {
+  // a task that never started has no run folders (nor global parameters). Cancelled, it is archived like any cancelled
+  // task, with empty logs and artefacts, so that the history keeps it (UsersAPI::UserTasks drops an entry without its
+  // <id>.json); a task ends without starting only when cancelled.
+  bool const started = !IsPending();
+  if (!started && !request_cancel_) {
     DeleteRunFolders();
     return ArchiveJob();
   }
@@ -332,7 +337,10 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
 
   std::filesystem::path taskJSONfile = savePath / (id+".json");
 
-  std::unordered_map<std::string, std::string> variables = LoadGlobalParameters(env_path_);
+  std::unordered_map<std::string, std::string> variables;
+  if (started) {
+    variables = LoadGlobalParameters(env_path_);
+  }
   for (const auto& [key, value] : args_) {
     variables.emplace(key, value);
   }
@@ -367,9 +375,13 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
       LOGE << "Error while saving task informations in save storage: " << taskJSONfile << Log::Flags::End;
     }
 
-    std::filesystem::rename(artefacts_path_, finalSavePath / "artefacts");
-    //std::filesystem::rename(outputs_path_, finalSavePath / "output");
-    std::filesystem::rename(logs_path_, finalSavePath / "logs");
+    if (started) {
+      std::filesystem::rename(artefacts_path_, finalSavePath / "artefacts");
+      std::filesystem::rename(logs_path_, finalSavePath / "logs");
+    } else {
+      std::filesystem::create_directory(finalSavePath / "artefacts");
+      std::filesystem::create_directory(finalSavePath / "logs");
+    }
   } catch(std::runtime_error const& e) {
     LOGE << "Error while moving resultats from running to save storage\n" <<
         "All keep in " << run_root_path_ << "\n\t" << e.what() << Log::Flags::End;
@@ -380,11 +392,12 @@ struct ns_Schedule::ArchiveJob ns_Schedule::Task::FinalizeAndArchive(
     return ArchiveJob();
   }
 
-  executor_->TaskFinalize(executor_data_, this);
+  if (started) {
+    executor_->TaskFinalize(executor_data_, this);
+  }
 
   DeleteRunFolders();
 
-  std::filesystem::path pathID = id;
   return ArchiveJob(publish_, variables, finalSavePath.string() + ".zip", 
       { taskJSONfile, finalSavePath / "artefacts", finalSavePath / "logs" }, 
       finalSavePath, finalSavePath);

@@ -2,6 +2,8 @@ import { config } from './config.js'
 import { ListInput } from './widget-listinput.js'
 import { resolveCommits, parseTaskName, commitLineHTML } from '../../../common/commitinfo.js'
 import { CheckScheduler } from '../../nav.js'
+import { CustomBenchmark } from './custombench.js'
+import { LEVELS } from '../../../common/verdicts.js'
 
 const link = document.createElement('link');
 link.rel  = 'stylesheet';
@@ -28,10 +30,29 @@ export const helpTexts = {
   'tlspuffin.cores':      'CPU cores per run',
   'tlspuffin.memory':     'Memory limit in MB. 0 = no limit.',
   'tlspuffin.unknown':    'This hash is not in the commit list (not fetched yet, or a typo). Check it before launching.',
+  'tlspuffin.custom':     'Custom Vuln benchmark: tick known bugs of tlspuffin\'s catalogue (dev\'s, or the commit\'s with Load bugs from this commit). Each one becomes an experiment on a version that has it (the newest with a patch first), with every other known bug patched, the build options it needs and ASan when its oracle is an ASan report; it ends only on a find that validation recognises during the run (a warning says how a bug without patch is recognised). Choose the commit first; Saved benchmarks, at the top, offer Vuln group A and B as configured (VulnA, VulnB: built in) and the benchmarks saved with 💾 Save (for every user of the board, to Load on any commit or Remove); below them, the timeout, attempts, cores per attempt and CPU sharing a saved benchmark keeps. Name the benchmark to follow it on Results; every field of a bug: the Bugs reference page.',
 };
 
 // short type of the tasks of each job type (jobsconfig.json), for the task descriptions (see describeTask)
-const JOB_TYPE_PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' };
+const JOB_TYPE_PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnC', 'campaign': 'Camp' };
+
+// The level of a task's objectives, as its objectives report decides it with the verdicts of the pages (bugs.js:
+// new, unexpected, known, unclear): the live report of a running task (objectives/live.json, every 5 minutes), the
+// final report of a finished one (board/custom/task_links.json, as History). A monitor message only counts objectives:
+// whether they are news is the report's. Read every minute; a card takes it at its next refresh.
+const objectivesLevels = new Map();
+async function LoadObjectivesLevels() {
+  const read = url => fetch(new URL(url, import.meta.url), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
+  const [live, links] = await Promise.all([read('../../../objectives/live.json'), read('../../custom/task_links.json')]);
+  objectivesLevels.clear();
+  for (const [id, list] of Object.entries(links ?? {})) {
+    const bug = (list ?? []).find(link => link?.source === 'objectives_report' && link.count != null);
+    if (bug) objectivesLevels.set(String(id), ['new', 'unexpected'].includes(bug.level) ? bug.level : bug.level === 'warning' ? 'unclear' : 'known');
+  }
+  for (const task of live?.tasks ?? []) if (task.level) objectivesLevels.set(String(task.task), task.level);
+}
+LoadObjectivesLevels();
+setInterval(LoadObjectivesLevels, 60000);
 
 export class JobLauncher {
   #config;
@@ -92,6 +113,9 @@ export class JobLauncher {
   #confirmUnknownCheck = null;
   #toast               = null;
   #tabBtns             = {};
+  #custom              = null;   // the custom Vuln benchmark panel (custombench.js), for job types with custom_benchmark
+  #smtRow              = null;   // the CPU sharing row (with the timeout section: moved into the custom panel for its job)
+  #modal               = null;
 
   constructor() {
     if (config?.commitsUrl == null) {
@@ -140,9 +164,17 @@ export class JobLauncher {
   describeMonitor(task, message) {
     const text = String(message ?? '');
     const facts = JobLauncher.#MonitorFacts(text);
-    // VulnA/VulnB look for known bugs: objectives are their expected outcome, shown without 🎉 nor highlight
-    const expected = JobLauncher.#ObjectivesExpected(task);
+    // objectives are news only when their report says so (its level: new, red with 🚨; unexpected, gold); before the
+    // report, or when its bugs are known (VulnA/VulnB, custom benchmarks: what they look for), counted without colour
+    const bugsLevel = objectivesLevels.get(String(task?.id ?? ''));
+    const highlight = bugsLevel === 'new' ? 'new' : bugsLevel === 'unexpected' ? 'objective' : null;
+    const mark = bugsLevel === 'new' ? `${LEVELS.new.mark} ` : '';
     if (!facts) return null;
+    // the objectives page: the live one while the task runs, its final report once it ended (the live page is removed
+    // when the final one is written)
+    const running = Object.values(task?.steps ?? {}).some(step => ['Running', 'Pending'].includes(step.state));
+    const live = facts.objectives?.live || null;
+    const url = live && !running ? live.replace(/\/live-(\d+)\.html$/, '/$1.html') : live;
     const esc = (value) => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
     const chip = (label, title, cls = '', href = null) => href
@@ -170,11 +202,13 @@ export class JobLauncher {
     }
     if (facts.objectives?.count > 0) {
       const recent = (facts.objectives.recent ?? []).map(o => `${o.age_min} min ago: ${o.name}`);
-      chips.push(chip(`${expected ? '' : '🎉 '}${count(facts.objectives.count)} obj${facts.objectives.age_min != null ? ` (${minutes(facts.objectives.age_min)})` : ''}`,
+      chips.push(chip(`${mark}🐞 ${count(facts.objectives.count)} obj${facts.objectives.age_min != null ? ` (${minutes(facts.objectives.age_min)})` : ''}`,
           `${facts.objectives.count} objectives${facts.objectives.age_min != null ? `, the last one ${facts.objectives.age_min} min ago` : ''}` +
-          (recent.length ? `\n${recent.join('\n')}` : '') + (facts.objectives.live ? '\nClick: live objectives, grouped by bug' : ''),
-          expected ? 'tp-mon-objective-expected' : 'tp-mon-objective', facts.objectives.live || null));
-      if (!expected) raise('success');
+          (recent.length ? `\n${recent.join('\n')}` : '') +
+          `\n${LEVELS[bugsLevel] ? `its report: ${LEVELS[bugsLevel].word} (${LEVELS[bugsLevel].tip})` : 'not judged yet: its report decides (every 5 minutes)'}` +
+          (url ? `\nClick: ${running ? 'live objectives' : 'the objectives report'}, grouped by bug` : ''),
+          highlight === 'new' ? 'tp-mon-objective tp-mon-objective-new' : highlight ? 'tp-mon-objective' : 'tp-mon-objective-expected', url));
+      if (highlight) raise('success');
     } else if (facts.objectives) {
       chips.push(chip('no obj', 'no objective yet', 'tp-mon-muted'));
     }
@@ -215,29 +249,28 @@ export class JobLauncher {
     const found = facts.objectives?.count > 0;
     // The live page is deleted when the task ends; its final report (objectives_report.sh, every 10 minutes) takes
     // its place: objectives/<task>.html next to it. The card says "report pending" until that page exists.
-    const running = Object.values(task?.steps ?? {}).some(step => ['Running', 'Pending'].includes(step.state));
-    const live = facts.objectives?.live || null;
-    const url = live && !running ? live.replace(/\/live-(\d+)\.html$/, '/$1.html') : live;
     return {
       summary: chips.join(' · '), level, text: readable,
-      // objectives found: the attempt stands out (not in VulnA/VulnB, where they are expected), and the task gets a
-      // button to its objectives page
-      highlight: found && !expected ? 'objective' : null,
+      // objectives found: the task gets a button to its objectives page; the attempt and the button stand out when its
+      // report says they are news (gold unexpected, red new), as History and the top bar's pill do
+      highlight: found ? highlight : null,
       taskLink: found ? {
-        key: 'objectives', count: facts.objectives.count, url, highlight: expected ? null : 'objective',
-        label: `${expected ? '' : '🎉 '}{count} objectives${!url ? '' : running ? ' · live ↗' : ' · report ↗'}`,
+        key: 'objectives', count: facts.objectives.count, url, highlight,
+        label: `${mark}🐞 {count} objectives${!url ? '' : running ? ' · live ↗' : ' · report ↗'}`,
         title: running ? 'Objectives of the running attempts; click: live objectives of this task, replayed and grouped by bug'
             : 'Objectives of the task; click: its final report, replayed and grouped by bug',
-        pending: url && !running ? {
-          label: `${expected ? '' : '🎉 '}{count} objectives · report pending`,
+        // a page written later, without link until it exists: the final report (objectives_report.sh, every 10 minutes
+        // after the end of the task), or the live page (objectives_live.sh, every 5 minutes: the first one appears after
+        // the round that follows the first objective has replayed it)
+        pending: !url ? null : !running ? {
+          label: `${mark}🐞 {count} objectives · report pending`,
           title: 'The final report of the objectives is written within 10 minutes of the end of the task',
-        } : null,
+        } : {
+          label: `${mark}🐞 {count} objectives · live page soon`,
+          title: 'The live objectives page is written every 5 minutes, once its round has replayed the new objectives: it appears within about 10 minutes of the first objective',
+        },
       } : null,
     };
-  }
-
-  static #ObjectivesExpected(task) {
-    return ['vuln-a', 'vuln-b'].includes(task?.job_type);
   }
 
   // The settings of a tlspuffin task for the task page (see launchers.js DescribeSettings): job type, commit, package,
@@ -405,6 +438,10 @@ export class JobLauncher {
       this.#taskNameInput.value = custom.name;
       this.#titleModified = true;
     }
+    if (custom.customBenchmark) {
+      this.#validate();   // the commit's catalogue and presets first
+      this.#custom.restore(custom.customBenchmark);
+    }
 
     this.#trackTemplateEdits();
     this.#validate();
@@ -438,6 +475,7 @@ export class JobLauncher {
   #buildDOM() {
     this.#overlay = this.#el('div', 'jl-overlay');
     const modal = this.#el('div', 'jl-modal');
+    this.#modal = modal;
     modal.addEventListener('click', e => e.stopPropagation());
     this.#overlay.addEventListener('mousedown', () => {
       if (this.#tablistEl?.classList.contains('open'))
@@ -574,7 +612,7 @@ export class JobLauncher {
     body.appendChild(this.#timeoutSection);
 
     // ── CPU sharing (every job type): how the scheduler chooses the CPUs of each run (task argument SMT_MODE) ──
-    const smtRow = this.#el('div', 'jl-field-row');
+    const smtRow = this.#smtRow = this.#el('div', 'jl-field-row');
     const smtLabel = this.#el('span', 'jl-label');
     smtLabel.textContent = 'CPU sharing';
     this.#smtSelect = this.#el('select', 'jl-select');
@@ -606,6 +644,43 @@ export class JobLauncher {
     this.#campaignExtra.append(this.#buildCampaignFields());
     body.appendChild(this.#campaignExtra);
 
+    // ── Custom Vuln benchmark (job types with "custom_benchmark": true) ──
+    this.#custom = new CustomBenchmark({
+      gitOrigin: new URL(this.#config.commitsUrl).origin, onChange: () => { this.#autoUpdateTitle(); this.#validate(); },
+      // the fields of the launcher a custom benchmark keeps with its own: its timeout and CPU sharing
+      settings: {
+        get: () => ({
+          timeout: { d: parseInt(this.#timeoutDayInput.value, 10) || 0, h: parseInt(this.#timeoutInput.value, 10) || 0,
+                     m: parseInt(this.#timeoutMinInput.value, 10) || 0 },
+          smt: this.#smtSelect.value,
+        }),
+        // a timeout given is kept like one typed (a change of job type does not reset it); none (a benchmark saved
+        // before the launcher kept it): the one set here when it was set (typed, or the task's for "New task…"),
+        // else the job's default, and a note saying which
+        set: ({ timeout, smt } = {}) => {
+          let note = '';
+          const shown = () => `${this.#timeoutDayInput.value !== '0' ? `${this.#timeoutDayInput.value} d ` : ''}${this.#timeoutInput.value} h ${String(this.#timeoutMinInput.value).padStart(2, '0')}`;
+          if (timeout) {
+            this.#timeoutDayInput.value = String(timeout.d ?? 0);
+            this.#timeoutInput.value = String(timeout.h ?? 0);
+            this.#timeoutMinInput.value = String(timeout.m ?? 0);
+            this.#timeoutModified = true;
+          } else if (this.#timeoutModified) {
+            note = `saved without a timeout: the one set here is kept (${shown()}); Save again to keep it with the benchmark`;
+          } else {
+            this.#applyTimeoutDefault(this.#jobDefs.find(j => j.value === this.#selectedType));
+            note = `saved without a timeout: the job's default (${shown()}) is set; Save again to keep one with the benchmark`;
+          }
+          if (typeof smt === 'string' && [...this.#smtSelect.options].some(o => o.value === smt)) this.#smtSelect.value = smt;
+          this.#validate();
+          return note;
+        },
+      },
+    });
+    // its help on its own marker: on the whole panel it answered every hover inside, placed against the panel
+    this.#custom.helpAnchor.dataset.help = 'tlspuffin.custom';
+    body.appendChild(this.#custom.node);
+
     // ── Separator + Launch ──
     body.appendChild(this.#el('hr', 'jl-sep'));
 
@@ -628,6 +703,8 @@ export class JobLauncher {
     body.appendChild(this.#launchBtn);
 
     this.#toast = this.#el('div', 'jl-toast');
+    this.#toast.title = 'Click to close';
+    this.#toast.addEventListener('click', () => { this.#toast.className = 'jl-toast'; });
     body.appendChild(this.#toast);
 
     return body;
@@ -649,6 +726,9 @@ export class JobLauncher {
       input.addEventListener('change', () => {
         this.#selectedType = job.value;
         this.#campaignExtra.classList.toggle('visible', !!job.campaign);
+        this.#custom.show(!!job.custom_benchmark);
+        this.#placeSettings(!!job.custom_benchmark);
+        this.#modal.classList.toggle('jl-wide', !!job.custom_benchmark);
         this.#timeoutSection.classList.toggle('visible', !!job.campaign || !!job.timeout);
         const timeoutJob = job.timeout ? job
           : this.#jobDefs.find(j => job.composite?.includes(j.value) && j.timeout);
@@ -664,6 +744,17 @@ export class JobLauncher {
       const dot = this.#el('span', 'jl-dot');
       lbl.append(dot, ' ' + job.label);
       this.#chipsWrap.append(input, lbl);
+    }
+  }
+
+  // the Timeout and CPU sharing rows: for a custom benchmark, in its panel below its saved benchmarks (what a saved
+  // benchmark keeps, shown once a commit is chosen); for the other jobs, in their own place, before the campaign fields
+  #placeSettings(custom) {
+    if (custom) {
+      this.#custom.timeoutSlot.append(this.#timeoutSection);
+      this.#custom.sharingSlot.append(this.#smtRow);
+    } else if (this.#timeoutSection.parentElement !== this.#campaignExtra.parentElement) {
+      this.#campaignExtra.before(this.#timeoutSection, this.#smtRow);
     }
   }
 
@@ -710,6 +801,9 @@ export class JobLauncher {
       this.#jobDefs = json.jobs ?? [];
       this.#vendorCatalog = (json.vendors && typeof json.vendors === 'object') ? json.vendors : {};
       this.#populateChips();
+      // the jobs a custom benchmark job offers as built-in benchmarks (Vuln group A and B), named as their tasks
+      const builtins = this.#jobDefs.find(j => j.custom_benchmark)?.builtin_benchmarks ?? [];
+      this.#custom.setBuiltins(builtins.map(v => this.#jobDefs.find(j => j.value === v)).filter(Boolean), JOB_TYPE_PREFIXES);
     } catch (err) {
       console.warn('[JobLauncher] failed to load jobs config:', err);
     }
@@ -1458,6 +1552,12 @@ export class JobLauncher {
     if (this.#selectedType) {
       const jobDef = this.#jobDefs.find(j => j.value === this.#selectedType);
       if (jobDef) {
+        // a custom Vuln benchmark: "Vuln <its name, C while it has the default one> - <branch or commit>"
+        if (jobDef.custom_benchmark) {
+          const bench = this.#custom.name && this.#custom.name !== 'custom' ? this.#custom.name : 'C';
+          this.#taskNameInput.value = [`Vuln ${bench}`, label].filter(Boolean).join(' - ');
+          return;
+        }
         if (typeof jobDef.job_label === 'string') {
           this.#taskNameInput.value = this.#resolveLabel(jobDef.job_label, commit);
           return;
@@ -1489,7 +1589,9 @@ export class JobLauncher {
     const jobDef        = this.#jobDefs.find(j => j.value === this.#selectedType);
     const vendorOk      = !jobDef?.campaign || this.#vendorListInput.value.trim().length > 0;
     const packageOk     = !jobDef?.package?.length || this.#packageListInput.value.trim().length > 0;
-    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && packageOk);
+    if (jobDef?.custom_benchmark) this.#custom.setCommit(commitOk ? this.#commitSha() : null);
+    const customOk      = !jobDef?.custom_benchmark || this.#custom.valid;
+    this.#launchBtn.disabled = !(userOk && typeOk && commitOk && confirmOk && vendorOk && packageOk && customOk);
     if (jobDef?.campaign) this.#refreshPresets();
   }
 
@@ -1571,6 +1673,7 @@ export class JobLauncher {
       nbCore:     parseInt(this.#nbCoreInput.value,     10) || 1,
       memMax:     parseInt(this.#memMaxInput.value,     10) || 0,
       smt:        this.#smtSelect.disabled ? '' : this.#smtSelect.value,
+      ...(this.#jobDefs.find(j => j.value === this.#selectedType)?.custom_benchmark ? { customBenchmark: this.#custom.definition() } : {}),
     };
   }
 
@@ -1634,6 +1737,12 @@ export class JobLauncher {
       if (nbCore     != null) fd.append('runtime[RUNTIME_NB_CORES]',          String(nbCore));
       if (memMax     > 0)     fd.append('runtime[RUNTIME_MEMORY_CORE]',        String(memMax));
       if (memMax     > 0)     fd.append('runtime[RUNTIME_MEMORY_CONSUMPTION]', String(memMax));
+      if (jobDef.custom_benchmark) {
+        // one configuration per ticked bug (custombench.js), the attempts and cores of the panel
+        fd.append('runtime[RUNTIME_RUN_CONFIG]', JSON.stringify(this.#custom.runConfig()));
+        fd.append('runtime[RUNTIME_NB_RUN]',     String(this.#custom.attempts));
+        fd.append('runtime[RUNTIME_NB_CORES]',   String(this.#custom.cores));
+      }
       if (isCampaign) {
         const configName = vendor ? vendor.split(':').pop() : 'campaign';
         const conf = { args: {} };
@@ -1714,6 +1823,11 @@ export class JobLauncher {
     this.#packageOptions = [];
     this.#packageRow.classList.remove('visible');
     this.#campaignExtra.classList.remove('visible');
+    this.#custom.show(false);
+    this.#placeSettings(false);
+    this.#custom.reset();
+    this.#custom.setCommit(null);
+    this.#modal.classList.remove('jl-wide');
     this.#timeoutSection.classList.remove('visible');
     this.#updateSmtNote(null);
     this.#timeoutDayInput.value  = '0';

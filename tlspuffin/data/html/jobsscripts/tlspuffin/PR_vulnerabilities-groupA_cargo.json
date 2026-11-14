@@ -8,6 +8,7 @@
     "BUF": {
       "args": {
         "experiment": "BUF",
+        "target_bug": "CVE-2022-39173",
         "features": "wolfssl540,fix-CVE-2022-42905",
         "vendor": "wolfssl:wolfssl540-buf"
       }
@@ -15,6 +16,7 @@
     "CDOS": {
       "args": {
         "experiment": "CDOS",
+        "target_bug": "CVE-2022-38153",
         "features": "wolfssl530,fix-CVE-2022-39173",
         "vendor": "wolfssl:wolfssl530-cdos"
       }
@@ -22,6 +24,7 @@
     "HEAP": {
       "args": {
         "experiment": "HEAP",
+        "target_bug": "CVE-2022-42905",
         "features": "wolfssl540,asan,fix-CVE-2022-39173",
         "vendor": "wolfssl:wolfssl540-heap"
       }
@@ -29,6 +32,7 @@
     "SDOS2": {
       "args": {
         "experiment": "SDOS2",
+        "target_bug": "CVE-2022-38152",
         "features": "wolfssl540,wolfssl-disable-postauth,fix-CVE-2022-39173",
         "extra_flags": "'--put-use-clear'",
         "vendor": "wolfssl:wolfssl540-sdos2"
@@ -37,6 +41,7 @@
     "SKIP": {
       "args": {
         "experiment": "SKIP",
+        "target_bug": "CVE-2022-25640",
         "features": "wolfssl510,fix-CVE-2022-25638,fix-CVE-2022-39173",
         "vendor": "wolfssl:wolfssl510-skip"
       }
@@ -71,6 +76,12 @@
         }
       },
       {
+        "step": "PrepareValidation",
+        "configuration": {
+          "nb_cores": 4
+        }
+      },
+      {
         "step": "ExperimentWithCargo",
         "configuration": {
           "timeout": "${RUNTIME_TIMEOUT}"
@@ -83,6 +94,12 @@
       },
       {
         "step": "ExperimentEnd"
+      },
+      {
+        "step": "ValidateObjectives",
+        "configuration": {
+          "nb_cores": 4
+        }
       }
     ],
     {

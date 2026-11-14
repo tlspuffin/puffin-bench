@@ -90,9 +90,12 @@ async function LoadTasks() {
 }
 
 // Optional extension point (like custom/header.html on the board): custom/task_links.json maps a task id to
-// buttons of the task, [{ "label": "…", "url": "…" (relative to this page), "title": "…", "level": "warning"
-// (optional: outlined), "count": objectives (optional), "bugs": distinct bugs (optional), "new": new bugs and
-// "headline": the title of the objectives report (optional: the task is highlighted, the title before the button) }].
+// buttons of the task, [{ "label": "…", "url": "…" (relative to this page), "title": "…", "level": (optional) "new"
+// (red: a new bug), "unexpected" (gold: objectives where no known bug is expected, or bugs other than those expected),
+// "warning" (outlined), "expected-all|partial|none|provisional" (🎯), "count": objectives (optional), "bugs":
+// distinct bugs (optional), "new": new bugs and "headline": the title of the objectives report (optional: the task is
+// highlighted, the title before the button) }]. The levels are decided by the objectives report (report_verdicts.js:
+// the same as its page): a button of the objectives report without level is plain; one of another source, gold.
 // Absent = none.
 async function LoadTaskLinks() {
   try {
@@ -141,13 +144,17 @@ const DateTime = (time) => new Date(time).toLocaleString(navigator.languages,
     { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const CoreHours = (value) => value >= 100 ? Math.round(value).toLocaleString('en-US') : value.toFixed(1);
 
+// the steps of a task: those that ended normally of all of them. A step that reached its timeout ran to its time
+// budget, which only a step given one can (the experiments): the normal end of a Perf or campaign run, and of a Vuln run
+// that did not find its bug in its time; it ended normally. Failed and cancelled steps did not.
 function Steps(task) {
   const steps = task.summary?.steps;
   if (!steps?.total) return null;
-  const good = steps.ok;
+  const good = steps.ok + (steps.timed_out ?? 0);
   const cls = good === steps.total ? 'ok' : (good === 0 ? 'fail' : 'mixed');
-  const title = [`${steps.ok} of ${steps.total} steps ended well`, steps.failed && `${steps.failed} failed`,
-    steps.timed_out && `${steps.timed_out} timed out`, steps.cancelled && `${steps.cancelled} cancelled`,
+  const title = [`${good} of ${steps.total} steps ended normally`
+      + (steps.timed_out ? ` (${steps.timed_out} of them ran to their time budget, as an experiment does)` : ''),
+    steps.failed && `${steps.failed} failed`, steps.cancelled && `${steps.cancelled} cancelled`,
     steps.other && `${steps.other} other`].filter(Boolean).join(', ');
   return { text: `${good}/${steps.total}`, cls, title };
 }
@@ -168,10 +175,7 @@ function SearchText(task) {
   return [task.name, task.id, task.user, task.type, PackageOf(task) ?? '', div.textContent, commit].join(' ').toLowerCase();
 }
 
-const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' })[type] ?? type;
-
-// objectives of VulnA/VulnB tasks are their expected outcome: their button is plain, not gold
-const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b'].includes(task.type);
+const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnC', 'campaign': 'Camp' })[type] ?? type;
 
 // a task whose objectives report found new bugs (task_links.json "new"): highlighted, with the title of the report
 const HasNewBugs = task => (state.taskLinks[task.id] ?? []).some(link => link.new > 0);
@@ -180,9 +184,10 @@ function LinkButtons(task, cls) {
   return (state.taskLinks[task.id] ?? []).map(link => {
     const count = link.count != null ? `${link.label} ${Number(link.count).toLocaleString('en-US')}` : link.label;
     const label = link.new > 0 && link.headline ? `${link.headline} · ${count}` : count;
-    // level: warning, or expected-all / expected-partial / expected-none (🎯: green, amber, red, never plain)
-    const level = link.level === 'warning' ? 'warning' : /^expected-(all|partial|none|provisional)$/.test(link.level ?? '') ? link.level : '';
-    const plain = (ObjectivesExpected(task, link) && !level.startsWith('expected-')) ? 'plain' : '';
+    // level: new (red), unexpected (gold), warning, or expected-all / expected-partial / expected-none (🎯: green,
+    // amber, red); without level, the objectives report's buttons are plain (known bugs), the others gold
+    const level = /^(new|unexpected|warning|expected-(all|partial|none|provisional))$/.test(link.level ?? '') ? link.level : '';
+    const plain = (link.source === 'objectives_report' && !level) ? 'plain' : '';
     return `<a class="${cls} ${plain} ${level} ${link.new > 0 ? 'new-bugs' : ''}" href="${esc(new URL(link.url, window.location.href))}"
         target="_blank" rel="noopener" title="${esc(link.title ?? '')}">${esc(label)}</a>`;
   }).join('');
@@ -466,7 +471,7 @@ function RenderDrawer(task, finalTask, error) {
       <button type="button" class="btn danger delete" data-help="history.delete">💣 Delete</button>
     </div>
     <div class="kv">
-      <div>State</div><div><span class="dot ${StateOf(task)}"></span> ${StateOf(task)}${steps ? `, ${esc(steps.title)}` : ''}</div>
+      <div>State</div><div><span class="dot ${StateOf(task)}"></span> ${StateOf(task)}${task.cancelled && !summary?.start_timestamp ? ' before it started' : ''}${steps ? `, ${esc(steps.title)}` : ''}</div>
       <div>Submitted</div><div>${esc(DateTime(task.id))}${waited > 60000 ? ` (waited ${esc(Duration(waited))})` : ''}</div>
       <div>Ended</div><div>${esc(DateTime(End(task)))} — ${esc(Duration(End(task) - Start(task)))}${summary?.core_hours ? `, ${CoreHours(summary.core_hours)} core-hours` : ''}</div>
       <div>User / type</div><div>${esc(task.user)} / ${esc(task.type)}</div>
@@ -474,7 +479,7 @@ function RenderDrawer(task, finalTask, error) {
       <div>Task</div><div>${esc(task.id)} · <a href="#" class="copy">📋 copy link</a></div>
     </div>
     ${configs.length ? `<table class="configs"><tr><th>configuration</th><th>runs</th><th></th><th>duration</th></tr>
-      ${configs.map(c => `<tr><td>${esc(c.id)}</td><td data-click-tip="${esc(`${c.name}: ${c.ok} ok, ${c.failed} failed, ${c.timedOut} timed out, of ${c.total}`)}">${c.ok}/${c.total}</td>
+      ${configs.map(c => `<tr><td>${esc(c.id)}</td><td data-click-tip="${esc(`${c.name}: ${c.ok + c.timedOut} of ${c.total} ended normally (${c.ok} by themselves, ${c.timedOut} at their time budget), ${c.failed} failed`)}">${c.ok + c.timedOut}/${c.total}</td>
         <td><div class="bar"><i style="width:${100 * c.ok / c.total}%"></i><i class="failed" style="width:${100 * c.failed / c.total}%"></i><i class="timedout" style="width:${100 * c.timedOut / c.total}%"></i></div></td>
         <td>${c.max ? esc(c.min === c.max || Duration(c.min) === Duration(c.max) ? Duration(c.max) : `${Duration(c.min)}–${Duration(c.max)}`) : ''}${c.timedOut ? ' (timeouts)' : ''}</td></tr>`).join('')}</table>` : ''}
     <h3>Task card</h3>

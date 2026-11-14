@@ -1,9 +1,11 @@
 // Page of the running tasks with objectives (objectives/live.html, written by objectives_live.sh every 5 minutes):
 // one row per task, from live.json next to it ({ updated, tasks: [{ task, name, commit, job_type, found, replayed,
-// reproduced, bugs, hit: [configurations], configurations, url, task_url }] }). Same look as the objectives pages
-// (report.css). The top bar (nav.js) also shows a pill for these tasks, except VulnA/VulnB ones.
+// reproduced, bugs, hit: [configurations], configurations, url, task_url, level, new }] }), coloured by the level of
+// its live report (report_verdicts.js: red new, gold unexpected), as History, the board and the top bar's pill (nav.js).
+// Same look as the objectives pages (report.css).
 import '../board/nav.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
+import { LEVELS } from '../common/verdicts.js';
 
 const help = document.createElement('template');
 help.id = 'help-panel';
@@ -13,33 +15,36 @@ help.innerHTML = `
     <li>One row per running task whose fuzzers found objectives, refreshed every 5 minutes; the page reloads every
       minute.</li>
     <li>Objectives are replayed on core 0 at idle priority, outside the fuzzing cores, and grouped by bug:
-      <b>bugs</b> = distinct confirmed bugs (sanitizer report, security claim, panic or crash),
-      <b>reproduced</b> = replays that confirmed a bug.</li>
-    <li>VulnA/VulnB tasks look for known bugs: their objectives are expected and shown plainly, without the top bar
-      pill.</li>
+      <b>bugs</b> = distinct reproduced bugs (sanitizer report, security claim, panic or crash),
+      <b>reproduced</b> = objectives whose replay gave their failure again.</li>
+    <li>The top bar's pill announces a task only when its live report finds news: a new bug (red, 🚨) or
+      unexpected objectives (yellow); known bugs (VulnA/VulnB, custom benchmarks finding their target) are not announced.</li>
+    <li>A row is coloured by the level of its task's live report: red with 🚨 for a new bug, gold for unexpected
+      objectives (where no known bug is expected, or bugs other than those expected), plain for known bugs; news first.</li>
     <li>A task's row links to its page, organized by bug. When the task ends, its final page replaces it
       (objectives/&lt;task&gt;.html, 🐞 on the History).</li>
   </ul>
   <p>Press <b>?</b> to toggle this panel.</p>`;
 document.head.appendChild(help);
 
-const EXPECTED = new Set(['vuln-a', 'vuln-b']);
-const PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' };
+const PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'vuln-custom': 'VulnC', 'campaign': 'Camp' };
+// the order of the rows: news first (the level of the live report)
+const RANK = { new: 0, unexpected: 1, unclear: 2, known: 3 };
 const esc = (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 const count = (value) => Number(value ?? 0).toLocaleString('en-US');
 
 function Row(task) {
-  const expected = EXPECTED.has(task.job_type);
+  const level = LEVELS[task.level];
   const type = PREFIXES[task.job_type] ?? task.job_type ?? '';
   const bugs = task.bugs ?? 0;
   const hit = task.hit ?? [];
   return `
-    <a class="card live-row ${bugs > 0 && !expected ? 'gold' : ''}" href="${esc(task.url)}">
+    <a class="card live-row ${task.level === 'new' ? 'new' : task.level === 'unexpected' ? 'gold' : ''}" href="${esc(task.url)}">
       <div class="live-head">
         <span class="commit-line" data-commit="${esc(task.commit)}" data-name="${esc(task.name)}" data-type="${esc(type)}">
           <span class="jobtype">${esc(type)}</span> <span class="mono">${esc(String(task.commit ?? '').slice(0, 10))}</span></span>
-        ${expected ? '<span class="muted">expected (known bugs)</span>' : ''}
+        ${level ? `<span class="${task.level === 'known' || task.level === 'unclear' ? 'muted' : 'live-level'}" title="${esc(level.tip)}">${esc(`${level.mark ? `${level.mark} ` : ''}${task.level === 'new' && task.new ? `${task.new} ` : ''}${level.word}`)}</span>` : ''}
       </div>
       <div class="meta">${esc(task.name)} · task ${esc(task.task)}</div>
       <div class="live-counts">
@@ -62,16 +67,17 @@ async function Main() {
     root.innerHTML = `<div class="wrap"><p class="unconf">Cannot read live.json: ${esc(error.message)}</p></div>`;
     return;
   }
-  // the unexpected finds first, then by number of bugs and objectives
+  // news first (new, unexpected), then by number of bugs and objectives
+  const rank = task => RANK[task.level] ?? 4;
   const tasks = [...(live.tasks ?? [])].sort((a, b) =>
-      (EXPECTED.has(a.job_type) - EXPECTED.has(b.job_type)) || ((b.bugs ?? 0) - (a.bugs ?? 0)) || ((b.found ?? 0) - (a.found ?? 0)));
-  const unexpected = tasks.filter(task => !EXPECTED.has(task.job_type)).length;
+      (rank(a) - rank(b)) || ((b.bugs ?? 0) - (a.bugs ?? 0)) || ((b.found ?? 0) - (a.found ?? 0)));
+  const news = tasks.filter(task => ['new', 'unexpected'].includes(task.level)).length;
   document.title = tasks.length ? `🐞 Live objectives (${tasks.length})` : 'Live objectives';
   root.innerHTML = `
     <div class="top">
       <h1>Live objectives</h1>
       <div class="meta"><span class="live">● updated ${esc(live.updated ?? '?')}</span> · running tasks whose fuzzers
-        found objectives${tasks.length ? ` · ${tasks.length} task${tasks.length > 1 ? 's' : ''}, ${unexpected} outside VulnA/VulnB` : ''}
+        found objectives${tasks.length ? ` · ${tasks.length} task${tasks.length > 1 ? 's' : ''}, ${news} with news (a new bug or unexpected objectives)` : ''}
         · finished tasks: 🐞 on the History</div>
     </div>
     <div class="wrap">

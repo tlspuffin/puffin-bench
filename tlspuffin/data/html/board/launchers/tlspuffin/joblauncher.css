@@ -524,8 +524,15 @@
 }
 
 /* ── Toast ── */
+/* the answer to a launch: the last element of the form, kept at the bottom of the window while it is shown (with a
+   custom benchmark the form is taller than the window); opaque over the form; a click closes it */
 .jl-toast {
   display: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  cursor: pointer;
+  box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.45);
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: 8px;
@@ -537,20 +544,20 @@
 }
 .jl-toast.success {
   display: block;
-  background: rgba(76, 175, 80, 0.12);
+  background: linear-gradient(rgba(76, 175, 80, 0.12), rgba(76, 175, 80, 0.12)), var(--jl-surface);
   border: 1px solid #4CAF50;
   color: #81c784;
 }
 .jl-toast.error {
   display: block;
-  background: rgba(244, 67, 54, 0.12);
+  background: linear-gradient(rgba(244, 67, 54, 0.12), rgba(244, 67, 54, 0.12)), var(--jl-surface);
   border: 1px solid #f44336;
   color: #e57373;
 }
 /* the scheduler answered but is slow or busy: the launch goes on */
 .jl-toast.warn {
   display: block;
-  background: rgba(255, 196, 0, 0.12);
+  background: linear-gradient(rgba(255, 196, 0, 0.12), rgba(255, 196, 0, 0.12)), var(--jl-surface);
   border: 1px solid #ffc400;
   color: #ffd089;
 }
@@ -597,10 +604,10 @@ a.tp-mon {
   color: #b9f6ca;
 }
 
-/* objectives found where they are the expected outcome (VulnA/VulnB): plain */
+/* objectives found, not news by their report (known bugs, or not judged yet): plain */
 .tp-mon.tp-mon-objective-expected { font-weight: 700; }
 
-/* objectives found: a bold pill */
+/* objectives found that their report calls news: a bold pill, gold (unexpected) or red (a new bug) */
 .tp-mon.tp-mon-objective {
   padding: 0 6px;
   border-radius: 999px;
@@ -609,6 +616,7 @@ a.tp-mon {
   font-weight: 700;
   text-decoration: none;
 }
+.tp-mon.tp-mon-objective.tp-mon-objective-new { background: #d32f2f; color: #fff; }
 
 .tp-mon-warning {
   color: #ffcc80;
@@ -671,3 +679,59 @@ a.tp-mon {
 .jl-smt-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .jl-smt-note { font-size: 12px; color: var(--jl-text-muted); }
 .jl-smt-note:empty { display: none; }
+
+/* ── Custom Vuln benchmark (custombench.js): desktop-wide, a table of known bugs to tick ── */
+.jl-modal.jl-wide { max-width: min(96vw, 1880px); }
+.jl-custom { display: none; flex-direction: column; gap: 6px; }
+.jl-custom.visible { display: flex; }
+.jl-custom-main { display: flex; flex-direction: column; gap: 6px; }
+/* until a commit is chosen: only the prompt */
+.jl-custom.no-commit .jl-custom-main { display: none; }
+.jl-custom-first { display: none; color: var(--jl-text-muted); font-size: 13px; padding: 4px 0; }
+.jl-custom.no-commit .jl-custom-first { display: block; }
+/* the launcher's Timeout and CPU sharing, moved here for a custom benchmark */
+.jl-custom-slot:empty { display: none; }
+.jl-custom-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--jl-text); font-size: 13px; }
+.jl-custom-row .jl-label { margin: 0; }
+.jl-custom-row input[type="number"] { width: 70px; }
+.jl-custom-name { width: 140px; } .jl-custom-description { flex: 1; min-width: 240px; }
+.jl-custom-details { margin-left: auto; color: #58a6ff; font-weight: 600; text-decoration: none; }
+.jl-custom-about { color: var(--jl-text-muted); font-size: 12px; cursor: help; }
+.jl-custom-load { background: #30363d; color: var(--jl-text); border: 1px solid var(--jl-border-light); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.jl-custom-status { color: var(--jl-text-muted); font-size: 13px; }
+.jl-custom table { border-collapse: collapse; width: 100%; font-size: 13px; color: var(--jl-text); }
+.jl-custom th, .jl-custom td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--jl-border); vertical-align: top; }
+.jl-custom th { color: var(--jl-text-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.jl-custom td.num { text-align: right; white-space: nowrap; }
+.jl-custom tr.group td { background: #262626; color: var(--jl-text-label); font-weight: 600; padding: 4px 8px; }
+.jl-custom tr.picked td { background: #13233a; }
+.jl-custom tr.na td { opacity: .45; }
+.jl-custom code { background: #1f1f1f; border: 1px solid #3a3a3a; border-radius: 4px; padding: 0 4px; font-size: 12px; white-space: nowrap; }
+.jl-custom-id { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: #58a6ff; text-decoration: none; }
+.jl-custom-summary { color: var(--jl-text-muted); font-size: 12px; max-width: 560px; }
+.jl-custom-mark { color: #d29922; font-weight: 700; margin-left: 2px; }
+.jl-custom-star { color: #e3b341; }
+.jl-tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; background: #222; border: 1px solid #3a3a3a; color: #bbb; }
+.jl-badge { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 11px; border: 1px solid #555; color: #bbb; white-space: nowrap; }
+.jl-badge.ok { border-color: #3fb950; color: #7ee787; } .jl-badge.warn { border-color: #d29922; color: #d29922; } .jl-badge.new { border-color: #58a6ff; color: #58a6ff; }
+.jl-muted { color: var(--jl-text-muted); font-size: 12px; }
+.jl-custom-footnotes { font-size: 12px; color: var(--jl-text); border-left: 3px solid #d29922; background: #1f1a12; padding: 4px 10px; }
+.jl-custom-footnotes:empty { display: none; }
+.jl-custom-h { margin: 8px 0 0; font-size: 13px; color: var(--jl-text-label); }
+.jl-custom-note { font-size: 12px; color: var(--jl-text-muted); border-left: 3px solid #58a6ff; padding: 2px 8px; }
+.jl-custom-note label { display: block; margin-top: 3px; }
+.jl-custom-disabled { opacity: .6; }
+.jl-custom-cost { color: var(--jl-text-muted); font-size: 12px; }
+.jl-custom-savedrow { border: 1px solid var(--jl-border); border-radius: 6px; padding: 5px 8px; background: #161b22; }
+.jl-custom-savedrow .jl-select { min-width: 220px; }
+.jl-custom-savedinfo { color: var(--jl-text-muted); font-size: 12px; }
+.jl-custom-load:disabled { opacity: .5; cursor: default; }
+.jl-custom-savestatus { font-size: 12px; color: var(--jl-text-muted); }
+.jl-custom-savestatus.ok { color: #3fb950; }
+.jl-custom-savestatus.warn { color: #d29922; }
+.jl-custom .jl-select { max-width: 360px; }
+/* the space kept for the campaign fields (no jump between job types) is not needed by the wide custom panel */
+.jl-modal.jl-wide .jl-campaign-extra:not(.visible) { display: none; }
+.jl-custom-warnings { font-size: 12px; color: #d29922; border-left: 3px solid #d29922; background: #1f1a12; padding: 4px 10px; }
+.jl-custom-warnings:empty { display: none; }
+.jl-custom-warnings div + div { margin-top: 3px; }

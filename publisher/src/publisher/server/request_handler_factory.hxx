@@ -2,6 +2,7 @@
 
 #include "config.hxx"
 #include "request_handler.hxx"
+#include "file_path.hxx"
 #include "../../utils/logs.hxx"
 #include <regex>
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
@@ -53,7 +54,7 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
     } else if (std::regex_match(uri, matches, reProjectListCampaigns)) {
       requestHandler = new RequestHandlerProjectListCampaigns(matches[1].str());
     } else if (uri.find("/files/") == 0) {
-      uri = uri.substr(7);
+      uri = FilePathOf(uri, "/files/");
       std::string uriRulesIndex = apis_.publishAPI_.RulesIndex(uri);
       if (uri == uriRulesIndex) {
         requestHandler = new RequestHandlerFiles(apis_.publishAPI_.Storage(), uri);
@@ -61,7 +62,7 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         requestHandler = new RequestHandlerFiles(apis_.publishAPI_.HTMLStorage(), uriRulesIndex);
       }
     } else if (uri.find("/html/") == 0) {
-      uri = uri.substr(6);
+      uri = FilePathOf(uri, "/html/");
       requestHandler = new RequestHandlerFiles(apis_.publishAPI_.HTMLStorage(), uri);
     }
   } else if (method == Poco::Net::HTTPRequest::HTTP_DELETE) {

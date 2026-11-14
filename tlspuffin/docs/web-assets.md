@@ -15,14 +15,14 @@ A static page installed to `<datapath>/html/index.html`, with `${SCHEDULER_PORT}
 The tlspuffin launcher itself, under `board/launchers/tlspuffin/`, is a self-contained UI module, embedded into the scheduler's board page, that builds and submits a `POST /api/task/new` multipart request — the same request shape described in the root [README](../../README.md#usage).
 
 - **`tlspuffin/config.js`** — one constant: `commitsUrl`, pointing at git_restapi's `/api/git/history/tlspuffin` (port resolved by the installer). Consumed only by `joblauncher.js`.
-- **`tlspuffin/jobsconfig.json`** — declares the five job types offered in the launcher UI (`vuln-a`, `vuln-b`, `perf`, `evaluate-pr`, `campaign`), each naming which flow-config/step-script/support-files to fetch from `<datapath>/html/jobsscripts/tlspuffin/` (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)) and submit as the task's `config`/`script`/`files[]` parts. `evaluate-pr` is a **composite**: it has no `config`/`script` of its own, only `"composite": ["vuln-a", "perf"]`, meaning the launcher submits two separate tasks and reports on both.
+- **`tlspuffin/jobsconfig.json`** — declares the job types offered in the launcher UI (`vuln-a`, `vuln-b`, `vuln-custom`, `perf`, `evaluate-pr`, `campaign`; `vuln-custom` has `"custom_benchmark": true`, its panel `custombench.js`, and `"builtin_benchmarks": ["vuln-a", "vuln-b"]`: the jobs whose configurations it offers as built-in saved benchmarks, VulnA and VulnB, read from their flow configuration: each configuration's `target_bug` on its preset, the run's `nb_retry` attempts and `nb_cores`, the job's `timeout_default`), each naming which flow-config/step-script/support-files to fetch from `<datapath>/html/jobsscripts/tlspuffin/` (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)) and submit as the task's `config`/`script`/`files[]` parts. `evaluate-pr` is a **composite**: it has no `config`/`script` of its own, only `"composite": ["vuln-a", "perf"]`, meaning the launcher submits two separate tasks and reports on both.
 - **`tlspuffin/joblauncher.js`** (`JobLauncher` class, styled by `tlspuffin/joblauncher.css`) — builds its own modal DOM (no framework), then:
   1. Fetches `jobsconfig.json` to populate the job-type chips, and the commit history from `commitsUrl` to populate a searchable, tabbed commit picker (`main/dev`, `PR`, `branches`, `All`) — PR data can be refreshed on demand against git_restapi's `?refresh=all`/`?refresh=local` (rate-limited GitHub API calls, credit/reset info surfaced in the refresh button's tooltip).
   2. For `campaign` jobs, exposes extra fields (timeout, vendor/features/impl, per-attempt core/memory limits) that get folded into `runtime[RUNTIME_*]` form fields — these are the `${RUNTIME_*}` placeholders `PR_campaign.json` expects (see [tlspuffin-job-scripts.md](tlspuffin-job-scripts.md)); this substitution is entirely client-side JS template literals, unrelated to the installer's own `${...}` substitution.
   3. On launch, fetches the job's `config`/`script`/`files` as blobs and posts them as multipart form parts alongside `args[COMMIT_ID]`, `args[PACKAGE]`, and (for campaigns) `args[CAMPAIGN_ID]`/`args[SAVE_CORPUS]`/`args[DISABLE_KILL_ON_HANG]`.
   4. `describeTask(task)` — called by the scheduler's board, task page and history (through `launchers.js`'s `DescribeTask`; the scheduler itself stays project-agnostic): resolves the task's commit (`COMMIT_ID` argument, or the commit id in the task name) with git_restapi and returns the commit line for the task title (`Perf@5c588a #540 [title]`, or `my test · Perf@…` for a custom name; type from the default name or the job type) and for the `COMMIT_ID` argument. An unknown commit (or git_restapi down) keeps the task name.
 
-  5. `describeMonitor(task, message)` — the one-line summary of a running experiment on the board: corpus size and age (⚠️ amber after 60 min without a new entry), objectives (🎉, linked to the live objectives page; plain, without 🎉, in VulnA/VulnB tasks, which look for known bugs), fuzzing errors and crashes, log volume, ASAN, age of the stats; the details in the hovers, the full message on click; red for errors, amber for warnings (stale stats, log volume, ASAN not instrumented). An attempt that found objectives is highlighted (gold box, gold square in the step header, 🎉 pill; not in VulnA/VulnB), and the task's state strip gets a `🎉 N objectives · live ↗` button (objectives of all its attempts) to the live objectives page; once the task is finished, `· report ↗` to its final page, or `· report pending` until `objectives_report.sh` has written it. It reads the `#MONITOR_JSON` line that `MonitorExperiment` (`scripts/PR_common.sh`) appends to its message, or the message text for runs started before that line existed.
+  5. `describeMonitor(task, message)` — the one-line summary of a running experiment on the board: corpus size and age (⚠️ amber after 60 min without a new entry), objectives (🐞, linked to the live objectives page), fuzzing errors and crashes, log volume, ASAN, age of the stats; the details in the hovers, the full message on click; red for errors, amber for warnings (stale stats, log volume, ASAN not instrumented). Objectives are counted, not judged: whether they are news is their objectives report's level (the live report of a running task, `objectives/live.json`; the final one of a finished task, `board/custom/task_links.json`; read every minute, as History and the top bar's pill have it): unexpected, the attempt is highlighted in gold (box, square in the step header, gold pill); a new bug, in red with 🚨; known bugs, or not judged yet, without colour. The task's state strip gets a `🐞 N objectives · live ↗` button (objectives of all its attempts, the same colours) to the live objectives page; once the task is finished, `· report ↗` to its final page, or `· report pending` until `objectives_report.sh` has written it. It reads the `#MONITOR_JSON` line that `MonitorExperiment` (`scripts/PR_common.sh`) appends to its message, or the message text for runs started before that line existed.
 
 ## Commit Context (`common/commitinfo.js`)
 
@@ -34,6 +34,25 @@ Shared by the dashboard and the tlspuffin launcher (served as `/files/common/com
 - otherwise `[NO_PR]`; a commit git_restapi does not know shows its hash only (no claim about its PR).
 
 sshpuffin is in the same repository: same links.
+
+## Words and signatures (`common/verdicts.js`, `common/signatures.js`)
+
+The vocabulary of every page that speaks of bugs (objectives pages, Results' 🐞 panel, History, the board, the Bugs
+reference, the launcher) and the stack rule they share; QuickJS reads them too (`report_verdicts.js`, the objectives
+pages' `bugs.js`), so they import nothing.
+
+- `verdicts.js`: the terms, the validation's verdicts with their mark, word, tip and order, why an objective has no
+  verdict, the tags, the levels of a task, a signature in words. The user guide's "Words of the pages" is generated from
+  it (`tools/words_markdown.js`; `words_doc_test.sh` fails when they differ).
+- `signatures.js`: the stack part of a signature, rule R3 (user guide: "The place of a bug"). `SignatureFrames` (the
+  first 3 frames outside the sanitizer runtime, libc, glibc's variants and the fuzzer), `PlaceOf(topFrames, witnessFrames)`
+  (a bug's place: its witness's first 3 frames, else the catalogue's top frames), `HasPlace(place, frames)` (a crash has
+  it: its first frames, in order), `PLACE_RULE` (the rule in words). Every place a page shows or compares comes from
+  it, and so does every decision of the job scripts on a crash (`tools/js/has_place.js`, run with the bench's qjs by
+  `PR_common.sh HasPlace`: the tools and the pages are installed side by side, `<data>/tools/js` and `<data>/html/common`);
+  the places of Vuln group A's targets are data (`vuln_targets.json` `place`), checked against the witnesses' stacks.
+  `signatures_test.sh` fails when a page or the job scripts keep a rule of their own or a page prints the catalogue's
+  `top_frames` as a place.
 
 ## Publisher Results Dashboard (`publisher/`)
 

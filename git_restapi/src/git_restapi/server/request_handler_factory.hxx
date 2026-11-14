@@ -38,6 +38,7 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
   static std::regex logURI = std::regex(R"(^/api/git/log/([0-9a-zA-Z-_.%]+)\?commit=([0-9a-fA-F]+)$)");
   static std::regex logsURI = std::regex(R"(^/api/git/logs/([0-9a-zA-Z-_.%]+)$)");
   static std::regex presetsURI = std::regex(R"(^/api/git/presets/([0-9a-zA-Z-_.%]+)/([0-9a-fA-F]{7,40})$)");
+  static std::regex catalogueURI = std::regex(R"(^/api/git/catalogue/([0-9a-zA-Z-_.%]+)/([0-9a-fA-F]{7,40}|dev|main)(\?.*)?$)");
 
   try {
     if (method == Poco::Net::HTTPRequest::HTTP_OPTIONS) {
@@ -50,6 +51,8 @@ Poco::Net::HTTPRequestHandler* RequestHandlerFactory::createRequestHandler(
         requestHandler = new RequestHandlerLog(matches[1].str(), matches[2].str());
       } else if (std::regex_match(uri, matches, presetsURI)) {
         requestHandler = new RequestHandlerPresets(matches[1].str(), matches[2].str());
+      } else if (std::regex_match(uri, matches, catalogueURI)) {
+        requestHandler = new RequestHandlerCatalogue(matches[1].str(), matches[2].str());
       }
     } else if (method == Poco::Net::HTTPRequest::HTTP_POST) {
       std::smatch matches;

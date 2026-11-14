@@ -51,6 +51,7 @@ function BuildSummary(result, artefactsPath, outPath) {
             }
             Utils.AttachLogStats(libResult, json, library, parseInt(file), outPath);
             Utils.AttachObjectives(libResult, json, library, parseInt(file), outPath);
+            Utils.AttachValidation(libResult, json, library, parseInt(file), outPath);
             libResult.data.push(json);
           } else {
             readJSONError.id = parseInt(file);
