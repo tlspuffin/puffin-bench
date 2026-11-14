@@ -1261,7 +1261,10 @@ ExperimentCrashStats() {
 
   local -a files=();
   local f;
-  for f in "${experiment_base}"/log/puffin_main_broker_std{out,err}.log "${experiment_base}"/{,log/}tlspuffin.out ./log/puffin_main_broker_std{out,err}.log; do
+  # (tlspuffin.log: the one log of every level of tlspuffin 1957fba (2024-09), where its "Spawning next client" are; the
+  # other commits do not write them there)
+  for f in "${experiment_base}"/log/puffin_main_broker_std{out,err}.log "${experiment_base}"/{,log/}tlspuffin.out \
+           "${experiment_base}"/{,log/}tlspuffin.log ./log/puffin_main_broker_std{out,err}.log; do
     [ -n "${experiment_base}" ] || [[ "${f}" == ./* ]] || continue;
     [ -f "${f}" ] && files+=( "${f}" );
   done
