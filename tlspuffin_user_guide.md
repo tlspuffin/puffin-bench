@@ -545,7 +545,8 @@ recorded when readable). Changing the rule (its depth, the frames left out) is d
 
 A task whose tlspuffin had no catalogue (before tlspuffin's catalogue, #563) has no validation. Its page is read against
 the **latest catalogue** (dev's, else that of the newest open pull request of tlspuffin that has one, as the Bugs
-reference shows), every time it is made: a crash with the ASan report type and the place of a known bug that is in
+reference shows), every time it is made, and it is made again when that catalogue changes: a crash with the ASan
+report type and the place of a known bug that is in
 what its run built is **recognised** as it (case 4 above: green, known, never 🚨 new). In what its run built: among the
 bugs its build declared, when it declared them (puffin-build: the bugs of its version minus those its preset fixes),
 else in the bug's affected versions at the library version it built (a crash at BUF's place on wolfSSL 5.8.0, which BUF

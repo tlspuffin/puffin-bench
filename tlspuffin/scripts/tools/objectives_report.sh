@@ -319,7 +319,7 @@ EOF_HTML
 # --all: every exported task with objective traces whose page is missing or older than its export or than this
 # script (for a cron job: an update of the page format rewrites every page once)
 AllTasks() {
-  local J id first;
+  local J id first latest="${PB_ROOT}/data/catalogue-cache/latest.txt";
   find -L "${PB_ROOT}/data/exports" "${PB_ROOT}/data/exports/Canceled" -maxdepth 1 -name '*.json' 2> /dev/null |
   grep -E '/[0-9]+\.json$' |
   while read -r J; do
@@ -328,8 +328,9 @@ AllTasks() {
     # first the tasks without a final report (none, or the last live page kept until it, see objectives_live.sh),
     # then the reports older than what makes them: the export, this script, the signatures (ObjectiveSignature,
     # PR_common.sh), the expected bugs (vuln_targets.json), the verdicts (report_verdicts.js with bugs.js and the
-    # words of common/verdicts.js) and the stacks of the witnesses (witness_frames.json: the places of the bugs, replaced
-    # only when a stack changes)
+    # words of common/verdicts.js, the place rule of common/signatures.js), the stacks of the witnesses
+    # (witness_frames.json: the places of the bugs, replaced only when a stack changes), and, for a report read against
+    # the latest catalogue (its commit has none), that catalogue (latest.txt, written when it changes)
     first=1;
     if [ ! -e "${OUT}/${id}.html" ] || grep -q '"pending_final": *true' "${OUT}/${id}.json" 2> /dev/null; then
       first=0;
@@ -338,7 +339,9 @@ AllTasks() {
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/report_verdicts.js" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/objectives_page/bugs.js" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/common/verdicts.js" ] &&
-        { [ ! -e "${OUT}/witness_frames.json" ] || [ "${OUT}/${id}.html" -nt "${OUT}/witness_frames.json" ]; }; then
+        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/common/signatures.js" ] &&
+        { [ ! -e "${OUT}/witness_frames.json" ] || [ "${OUT}/${id}.html" -nt "${OUT}/witness_frames.json" ]; } &&
+        { [ ! -e "${latest}" ] || [ "${OUT}/${id}.html" -nt "${latest}" ] || ! grep -qE '"latest": ?true' "${OUT}/${id}.json" 2> /dev/null; }; then
       continue;
     fi
     # a task with objectives, or a Vuln task (its 🎯 also when no run saved any objective: 0/n)
@@ -412,7 +415,10 @@ CatalogueFile() {
 # open pull request updated last that has one, as the Bugs reference shows it; cached an hour; nothing when none
 LatestCatalogue() {
   local api="${PB_GIT_RESTAPI:-http://127.0.0.1:10081}" latest="${PB_ROOT}/data/catalogue-cache/latest.txt" commit='' c;
-  if [ -s "${latest}" ] && [ -n "$( find "${latest}" -mmin -60 2> /dev/null )" ]; then cat "${latest}"; return 0; fi
+  # latest.checked: when git_restapi was last asked (the hour of the cache); latest.txt: the commit, written only when it
+  # changes, its date when the latest catalogue changed (AllTasks makes again the reports read against it)
+  local checked="${latest%.txt}.checked";
+  if [ -s "${latest}" ] && [ -n "$( find "${checked}" -mmin -60 2> /dev/null )" ]; then cat "${latest}"; return 0; fi
   commit=$( curl -sf --max-time 30 "${api}/api/git/catalogue/tlspuffin/dev" 2> /dev/null | jq -r 'select(.format == "vulnerabilities.toml") | .commit // empty' 2> /dev/null );
   if [ -z "${commit}" ]; then
     for c in $( curl -sf --max-time 30 "${api}/api/git/history/tlspuffin" 2> /dev/null | jq -r '[.PR[]? | select(.state == "open" and ((.id // "") | test("^[0-9a-f]{40}$")))]
@@ -421,7 +427,9 @@ LatestCatalogue() {
     done
   fi
   [ -n "${commit}" ] || return 0;
-  mkdir -p "$( dirname "${latest}" )" && echo "${commit}" > "${latest}.tmp" && mv -f "${latest}.tmp" "${latest}";
+  mkdir -p "$( dirname "${latest}" )" || return 0;
+  [ "$( cat "${latest}" 2> /dev/null )" == "${commit}" ] || { echo "${commit}" > "${latest}.tmp" && mv -f "${latest}.tmp" "${latest}"; };
+  touch "${checked}";
   echo "${commit}";
 }
 
@@ -473,6 +481,8 @@ if [ "$1" == "--all" ]; then
   exec 9> "${OUT}/.report-all.lock" || exit 1;
   flock -n 9 || { echo "$( date '+%F %T' ) another --all is running"; exit 0; };
 fi
+# the latest catalogue first (LatestCatalogue, an hour of cache): the reports read against it are made again when it changed
+[ "$1" == "--all" ] && LatestCatalogue > /dev/null;
 [ "$1" == "--all" ] && tasks=( $( AllTasks ) );
 status=0;
 for t in "${tasks[@]}"; do Report "${t}" || status=1; done
