@@ -180,7 +180,7 @@ monitor's own bash). Assignments and `export`s are commands too: what set a vari
 internals" hides tests, `echo`, `read`, local variables and the like; `export`, `source`, `exec` and every program stay.
 A program started by a command does not trace its own commands (e.g. the setup of a `nix-shell`): its command line, with
 the commands given to it (`--run "…"`), is the line. The file is `logs/commands.<step>.txt` of the task, archived with
-stdout and stderr; steps that ran before 2026-10-12 have none (the tab is grey). Via API:
+stdout and stderr; steps that ran before 2026-10-10 13:21 UTC have none (the tab is grey). Via API:
 ```bash
 curl "http://localhost:10082/api/task/<taskID>/<stepUUID>/<stepID>/output/stdout/65536/0"
 # also output/stderr/… and output/commands/…
