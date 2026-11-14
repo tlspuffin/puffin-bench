@@ -790,20 +790,22 @@ FuzzerRecordsOf() {
     # made each check of a new objective slow: at its low priority on the fuzzer's cores, the monitor saw the expected
     # bug up to 17 minutes late, and a run that found it near its timeout ended by the timeout
     LC_ALL=C grep -av $'^[0-9][^\t]*\tWARN\t\\[' |
-    awk -v kind="${f##*/}" '
-      # ISO 8601 time (2026-10-08T14:37:11.123456789+02:00) -> ms since the epoch, without a process per record
+    LC_ALL=C TZ=UTC awk -v kind="${f##*/}" '
+      # ISO 8601 time (2026-10-08T14:37:11.123456789+02:00) -> ms since the epoch, without a process per record (any awk:
+      # mktime of POSIX awks takes local time, here UTC by TZ; seconds by %.0f, as mawk prints %d of 2^31 and over as
+      # 2147483647)
       function iso2ms(s,   a, t, ms, off, sign) {
-        split(substr(s, 1, 19), a, /[-T:]/); t = mktime(a[1] " " a[2] " " a[3] " " a[4] " " a[5] " " a[6], 1);
+        split(substr(s, 1, 19), a, /[-T:]/); t = mktime(a[1] " " a[2] " " a[3] " " a[4] " " a[5] " " a[6]);
         if (t < 0) return 0;
         ms = substr(s, 20, 1) == "." ? substr(s, 21, 3) + 0 : 0;
         off = substr(s, length(s) - 5); sign = substr(off, 1, 1) == "-" ? -1 : 1;
         if (off ~ /^[+-][0-9][0-9]:[0-9][0-9]$/) t -= sign * (substr(off, 2, 2) * 3600 + substr(off, 5, 2) * 60);
-        return sprintf("%d%03d", t, ms) }
+        return sprintf("%.0f%03d", t, ms) }
       # frames of the crash handler backtrace, outside the fuzzer runtime, libc, the allocator and the sanitizer
       function skip(f) { return (f ~ /^(libafl|<unknown>|__pthread_kill|pthread_kill|gsignal|raise|__GI_|abort$|__libc_|malloc_printerr|_int_(free|malloc|realloc)|cfree|free$|malloc$|realloc$|__rust|rust_panic|std::|core::|alloc::|<alloc::|<core::|<std::|__asan|__sanitizer|__interceptor|___interceptor|__lsan|__ubsan|_ZN11__sanitizer|_ZN6__asan|_ZN6__lsan|_ZN7__ubsan)/) }
       function flush() { if (ts != "") { s = ""; for (i = 1; i <= n; i++) s = s (i > 1 ? " < " : "") fr[i];
                                           printf "%s\tcrash\t%s\t%s\t%s\t%s\n", iso2ms(ts), sig, s, ts, inp } ts = ""; n = 0; inp = "" }
-      /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+[+-][0-9:]+\t/ {
+      /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+\t/ {
         if (match($0, /\tERROR\tCrashed with [A-Z0-9]+/)) { flush(); ts = $1; sig = substr($0, RSTART + 20, RLENGTH - 20); next }
         if (ts != "" && match($0, /\tERROR\tinput: "[^"]+"/)) { inp = substr($0, RSTART + 15, RLENGTH - 16); next }
         # a WARN line is a claim violation, except the messages of the fuzzer itself: tagged "[module] ..." (e.g.
@@ -817,15 +819,17 @@ FuzzerRecordsOf() {
                                   if (!skip(f) && n < 3) fr[++n] = f; next }
       END { flush() }' FS='\t';
   else
-    awk '
-      # ISO 8601 time (2026-10-08T14:37:11.123456789+02:00) -> ms since the epoch, without a process per record
+    LC_ALL=C TZ=UTC awk '
+      # ISO 8601 time (2026-10-08T14:37:11.123456789+02:00) -> ms since the epoch, without a process per record (any awk:
+      # mktime of POSIX awks takes local time, here UTC by TZ; seconds by %.0f, as mawk prints %d of 2^31 and over as
+      # 2147483647)
       function iso2ms(s,   a, t, ms, off, sign) {
-        split(substr(s, 1, 19), a, /[-T:]/); t = mktime(a[1] " " a[2] " " a[3] " " a[4] " " a[5] " " a[6], 1);
+        split(substr(s, 1, 19), a, /[-T:]/); t = mktime(a[1] " " a[2] " " a[3] " " a[4] " " a[5] " " a[6]);
         if (t < 0) return 0;
         ms = substr(s, 20, 1) == "." ? substr(s, 21, 3) + 0 : 0;
         off = substr(s, length(s) - 5); sign = substr(off, 1, 1) == "-" ? -1 : 1;
         if (off ~ /^[+-][0-9][0-9]:[0-9][0-9]$/) t -= sign * (substr(off, 2, 2) * 3600 + substr(off, 5, 2) * 60);
-        return sprintf("%d%03d", t, ms) }
+        return sprintf("%.0f%03d", t, ms) }
       function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor|_ZN11__sanitizer|_ZN6__asan)/ ||
                                  f ~ /^(mem(cpy|move|set|cmp)|str(len|cpy|ncpy|cmp|ncmp|cat)|bcmp)$/) }
       # the clients share this stderr: several reports can come before the next dated line, each makes a record (the
@@ -834,7 +838,7 @@ FuzzerRecordsOf() {
                                     t = $0; sub(/.*AddressSanitizer: /, "", t); sub(/ on .*/, "", t); sub(/ .*/, "", t); inb = 1; n = 0; fr = ""; next }
       inb && /^ *#[0-9]+ 0x[0-9a-f]+ in / { f = $0; sub(/^ *#[0-9]+ 0x[0-9a-f]+ in /, "", f); sub(/ .*/, "", f);
                                            if (!skip(f) && n < 3) { fr = fr (n ? " < " : "") f; n++ } next }
-      inb && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+[+-][0-9:]+/ { ts = $0; sub(/[ \t].*/, "", ts);
+      inb && /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+/ { ts = $0; sub(/[ \t].*/, "", ts);
                                            for (i = 1; i <= np; i++) printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), pt[i], pf[i], ts;
                                            printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), t, fr, ts; np = 0; inb = 0 }';
   fi |
@@ -966,8 +970,8 @@ NotTargetedJSON() {
 FuzzerVerdicts() {
   local records="$1";
   # names → ms since the epoch (UTC in the name), sorted by time
-  awk '{ n = $1; ts = sprintf("%s %s %s %s %s %s", substr(n, 1, 4), substr(n, 5, 2), substr(n, 7, 2), substr(n, 10, 2), substr(n, 12, 2), substr(n, 14, 2));
-         t = mktime(ts, 1); if (t >= 0) printf "%d%03d\t%s\n", t, substr(n, 16, 3), n }' | sort -n |
+  LC_ALL=C TZ=UTC awk '{ n = $1; ts = sprintf("%s %s %s %s %s %s", substr(n, 1, 4), substr(n, 5, 2), substr(n, 7, 2), substr(n, 10, 2), substr(n, 12, 2), substr(n, 14, 2));
+         t = mktime(ts); if (t >= 0) printf "%.0f%03d\t%s\n", t, substr(n, 16, 3), n }' | sort -n |
   # the records through a file (too large for an argument: a warn.log of 700 KB), then the names on stdin
   awk -F'\t' '
     # a frame as a function name, as in FuzzerVerdict
@@ -1014,10 +1018,10 @@ FuzzerExcerpt() {
   [ -n "${ts}" ] || return 0;
   for f in "${dir}"/$( [ "${kind}" == crash ] && echo error || echo warn ).log "${dir}"/$( [ "${kind}" == crash ] && echo error || echo warn ).*.gz "${dir}"/tlspuffin.log; do
     [ -e "${f}" ] || continue;
-    { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } | awk -v ts="${ts}" -v kind="${kind}" '
+    { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } | LC_ALL=C awk -v ts="${ts}" -v kind="${kind}" '
       !on && index($0, ts) == 1 { on = 1; print; if (kind != "crash") exit; next }
       !on { next }
-      /^[0-9]{4}-[0-9]{2}-[0-9]{2}T/ { if (++stamped > 2) exit; print; next }
+      /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { if (++stamped > 2) exit; print; next }
       /━━/ { section = $0; keep = (section ~ /CRASH|BACKTRACE/); if (keep) print; next }
       keep && ++n <= 60 { print }' && break;
   done
