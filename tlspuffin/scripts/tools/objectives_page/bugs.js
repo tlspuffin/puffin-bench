@@ -419,13 +419,17 @@ export function NewBugs(bugs, known, task, report = null) {
   const out = [];
   const targets = ReportTargets(report);
   for (const bug of bugs) {
-    if (bug.notTarget || bug.expected || !(bug.reproduced > 0 || bug.fuzzer)) continue;
-    if (KnownByValidation(bug)) continue;
-    if (bug.validation?.kind === 'new') {
-      bug.isNew = [...new Set(bug.runs.map(run => run.library))];
+    if (bug.notTarget || !(bug.reproduced > 0 || bug.fuzzer)) continue;
+    // an objective validation found no known bug's signature for: the bug is new where it was, whatever its other
+    // objectives say (one confirmed by patch beside it: another bug in the same function, grouped with it), and the
+    // task's level is new
+    if (bug.validation?.newIn?.length) {
+      bug.isNew = bug.validation.newIn;
       out.push(bug);
       continue;
     }
+    if (bug.expected) continue;
+    if (KnownByValidation(bug)) continue;
     const sig = BugSignature(bug);
     if (!sig) continue;
     const libs = [];
@@ -680,11 +684,14 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   const topFramesOf = id => PlaceOf(firstOf('top_frames', id), firstOf('witness_frames', id));
   // the verdicts of its objectives, by name; those without verdict counted per run, every objective of the run (the
   // report names at most TRACES_PER_GROUP of a group: objectives_report.sh), not only those it names
-  const verdicts = [], withVerdict = new Map();
+  // newIn: the configurations where validation found no known bug's signature for one of its objectives (a "new" part):
+  // the bug is new there, whatever its other parts (NewBugs)
+  const verdicts = [], withVerdict = new Map(), newIn = new Set();
   for (const o of objectives) {
     const v = byLib[o.library]?.byTrace?.[`${o.attempt}/${o.name}`];
     if (!v) continue;
     verdicts.push(v);
+    if (VerdictKind(v) === 'new') newIn.add(o.library);
     withVerdict.set(`${o.library}|${o.attempt}`, (withVerdict.get(`${o.library}|${o.attempt}`) ?? 0) + 1);
   }
   const without = (bug.runs ?? []).filter(r => byLib[r.library])
@@ -773,7 +780,7 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   // the bug's verdict: its strongest part with a verdict, with the bugs of every part of that kind
   const kind = parts.find(p => p.kind !== 'none')?.kind ?? null;
   const ofKind = parts.filter(p => p.kind === kind);
-  return { ...base, parts, kind, ids: [...new Set(ofKind.flatMap(p => p.ids))],
+  return { ...base, parts, kind, ids: [...new Set(ofKind.flatMap(p => p.ids))], newIn: [...newIn],
            weak: kind === 'signature' && ofKind.every(p => p.weak) };
 }
 

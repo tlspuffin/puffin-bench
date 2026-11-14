@@ -105,6 +105,15 @@ jq --argjson c "${custom}" '.libraries += [{ library: "Empty", runs: 1, ends: { 
     cli: { vendor: "wolfssl:wolfssl540-sdos2-asan-only-CVE-2022-38152", custom: $c } }]' "${work}/custom.json" > "${work}/customempty.json"
 check 'a custom configuration whose runs found nothing: its 🎯 0/1 counts (the task is not all found)' \
   '[ "$( verdicts customempty "[.verdicts.conclusion.configurations, .verdicts.conclusion.hit, .verdicts.conclusion.runs, .verdicts.conclusion.level, .verdicts.libraries.Empty.cve, (.verdicts.libraries.Empty.runs | length), (.verdicts.libraries.Empty.found | length)]" )" == "[2,1,3,\"none\",\"CVE-2022-38152\",1,0]" ]'
+# a bug two of whose objectives validation tells apart: one confirmed by patch (BUF), one with no known bug's signature
+# on the build with every patch (another bug in the same function, grouped with it): the bug is new, the task's level
+# new, whatever the confirmed one says
+bufc='{ "benchmark": "C", "target": "CVE-2022-39173", "oracle": { "kind": "crash", "asan": "stack-buffer-overflow" } }'
+bufg='{ "type": "stack-buffer-overflow", "frames": ["RefineSuites", "CheckPreSharedKeys", "DoTls13ClientHello"], "count": 2, "traces": ["b1", "b2"] }'
+report mixed vuln-custom "[$( run 0 '["CVE-2022-39173"]' "[${bufg}]" "${bufc}" )]" \
+  "$( validation '{ "0/b1": { "verdict": "confirmed", "entries": ["CVE-2022-39173"] }, "0/b2": { "verdict": "not-patched", "known_unpatched": [] } }' )"
+check 'a bug with an objective confirmed by patch and one with no known signature: new, the task new' \
+  '[ "$( verdicts mixed "[.verdicts.headline.level, .verdicts.headline.new, .verdicts.history.level]" )" == "[\"new\",1,\"new\"]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'
