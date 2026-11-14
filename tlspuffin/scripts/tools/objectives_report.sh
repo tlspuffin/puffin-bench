@@ -63,7 +63,8 @@ Report() {
     found=$( unzip -Z1 "${Z}" 2> /dev/null | grep -cE "^artefacts/${lib}/${attempt}-objective/[^.][^/]*\.trace$" );
     replayed=$( grep -cE '^=== .*\.trace ===$' "${tmp}/out" );
     (( found > 0 || replayed > 0 )) || continue;
-    rm -f "${tmp}"/block.*;
+    # (one link per objective not replayed: tens of thousands, more than a command line holds)
+    find "${tmp}" -maxdepth 1 -name 'block.*' -delete;
     : > "${tmp}/sig.tsv";
     local b k=0;
     # the report of every replayed objective, kept by ExperimentEnd (job scripts since 2026-10-02): one signature
@@ -111,7 +112,8 @@ Report() {
           /error while loading shared libraries|binary not found:|^error: could not compile|^binary changed since the experiment|^exit status: (124|137)$/ { n++ }
         n > 0 { print > (dir "/block." n) }'
       local last=0;
-      for b in "${tmp}"/block.*; do
+      # the numbered blocks only (block.empty is the link of the objectives not replayed)
+      for b in "${tmp}"/block.[0-9]*; do
         [ -e "${b}" ] || continue;
         printf '%s\t%s\n' "${b##*.}" "$( ObjectiveSignature < "${b}" )" >> "${tmp}/sig.tsv";
         (( ${b##*.} > last )) && last=${b##*.};
