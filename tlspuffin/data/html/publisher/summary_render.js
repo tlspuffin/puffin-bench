@@ -133,7 +133,10 @@ function GetObjectivesButton(status) {
 // summary scripts): one line, and the verdict of a trace, in the words of every page (../common/verdicts.js)
 // noReplay: the objectives ("<attempt>/<trace>") of bugs known not to replay (bugs.js NoReplay: CDOS), whose inconclusive
 // verdicts are as expected
-function ValidationLine(validation, noReplay = new Set()) {
+// strength: the signature verdicts of the configuration by strength, from its bugs' parts (BugValidation, as their
+// badges: { strong: { "<ids>": n }, weak: { … } }), when the objectives report is read: the line then tells a weak
+// signature (one message, a crash without its place) from a strong one, as the badges do
+function ValidationLine(validation, noReplay = new Set(), strength = null) {
   if (!validation) return '';
   if (validation.unsupported) return `<div class="lib-validation muted">Not validated: ${EscapeAttribute(validation.unsupported)}.</div>`;
   const catalogue = validation.catalogue
@@ -147,10 +150,21 @@ function ValidationLine(validation, noReplay = new Set()) {
     kinds[kind] = (kinds[kind] ?? 0) + 1;
   });
   else Object.entries(validation.verdicts ?? {}).forEach(([verdict, n]) => { const kind = VerdictKind({ verdict }); kinds[kind] = (kinds[kind] ?? 0) + n; });
-  const parts = Object.entries(kinds).sort(([a], [b]) => VERDICT_ORDER.indexOf(a) - VERDICT_ORDER.indexOf(b)).map(([kind, n]) => {
+  const parts = Object.entries(kinds).sort(([a], [b]) => VERDICT_ORDER.indexOf(a) - VERDICT_ORDER.indexOf(b)).flatMap(([kind, n]) => {
     const v = VERDICTS[kind] ?? VERDICTS.none;
+    const sum = map => Object.values(map ?? {}).reduce((total, k) => total + k, 0);
+    if (kind === 'signature' && strength && sum(strength.strong) + sum(strength.weak) > 0) {
+      // strong (its stack has the bug's place) and weak (one message, a crash elsewhere), each in its colour; what the
+      // rows do not tell (objectives the report does not name) as before
+      const rest = n - sum(strength.strong) - sum(strength.weak);
+      return [
+        sum(strength.strong) ? `<span class="validation-signature" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${sum(strength.strong)} ${EscapeAttribute(v.word)} with its stack (${count(strength.strong)})</span>` : '',
+        sum(strength.weak) ? `<span class="validation-signature validation-weak" title="${EscapeAttribute(`${v.mark} ${v.tip}\nweak: one message, or a crash whose stack has not the bug's place`)}">${v.mark} ${sum(strength.weak)} ${EscapeAttribute(v.word)} · weak (${count(strength.weak)})</span>` : '',
+        rest > 0 ? `<span class="validation-signature" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${rest} ${EscapeAttribute(v.word)}</span>` : '',
+      ].filter(Boolean);
+    }
     const detail = kind === 'patch' ? count(validation.confirmed) : kind === 'signature' ? count(validation.known_unpatched) : '';
-    return `<span class="validation-${EscapeAttribute(kind)}" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${n} ${EscapeAttribute(v.word)}${detail ? ` (${detail})` : ''}</span>`;
+    return [`<span class="validation-${EscapeAttribute(kind)}" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${n} ${EscapeAttribute(v.word)}${detail ? ` (${detail})` : ''}</span>`];
   });
   const controls = (validation.controls_failed ?? []).length
     ? ` · <b class="validation-controls-failed" title="the witness of a candidate bug did not behave on the validation builds: verdicts not trusted">controls failed (runs ${EscapeAttribute(validation.controls_failed.join(', '))})</b>` : '';
@@ -362,6 +376,7 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
   const total = own.reduce((sum, entry) => sum + entry.count, 0);
   // not reproduced by their replay, but those of the bugs known not to replay (CDOS: as expected)
   const notReproduced = own.filter(entry => !(entry.bug.noReplay ?? []).length).reduce((sum, entry) => sum + entry.count - entry.reproduced - entry.notReplayed, 0);
+  const strength = { strong: {}, weak: {} };
   const rows = own.map(({ bug, runs, count, reproduced, notReplayed }) => {
     const kind = bug.type;
     const where = (bug.frames ?? []).map(EscapeAttribute).join(' &lt; ') || EscapeAttribute(bug.summary || '—');
@@ -380,6 +395,11 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
         ? module.BugValidation({ ...bug, objectives: (bug.objectives ?? []).filter(o => o.library === library), runs, count, run: runs[0] ?? bug.run },
             report?.libraries ?? [], catalogue, !!report?.live)
         : bug.validation;
+    // the signature verdicts by strength, for the line of the panel (ValidationLine)
+    for (const part of (validation?.parts ?? []).filter(p => p.kind === 'signature' && !p.recognised)) {
+      const side = part.weak ? strength.weak : strength.strong, ids = part.ids.join(' or ');
+      side[ids] = (side[ids] ?? 0) + part.count;
+    }
     const verdicts = (validation?.parts ?? []).filter(part => part.kind !== 'none').map(part => {
       const v = VERDICTS[part.kind] ?? VERDICTS.none;
       const ids = part.ids.join(part.kind === 'signature' ? ' or ' : ', ');
@@ -403,7 +423,7 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
       + (notReproduced ? `, ${notReproduced} not reproduced by their replay` : '') + ` — as in the `
       + `<a class="lib-objectives-report" href="${ObjectivesPageURL(taskID)}" target="_blank" rel="noopener">objectives report ↗</a>`
       + ` (a bug is what the fuzzer recorded; the report has the replays and the fuzzer's logs).</div>`
-      + ValidationLine(status?.validation, noReplayTraces) + rows;
+      + ValidationLine(status?.validation, noReplayTraces, strength) + rows;
   // the expected bug of this configuration (vuln_targets.json): 🎯 runs that found it / runs (bugs.js ExpectedRuns, the
   // count of the objectives report), · k untimed those of them that did not succeed (no time to find), then the others
   // counted with the run states of the summary this row shows (the same as the outcomes of the report, which a report

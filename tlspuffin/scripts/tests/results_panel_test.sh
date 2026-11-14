@@ -4,7 +4,9 @@
 # code (results_page.mjs), on reports made here:
 #   - objectives never replayed (beyond the replays of the experiment) are not "not reproduced": the button and
 #     the panel count them apart, "not replayed";
-#   - a bug of several configurations: each row's verdict badges count its objectives there, not the task's (F20).
+#   - a bug of several configurations: each row's verdict badges count its objectives there, not the task's;
+#   - the validation line of a row tells weak signatures (a claim, a crash elsewhere than the bug's place) from strong
+#     ones, as the badges do.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 command -v node > /dev/null || { echo "SKIP: no node"; exit 0; }
@@ -12,6 +14,7 @@ work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
 command cp -f "${here}/results_page.mjs" "${work}/results_page.mjs"
 cat > "${work}/test.mjs" <<'JS'
 import { Prepare, InstallShims, WriteFixture, FakeEl } from './results_page.mjs';
+import { readFileSync } from 'node:fs';
 const root = process.env.WORK, repo = process.env.REPO;
 let fail = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fail = 1; };
@@ -19,10 +22,11 @@ const page = Prepare(root, repo);
 InstallShims(root);
 const { ShowReportBugs } = await import(page);
 // ShowReportBugs on a row of the configuration: what its panel and its button show
-async function Panel(task, library) {
+// (status: the configuration's status on Results, BuildDataSet: its validation from the task's summary, the same record)
+async function Panel(task, library, validation = null) {
   const panel = new FakeEl('div'), button = new FakeEl('button'), parent = new FakeEl('td');
   button.parentNode = parent;
-  await ShowReportBugs(panel, button, task, library, { runs: [] });
+  await ShowReportBugs(panel, button, task, library, { runs: [], validation });
   return { panel: panel.innerHTML, button: button.textContent, title: button.title };
 }
 // a Perf task: one bug replayed 2 times (reproduced) with 3 objectives beyond the replays, one bug never replayed
@@ -51,10 +55,29 @@ const run = (name, traces) => ({ library: name, attempt: 0, found: traces.length
 WriteFixture(root, 'objectives/102.json', { task: '102', commit: 'c', job_type: 'vuln-custom',
   libraries: [lib('custom2_SIG', ['s1']), lib('custom2_SKIP', ['k1', 'k2', 'k3', 'k4'])],
   runs: [run('custom2_SIG', ['s1']), run('custom2_SKIP', ['k1', 'k2', 'k3', 'k4'])] });
-const sig = await Panel('102', 'custom2_SIG'), skip = await Panel('102', 'custom2_SKIP');
+const sig = await Panel('102', 'custom2_SIG', lib('custom2_SIG', ['s1']).validation), skip = await Panel('102', 'custom2_SKIP');
 const badge = p => (/class="objective-validation validation-signature[^"]*"[^>]*>([^<]*)</.exec(p.panel) ?? [])[1] ?? '';
 check(/×1$/.test(badge(sig)), `custom2_SIG: its badge counts its 1 objective, not the task's 5: ${badge(sig)}`);
 check(/×4$/.test(badge(skip)), `custom2_SKIP: its badge counts its 4: ${badge(skip)}`);
+const line = p => (/<div class="lib-validation">[\s\S]*?<\/div>/.exec(p.panel) ?? [''])[0];
+check(/class="validation-signature validation-weak"[^>]*>≈ 1 by its signature · weak \(CVE-2024-5814\)/.test(line(sig)),
+  `the line: a claim's signature is weak, in the weak colour: ${line(sig).replace(/<[^>]*>/g, '')}`);
+// SDOS2 (no patch at 5.4.0): one crash at its place (strong), one elsewhere (weak)
+WriteFixture(root, 'objectives/103.json', { task: '103', commit: 'c', job_type: 'vuln-custom',
+  libraries: [{ library: 'custom_SDOS2', runs: 1, validation: { catalogue: { source: 'commit', commit: 'c' },
+    entries: { 'CVE-2022-38152': { alias: 'SDOS2', oracle: { kind: 'crash', asan: 'SEGV' },
+                                   witness_frames: ['DoTls13ClientHello', 'DoTls13HandShakeMsgType', 'DoTls13HandShakeMsg'] } },
+    byTrace: { '0/a1': { verdict: 'not-patched', entries: [], known_unpatched: ['CVE-2022-38152'] },
+               '0/b1': { verdict: 'not-patched', entries: [], known_unpatched: ['CVE-2022-38152'] } } } }],
+  runs: [{ library: 'custom_SDOS2', attempt: 0, found: 2, replayed: 2, reports: 2,
+    cli: { vendor: 'wolfssl:wolfssl540-sdos2-asan-only-CVE-2022-38152', library: { name: 'wolfssl', version: '540' } },
+    groups: [
+      { type: 'SEGV', frames: ['__memmove_avx_unaligned_erms', 'DoTls13ClientHello', 'DoTls13HandShakeMsgType', 'DoTls13HandShakeMsg'], count: 1, traces: ['a1'], excerpt: '' },
+      { type: 'SEGV', frames: ['ParseOther', 'Caller', 'Outer'], count: 1, traces: ['b1'], excerpt: '' }] }] });
+const sdos2 = line(await Panel('103', 'custom_SDOS2', JSON.parse(readFileSync(`${root}/html/objectives/103.json`, 'utf8')).libraries[0].validation));
+check(/class="validation-signature"[^>]*>≈ 1 by its signature with its stack \(CVE-2022-38152\)/.test(sdos2)
+      && /class="validation-signature validation-weak"[^>]*>≈ 1 by its signature · weak \(CVE-2022-38152\)/.test(sdos2),
+  `the line: the crash at the place strong, the one elsewhere weak: ${sdos2.replace(/<[^>]*>/g, '')}`);
 process.exit(fail);
 JS
 WORK="${work}" REPO="$( cd "${here}/../../.." && pwd )" node "${work}/test.mjs"
