@@ -50,7 +50,8 @@ report() { # <name> <job type> <runs JSON> [<validation JSON>]
 }
 validation() { # <byTrace JSON>
   jq -nc --argjson b "$1" '{ catalogue: { source: "commit", commit: "abc" }, byTrace: $b,
-    entries: { "CVE-2022-38152": { alias: "SDOS2", oracle: { kind: "crash", asan: "SEGV" } },
+    entries: { "CVE-2022-38152": { alias: "SDOS2", oracle: { kind: "crash", asan: "SEGV" },
+                                   witness_frames: ["__memmove_avx_unaligned_erms", "DoTls13ClientHello", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] },
                "CVE-2022-42905": { alias: "HEAP", oracle: { kind: "crash", asan: "heap-buffer-overflow" } },
                "CVE-2022-25640": { alias: "SKIP", oracle: { kind: "claim", violation: "Authentication bypass" } } } }'
 }
@@ -114,6 +115,23 @@ report mixed vuln-custom "[$( run 0 '["CVE-2022-39173"]' "[${bufg}]" "${bufc}" )
   "$( validation '{ "0/b1": { "verdict": "confirmed", "entries": ["CVE-2022-39173"] }, "0/b2": { "verdict": "not-patched", "known_unpatched": [] } }' )"
 check 'a bug with an objective confirmed by patch and one with no known signature: new, the task new' \
   '[ "$( verdicts mixed "[.verdicts.headline.level, .verdicts.headline.new, .verdicts.history.level]" )" == "[\"new\",1,\"new\"]" ]'
+# a custom target without patch at the version built (SDOS2 on 5.4.0), named by its signature only: a crash elsewhere
+# than its place is not the find, whatever its ASan type
+report customelse vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segvElsewhere}]" "${custom}" )]" \
+  "$( validation '{ "0/x1": { "verdict": "not-patched", "known_unpatched": ["CVE-2022-38152"] } }' )"
+check 'a custom target named by its signature only: a crash elsewhere is not the find, nor a known bug' \
+  '[ "$( verdicts customelse "[.verdicts.conclusion.counted, .verdicts.headline.allKnown, .verdicts.headline.text]" )" == "[0,false,\"1 bug found\"]" ]'
+# a Vuln group A target recognised by its place, the find validated as no known bug: not the target, new
+heapPlaced='{ "type": "heap-buffer-overflow", "frames": ["AddPacketInfo", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"], "count": 1, "traces": ["v1"] }'
+report vulna vuln-a "[$( run 0 '["CVE-2022-42905"]' "[${heapPlaced}]" )]" \
+  "$( validation '{ "0/v1": { "verdict": "not-patched", "known_unpatched": [] } }' )"
+jq '.targets = { WolfSSL: { cve: "CVE-2022-42905", kind: "crash", place: ["AddPacketInfo", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] } }' \
+  "${work}/vulna.json" > "${work}/vulna.tmp" && mv "${work}/vulna.tmp" "${work}/vulna.json"
+check 'Vuln group A: a crash at the place of its target that validation finds no known bug in: not the target, new' \
+  '[ "$( verdicts vulna "[.verdicts.conclusion.counted, .verdicts.headline.level, .verdicts.headline.new]" )" == "[0,\"new\",1]" ]'
+jq '.libraries[0].validation = null' "${work}/vulna.json" > "${work}/vulna0.json"
+check 'Vuln group A without validation: its target by its place, as before' \
+  '[ "$( verdicts vulna0 "[.verdicts.conclusion.counted, .verdicts.headline.level]" )" == "[1,\"known\"]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'

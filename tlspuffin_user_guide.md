@@ -335,6 +335,10 @@ The scheduler's generic cache endpoints (`GET`/`PUT /api/cache/<id>`, see [sched
 | SDOS2 | `wolfssl:wolfssl540-sdos2` | CVE-2022-38152 | a crash at `DoTls13ClientHello < DoTls13HandShakeMsgType < DoTls13HandShakeMsg` |
 | SKIP | `wolfssl:wolfssl510-skip` | CVE-2022-25640 | claim `Authentication bypass` |
 
+A crash is the expected bug when its stack (the fuzzer's record, else the replay's) has the target's place, the first 3
+frames of its witness's stack ([The place of a bug](#the-place-of-a-bug-rule-r3)). Where the commit has tlspuffin's
+catalogue, validation decides first: a find it names as another bug, or as no known bug, is not the target.
+
 ## Vulnerability configurations (group B)
 
 `PR_vulnerabilities-groupB_cargo.json` tests two harder-to-trigger cases in parallel, 90 retries × 2890-minute (~48h) timeout each — a long, patient search rather than a broad sweep:
@@ -452,7 +456,7 @@ known bug X in one of four ways, from the most certain to the least:
 |---|---|---|---|
 | 1. **patch differential** | the objective goes away on F (the library with every known bug's patch), and on V_X (every patch but X's) it fails again, with X's signature | ✔ X · confirmed by patch (green) | certain: it is X |
 | 2. **strong signature** | X has no patch at this version; on F the objective still fails, with X's signature, **and its stack has X's place** (below) | ≈ X · by its signature with its stack (green) | as well as a signature can tell; X is known |
-| 3. **weak signature** | the same, without stack to compare: a claim or a panic (one message, several bugs can share it), a crash of X's type whose stack lacks X's place, or a bug with no known place | ≈ X · by its signature · weak (yellow, dashed) | a candidate only: never makes a bug known on its own |
+| 3. **weak signature** | the same, without stack to compare: a claim or a panic (one message, several bugs can share it), a crash of X's type whose stack lacks X's place, or a bug with no known place | ≈ X · by its signature · weak (yellow, dashed) | a candidate only: never makes a bug known on its own, but the claim of a configuration's expected bug (its message is its only signature): 🎯 and known |
 | 4. **recognised, not validated** | no validation verdict (an older task, or objectives not validated): X is in what the run built (below), and the crash has X's ASan report type and X's place, in the latest catalogue | ≈ X · by its signature with its stack · not validated (green) | X is known, not proven: a validation by patch would confirm it |
 
 Anything else is said as such: ⚠ to review (X's patch removes the objective but X's signature does not show without it;
@@ -633,8 +637,9 @@ not when the attempt stopped. A preset that turns out not to have the bug (a PUT
 makes the experiment "unsupported" instead of running for nothing. When the validation builds cannot run an objective
 (⛔ could not replay), validation does not decide: the fuzzer's record does, as on a commit without the catalogue.
 The objectives page, Results and History give each experiment its 🎯 (runs that found its target, as for Vuln group
-A): an objective is the target when validation names the target for it, else, until validation says, when it has the
-target's signature. An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
+A): an objective is the target when validation names the target for it (by patch; by its signature only, a crash at the
+target's place only), not when validation names another bug or none, else, until validation says or when it cannot,
+when it has the target's signature (a crash: at the target's place). An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
 it, `cli-<experiment>.json`): the task's conclusion counts it, never "all found" without it.
 
 ## Performance configurations

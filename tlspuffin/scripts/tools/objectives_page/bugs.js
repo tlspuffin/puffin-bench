@@ -24,21 +24,34 @@ export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'repl
 // tools/js/has_place.js), or the claim with that message. A custom benchmark's target (CustomTargets: { cve, oracle,
 // custom }): validation decides when it named a bug for one of the group's objectives (verdictOf(trace): its verdict),
 // else its signature (OracleMatchesGroup), until validation says
+// Validation first, for both kinds of target: a verdict naming the target by patch makes the group the target; one
+// naming it by its signature only (no patch for it at the version built: known_unpatched) does too, but for a crash
+// target only when its stack has the target's place, a strong signature (any crash of its ASan type would match
+// the signature); a verdict naming another bug, or none (not-patched without it, another signature), never. Without a
+// verdict that decides (inconclusive, an error, not validated): the target's signature for a custom one (provisional
+// until validation says), the place or the claim of vuln_targets.json for the others.
 export function IsExpected(target, group, verdictOf = null) {
   if (!target) return false;
-  if (target.custom) {
-    const verdicts = (group.traces ?? []).map(trace => verdictOf?.(trace)).filter(Boolean);
-    if (verdicts.some(v => (v.entries ?? []).includes(target.cve) || (v.known_unpatched ?? []).includes(target.cve))) return true;
-    if (verdicts.some(v => ['confirmed', 'not-patched', 'other-signature'].includes(v.verdict))) return false;
-    return OracleMatchesGroup(target.oracle, group);
-  }
+  const verdicts = (group.traces ?? []).map(trace => verdictOf?.(trace)).filter(Boolean);
+  const crash = target.custom ? target.oracle?.kind === 'crash' : target.kind === 'crash';
+  if (verdicts.some(v => (v.entries ?? []).includes(target.cve))) return true;
+  if (verdicts.some(v => (v.known_unpatched ?? []).includes(target.cve))) return !crash || AtPlace(target.place, group);
+  if (verdicts.some(v => ['confirmed', 'not-patched', 'other-signature'].includes(v.verdict))) return false;
+  if (target.custom) return OracleMatchesGroup(target.oracle, group);
   const fz = group.fuzzer;
   if (target.kind === 'claim') {
     return (fz?.kind === 'claim' && fz.detail === target.match)
         || (group.type === 'security-violation' && (group.frames ?? [])[0] === target.match);
   }
-  return (fz?.kind === 'crash' && HasPlace(target.place, fz.frames))
-      || (!['no-crash', 'replay-error', 'security-violation'].includes(group.type) && HasPlace(target.place, group.frames));
+  return AtPlace(target.place, group);
+}
+// AtPlace(place, group): a crash whose stack, the fuzzer's backtrace or the replay's, has that place (HasPlace, R3); no
+// place known: never
+function AtPlace(place, group) {
+  if (!(place ?? []).length) return false;
+  const fz = group.fuzzer;
+  return (fz?.kind === 'crash' && HasPlace(place, fz.frames))
+      || (!['no-crash', 'replay-error', 'security-violation', 'not-replayed'].includes(group.type) && HasPlace(place, group.frames));
 }
 
 // the signal of a crash with an ASan report of that type, when the fuzzer records only the signal (LibAFL replaces
@@ -66,18 +79,26 @@ function OracleMatchesGroup(oracle, group) {
 // it: the catalogue's bug and its signature), as targets of their configuration: { library: { cve, kind, oracle,
 // custom: true } }. From the configurations (libraries[].cli) as well as from the runs with objectives: a configuration
 // whose runs found nothing has its target too, its 🎯 0/n (else it would not count, and the task would look all found)
-function CustomTargets(runs, libraries) {
+// A target's place (PlaceOf: the first frames of its witness's stack, else the catalogue's top frames), from the
+// validation's record of the entry (libraries[].validation.entries) and the catalogue (or the report's digest of it):
+// what a crash of it is recognised by when validation names it by its signature only (IsExpected)
+function CustomTargets(runs, libraries, catalogue = null) {
   const out = {};
+  const records = id => [...(libraries ?? []).map(l => l.validation?.entries?.[id]), ...Object.values(catalogue?.vendors ?? {}).map(v => v.entries?.[id])];
+  const first = (id, field) => records(id).map(e => e?.[field]).find(f => f?.length) ?? [];
   for (const { library, cli } of [...(runs ?? []), ...(libraries ?? [])]) {
     const c = cli?.custom;
-    if (c?.target && !out[library]) out[library] = { cve: c.target, kind: c.oracle?.kind ?? null, oracle: c.oracle ?? null, custom: true };
+    if (c?.target && !out[library]) out[library] = { cve: c.target, kind: c.oracle?.kind ?? null, oracle: c.oracle ?? null, custom: true,
+                                                    place: PlaceOf(first(c.target, 'top_frames'), first(c.target, 'witness_frames')) };
   }
   return out;
 }
-// ReportTargets(report): the expected bug of each configuration of a report: vuln_targets.json's (report.targets) and
-// those of a custom benchmark's experiments
-function ReportTargets(report) {
-  return { ...(report?.targets ?? {}), ...CustomTargets(report?.runs, report?.libraries) };
+// ReportTargets(report, catalogue): the expected bug of each configuration of a report: vuln_targets.json's
+// (report.targets) and those of a custom benchmark's experiments (catalogue: the one the analysis has, else the
+// report's digest)
+function ReportTargets(report, catalogue = null) {
+  catalogue ??= report?.catalogue_digest?.format === 'vulnerabilities.toml' ? report.catalogue_digest : null;
+  return { ...(report?.targets ?? {}), ...CustomTargets(report?.runs, report?.libraries, catalogue) };
 }
 // TargetText(target): how a configuration's expected bug is recognised, in words
 export function TargetText(t) {
@@ -813,7 +834,7 @@ export function AnalyseReport(report, known = null, catalogue = null) {
   // without the catalogue (Results), the digest report_verdicts.js wrote into the report: the same flags
   catalogue ??= report?.catalogue_digest?.format === 'vulnerabilities.toml' ? report.catalogue_digest : null;
   const runs = report?.runs ?? [], libraries = report?.libraries ?? [];
-  const targets = ReportTargets(report);
+  const targets = ReportTargets(report, catalogue);
   const bugs = Bugs(runs, report?.not_targeted, targets, libraries, report?.job_type);
   for (const bug of bugs) {
     bug.validation = BugValidation(bug, libraries, catalogue, !!report?.live);
