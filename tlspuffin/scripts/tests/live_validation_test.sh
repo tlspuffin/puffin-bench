@@ -4,13 +4,14 @@
 # given in the step folders (validation/verdicts), by "<attempt>/<trace>" per configuration; for the runs of Perf
 # validated after all of them (PerfObjectives), in run-<n> under their run numbers. And its configurations (LiveLibraries):
 # each with its number of runs and the target of a custom benchmark's experiment (output/cli-<library>.json), also one
-# without objective yet (its 🎯 0/n).
+# without objective yet (its 🎯 0/n). And its row of the index of running tasks (LiveIndexRow, live.json: the pill of
+# the top bar): the bugs and the configurations hit are those a replay reproduced, not an objective not replayed yet.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
 fail=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
-source <( sed -n '/^StepLibrary()/,/^}/p; /^LiveValidation()/,/^}/p; /^LiveLibraries()/,/^}/p' "${here}/../tools/objectives_live.sh" )
+source <( sed -n '/^StepLibrary()/,/^}/p; /^LiveValidation()/,/^}/p; /^LiveLibraries()/,/^}/p; /^LiveIndexRow()/,/^}/p' "${here}/../tools/objectives_live.sh" )
 
 task="${work}/task"
 mkdir -p "${task}/output" "${task}/executor/WolfSSL-0/validation/verdicts" "${task}/executor/OpenSSL-0/run-2/validation/verdicts" \
@@ -44,4 +45,19 @@ check 'LiveLibraries: a custom configuration without objective yet has its targe
 check 'LiveLibraries: twin steps count 2 runs, no target without cli.custom, none without cli' \
   'jq -e "map({ (.library): [.runs, (.cli.custom.target // null)] }) | add == { Twin: [2, null], NoCli: [1, null], custom_CALLB: [2, \"CVE-2023-6936\"] }" <<< "${got}" > /dev/null'
 check 'LiveLibraries: a state that cannot be read gives no configuration' '[ "$( LiveLibraries "${task}" "not json" )" == "[]" ]'
+
+# the index row: a crash reproduced (A), objectives not replayed yet (B), a replay without crash (C)
+cat > "${work}/live-5.json" <<'EOF'
+{ "task": "5", "name": "Vuln C", "commit": "c", "job_type": "vuln-custom", "task_url": "u",
+  "verdicts": { "headline": { "level": "known", "new": 0 } },
+  "runs": [
+    { "library": "A", "attempt": 0, "found": 2, "replayed": 2, "reports": 2, "groups": [{ "type": "heap-buffer-overflow", "frames": ["F", "G"], "count": 2 }] },
+    { "library": "B", "attempt": 0, "found": 3, "replayed": 0, "reports": 0, "groups": [{ "type": "not-replayed", "frames": [], "count": 3,
+        "fuzzer": { "kind": "crash", "detail": "SIGABRT", "frames": ["H"] } }] },
+    { "library": "C", "attempt": 0, "found": 1, "replayed": 1, "reports": 0, "groups": [{ "type": "no-crash", "frames": [], "count": 1 }] }] }
+EOF
+row=$( LiveIndexRow "${work}/live-5.json" live-5.html 3 <<< '[]' )
+check 'the index row: counts and level of the live report' 'jq -e ".[0] | .found == 6 and .replayed == 3 and .reproduced == 2 and .level == \"known\" and .configurations == 3" <<< "${row}" > /dev/null'
+check 'the index row: the bugs and configurations hit by a replay only, not those not replayed yet' \
+  'jq -e ".[0] | .bugs == 1 and .hit == [\"A\"]" <<< "${row}" > /dev/null'
 exit "${fail}"

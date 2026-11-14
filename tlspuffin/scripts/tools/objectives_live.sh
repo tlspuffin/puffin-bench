@@ -227,6 +227,27 @@ LiveLibraries() {
   echo "${libs}";
 }
 
+# LiveIndexRow <live report> <url of its page> <configurations>: the index of the running tasks (stdin, JSON list) with
+# the row of this task added: its counts for live.html and the pill of the top bar (bar.js). Its bugs and the
+# configurations hit: the groups a replay reproduced (not no-crash, replay-error, nor not-replayed: an objective not
+# replayed yet is no reproduced bug, as the page counts it)
+LiveIndexRow() {
+  jq --slurpfile t "$1" --arg url "$2" --argjson nconf "${3:-0}" '
+      ($t[0]) as $l
+      | def reproduced: .type != "no-crash" and .type != "replay-error" and .type != "not-replayed";
+        ([$l.runs[] | .library as $lib | .groups[] | select(reproduced)
+          | if .type == "crash" and (.frames | length) == 0 then "crash|" + $lib else .type + "|" + (.frames | join("<")) end])
+        as $confirmed
+      | . + [{ task: $l.task, name: $l.name, commit: $l.commit, job_type: $l.job_type, task_url: $l.task_url, url: $url,
+               found: ([$l.runs[].found] | add // 0), replayed: ([$l.runs[].replayed] | add // 0),
+               reproduced: ([$l.runs[].reports] | add // 0),
+               bugs: ($confirmed | unique | length),
+               # the level of the task (report_verdicts.js): new, unexpected, known, unclear; null without verdicts
+               level: ($l.verdicts.headline.level // null), new: ($l.verdicts.headline.new // 0),
+               hit: ([$l.runs[] | select(any(.groups[]; reproduced)) | .library] | unique),
+               configurations: ([$nconf, ([$l.runs[].library] | unique | length)] | max) }]';
+}
+
 # Commit and name of a task, from its state ($1, JSON of /api/task/<id>/state): its arguments are [{key, value}]
 TaskInfo() {
   jq -r '[([.task.args[]? | select(.key? == "COMMIT_ID") | .value] + [.task.args.COMMIT_ID? // empty])[0] // "?",
@@ -435,20 +456,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
   # row of live.html and of the top bar pill (board/custom/tlspuffin/bar.js): counts of the task; configurations = its experiment steps
   nconf=$( jq '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment")) | .id] | unique | length' \
       <<< "${taskJSON}" 2> /dev/null ) || nconf=0;
-  liveTasks=$( jq --slurpfile t "${OUT}/live-${task}.json" --arg url "live-${task}.html" --argjson nconf "${nconf:-0}" '
-      ($t[0]) as $l
-      | ([$l.runs[] | .library as $lib | .groups[] | select(.type != "no-crash" and .type != "replay-error")
-          | if .type == "crash" and (.frames | length) == 0 then "crash|" + $lib else .type + "|" + (.frames | join("<")) end])
-        as $confirmed
-      | . + [{ task: $l.task, name: $l.name, commit: $l.commit, job_type: $l.job_type, task_url: $l.task_url, url: $url,
-               found: ([$l.runs[].found] | add // 0), replayed: ([$l.runs[].replayed] | add // 0),
-               reproduced: ([$l.runs[].reports] | add // 0),
-               bugs: ($confirmed | unique | length),
-               # the level of the task (report_verdicts.js): new, unexpected, known, unclear; null without verdicts
-               level: ($l.verdicts.headline.level // null), new: ($l.verdicts.headline.new // 0),
-               hit: ([$l.runs[] | select(any(.groups[]; .type != "no-crash" and .type != "replay-error")) | .library] | unique),
-               configurations: ([$nconf, ([$l.runs[].library] | unique | length)] | max) }]' <<< "${liveTasks}" ) ||
-      liveTasks='[]';
+  liveTasks=$( LiveIndexRow "${OUT}/live-${task}.json" "live-${task}.html" "${nconf:-0}" <<< "${liveTasks}" ) || liveTasks='[]';
 done
 
 # index of the running tasks; state of finished tasks is dropped (their final page comes from objectives_report.sh)
