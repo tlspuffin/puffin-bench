@@ -463,6 +463,46 @@ def load_warning():
         return 0.25
 
 
+COMPAT_SCRIPT = f'{CHECKOUT}/tlspuffin/scripts/PR_compat.sh'
+TLSPUFFIN_REPO = f'{PB_ROOT}/data/repo/tlspuffin/repo'
+# the tasks shown on Results that ran without a compat rule their commit gets today (rules_today), for runs_report.py
+# to list (stale_rules.json): what to run again
+STALE = []
+
+
+def rules_today(commit):
+    """the compat rules the job scripts apply to a commit today (PR_compat.sh CompatEvaluate, as Init does, on the
+    bench's clone of tlspuffin at that commit, read only): a set; None when they cannot be told (no clone, a commit it
+    does not have). Cached per commit and version of the rules (the md5 of PR_compat.sh)"""
+    if not (os.path.exists(COMPAT_SCRIPT) and os.path.isdir(TLSPUFFIN_REPO) and re.fullmatch(r'[0-9a-f]{7,40}', commit or '')):
+        return None
+    version = hashlib.md5(open(COMPAT_SCRIPT, 'rb').read()).hexdigest()
+    path = f'{CACHE}/compat-rules.json'
+    cache = json.load(open(path)) if os.path.exists(path) else {}
+    if cache.get('version') != version:
+        cache = {'version': version, 'commits': {}}
+    if commit not in cache['commits']:
+        if subprocess.run(['git', '-C', TLSPUFFIN_REPO, 'cat-file', '-e', f'{commit}^{{commit}}'], capture_output=True).returncode != 0:
+            return None
+        # (its output list by name: not "applied", a local of CompatEvaluate)
+        out = subprocess.run(['bash', '-c', 'source "$1"; compatApplied=""; COMPAT_GIT_REV="$3" CompatEvaluate "$2" "$3" compatApplied > /dev/null 2>&1; echo "${compatApplied}"',
+                              '_', COMPAT_SCRIPT, TLSPUFFIN_REPO, commit], capture_output=True, text=True)
+        if out.returncode != 0:
+            return None
+        cache['commits'][commit] = sorted(filter(None, out.stdout.strip().split(',')))
+        write_json(path, cache)
+    return set(cache['commits'][commit])
+
+
+def stale_rules(task, commit):
+    """the compat rules a commit gets today that its task ran without (it ran before they existed): sorted, [] when
+    none or when they cannot be told"""
+    today = rules_today(commit)
+    if today is None:
+        return []
+    return sorted(today - set(filter(None, ((task.get('settings') or {}).get('compat') or '').split(','))))
+
+
 def regression(groups):
     """each commit's latest task against the latest task of its nearest ancestor with results (same category and type):
     per library and metric the change of the mean and the Mann-Whitney p on the runs, and what differs between the two
@@ -489,6 +529,12 @@ def regression(groups):
             for k, label in (('timeout', 'timeout'), ('cores', 'cores'), ('libafl', 'LibAFL')):
                 if sa.get(k) != sb.get(k):
                     notes.append(f'{label} {sa.get(k)} → {sb.get(k)}')
+            # a side that ran before a compat rule its commit gets today: the bench would run it otherwise now
+            stale = {'task': stale_rules(b, c), 'base': stale_rules(a, base)}
+            for side, task, commit in (('base', a, base), ('task', b, c)):
+                if stale[side]:
+                    notes.append(f'run before compat rule{"s" if len(stale[side]) > 1 else ""} {",".join(stale[side])}: task {task["id"]} of {commit[:7]} (to run again)')
+                    STALE.append({'commit': commit, 'category': category, 'type': ctype, 'task': task['id'], 'missing': stale[side]})
             libs = {}
             for lib in sorted(set(va) & set(vb)):
                 warn = []
@@ -520,6 +566,8 @@ def regression(groups):
                 # runs, runs_base: (runs measured, runs) of each side (Vuln: the runs with a time to find)
                 libs[lib] = {'warn': warn, 'metrics': metrics, 'runs': vb[lib]['_runs'], 'runs_base': va[lib]['_runs']}
             entry = {'base': base, 'gap': gap, 'task': b['id'], 'base_task': a['id'], 'major': major(b), 'notes': notes, 'libs': libs}
+            if stale['task'] or stale['base']:
+                entry['stale_rules'] = stale
             # Perf: each metric over the comparable libraries (no ⚠) at once
             if ctype == 'Perf':
                 entry['pooled'] = {}
@@ -660,6 +708,9 @@ def main():
         import socket
         write_json(f'{OUT}/regression.json', {'machine': socket.gethostname().split('.')[0],
                                                'commits': regression({k: v for k, v in groups.items() if k[0] == 'PR'})})
+        # the tasks Results compares that ran before a compat rule their commit gets today: to run again
+        write_json(f'{OUT}/stale_rules.json', {'updated': datetime.datetime.now().isoformat(timespec='seconds'),
+                                               'tasks': [json.loads(t) for t in sorted({json.dumps(t, sort_keys=True) for t in STALE})]})
         write_json(f'{OUT}/regression_floors.measured.json', measured_floors(groups))
     else:
         old = json.load(open(f'{OUT}/index.json')) if os.path.exists(f'{OUT}/index.json') else {}

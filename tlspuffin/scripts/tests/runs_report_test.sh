@@ -6,7 +6,8 @@
 #     or none recorded on both, is;
 #   - a task with a twin run is of major version 2, whatever its job scripts recorded: not comparable with 3-client
 #     runs of major 1, on Results and on the Runs page (page_record);
-#   - the floors are measured on pairs of tasks with the same CPU sharing only, also when one did not record it.
+#   - the floors are measured on pairs of tasks with the same CPU sharing only, also when one did not record it;
+#   - a side of a comparison that ran before a compat rule its commit gets today: noted, listed to run again.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
@@ -55,5 +56,15 @@ check(page['bench']['major'] == 2 and 'stamp' not in page and page['bench']['com
 same = [task(str(i), 100 + i, ('pairs', False)) for i in range(1, 6)]
 floors = rr.measured_floors({('PR', 'Perf'): {'c' * 40: same + [task('9', 100)]}})
 check(floors['pairs'].get('Perf/coverage') == 10, f"the floors: pairs of the same CPU sharing only ({floors['pairs'].get('Perf/coverage')} pairs, 10 expected)")
+# a task that ran before a compat rule its commit gets today (rules_today: PR_compat.sh on the bench's clone, given here)
+rr.rules_today = lambda commit: {'reservoir_sample_warn'} if commit == 'c' * 40 else set()
+rr.STALE.clear()
+w, entry = warnings(task('1', 100), task('2', 50))
+check(any(n == f"run before compat rule reservoir_sample_warn: task 2 of {'c' * 7} (to run again)" for n in entry['notes'])
+      and entry.get('stale_rules') == {'task': ['reservoir_sample_warn'], 'base': []}
+      and [t['task'] for t in rr.STALE] == ['2'], f"a task run before a rule its commit gets today: noted, listed: {entry['notes']}")
+withrule = task('2', 50); withrule['settings']['compat'] = 'reservoir_sample_warn'
+w, entry = warnings(task('1', 100), withrule)
+check(not any('run before' in n for n in entry['notes']) and 'stale_rules' not in entry, 'a task that ran with the rule: nothing noted')
 sys.exit(fail)
 PY
