@@ -8,8 +8,14 @@ For each final objectives report with verdicts (report_verdicts.js, the pages' c
   history    the 🎯 of the scheduler's history page (task_links.json) is the conclusion of the report
   runs       the Runs page measures a time to find for the runs 🎯 counts that succeeded, no other (runs-cache)
 
+A run where the job scripts did not see the expected bug and the report finds it, by the fuzzer's own record, is not a
+difference when the report counts it untimed: the pages say so in words (bugs.js RunFailures: "its job scripts did not
+see the expected bug", or its timeout), its time to find left out. Those runs are counted apart ("explained"), never in
+the exit status: else every pass fails on the same old runs and a new difference is one more line among them.
+
 Prints one line per difference, then a summary; exit status 1 when there is a difference. Run by objectives_report.sh
 --all after the reports (its log: pb-objectives-cron.log), and by hand: PB_ROOT=/srv/puffin-bench python3 -I check_verdicts.py
+[--explained] (--explained: the explained runs too, one line each)
 """
 import glob
 import json
@@ -45,7 +51,7 @@ def summary_of(task):
 
 def main():
     links = load(LINKS) or {}
-    issues, checked = [], 0
+    issues, explained, checked = [], [], 0
     for path in sorted(glob.glob(f'{REPORTS}/[0-9]*.json')):
         task = os.path.basename(path)[:-5]
         report = load(path)
@@ -71,10 +77,12 @@ def main():
                 expect = sorted(a for a in v.get('found', []) if outcomes.get(str(a)) != 'success')
                 if untimed != expect:
                     issues.append(f'{task} {name} untimed {untimed} but found and did not succeed are {expect}')
-            # scripts: the job scripts and the report on the expected bug
+            # scripts: the job scripts and the report on the expected bug; a run they did not see it in, which the
+            # report finds and counts untimed, is explained (see above)
             for d in v.get('script_disagrees') or []:
-                issues.append(f'{task} {name} run {d["attempt"]}: job scripts {"found" if d["script"] else "did not find"} '
-                              f'the expected bug, the report {"found" if d["report"] else "did not find"} it')
+                line = (f'{task} {name} run {d["attempt"]}: job scripts {"found" if d["script"] else "did not find"} '
+                        f'the expected bug, the report {"found" if d["report"] else "did not find"} it')
+                (explained if not d['script'] and d['report'] and d['attempt'] in untimed else issues).append(line)
             # runs: the Runs page measures the runs 🎯 counts that succeeded
             cache = load(f'{CACHE}/{task}.json')
             runs = (((cache or {}).get('metrics') or {}).get(name) or {}).get('runs')
@@ -91,7 +99,12 @@ def main():
             issues.append(f'{task} history 🎯 {pill and pill.get("label")} ({pill and pill.get("level")}) vs report {c}')
     for line in issues:
         print(line)
-    print(f'check_verdicts: {checked} reports, {len(issues)} difference(s)')
+    if '--explained' in sys.argv[1:]:
+        for line in explained:
+            print(f'explained: {line}')
+    print(f'check_verdicts: {checked} reports, {len(issues)} difference(s)'
+          + (f', {len(explained)} run(s) explained (the job scripts did not see the expected bug, the report finds it and'
+             ' counts the run untimed)' if explained else ''))
     return 1 if issues else 0
 
 
