@@ -4,7 +4,8 @@
 # (results_page.mjs):
 #   - a change beyond its floor with p <= p_max is coloured (▼ worse, ▲ better) and counted in the line "vs <base>";
 #   - a library marked ⚠ not comparable (another build, CPU sharing, major version): its changes are shown faint, never
-#     ▲/▼, not counted, and its details say "not comparable" (F14);
+#     ▲/▼, not counted, and its details say "not comparable";
+#   - an ancestor with no configuration in common: "nothing to compare", never "≈";
 #   - the Runs page (runs_page/runs.js): between two tasks of a commit, the significant differences, but where the two
 #     do not compare (another major version of the measurements; a CPU sharing recorded by one of them only, or
 #     two different ones): then none is called significant.
@@ -28,6 +29,8 @@ WriteFixture(root, 'runs/regression.json', { machine: 'm', commits: {
     A: { warn: [], metrics: { coverage: metric(-5, 0.001) } },
     B: { warn: ['CPU sharing: twin vs pairs'], metrics: { coverage: metric(-20, 0.0001) } },
     C: { warn: [], metrics: { coverage: metric(-0.5, 0.001) } } } } },
+  // an ancestor whose results have no configuration of this card (a custom task against another one)
+  c2: { 'PR/Vuln': { base: 'b1b1b1b1', gap: 1, task: '4', base_task: '3', notes: ['job scripts x → y'], libs: {} } },
 } });
 const { ApplyRegression } = await import(page);
 const table = RegressionTable(['A', 'B', 'C'], ['coverage']);
@@ -62,6 +65,10 @@ check(/major version 1 → 2 \(not comparable\)/.test(lines[1] ?? '') && !/signi
   && /differences not tested \(not comparable\)/.test(lines[1] ?? ''), 'two tasks that do not compare: no difference called significant');
 check(/CPU sharing not recorded \(logical CPUs\) → pairs \(not comparable\)/.test(lines[2] ?? '') && !/significant:/.test(lines[2] ?? ''),
   'a CPU sharing recorded by one task only: noted, not comparable');
+const empty = RegressionTable(['custom_A'], ['total_execs']);
+await ApplyRegression(empty, 'c2', 'Vuln');
+const e = Shown(empty, 'total_execs');
+check(/nothing to compare/.test(e.head) && !/≈/.test(e.head) && /nothing to compare/.test(e.headDetails), `nothing compared: "nothing to compare", not ≈: "${e.head}"`);
 process.exit(fail);
 JS
 WORK="${work}" REPO="$( cd "${here}/../../.." && pwd )" node "${work}/test.mjs"

@@ -1034,7 +1034,8 @@ async function ApplyRegression(table, commit, type) {
   if (!entry || !floors) return;
   const pMax = floors.rule?.p_max ?? 0.016;
   const fields = REGRESSION_FIELDS[type];
-  let up = 0, down = 0, warned = 0;
+  // compared: the cells given a change (a configuration of the card with results on the base, a metric of both)
+  let up = 0, down = 0, warned = 0, compared = 0;
   const changes = [], warnings = [];  // for the hover of the line: what was flagged, what is not comparable
   for (const row of table.querySelectorAll('tr.lib-row')) {
     const lib = entry.libs?.[row.dataset.library];
@@ -1049,6 +1050,7 @@ async function ApplyRegression(table, commit, type) {
       const m = lib.metrics?.[metric];
       const cell = row.querySelector(`td[data-field="${field}"]`);
       if (!m || !cell) continue;
+      compared++;
       const [floor, from] = RegressionFloor(floors, data.machine, type, row.dataset.library, metric, entry.major ?? 1);
       // a library not comparable with its base (⚠: another build, CPU sharing, major version) is never flagged nor
       // counted: its change is shown faint, as runs_report.py leaves it out of the pooled change
@@ -1098,14 +1100,18 @@ async function ApplyRegression(table, commit, type) {
   const notes = entry.notes ?? [];
   const head = document.createElement('div');
   head.className = 'reg-head';
+  // nothing compared (no configuration of the card has results on the base): said, never "≈" (no change)
   head.innerHTML = `vs <span class="mono">${E(entry.base.slice(0, 7))}</span>: `
-      + (up || down ? `${up ? `<b class="reg-better">${up} ▲</b>` : ''}${up && down ? ' ' : ''}${down ? `<b class="reg-worse">${down} ▼</b>` : ''}` : '<span class="reg-faint">≈</span>')
+      + (!compared && !pooledRows.length ? '<span class="reg-faint">nothing to compare</span>'
+         : up || down ? `${up ? `<b class="reg-better">${up} ▲</b>` : ''}${up && down ? ' ' : ''}${down ? `<b class="reg-worse">${down} ▼</b>` : ''}` : '<span class="reg-faint">≈</span>')
       + (warned ? ` · <span class="reg-warn">${warned} ⚠</span>` : '')
       + (pooledFlagged.length ? ` · all: ${pooledFlagged.map(r => `<b class="${r.better ? 'reg-better' : 'reg-worse'}">${r.better ? '▲' : '▼'} ${E(r.metric.replace(/_/g, ' '))}</b>`).join(' ')}` : '')
       + (notes.length ? ` · <span class="reg-notes">${notes.length} ⚙</span>` : '');
   const metricName = (metric) => metric.replace(/_/g, ' ');
   const details = `<div class="rd-title">vs ${E(entry.base.slice(0, 7))} <span class="rd-sub">nearest ancestor with ${E(type)} results · ${entry.gap} commits earlier · task ${E(entry.task)} vs ${E(entry.base_task)}</span></div>`
-      + `<div class="rd-section">${changes.length ? `${changes.length} flagged change${changes.length > 1 ? 's' : ''} <span class="rd-sub">(▲ better, ▼ worse)</span>` : '≈ nothing flagged'} <span class="rd-sub">(p ≤ ${pMax} and beyond the noise floor)</span></div>`
+      + (!compared && !pooledRows.length
+          ? `<div class="rd-section">nothing to compare <span class="rd-sub">(no configuration of this card has results on ${E(entry.base.slice(0, 7))})</span></div>`
+          : `<div class="rd-section">${changes.length ? `${changes.length} flagged change${changes.length > 1 ? 's' : ''} <span class="rd-sub">(▲ better, ▼ worse)</span>` : '≈ nothing flagged'} <span class="rd-sub">(p ≤ ${pMax} and beyond the noise floor)</span></div>`)
       + (changes.length ? `<div class="rd-grid">${changes.map(c => `<span>${E(c.lib)}</span><span><span class="${c.better ? 'reg-better' : 'reg-worse'}">${c.better ? '▲' : '▼'} ${E(metricName(c.metric))} ${c.delta >= 0 ? '+' : ''}${c.delta.toFixed(1)} %</span> <span class="rd-sub">p = ${c.p.toFixed(3)}</span></span>`).join('')}</div>` : '')
       + (pooledRows.length ? `<div class="rd-section">all libraries at once <span class="rd-sub">(${pooledRows[0].libs} comparable; a change that hits every library)</span></div><div class="rd-grid">`
           + pooledRows.map(r => `<span>${E(metricName(r.metric))}</span><span><span class="${r.flagged ? (r.better ? 'reg-better' : 'reg-worse') : 'reg-faint'}">${r.flagged ? (r.better ? '▲ ' : '▼ ') : ''}${r.delta >= 0 ? '+' : ''}${r.delta.toFixed(1)} %</span> <span class="rd-sub">${r.p < 0.001 ? 'p &lt; 0.001' : `p = ${r.p.toFixed(3)}`} · ${r.floor === null ? 'no floor set: never flagged' : `floor ${r.floor} % (${E(r.from)})`}</span></span>`).join('')
