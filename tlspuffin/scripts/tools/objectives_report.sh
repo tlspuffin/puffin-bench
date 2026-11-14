@@ -98,13 +98,13 @@ Report() {
       local name vk vd vf vr;
       cut -f10 "${tmp}/sig.tsv" | sort -u > "${tmp}/replayed.names";
       : > "${tmp}/block.empty";
-      while IFS=$'\t' read -r name vk vd vf vr; do
+      while IFS=$'\037' read -r name vk vd vf vr; do
         [ -n "${name}" ] || continue;
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${k}" $'not-replayed\t\tnot replayed (beyond the replays of the experiment)\t0' "${vk}" "${vd}" "${vf}" "${vr}" "${name}" >> "${tmp}/sig.tsv";
         ln -sf "${tmp}/block.empty" "${tmp}/block.${k}";
         k=$(( k + 1 ));
       done < <( unzip -Z1 "${Z}" 2> /dev/null | sed -n "s#^artefacts/${lib}/${attempt}-objective/\([^.][^/]*\)\.trace\$#\1#p" |
-                grep -vxF -f "${tmp}/replayed.names" | FuzzerVerdicts "${records}" )
+                grep -vxF -f "${tmp}/replayed.names" | FuzzerVerdicts "${records}" | tr '\t' '\037' )
     else
       # one block per report: AddressSanitizer errors, security violations, Rust panics and replay errors (the fuzzer
       # could not run, or the replay timed out), in stdout and stderr
@@ -125,13 +125,13 @@ Report() {
       k=$(( last + 1 ));
       sed -n 's/^=== \(.*\)\.trace ===$/\1/p' "${tmp}/out" | sed 's#.*/##' | sort -u > "${tmp}/replayed.names";
       : > "${tmp}/block.empty";
-      while IFS=$'\t' read -r name vk vd vf vr; do
+      while IFS=$'\037' read -r name vk vd vf vr; do
         [ -n "${name}" ] || continue;
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${k}" $'not-replayed\t\tnot replayed (beyond the replays of the experiment)\t0' "${vk}" "${vd}" "${vf}" "${vr}" "${name}" >> "${tmp}/sig.tsv";
         ln -sf "${tmp}/block.empty" "${tmp}/block.${k}";
         k=$(( k + 1 ));
       done < <( unzip -Z1 "${Z}" 2> /dev/null | sed -n "s#^artefacts/${lib}/${attempt}-objective/\([^.][^/]*\)\.trace\$#\1#p" |
-                grep -vxF -f "${tmp}/replayed.names" | FuzzerVerdicts "${records}" )
+                grep -vxF -f "${tmp}/replayed.names" | FuzzerVerdicts "${records}" | tr '\t' '\037' )
     fi
     local groups;
     local max="${TRACES_PER_GROUP}";

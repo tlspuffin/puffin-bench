@@ -369,12 +369,12 @@ for taskDir in "${RUNS}"/[0-9]*; do
     page="${taskState}/${key}.page.tsv";
     cp "${tsv}" "${page}";
     cut -f1 "${tsv}" | sort -u > "${taskState}/${key}.done";
-    while IFS=$'\t' read -r name vk vd vf vr; do
+    while IFS=$'\037' read -r name vk vd vf vr; do
       [ -n "${name}" ] || continue;
       t=$( awk -v n="/${name}.trace" 'index($0, n) { split($1, a, "."); print a[1]; exit }' "${taskState}/${key}.allt" 2> /dev/null );
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${name}" "${t:-0}" $'not-replayed\t\tnot replayed yet\t0' "${vk}" "${vd}" "${vf}" "${vr}" "" >> "${page}";
     done < <( sed 's#.*/##; s/\.trace$//' "${taskState}/${key}.all" 2> /dev/null | grep -vxF -f "${taskState}/${key}.done" |
-              FuzzerVerdicts "$( cat "${taskState}/${key}.records" 2> /dev/null )" )
+              FuzzerVerdicts "$( cat "${taskState}/${key}.records" 2> /dev/null )" | tr '\t' '\037' )
     groups=$( jq -R -s '
       split("\n") | map(select(length > 0) | split("\t")
         | { trace: .[0], found: (.[1] | tonumber? // 0), type: .[2], frames: .[3], summary: .[4], start: ((.[5] // "0") | tonumber? // 0),

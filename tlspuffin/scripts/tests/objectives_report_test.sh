@@ -3,7 +3,9 @@
 # (its export and archive under a scratch PB_ROOT; git_restapi not asked: no catalogue):
 #   - the report: a run with its objectives grouped by signature (an ASan crash, a claim), its traces next to the page,
 #     its verdicts (report_verdicts.js, the pages' code), its page;
-#   - made aside and published in one rename (F30): while its verdicts are computed, the page still reads the previous
+#   - objectives beyond the replays, classified by the fuzzer's record: a claim record (no frames) keeps its fields
+#     (an empty field collapsing, the time would become the frames, each objective its own group);
+#   - made aside and published in one rename: while its verdicts are computed, the page still reads the previous
 #     report whole, with its verdicts, and the task's traces; nothing is left beside them.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -35,7 +37,8 @@ case " \$* " in *-objective/*.trace*) find "${out}/${task}-traces" -name '*.trac
 exec "$( command -v unzip )" "\$@"
 STANDIN
 chmod +x "${work}/bin/unzip"
-# the export of a Vuln task with one run of WolfSSL: 2 objectives, a heap overflow and a claim, both replayed
+# the export of a Vuln task with one run of WolfSSL: 2 objectives replayed, a heap overflow and a claim, and 2 beyond
+# the replays whose fuzzer recorded a claim
 python3 -I - "${root}/data/exports" "${task}" <<'PY'
 import json, sys, zipfile
 d, task = sys.argv[1], sys.argv[2]
@@ -58,25 +61,32 @@ with zipfile.ZipFile(f'{d}/{task}.zip', 'w') as z:
         z.writestr(f'artefacts/WolfSSL/0-objective/{name}.trace', 'trace')
     z.writestr(f'artefacts/WolfSSL/0-objective-reports/{heap}.txt', asan)
     z.writestr(f'artefacts/WolfSSL/0-objective-reports/{claim}.txt', 'error because a security violation occurred. msg: Authentication bypass\n')
+    # beyond the replays: the fuzzer's records of their claims (warn.log, its local time; the names are UTC)
+    for name in ('20261111-000000003-cccc', '20261111-000001004-dddd'):
+        z.writestr(f'artefacts/WolfSSL/0-objective/{name}.trace', 'trace')
+    z.writestr('artefacts/WolfSSL/0-log/warn.log', '2026-11-11T01:00:00.002000000+01:00\tWARN\tSome claim\n'
+                                                   '2026-11-11T01:00:01.003000000+01:00\tWARN\tSome claim\n')
     z.writestr('artefacts/summary.json', json.dumps({'libraries': {'WolfSSL': {'cli': cli, 'data': [{'id': 0, 'state': 'success'}]}}}))
 PY
 build() { PATH="${work}/bin:${PATH}" PB_ROOT="${root}" PB_GIT_RESTAPI=http://127.0.0.1:9 PB_PUBLIC_URL=http://h PB_BOARD_URL=http://h \
             bash "${here}/../tools/objectives_report.sh" "${task}" > "${work}/build.log" 2>&1; }
 build || { echo "FAIL the report could not be made:"; cat "${work}/build.log"; exit 1; }
 report="${out}/${task}.json"
-check 'the report: one run, its 2 objectives in 2 groups (an ASan crash, a claim)' \
-  '[ "$( jq -c "[.runs[0].found, ([.runs[0].groups[].type] | sort)]" "${report}" )" == "[2,[\"heap-buffer-overflow\",\"security-violation\"]]" ]'
+check 'the report: one run, its 4 objectives in 3 groups (an ASan crash, a claim, 2 beyond the replays)' \
+  '[ "$( jq -c "[.runs[0].found, ([.runs[0].groups[].type] | sort)]" "${report}" )" == "[4,[\"heap-buffer-overflow\",\"not-replayed\",\"security-violation\"]]" ]'
+check 'the 2 beyond the replays: one group, their claim as the fuzzer recorded it, no frames' \
+  '[ "$( jq -c "[.runs[0].groups[] | select(.type == \"not-replayed\") | [.count, .fuzzer.kind, .fuzzer.detail, .fuzzer.frames]]" "${report}" )" == "[[2,\"claim\",\"Some claim\",[]]]" ]'
 check 'its traces next to the page, named in the report' \
-  '[ "$( find "${out}/${task}-traces/WolfSSL/0" -name "*.trace" | wc -l )" -eq 2 ] && [ "$( jq "[.runs[0].groups[].traces[]] | length" "${report}" )" -eq 2 ]'
+  '[ "$( find "${out}/${task}-traces/WolfSSL/0" -name "*.trace" | wc -l )" -eq 4 ] && [ "$( jq "[.runs[0].groups[].traces[]] | length" "${report}" )" -eq 4 ]'
 check 'its verdicts (report_verdicts.js) and its page' 'jq -e ".verdicts.headline" "${report}" > /dev/null && grep -q "data-json=\"${task}.json\"" "${out}/${task}.html"'
 # made again (an update of the tools): meanwhile a page reads the previous report, whole, with its verdicts
 : > "${work}/seen"; : > "${work}/seen-unzip"
 build || { echo "FAIL the report could not be made again:"; cat "${work}/build.log"; exit 1; }
 check 'while the verdicts are computed, a page reads the previous report whole, with its verdicts' \
-  '[ "$( head -n 1 "${work}/seen" )" == "{\"verdicts\":true,\"groups\":2}" ]'
+  '[ "$( head -n 1 "${work}/seen" )" == "{\"verdicts\":true,\"groups\":3}" ]'
 check 'and the task'"'"'s traces, all of them, also while the new ones are extracted' \
-  '[ "$( sed -n 2p "${work}/seen" )" -eq 2 ] && [ -s "${work}/seen-unzip" ] && [ "$( sort -n "${work}/seen-unzip" | head -n 1 )" -eq 2 ]'
+  '[ "$( sed -n 2p "${work}/seen" )" -eq 4 ] && [ -s "${work}/seen-unzip" ] && [ "$( sort -n "${work}/seen-unzip" | head -n 1 )" -eq 4 ]'
 check 'the new report published whole: verdicts, groups, traces; nothing left beside it' \
-  'jq -e ".verdicts.headline and (.runs[0].groups | length) == 2" "${report}" > /dev/null && [ "$( find "${out}/${task}-traces" -name "*.trace" | wc -l )" -eq 2 ] &&
+  'jq -e ".verdicts.headline and (.runs[0].groups | length) == 3" "${report}" > /dev/null && [ "$( find "${out}/${task}-traces" -name "*.trace" | wc -l )" -eq 4 ] &&
    [ -z "$( find "${out}" -maxdepth 1 \( -name "*.tmp" -o -name "*.new" -o -name "*.old" \) )" ]'
 exit "${fail}"
