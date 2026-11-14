@@ -424,10 +424,13 @@ for taskDir in "${RUNS}"/[0-9]*; do
          # every configuration with its number of runs and its custom target (LiveLibraries)
          libraries: ($libraries | map(. + (if $validation[.library] then { validation: $validation[.library] } else {} end))),
          runs: sort_by(.library, .attempt) }' \
-      <<< "${runs}" > "${OUT}/live-${task}.json";
+      <<< "${runs}" > "${OUT}/live-${task}.json.tmp" || { rm -f "${OUT}/live-${task}.json.tmp"; continue; };
   # the verdicts of the pages (report_verdicts.js with bugs.js): the level of the task for the pill of the top bar, as
-  # History has it for a finished task (a failure leaves the report without them: the pill falls back to its counts)
-  bash "${TOOLS}/objectives_report.sh" --verdicts "${OUT}/live-${task}.json" 2> /dev/null || true;
+  # History has it for a finished task (a failure leaves the report without them: the pill falls back to its counts).
+  # Added to the report being made, which then replaces the one the page reads in one rename: an open page never
+  # reads it half written or without its verdicts and catalogue digest
+  bash "${TOOLS}/objectives_report.sh" --verdicts "${OUT}/live-${task}.json.tmp" 2> /dev/null || true;
+  mv -f "${OUT}/live-${task}.json.tmp" "${OUT}/live-${task}.json" || continue;
   bash "${TOOLS}/objectives_report.sh" --render "${OUT}/live-${task}.json" "${OUT}/live-${task}.html";
   # row of live.html and of the top bar pill (board/custom/tlspuffin/bar.js): counts of the task; configurations = its experiment steps
   nconf=$( jq '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment")) | .id] | unique | length' \

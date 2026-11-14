@@ -50,8 +50,9 @@ Report() {
   [ -n "${J}" ] || { echo "${task}: export not found" >&2; return 1; }
   local Z="${J%.json}.zip";
   [[ "${task}" =~ ^[0-9]+$ ]] || { echo "${task}: not a task id" >&2; return 1; }
-  # the traces of the page are extracted again (rm of the task's own folder only)
-  rm -rf "${OUT:?}/${task}-traces";
+  # the traces of the page are extracted again, into <task>-traces.new, which replaces the task's own folder once the
+  # report is made: a page open meanwhile keeps its traces (and its report: written whole, see below)
+  rm -rf "${OUT:?}/${task}-traces.new";
   local tmp; tmp=$( mktemp -d );
   local commit; commit=$( jq -r '[(.task.args, .task.argsToUpdate) | (if type == "array" then .[] else empty end) | select(.key == "COMMIT_ID") | .value] | last // "?"' "${J}" );
   local libs='[]';
@@ -163,7 +164,7 @@ Report() {
           '.[$i].excerpt = $e | del(.[$i].block) | if .[$i].fuzzer then .[$i].fuzzer.excerpt = $f | del(.[$i].fuzzer.ts) else . end' <<< "${groups}" );
     done
     # the traces of the groups, next to the page: <task>-traces/<library>/<run>/<objective>.trace
-    local tracesDir="${OUT}/${task}-traces/${lib}/${attempt}" name;
+    local tracesDir="${OUT}/${task}-traces.new/${lib}/${attempt}" name;
     mkdir -p "${tracesDir}";
     while IFS= read -r name; do
       [[ "${name}" =~ ^[A-Za-z0-9._-]+$ ]] || continue;
@@ -252,12 +253,26 @@ Report() {
       '$info + { task: $task, commit: $commit, cancelled: $cancelled, runs: .,
                  not_targeted: $nt, targets: $targets,
                  cves: $cves }' \
-      <<< "${libs}" > "${OUT}/${task}.json" || return 1;
-  # the verdicts of bugs.js (the pages' code) in the report, for runs_report.py and the history page
-  Verdicts "${OUT}/${task}.json" || return 1;
+      <<< "${libs}" > "${OUT}/${task}.json.tmp" || { rm -f "${OUT}/${task}.json.tmp"; return 1; };
+  # the verdicts of bugs.js (the pages' code) in the report, for runs_report.py and the history page: added to the report
+  # being made (next to the final one: report_verdicts.js reads known_bugs.json beside it), which then replaces the
+  # published one in one rename. A page never reads a report half written or without its verdicts and catalogue digest
+  Verdicts "${OUT}/${task}.json.tmp" || { rm -f "${OUT}/${task}.json.tmp"; return 1; };
+  SwapTraces "${task}";
+  mv -f "${OUT}/${task}.json.tmp" "${OUT}/${task}.json" || return 1;
   Render "${OUT}/${task}.json" "${OUT}/${task}.html" || return 1;
   echo "${task}: $( jq -r '[.runs[] | "\(.library) run \(.attempt): \(.reports) report(s) in \(.groups | length) group(s)"] | join("; ") | if . == "" then "no objective" else . end' "${OUT}/${task}.json" )";
   echo "  ${URL}/html/objectives/${task}.html";
+}
+
+# SwapTraces <task>: the traces just extracted (<task>-traces.new) in place of the task's folder (none extracted: the
+# folder goes). Two renames: the folder is missing for an instant only, not for the time of the extraction
+SwapTraces() {
+  local dir="${OUT:?}/$1-traces";
+  rm -rf "${dir}.old";
+  [ -d "${dir}" ] && mv "${dir}" "${dir}.old";
+  [ -d "${dir}.new" ] && mv "${dir}.new" "${dir}";
+  rm -rf "${dir}.old";
 }
 
 # Targets <export json>: the expected bug of each configuration of a VulnA/VulnB task, from the vendor preset of its steps
