@@ -374,6 +374,10 @@ ConfirmObjective() {
   local target; target=$( jq -c --arg id "${target_bug:-}" '{ candidate: ([.candidates[].id] | index($id) != null),
       replayable: ([.entries[] | select(.id == $id) | .replayable][0] | . != false) }' "${state}" );
   jq -e '.replayable == false' <<< "${target}" > /dev/null && { echo "its objectives do not replay: the fuzzer's record"; return 2; };
+  # its own control failed (its witness gave its signature with every patch, or not without its patch): no verdict on it
+  # can be trusted, the fuzzer's record decides
+  jq -e --arg id "${target_bug:-}" 'any(.controls[]?; .entry == $id and .ok == false)' "${state}" > /dev/null &&
+    { echo "the controls of ${target_bug} failed on the validation builds: the fuzzer's record"; return 2; };
   local verdict; verdict=$( ValidationEnv && ValidationVerdict "${trace}" during ) || { echo "the validation failed"; return 2; };
   if jq -e '.candidate' <<< "${target}" > /dev/null; then
     jq -e --arg id "${target_bug}" '.verdict == "confirmed" and (.entries | index($id) != null)' <<< "${verdict}" > /dev/null &&

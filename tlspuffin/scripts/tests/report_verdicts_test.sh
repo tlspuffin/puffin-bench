@@ -5,6 +5,7 @@
 #   - Perf with objectives on a version that declares no known bug: unexpected, its 🐞 gold (new when one is a real bug);
 #   - a bug the validation finds with no known bug's signature: new (🚨), its 🐞 red, whatever the registry;
 #   - a weak signature (SDOS2: any ASan SEGV) does not make a crash elsewhere known: new by its stack;
+#   - a claim split by patch (SplitByPatch): a verdict that a failed control can have made false has no say there either;
 #   - a custom benchmark's experiments get their 🎯 (their target, recognised by validation; by its signature before),
 #     also a configuration whose runs found nothing (🎯 0/n: the task is not all found);
 #   - objectives but nothing reproduced and no fuzzer record: unclear, its 🐞 outlined (warning);
@@ -143,6 +144,58 @@ printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/b
 check 'one claim confirmed by patch as two bugs: two bugs, each its own name, "2 known bugs found"' \
   '[ "$( verdicts twoclaims "[.verdicts.bugs.count, .verdicts.headline.text]" )" == "[2,\"2 known bugs found\"]" ] &&
    [ "$( "${qjs}" --std -m "${work}/named.js" "${work}/twoclaims.json" )" == "[[\"CVE-2021-3336\"],[\"CVE-2022-25640\"]]" ]'
+# the split of a claim by patch (SplitByPatch) follows the rule of the failed controls too: with 3336's control failed
+# in run 0, its "confirmed 3336" has no say, so no row is keyed after it (a row with nothing under it): one bug, its
+# objectives confirmed SKIP by patch (run 1) and could not validate (run 0)
+printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/bugs.js';" 'const a = AnalyseReport(JSON.parse(std.loadFile(scriptArgs[1])));' \
+  'print(JSON.stringify(a.bugs.map(b => [b.key, b.count, b.validation?.ids ?? [], (b.validation?.parts ?? []).map(p => p.kind + (p.why ? ":" + p.why : "") + "x" + p.count).join(",")])));' > "${work}/split.js"
+jq '.libraries[0].validation.failed_controls = { "0": [{ entry: "CVE-2021-3336", triggers_unpatched: false, triggers_patched: false }] }' \
+  "${work}/twoclaims.json" > "${work}/twoclaimsfailed.json"
+check "a claim split by patch, 3336's control failed: one bug, confirmed SKIP ×1 and could not validate ×1, no row named 3336" \
+  '[ "$( "${qjs}" --std -m "${work}/split.js" "${work}/twoclaimsfailed.json" )" == "[[\"claim|Authentication bypass\",2,[\"CVE-2022-25640\"],\"patchx1,none:controlsx1\"]]" ]'
+# failed controls (by side; of HEAP's 2 objectives one has a verdict, the other is "not chosen"): HEAP's witness
+# did not trigger without its patch: a "confirmed HEAP" has no verdict;
+# HEAP's witness triggered with every patch: a crash with HEAP's signature found on that build has none either (it may
+# be HEAP, not a new bug); the verdict of SDOS2 beside them stands
+printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/bugs.js';" 'const a = AnalyseReport(JSON.parse(std.loadFile(scriptArgs[1])));' \
+  'print(JSON.stringify(a.bugs.map(b => [b.type, b.validation?.kind ?? null, (b.validation?.parts ?? []).map(p => p.kind + (p.why ? ":" + p.why : "")).join(","), !!b.isNew])));' > "${work}/parts.js"
+report ctlunpatched perf "[$( run 0 '["CVE-2022-38152","CVE-2022-42905"]' "[${heap},${segv}]" )]" \
+  "$( validation '{ "0/h1": { "verdict": "confirmed", "entries": ["CVE-2022-42905"] }, "0/s1": { "verdict": "not-patched", "known_unpatched": ["CVE-2022-38152"] } }' )"
+jq '.libraries[0].validation.failed_controls = { "0": [{ entry: "CVE-2022-42905", triggers_unpatched: false, triggers_patched: false }] }' \
+  "${work}/ctlunpatched.json" > "${work}/ctl.tmp" && mv "${work}/ctl.tmp" "${work}/ctlunpatched.json"
+check "HEAP's witness did not trigger without its patch: its confirmed find has no verdict, SDOS2's stands" \
+  '[ "$( "${qjs}" --std -m "${work}/parts.js" "${work}/ctlunpatched.json" )" == "[[\"heap-buffer-overflow\",null,\"none:not-chosen,none:controls\",false],[\"SEGV\",\"signature\",\"signature\",false]]" ]'
+report ctlpatched perf "[$( run 0 '["CVE-2022-38152","CVE-2022-42905"]' "[${heap}]" )]" \
+  "$( validation '{ "0/h1": { "verdict": "not-patched", "known_unpatched": [] } }' )"
+jq '.libraries[0].validation.failed_controls = { "0": [{ entry: "CVE-2022-42905", triggers_unpatched: true, triggers_patched: true }] }' \
+  "${work}/ctlpatched.json" > "${work}/ctl.tmp" && mv "${work}/ctl.tmp" "${work}/ctlpatched.json"
+check "HEAP's witness triggered with every patch: a crash of its signature there has no verdict, not new" \
+  '[ "$( "${qjs}" --std -m "${work}/parts.js" "${work}/ctlpatched.json" )" == "[[\"heap-buffer-overflow\",null,\"none:not-chosen,none:controls\",false]]" ]'
+jq 'del(.libraries[0].validation.failed_controls)' "${work}/ctlpatched.json" > "${work}/ctlnone.json"
+check 'the same crash with the controls passed: no known signature, new' \
+  '[ "$( "${qjs}" --std -m "${work}/parts.js" "${work}/ctlnone.json" )" == "[[\"heap-buffer-overflow\",\"new\",\"new,none:not-chosen\",true]]" ]'
+# the target of a run (🎯) by a verdict whose control failed: that verdict has no say there either (as on the bug's
+# badge), the target is recognised as without validation, by its place: a crash elsewhere "confirmed HEAP" is not the
+# find when HEAP's witness did not trigger without its patch; a crash at HEAP's place is, by its place
+tHeap='{ "WolfSSL": { "cve": "CVE-2022-42905", "kind": "crash",
+                     "place": ["AddPacketInfo", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"] } }'
+heapFailed='{ "0": [{ "entry": "CVE-2022-42905", "triggers_unpatched": false, "triggers_patched": false }] }'
+report ctltarget vuln-a "[$( run 0 '["CVE-2022-38152","CVE-2022-42905"]' "[${uaf}]" )]" \
+  "$( validation '{ "0/u1": { "verdict": "confirmed", "entries": ["CVE-2022-42905"] } }' )"
+jq --argjson t "${tHeap}" '.targets = $t' "${work}/ctltarget.json" > "${work}/ctl.tmp" \
+  && mv "${work}/ctl.tmp" "${work}/ctltarget.json"
+check 'Vuln group A: a crash elsewhere that validation confirms as the target by patch, the controls passed: the find' \
+  '[ "$( verdicts ctltarget "[.verdicts.conclusion.counted, .verdicts.conclusion.level]" )" == "[1,\"all\"]" ]'
+jq --argjson c "${heapFailed}" '.libraries[0].validation.failed_controls = $c' "${work}/ctltarget.json" \
+  > "${work}/ctltargetfailed.json"
+check "Vuln group A: the same with HEAP's control failed: not the find (🎯 0/1), as without validation" \
+  '[ "$( verdicts ctltargetfailed "[.verdicts.conclusion.counted, .verdicts.conclusion.level]" )" == "[0,\"none\"]" ]'
+report ctlplace vuln-a "[$( run 0 '["CVE-2022-38152","CVE-2022-42905"]' "[${heapPlaced}]" )]" \
+  "$( validation '{ "0/v1": { "verdict": "confirmed", "entries": ["CVE-2022-42905"] } }' )"
+jq --argjson t "${tHeap}" --argjson c "${heapFailed}" '.targets = $t | .libraries[0].validation.failed_controls = $c' \
+  "${work}/ctlplace.json" > "${work}/ctl.tmp" && mv "${work}/ctl.tmp" "${work}/ctlplace.json"
+check "Vuln group A: a crash at HEAP's place with HEAP's control failed: the find, by its place" \
+  '[ "$( verdicts ctlplace "[.verdicts.conclusion.counted, .verdicts.conclusion.level]" )" == "[1,\"all\"]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'

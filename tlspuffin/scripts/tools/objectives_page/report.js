@@ -471,7 +471,7 @@ function ValidationNote(libraries) {
       all.findIndex(x => x.commit === b.commit && x.jobscripts === b.jobscripts) === i));
   const problems = validated.flatMap(l => [
     ...(l.validation.errors ?? []).map(e => `${l.library} run ${e.attempt}: ${e.error}`),
-    ...(l.validation.controls_failed ?? []).map(a => `${l.library} run ${a}: the controls failed (verdicts not trusted)`),
+    ...(l.validation.controls_failed ?? []).map(a => `${l.library} run ${a}: the controls of ${(l.validation.failed_controls?.[a] ?? []).map(c => c.entry).join(', ') || 'a bug'} failed (the verdicts that rest on them have none: "could not validate")`),
   ]);
   return `<p class="note validation-note">Validation against tlspuffin's catalogue${catalogue
       ? ` (${catalogue.source === 'dev' ? 'dev' : 'the commit\'s own'} at <span class="mono">${esc(String(catalogue.commit ?? '').slice(0, 10))}</span>)` : ''}${bench ? ` · ${esc(bench)}` : ''}${problems.length

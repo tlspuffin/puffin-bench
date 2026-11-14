@@ -14,6 +14,8 @@ if [ -z "${file}" ]; then
   file="${work}/given.json"
   cat > "${file}" <<'JSON'
 { "vendor": "wolfssl:wolfssl540-asan", "bench": { "commit": "c787eb8", "jobscripts": "2f35e8c" },
+  "controls": [{ "entry": "CVE-2022-39173", "triggers_unpatched": true, "triggers_patched": false, "ok": true },
+               { "entry": "CVE-2022-42905", "triggers_unpatched": true, "triggers_patched": true, "ok": false }], "controls_ok": false,
   "entries": { "CVE-2022-39173": { "state": "active", "alias": "BUF", "oracle": { "kind": "crash", "asan": "stack-buffer-overflow" } } },
   "objectives": [
   { "trace": "a", "verdict": "confirmed", "entries": ["CVE-2022-39173"] },
@@ -56,4 +58,6 @@ done
   echo "ok   the bugs it knew and the bench" || { echo "FAIL the bugs it knew and the bench: $( jq -c '[.lib.entries, .lib.bench]' <<< "${got}" )"; fail=1; }; }
 [ "$( jq -c '[.unchanged, (.lib.errors | map(.attempt))]' <<< "${got}" )" == '[true,[1]]' ] &&
   echo "ok   no validation file: an error only for an attempt with objectives" || { echo "FAIL missing file: $( jq -c '[.unchanged, .lib.errors]' <<< "${got}" )"; fail=1; }
+[ -z "${1:-}" ] && { [ "$( jq -c '[.lib.controls_failed, .lib.failed_controls]' <<< "${got}" )" == '[[0],{"0":[{"entry":"CVE-2022-42905","triggers_unpatched":true,"triggers_patched":true}]}]' ] &&
+  echo "ok   the controls that failed, which and how, by attempt" || { echo "FAIL failed controls: $( jq -c '[.lib.controls_failed, .lib.failed_controls]' <<< "${got}" )"; fail=1; }; }
 exit ${fail}

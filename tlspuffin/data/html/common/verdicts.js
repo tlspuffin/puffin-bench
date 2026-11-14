@@ -46,6 +46,7 @@ export const NO_VERDICT = {
   failed: 'the validation of its run failed',
   'not-chosen': 'not among the objectives validated in its run (at most 20 a run, the first of each bug first)',
   unsupported: 'not validated at this commit (the reason follows: its tlspuffin has no catalogue, or dev, whose catalogue validation trusts, has none yet); its crashes are still recognised by their stack against the latest catalogue',
+  controls: 'could not validate: the controls of a bug its verdict rests on failed on the validation builds (its witness gave its signature with every patch, or not without its patch: the verdict could be false)',
 };
 
 // The verdict JSON of one objective ({ verdict, entries, known_unpatched, signature_of_patched, … }) as a kind of

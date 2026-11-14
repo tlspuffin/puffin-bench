@@ -171,6 +171,8 @@ LiveValidation() {
           | .entries = ((.entries // {}) + ($v[0].entries // {} | map_values({ alias, oracle, replayable, witness_frames })))
           | .bench = ((.bench // []) + (if $v[0].bench then [$v[0].bench | { commit, jobscripts }] else [] end) | unique)
           | .errors = ((.errors // []) + (if $v[0].error then [{ attempt: ($a | tonumber? // $a), error: $v[0].error }] else [] end))
+          | .failed_controls = ((.failed_controls // {}) + ([$v[0].controls[]? | select(.ok == false) | { entry, triggers_unpatched, triggers_patched }]
+              | if length > 0 then { ($a): . } else {} end))
           | .byTrace = ((.byTrace // {}) + ([$v[0].objectives[]? | { key: ($a + "/" + .trace),
               value: ({ verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
                 + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)
@@ -199,6 +201,8 @@ LiveValidation() {
           --slurpfile s "$( dirname "${dir}" )/state.json" '
           .[$lib] = ((.[$lib] // {})
             | .catalogue = (.catalogue // ($s[0] | if .catalogueCommit then { source, commit: .catalogueCommit } else null end))
+            | .failed_controls = ((.failed_controls // {}) | if .[$a] == null then . + ([$s[0].controls[]? | select(.ok == false)
+                | { entry, triggers_unpatched, triggers_patched }] | if length > 0 then { ($a): . } else {} end) else . end)
             | .byTrace[$a + "/" + $v[0].trace] //= ($v[0] | { verdict, entries: (.entries // []), known_unpatched: (.known_unpatched // []) }
                 + (if $during then { during_attempt: true } else {} end)
                 + (if (.other_signature // []) | length > 0 then { other_signature } else {} end)

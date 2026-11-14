@@ -151,7 +151,7 @@ export function AttachObjectives(libResult, attempt, library, attemptID, outPath
 // result"): its objectives have no verdict, the pages say why.
 export function AttachValidation(libResult, attempt, library, attemptID, outPath) {
   const validation = ReadJSON(`${outPath}/validation-${library}-${attemptID}.json`, {});
-  const merged = libResult.validation ?? { verdicts: {}, confirmed: {}, known_unpatched: {}, controls_failed: [],
+  const merged = libResult.validation ?? { verdicts: {}, confirmed: {}, known_unpatched: {}, controls_failed: [], failed_controls: {},
                                            unsupported: null, errors: [], catalogue: null, byTrace: {}, entries: {}, bench: [] };
   if (validation === null) {
     const objectives = Math.max(attempt?.global?.tEnd?.objective_size ?? 0,
@@ -176,6 +176,11 @@ export function AttachValidation(libResult, attempt, library, attemptID, outPath
                                                   ...(o.failure ? { failure: o.failure } : {}) };
   });
   if (validation.controls_ok === false) merged.controls_failed.push(attemptID);
+  // which control failed, and how (its witness without the patch of its bug, with every patch): the verdicts that rest on
+  // it have none (bugs.js BugValidation)
+  const failed = (validation.controls ?? []).filter(c => c?.ok === false)
+      .map(c => ({ entry: c.entry, triggers_unpatched: c.triggers_unpatched ?? null, triggers_patched: c.triggers_patched ?? null }));
+  if (failed.length) (merged.failed_controls ??= {})[attemptID] = failed;
   if (validation.unsupported) merged.unsupported = validation.unsupported;
   if (validation.error) merged.errors.push({ attempt: attemptID, error: validation.error });
   if (validation.catalogue) merged.catalogue = validation.catalogue;

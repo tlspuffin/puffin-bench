@@ -337,7 +337,9 @@ The scheduler's generic cache endpoints (`GET`/`PUT /api/cache/<id>`, see [sched
 
 A crash is the expected bug when its stack (the fuzzer's record, else the replay's) has the target's place, the first 3
 frames of its witness's stack ([The place of a bug](#the-place-of-a-bug-rule-r3)). Where the commit has tlspuffin's
-catalogue, validation decides first: a find it names as another bug, or as no known bug, is not the target.
+catalogue, validation decides first: a find it names as another bug, or as no known bug, is not the target. A verdict
+that a failed control of its run can have made false has no say there either: the place decides, as without
+validation.
 
 ## Vulnerability configurations (group B)
 
@@ -348,7 +350,10 @@ catalogue, validation decides first: a find it names as another bug, or as no kn
 | SDOS1 | `openssl:openssl111j` | CVE-2021-3449 |
 | SIG | `wolfssl:wolfssl510-sig` (SKIP and BUF patched: CVE-2022-25640, CVE-2022-39173) | CVE-2022-25638 |
 
-No target is declared for group B: a run ends at its first objective that is not set apart.
+Each configuration names its bug (`target_bug`), with no place nor claim in `vuln_targets.json`: a run ends at an
+objective that is not set apart once validation confirms it is that bug; when validation cannot tell (no catalogue at
+the commit, a build that could not run the objective, the bug's controls failed), at its first objective that is not
+set apart.
 
 ## Words of the pages
 
@@ -407,6 +412,7 @@ Why an objective has no verdict:
 - the validation of its run failed
 - not among the objectives validated in its run (at most 20 a run, the first of each bug first)
 - not validated at this commit (the reason follows: its tlspuffin has no catalogue, or dev, whose catalogue validation trusts, has none yet); its crashes are still recognised by their stack against the latest catalogue
+- could not validate: the controls of a bug its verdict rests on failed on the validation builds (its witness gave its signature with every patch, or not without its patch: the verdict could be false)
 
 What a bug is for its task:
 
@@ -439,7 +445,7 @@ failure, and `--explained` lists them); a task whose job scripts had no target (
   - in a configuration with an expected bug (an alias: BUF, SKIP…), when no earlier task had its signature in that configuration, whatever the job (VulnA, VulnB, Perf, campaigns);
   - in a plain version (e.g. Perf's wolfSSL 5.8.0, a campaign on wolfssl540), when it is none of the CVEs tlspuffin declares for that build — the build's `vendorinfo.sh` (puffin-build): known vulnerabilities of the version (the library's `builder.cmake`) minus those the preset fixes, recorded by `ForcedBuild` as `cli.vulnerabilities` — whose signature `vuln_targets.json` gives (a CVE's own `kind` and `place` or `match` in `_cves`, else its target's, else its claim in `_not_targeted`; `objectives_page/cve_signatures.jq`). Such a bug is shown as 📋 known · CVE; any other is new on every task until it is added to the file. A run without declaration (built before puffin-build, Rust harness, job scripts before 2026-10-09): next item.
   - in a plain version whose build declared no CVEs: when it is none of the CVEs of the library it built in the CVE table of `vuln_targets.json` (`_cves`: `library` and signature) and no earlier task had its signature in that configuration. A bug recognised this way is marked **📋 known (inferred)**.
-- **Validation first** ([Known bugs: how a find is validated](#known-bugs-how-a-find-is-validated)): a bug validation names by patch, or by a signature that is not weak, is known, and so is a find without verdict recognised by its stack (an older task: against the latest catalogue); a bug one of whose objectives stays on the build with every patch with the signature of no known bug is 🚨 new where it was, whatever its other objectives say; a weak signature decides nothing (the rules above do). The same for the expected bug of a configuration (Vuln group A/B, a custom benchmark): a find validation names as another bug, or as none, is not the target; named by its signature only (no patch at this version), a crash is the target at its place only, and an experiment looking for it ends on it only then. Two bugs validation confirms by patch are two bugs, also when they share a claim (CVE-2021-3336 and SKIP: "Authentication bypass").
+- **Validation first** ([Known bugs: how a find is validated](#known-bugs-how-a-find-is-validated)): a bug validation names by patch, or by a signature that is not weak, is known, and so is a find without verdict recognised by its stack (an older task: against the latest catalogue); a bug one of whose objectives stays on the build with every patch with the signature of no known bug is 🚨 new where it was, whatever its other objectives say; a weak signature decides nothing (the rules above do). The same for the expected bug of a configuration (Vuln group A/B, a custom benchmark): a find validation names as another bug, or as none, is not the target; named by its signature only (no patch at this version), a crash is the target at its place only, and an experiment looking for it ends on it only then. A verdict that a failed control of its run can have made false decides neither the bug nor the target: both are read as without validation. Two bugs validation confirms by patch are two bugs, also when they share a claim (CVE-2021-3336 and SKIP: "Authentication bypass").
 - **The level of a task** (`bugs.js BugsHeadline`, written into the report by `report_verdicts.js`, see [Words of the pages](#words-of-the-pages)): **🚨 new bug** when a bug is new; **⚡ unexpected** when objectives come from a configuration where no known bug is expected (no target and its build declares no known bug) or, but in a Vuln job, when a real bug is not expected there; **known bugs** when every bug found is expected given the tested version (🎯 expected, 📋 known, or named by validation); **nothing reproduced** otherwise. The title of a report says **N known bugs found** for known, **⚡ N bugs found** for unexpected (or **⚡ objectives where no known bug is expected (…)**), with **🚨 N NEW BUG(S)** before it for new. The history page of the scheduler colours the task's 🐞 by that level: **red, 🚨 and the row highlighted** for a new bug (with the report's title on the button), **gold** for unexpected, **plain** for known bugs (outlined when nothing was reproduced); the board does the same for a running task once its live report has a level (its attempts, the steps' squares and its `🐞 N objectives` button: no colour before, the monitor only counts objectives), and so does the pill of the top bar (only the running tasks whose level is new, red, or unexpected, yellow); a custom benchmark's experiments have their 🎯 like Vuln group A (their target: the catalogue's bug they name, recognised by validation).
 
 ## Known bugs: how a find is validated
@@ -476,7 +482,9 @@ bug's verdict on the pages is its strongest part; the words and badges are in [W
    (`data/validation-libs/`, named after what they are made from; a folder unused for 30 days goes), the binary in the
    scheduler's cache per the sources it is built from.
 3. **The controls.** Each X's witness runs first on V_X (it must fail with X's signature) and on F (it must not): when it
-   does not behave, the verdicts say "controls failed". The executions are symbolized (`llvm-symbolizer` of the tree), so
+   does not behave, the verdicts it can have made false have none ("○ no verdict: could not validate"): those naming X,
+   and, when X's witness gives X's signature on F (F still has X), those of an objective with X's signature on F; the
+   others stand, and an experiment looking for X lets the fuzzer's record decide. The executions are symbolized (`llvm-symbolizer` of the tree), so
    the stack of each witness is recorded with the validation (`witness_frames`); the witness of a crash bug without
    patch runs once on F for its stack. That stack gives the bug's place (below). Without a symbolizer no stack is
    recorded (a warning in the step's log), nor a stack whose frames are only the binary's file name.
@@ -641,11 +649,13 @@ and so does one whose place cannot be checked (the bench's tools incomplete: sai
 step fails at its end). The time to find is when the fuzzer saved the first recognised objective (its name),
 not when the attempt stopped. A preset that turns out not to have the bug (a PUT capability the launcher cannot know)
 makes the experiment "unsupported" instead of running for nothing. When the validation builds cannot run an objective
-(⛔ could not replay), validation does not decide: the fuzzer's record does, as on a commit without the catalogue.
+(⛔ could not replay), or the controls of the bug failed, validation does not decide: the fuzzer's record does, as on a
+commit without the catalogue. The run's summary says which decided: `confirmed_by: "validation"` only when validation
+confirmed the objective that ended it.
 The objectives page, Results and History give each experiment its 🎯 (runs that found its target, as for Vuln group
 A): an objective is the target when validation names the target for it (by patch; by its signature only, a crash at the
-target's place only), not when validation names another bug or none, else, until validation says or when it cannot,
-when it has the target's signature (a crash: at the target's place). An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
+target's place only), not when validation names another bug or none, else, until validation says or when it cannot
+(no verdict, or one that a failed control of its run can have made false), when it has the target's signature (a crash: at the target's place). An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
 it, `cli-<experiment>.json`): the task's conclusion counts it, never "all found" without it.
 
 ## Performance configurations

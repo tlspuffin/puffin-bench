@@ -112,6 +112,12 @@ if [ -x "${qjs}" ]; then
   check 'ConfirmObjective: 1 for a crash of U'"'"'s type elsewhere: another crash of its type, the experiment goes on' \
     'touch "${work}/segvelse.trace"; rc=0; ( target_bug=U; ConfirmObjective "${work}/segvelse.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 1 ] && grep -q "not at its place" "${work}/why"'
   jq '.controls = []' validation/state.json > validation/state.tmp && mv validation/state.tmp validation/state.json
+  # the target's own control failed: no verdict of it is trusted, the fuzzer's record decides
+  jq '.controls = [{ entry: "X1", triggers_unpatched: false, triggers_patched: false, ok: false }]' validation/state.json > validation/state.tmp &&
+    mv validation/state.tmp validation/state.json
+  check 'ConfirmObjective: 2 (the fuzzer record) when the controls of the target failed' \
+    'rm -f validation/verdicts/claim.json; rc=0; ( target_bug=X1; ConfirmObjective "${work}/claim.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 2 ] && grep -q "controls of X1 failed" "${work}/why"'
+  jq '.controls = []' validation/state.json > validation/state.tmp && mv validation/state.tmp validation/state.json
   check 'ConfirmObjective: 2 (the fuzzer record) when the place of U is not known' \
     'touch "${work}/segvat2.trace"; rm -f validation/verdicts/segvat.json; rc=0; ( target_bug=U; ConfirmObjective "${work}/segvat.trace" > "${work}/why" ) || rc=$?; [ "${rc}" == 2 ] && grep -q "not known" "${work}/why"'
 fi

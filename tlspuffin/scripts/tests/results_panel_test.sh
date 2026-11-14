@@ -6,7 +6,10 @@
 #     the panel count them apart, "not replayed";
 #   - a bug of several configurations: each row's verdict badges count its objectives there, not the task's;
 #   - the validation line of a row tells weak signatures (a claim, a crash elsewhere than the bug's place) from strong
-#     ones, as the badges do.
+#     ones, as the badges do;
+#   - it counts a verdict that a failed control can have made false as could not validate, as the badges and the 🎯 do
+#     (bugs.js UntrustedBy): a "confirmed X" when X's control failed, a "not patched" with X's signature when X's
+#     witness triggered with every patch; the others stand.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 command -v node > /dev/null || { echo "SKIP: no node"; exit 0; }
@@ -78,6 +81,33 @@ const sdos2 = line(await Panel('103', 'custom_SDOS2', JSON.parse(readFileSync(`$
 check(/class="validation-signature"[^>]*>≈ 1 by its signature with its stack \(CVE-2022-38152\)/.test(sdos2)
       && /class="validation-signature validation-weak"[^>]*>≈ 1 by its signature · weak \(CVE-2022-38152\)/.test(sdos2),
   `the line: the crash at the place strong, the one elsewhere weak: ${sdos2.replace(/<[^>]*>/g, '')}`);
+// HEAP's control failed in run 0 (its witness did not trigger without its patch): a use-after-free elsewhere "confirmed
+// HEAP" there has no say (its badge and the 🎯 already said so): the line counts it as could not validate
+const heapControl = (unpatched, patched, byTrace) => ({ catalogue: { source: 'commit', commit: 'c' }, controls_failed: [0],
+  failed_controls: { 0: [{ entry: 'CVE-2022-42905', triggers_unpatched: unpatched, triggers_patched: patched }] },
+  entries: { 'CVE-2022-42905': { alias: 'HEAP', oracle: { kind: 'crash', asan: 'heap-buffer-overflow' } } }, byTrace,
+  confirmed: Object.fromEntries(Object.values(byTrace).flatMap(v => v.entries ?? []).map(id => [id, 1])),
+  verdicts: Object.values(byTrace).reduce((c, v) => ({ ...c, [v.verdict]: (c[v.verdict] ?? 0) + 1 }), {}) });
+const heapReport = (task, validation, groups) => WriteFixture(root, `objectives/${task}.json`, { task, commit: 'c', job_type: 'vuln-a',
+  targets: { HEAP: { cve: 'CVE-2022-42905', kind: 'crash', place: ['AddPacketInfo', 'DoTls13HandShakeMsgType', 'DoTls13HandShakeMsg'] } },
+  libraries: [{ library: 'HEAP', runs: 1, outcomes: { 0: 'success' }, validation }],
+  runs: [{ library: 'HEAP', attempt: 0, found: groups.length, replayed: groups.length, reports: groups.length,
+    cli: { vendor: 'wolfssl:wolfssl540-heap', library: { name: 'wolfssl', version: '540' } }, groups }] });
+const uaf = { type: 'heap-use-after-free', frames: ['FreeKeyExchange', 'Caller'], count: 1, traces: ['u1'], excerpt: '' };
+const untrusted = heapControl(false, false, { '0/u1': { verdict: 'confirmed', entries: ['CVE-2022-42905'] } });
+heapReport('104', untrusted, [uaf]);
+const ctl = line(await Panel('104', 'HEAP', untrusted)).replace(/<[^>]*>/g, '');
+check(!/confirmed by patch/.test(ctl) && /○ 1 could not validate \(failed control of CVE-2022-42905\)/.test(ctl) && /controls failed \(runs 0\)/.test(ctl),
+  `HEAP's control failed: its "confirmed" there counts as could not validate, as on its badge: ${ctl}`);
+// HEAP's witness triggered with every patch: a "not patched" with HEAP's signature (a heap-buffer-overflow) may be HEAP,
+// it has no say; one with another signature (the use-after-free) stands
+const heapCrash = { type: 'heap-buffer-overflow', frames: ['ParseCertRelative', 'ProcessPeerCerts'], count: 1, traces: ['h1'], excerpt: '' };
+const patchedSide = heapControl(true, true, { '0/h1': { verdict: 'not-patched', entries: [], known_unpatched: [] },
+                                              '0/u1': { verdict: 'not-patched', entries: [], known_unpatched: [] } });
+heapReport('105', patchedSide, [heapCrash, uaf]);
+const side = line(await Panel('105', 'HEAP', patchedSide)).replace(/<[^>]*>/g, '');
+check(/🚨 1 no known bug's signature/.test(side) && /○ 1 could not validate \(failed control of CVE-2022-42905\)/.test(side),
+  `HEAP's witness triggered with every patch: the one with its signature could not validate, the other stands: ${side}`);
 process.exit(fail);
 JS
 WORK="${work}" REPO="$( cd "${here}/../../.." && pwd )" node "${work}/test.mjs"

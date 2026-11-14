@@ -4,7 +4,7 @@ import { GraphCompare } from './summary_graphcompare.js';
 import { MetricsCampaign } from './summary_metricscampaign.js';
 import { describeCommit, commitLineHTML } from '../common/commitinfo.js';
 import { BenchmarkOf, ExperimentLabel, OrderLibraries } from './summary_benchmarks.js';
-import { VERDICTS, VERDICT_ORDER, VerdictKind, BenchText, TAGS, SignatureText } from '../common/verdicts.js';
+import { VERDICTS, VERDICT_ORDER, VerdictKind, BenchText, TAGS, SignatureText, NO_VERDICT } from '../common/verdicts.js';
 
 // open pull requests of the git_restapi history, for the PR of each commit (see SetPullRequests)
 let pullRequests = [];
@@ -136,19 +136,30 @@ function GetObjectivesButton(status) {
 // strength: the signature verdicts of the configuration by strength, from its bugs' parts (BugValidation, as their
 // badges: { strong: { "<ids>": n }, weak: { … } }), when the objectives report is read: the line then tells a weak
 // signature (one message, a crash without its place) from a strong one, as the badges do
-function ValidationLine(validation, noReplay = new Set(), strength = null) {
+// untrusted: the objectives whose verdict a failed control of their run can have made false, with the bug whose control
+// failed (UntrustedTraces: bugs.js UntrustedBy, the rule of the badges and the 🎯): counted as could not validate, not
+// by their verdict
+function ValidationLine(validation, noReplay = new Set(), strength = null, untrusted = new Map()) {
   if (!validation) return '';
   if (validation.unsupported) return `<div class="lib-validation muted">Not validated: ${EscapeAttribute(validation.unsupported)}.</div>`;
   const catalogue = validation.catalogue
     ? `${validation.catalogue.source === 'dev' ? 'dev' : 'the commit\'s own catalogue'} at ${EscapeAttribute(String(validation.catalogue.commit ?? '').slice(0, 10))}` : '';
   const count = (map) => Object.entries(map ?? {}).map(([id, n]) => `${EscapeAttribute(id)}${n > 1 ? ` ×${n}` : ''}`).join(', ');
-  // the objectives by kind of verdict (VerdictKind: what the validation recorded)
-  const kinds = {};
+  // the objectives by kind of verdict (VerdictKind: what the validation recorded), and the bugs named by the verdicts
+  // counted (confirmed by patch, by signature); those a failed control took away apart
+  const kinds = {}, untrustedBy = {};
+  let confirmed = validation.confirmed, knownUnpatched = validation.known_unpatched;
   const traces = Object.entries(validation.byTrace ?? {});
-  if (traces.length) traces.forEach(([key, v]) => {
-    const raw = VerdictKind(v), kind = raw === 'inconclusive' && noReplay.has(key) ? 'no-replay' : raw;
-    kinds[kind] = (kinds[kind] ?? 0) + 1;
-  });
+  if (traces.length) {
+    confirmed = {}; knownUnpatched = {};
+    traces.forEach(([key, v]) => {
+      if (untrusted.has(key)) { untrustedBy[untrusted.get(key)] = (untrustedBy[untrusted.get(key)] ?? 0) + 1; return; }
+      const raw = VerdictKind(v), kind = raw === 'inconclusive' && noReplay.has(key) ? 'no-replay' : raw;
+      kinds[kind] = (kinds[kind] ?? 0) + 1;
+      if (kind === 'patch') (v.entries ?? []).forEach(id => { confirmed[id] = (confirmed[id] ?? 0) + 1; });
+      if (kind === 'signature') (v.known_unpatched ?? []).forEach(id => { knownUnpatched[id] = (knownUnpatched[id] ?? 0) + 1; });
+    });
+  }
   else Object.entries(validation.verdicts ?? {}).forEach(([verdict, n]) => { const kind = VerdictKind({ verdict }); kinds[kind] = (kinds[kind] ?? 0) + n; });
   const parts = Object.entries(kinds).sort(([a], [b]) => VERDICT_ORDER.indexOf(a) - VERDICT_ORDER.indexOf(b)).flatMap(([kind, n]) => {
     const v = VERDICTS[kind] ?? VERDICTS.none;
@@ -163,11 +174,14 @@ function ValidationLine(validation, noReplay = new Set(), strength = null) {
         rest > 0 ? `<span class="validation-signature" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${rest} ${EscapeAttribute(v.word)}</span>` : '',
       ].filter(Boolean);
     }
-    const detail = kind === 'patch' ? count(validation.confirmed) : kind === 'signature' ? count(validation.known_unpatched) : '';
+    const detail = kind === 'patch' ? count(confirmed) : kind === 'signature' ? count(knownUnpatched) : '';
     return [`<span class="validation-${EscapeAttribute(kind)}" title="${EscapeAttribute(`${v.mark} ${v.tip}`)}">${v.mark} ${n} ${EscapeAttribute(v.word)}${detail ? ` (${detail})` : ''}</span>`];
   });
+  // the verdicts a failed control took away (UntrustedBy): could not validate, by the bug whose control failed
+  const without = Object.values(untrustedBy).reduce((total, n) => total + n, 0);
+  if (without) parts.push(`<span class="validation-none" title="${EscapeAttribute(`${VERDICTS.none.mark} ${NO_VERDICT.controls}`)}">${VERDICTS.none.mark} ${without} could not validate (failed control of ${Object.keys(untrustedBy).map(EscapeAttribute).join(', ')})</span>`);
   const controls = (validation.controls_failed ?? []).length
-    ? ` · <b class="validation-controls-failed" title="the witness of a candidate bug did not behave on the validation builds: verdicts not trusted">controls failed (runs ${EscapeAttribute(validation.controls_failed.join(', '))})</b>` : '';
+    ? ` · <b class="validation-controls-failed" title="the witness of a candidate bug did not behave on the validation builds: the verdicts that rest on it have none (could not validate)">controls failed (runs ${EscapeAttribute(validation.controls_failed.join(', '))})</b>` : '';
   const errors = (validation.errors ?? []).length ? ` · <b class="validation-error">⚠ ${validation.errors.map(e => `run ${EscapeAttribute(e.attempt)}: ${EscapeAttribute(e.error)}`).join('; ')}</b>` : '';
   const bench = BenchText(validation.bench);
   return `<div class="lib-validation">Validated against tlspuffin's catalogue${catalogue ? ` (${catalogue})` : ''}: ${parts.join(' · ') || 'no objective validated'}${controls}${errors}${bench ? ` · <span class="muted">${EscapeAttribute(bench)}</span>` : ''}.</div>`;
@@ -319,6 +333,21 @@ function ExplainUncounted(icon, expected, runs, ends, endErrors) {
   icon.dataset.clickTip += `\n🎯 ${expected.target.cve} found by these runs, counted in 🎯 but without a time to find (they did not succeed):\n` + lines.join('\n');
 }
 
+// UntrustedTraces(module, validation, own, library, libraries, catalogue): the objectives ("<attempt>/<trace>") of the
+// configuration whose verdict a failed control of their run can have made false, with the bug whose control failed
+// (bugs.js UntrustedBy, the rule of the badges and the 🎯), each with the signature of its bug when the report names it
+// (a "not patched" verdict needs it: it is untrusted only with the signature of the bug whose witness triggered)
+function UntrustedTraces(module, validation, own, library, libraries, catalogue) {
+  if (!module?.UntrustedBy || !Object.keys(validation?.failed_controls ?? {}).length) return new Map();
+  const groupOf = new Map(own.flatMap(({ bug }) => (bug.objectives ?? []).filter(o => o.library === library)
+      .map(o => [`${o.attempt}/${o.name}`, { fuzzer: bug.fuzzer, type: bug.type, frames: bug.frames }])));
+  const oracleOf = module.EntryOracles(libraries, catalogue);
+  return new Map(Object.entries(validation.byTrace ?? {}).flatMap(([key, v]) => {
+    const by = module.UntrustedBy(validation, key.slice(0, key.indexOf('/')), v, groupOf.get(key) ?? null, oracleOf);
+    return by ? [[key, by]] : [];
+  }));
+}
+
 // The panel and the 🐞 button of a library from the report of its task, when there is one: its bugs with the letters
 // of the report, where they happened, how many objectives (and how many not reproduced), each linked to the report
 async function ShowReportBugs(panel, button, taskID, library, status) {
@@ -423,7 +452,8 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
       + (notReproduced ? `, ${notReproduced} not reproduced by their replay` : '') + ` — as in the `
       + `<a class="lib-objectives-report" href="${ObjectivesPageURL(taskID)}" target="_blank" rel="noopener">objectives report ↗</a>`
       + ` (a bug is what the fuzzer recorded; the report has the replays and the fuzzer's logs).</div>`
-      + ValidationLine(status?.validation, noReplayTraces, strength) + rows;
+      + ValidationLine(status?.validation, noReplayTraces, strength,
+          UntrustedTraces(module, status?.validation, own, library, report?.libraries, catalogue)) + rows;
   // the expected bug of this configuration (vuln_targets.json): 🎯 runs that found it / runs (bugs.js ExpectedRuns, the
   // count of the objectives report), · k untimed those of them that did not succeed (no time to find), then the others
   // counted with the run states of the summary this row shows (the same as the outcomes of the report, which a report

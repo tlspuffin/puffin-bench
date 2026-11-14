@@ -97,7 +97,7 @@ for (const [library, o] of Object.entries(expected)) {
   // the first objective of the expected bug of each run (names start with their UTC time: the smallest is the first)
   const firstExpected = {};
   for (const run of runs.filter(r => r.library === library)) {
-    const verdictOf = VerdictOf(libraries, library, run.attempt);
+    const verdictOf = VerdictOf(libraries, library, run.attempt, catalogue);
     const names = (run.groups ?? []).filter(g => IsExpected(o.target, g, verdictOf)).map(g => g.first).filter(Boolean).sort();
     if (names.length) firstExpected[run.attempt] = names[0];
   }
