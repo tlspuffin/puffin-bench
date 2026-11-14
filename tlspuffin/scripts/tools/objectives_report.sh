@@ -327,8 +327,9 @@ AllTasks() {
     [ -f "${J%.json}.zip" ] || continue;
     # first the tasks without a final report (none, or the last live page kept until it, see objectives_live.sh),
     # then the reports older than what makes them: the export, this script, the signatures (ObjectiveSignature,
-    # PR_common.sh), the expected bugs (vuln_targets.json) and the verdicts (report_verdicts.js with bugs.js and the
-    # words of common/verdicts.js)
+    # PR_common.sh), the expected bugs (vuln_targets.json), the verdicts (report_verdicts.js with bugs.js and the
+    # words of common/verdicts.js) and the stacks of the witnesses (witness_frames.json: the places of the bugs, replaced
+    # only when a stack changes)
     first=1;
     if [ ! -e "${OUT}/${id}.html" ] || grep -q '"pending_final": *true' "${OUT}/${id}.json" 2> /dev/null; then
       first=0;
@@ -336,7 +337,8 @@ AllTasks() {
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/PR_common.sh" ] && [ "${OUT}/${id}.html" -nt "${TARGETS_JSON}" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/report_verdicts.js" ] &&
         [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/objectives_page/bugs.js" ] &&
-        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/common/verdicts.js" ]; then
+        [ "${OUT}/${id}.html" -nt "${SCRIPTS}/tools/common/verdicts.js" ] &&
+        { [ ! -e "${OUT}/witness_frames.json" ] || [ "${OUT}/${id}.html" -nt "${OUT}/witness_frames.json" ]; }; then
       continue;
     fi
     # a task with objectives, or a Vuln task (its 🎯 also when no run saved any objective: 0/n)
@@ -452,7 +454,10 @@ Verdicts() {
   if [ -z "${catalogue}" ]; then
     commit=$( LatestCatalogue ); catalogue=$( CatalogueFile "${commit}" ); [ -n "${catalogue}" ] && latest=1;
   fi
-  local frames="${PB_ROOT}/data/catalogue-cache/witness_frames.json";
+  # the stacks of the witnesses as the Bugs reference and the launcher have them (witness_frames.json, published below
+  # by --all: the newest validation's, else those computed once), else those computed once: one place per bug
+  local frames="${OUT}/witness_frames.json";
+  [ -s "${frames}" ] || frames="${PB_ROOT}/data/catalogue-cache/witness_frames.json";
   PB_CATALOGUE_LATEST="${latest}" PB_WITNESS_FRAMES="$( [ -r "${frames}" ] && echo "${frames}" )" \
   PB_COMMIT_AFFECTED="$( CommitAffected "$( jq -r '.commit // empty' "$1" 2> /dev/null )" "${catalogue}" )" \
     "${PB_ROOT}/data/tools/qjs" --std -m "${SCRIPTS}/tools/report_verdicts.js" "$1" ${catalogue:+"${catalogue}"};
@@ -486,8 +491,16 @@ if [ "$1" == "--all" ]; then
              | { id: .key, frames: .value.witness_frames, from: "the validation of task \($t)", task: $t }] | .[]' "${f}" 2> /dev/null;
     done; } | jq -s --slurpfile once <( [ -r "${stacks}" ] && cat "${stacks}" || echo '{}' ) '
         (($once[0] // {}) | with_entries(.value = { frames: .value.frames, from: "its witness, run once on \(.value.put // "a validation build")" }))
-        + (sort_by(.task) | map({ (.id): { frames, from } }) | add // {})' > "${OUT}/witness_frames.json.tmp" &&
-    mv -f "${OUT}/witness_frames.json.tmp" "${OUT}/witness_frames.json" || { rm -f "${OUT}/witness_frames.json.tmp"; status=1; };
+        + (sort_by(.task) | map({ (.id): { frames, from } }) | add // {})' > "${OUT}/witness_frames.json.tmp" || status=1;
+  # replaced only when a stack changes, not when only what recorded it does (a newer validation of the same bug, its
+  # "from": that file's says a task that recorded the same stack): its date says when the places of the bugs changed
+  # (the reports older than it are made again, AllTasks)
+  stacksOf() { jq -cS 'map_values(.frames)' "$1" 2> /dev/null; }
+  if [ -s "${OUT}/witness_frames.json.tmp" ] \
+      && [ "$( stacksOf "${OUT}/witness_frames.json.tmp" )" != "$( stacksOf "${OUT}/witness_frames.json" )" ]; then
+    mv -f "${OUT}/witness_frames.json.tmp" "${OUT}/witness_frames.json" || status=1;
+  fi
+  rm -f "${OUT}/witness_frames.json.tmp";
 fi
 # the runs of each commit (Results' "🕘 N runs", /html/runs/): after the reports, which give the Vuln bugs
 if [ "$1" == "--all" ]; then

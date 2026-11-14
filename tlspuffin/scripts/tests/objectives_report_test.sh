@@ -6,7 +6,10 @@
 #   - objectives beyond the replays, classified by the fuzzer's record: a claim record (no frames) keeps its fields
 #     (an empty field collapsing, the time would become the frames, each objective its own group);
 #   - made aside and published in one rename: while its verdicts are computed, the page still reads the previous
-#     report whole, with its verdicts, and the task's traces; nothing is left beside them.
+#     report whole, with its verdicts, and the task's traces; nothing is left beside them;
+#   - a bug's place from the stacks the Bugs reference has (witness_frames.json, published by --all: the newest
+#     validation's), not only those computed once; --all replaces that file only when a stack changes, and makes
+#     the reports again when it does.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 qjs="${1:-/srv/puffin-bench/data/tools/qjs}"
@@ -68,6 +71,15 @@ with zipfile.ZipFile(f'{d}/{task}.zip', 'w') as z:
                                                    '2026-11-11T01:00:01.003000000+01:00\tWARN\tSome claim\n')
     z.writestr('artefacts/summary.json', json.dumps({'libraries': {'WolfSSL': {'cli': cli, 'data': [{'id': 0, 'state': 'success'}]}}}))
 PY
+# the catalogue of the task's commit (as git_restapi gives it, cached), HEAP with its 2 top frames; its witness's stack
+# as a validation recorded it, published (3 frames), none computed once
+mkdir -p "${root}/data/catalogue-cache"
+jq -n '{ commit: "cccccccccccccccccccccccccccccccccccccccc", format: "vulnerabilities.toml", vendors: { wolfssl: { entries: {
+  "CVE-2022-42905": { alias: "HEAP", affected: "< 5.5.2", oracle: { kind: "crash", asan: "heap-buffer-overflow" },
+                      top_frames: ["AddPacketInfo", "DoTls13HandShakeMsgType"] } } } } }' > "${root}/data/catalogue-cache/$( printf 'c%.0s' {1..40} ).json"
+echo '{}' > "${root}/data/catalogue-cache/witness_frames.json"
+place='["AddPacketInfo","DoTls13HandShakeMsgType","DoTls13HandShakeMsg"]'
+jq -n --argjson f "${place}" '{ "CVE-2022-42905": { frames: ($f + ["ProcessReplyEx"]), from: "the validation of task 1" } }' > "${out}/witness_frames.json"
 build() { PATH="${work}/bin:${PATH}" PB_ROOT="${root}" PB_GIT_RESTAPI=http://127.0.0.1:9 PB_PUBLIC_URL=http://h PB_BOARD_URL=http://h \
             bash "${here}/../tools/objectives_report.sh" "${task}" > "${work}/build.log" 2>&1; }
 build || { echo "FAIL the report could not be made:"; cat "${work}/build.log"; exit 1; }
@@ -79,6 +91,8 @@ check 'the 2 beyond the replays: one group, their claim as the fuzzer recorded i
 check 'its traces next to the page, named in the report' \
   '[ "$( find "${out}/${task}-traces/WolfSSL/0" -name "*.trace" | wc -l )" -eq 4 ] && [ "$( jq "[.runs[0].groups[].traces[]] | length" "${report}" )" -eq 4 ]'
 check 'its verdicts (report_verdicts.js) and its page' 'jq -e ".verdicts.headline" "${report}" > /dev/null && grep -q "data-json=\"${task}.json\"" "${out}/${task}.html"'
+check "HEAP's place from the stack the Bugs reference has, its 3 frames, not the catalogue's 2" \
+  '[ "$( jq -c ".catalogue_digest.vendors.wolfssl.entries[\"CVE-2022-42905\"].witness_frames[0:3]" "${report}" )" == "${place}" ]'
 # made again (an update of the tools): meanwhile a page reads the previous report, whole, with its verdicts
 : > "${work}/seen"; : > "${work}/seen-unzip"
 build || { echo "FAIL the report could not be made again:"; cat "${work}/build.log"; exit 1; }
@@ -89,4 +103,30 @@ check 'and the task'"'"'s traces, all of them, also while the new ones are extra
 check 'the new report published whole: verdicts, groups, traces; nothing left beside it' \
   'jq -e ".verdicts.headline and (.runs[0].groups | length) == 3" "${report}" > /dev/null && [ "$( find "${out}/${task}-traces" -name "*.trace" | wc -l )" -eq 4 ] &&
    [ -z "$( find "${out}" -maxdepth 1 \( -name "*.tmp" -o -name "*.new" -o -name "*.old" \) )" ]'
+# --all: witness_frames.json replaced only when a stack changes, and the reports made again when it does (the export,
+# the data, dated before; the page is newer than all it is made from)
+all() { PATH="${work}/bin:${PATH}" PB_ROOT="${root}" PB_GIT_RESTAPI=http://127.0.0.1:9 PB_PUBLIC_URL=http://h PB_BOARD_URL=http://h \
+          bash "${here}/../tools/objectives_report.sh" --all > "${work}/all.log" 2>&1; }
+touch -d '-1 hour' "${root}/data/exports/${task}.json" "${root}/data/exports/${task}.zip"
+all
+touch -d '-10 minutes' "${out}/witness_frames.json"
+page=$( stat -c %y "${out}/${task}.html" ) frames=$( stat -c %y "${out}/witness_frames.json" )
+all
+check '--all: no stack changed, witness_frames.json kept, the report not made again' \
+  '[ "$( stat -c %y "${out}/witness_frames.json" )" == "${frames}" ] && [ "$( stat -c %y "${out}/${task}.html" )" == "${page}" ]'
+jq --argjson f "${place}" '. + { "CVE-2022-42905": { frames: $f, put: "wolfssl540-asan" } }' "${root}/data/catalogue-cache/witness_frames.json" > "${work}/once" &&
+  mv "${work}/once" "${root}/data/catalogue-cache/witness_frames.json"
+all; all
+check '--all: a stack changed, witness_frames.json replaced, the report made again with it' \
+  '[ "$( stat -c %y "${out}/witness_frames.json" )" != "${frames}" ] && [ "${out}/${task}.html" -nt "${out}/witness_frames.json" ] &&
+   jq -e ".[\"CVE-2022-42905\"].from | test(\"run once\")" "${out}/witness_frames.json" > /dev/null'
+# --all: only what recorded a stack changed (a newer validation of the same bug: its "from"), not the stack:
+# witness_frames.json kept, so the reports are not made again
+jq '.["CVE-2022-42905"].from = "the validation of task 0"' "${out}/witness_frames.json" > "${work}/frames" &&
+  mv "${work}/frames" "${out}/witness_frames.json"
+touch -d '-10 minutes' "${out}/witness_frames.json"
+page=$( stat -c %y "${out}/${task}.html" ) frames=$( stat -c %y "${out}/witness_frames.json" )
+all; all
+check '--all: only the task that recorded a stack changed: witness_frames.json kept, the report not made again' \
+  '[ "$( stat -c %y "${out}/witness_frames.json" )" == "${frames}" ] && [ "$( stat -c %y "${out}/${task}.html" )" == "${page}" ]'
 exit "${fail}"
