@@ -132,6 +132,17 @@ check 'Vuln group A: a crash at the place of its target that validation finds no
 jq '.libraries[0].validation = null' "${work}/vulna.json" > "${work}/vulna0.json"
 check 'Vuln group A without validation: its target by its place, as before' \
   '[ "$( verdicts vulna0 "[.verdicts.conclusion.counted, .verdicts.headline.level]" )" == "[1,\"known\"]" ]'
+# one claim, two bugs: objectives of "Authentication bypass" confirmed by patch as CVE-2021-3336 in one run and as SKIP in
+# another: two bugs, each named after its own, counted as two
+auth1='{ "type": "security-violation", "frames": ["Authentication bypass"], "count": 1, "traces": ["c1"], "fuzzer": { "kind": "claim", "detail": "Authentication bypass", "frames": [] } }'
+auth2='{ "type": "security-violation", "frames": ["Authentication bypass"], "count": 1, "traces": ["c2"], "fuzzer": { "kind": "claim", "detail": "Authentication bypass", "frames": [] } }'
+report twoclaims perf "[$( run 0 '["CVE-2021-3336","CVE-2022-25640"]' "[${auth1}]" ), $( run 1 '["CVE-2021-3336","CVE-2022-25640"]' "[${auth2}]" )]" \
+  "$( validation '{ "0/c1": { "verdict": "confirmed", "entries": ["CVE-2021-3336"] }, "1/c2": { "verdict": "confirmed", "entries": ["CVE-2022-25640"] } }' )"
+printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/bugs.js';" 'const a = AnalyseReport(JSON.parse(std.loadFile(scriptArgs[1])));' \
+  'print(JSON.stringify(a.bugs.map(b => b.validation?.ids ?? []).sort()));' > "${work}/named.js"
+check 'one claim confirmed by patch as two bugs: two bugs, each its own name, "2 known bugs found"' \
+  '[ "$( verdicts twoclaims "[.verdicts.bugs.count, .verdicts.headline.text]" )" == "[2,\"2 known bugs found\"]" ] &&
+   [ "$( "${qjs}" --std -m "${work}/named.js" "${work}/twoclaims.json" )" == "[[\"CVE-2021-3336\"],[\"CVE-2022-25640\"]]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'

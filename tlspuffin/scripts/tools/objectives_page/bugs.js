@@ -259,43 +259,78 @@ export function SetApart(entry, run) {
   return built.version < Number(String(entry.below ?? '').replace(/\./g, '')) ? entry.cve : null;
 }
 
+// GroupKey(run, group, notTargeted, targets, jobType): the bug a group of objectives belongs to (its key), from the
+// fuzzer's record of them, else their replay's signature (see Bugs), with what Bugs needs of it
+function GroupKey(run, group, notTargeted, targets, jobType) {
+  const fz = group.fuzzer;
+  const rFrames = group.frames ?? [];
+  const confirmed = !UNCONFIRMED.has(group.type);
+  // a fuzzer record by the first frame that locates it (its backtraces vary in depth and in mangling)
+  const fzTop = fz?.kind === 'crash' ? LocationFrames(fz.frames)[0] : undefined;
+  const fzKey = fz ? (fz.kind === 'crash' ? `crash|${fzTop || run.library}` : `claim|${fz.detail}`) : '';
+  const same = fz && (!confirmed || group.type === 'crash'
+      || (fz.kind === 'crash' && rFrames.length && fzTop && LocationFrames(rFrames)[0] === fzTop)
+      || (fz.kind === 'claim' && group.type === 'security-violation' && rFrames.join(' < ') === fz.detail));
+  // a claim set apart (CVE-2024-5814) only where its scope says: the same claim elsewhere is another bug, a real one;
+  // and only in a run that looks for a target, as the job scripts set it apart from what the run looks for
+  // (PR_common.sh ObjectiveTargeted): a Vuln job, or a configuration with a target (a Vuln flow launched as another
+  // job); elsewhere (Perf, campaigns) it is a known CVE of its build like the others (📋). Never in the experiment that
+  // looks for that very bug (a custom benchmark of CVE-2024-5814): there it is the target
+  const claimOf = fz?.kind === 'claim' ? fz.detail : (group.type === 'security-violation' ? rFrames[0] : null);
+  const looksForTarget = /^vuln-/.test(String(jobType ?? '')) || !!targets?.[run.library];
+  const apartCve = looksForTarget && claimOf && notTargeted?.[claimOf] ? SetApart(notTargeted[claimOf], run) : null;
+  const apart = apartCve && apartCve !== targets?.[run.library]?.cve ? apartCve : null;
+  const scope = looksForTarget && claimOf && notTargeted?.[claimOf] ? (apart ? '|apart' : '|flagged') : '';
+  // the harness aborting on a claim (tlspuffin before ac3b89aff logs the claim, then aborts): the fuzzer may have
+  // recorded the abort instead of the claim, which the replay confirms: the claim's bug, as when it recorded the claim
+  const abortOfClaim = fz?.kind === 'crash' && HarnessAbort(fz.frames) && group.type === 'security-violation';
+  // a replay without the fuzzer's record of its objective: a crash by the first frame that locates it too, so that
+  // it is the bug the fuzzer recorded at that place (as known_bugs.json: BugSignature), not another one
+  const rTop = !['security-violation', 'panic'].includes(group.type) ? LocationFrames(rFrames)[0] : undefined;
+  const key = (same ? fzKey
+      : abortOfClaim ? `claim|${rFrames.join(' < ')}`
+      : confirmed ? ((group.type === 'crash' && !rFrames.length) ? `crash|${run.library}`
+                     : rTop ? `crash|${rTop}` : `${group.type}|${rFrames.join(' < ')}`)
+      : `${group.type}|replay-only`) + scope;
+  return { key, same, apart, fz, rFrames, confirmed };
+}
+
+// SplitByPatch(entries, libraries): one bug per bug validation confirms by patch: the groups of one key (a claim
+// shared by several bugs: Authentication bypass is CVE-2021-3336's and SKIP's) whose objectives validation confirms by
+// patch as different bugs get a key of their own each, "<key>|patch:<ids>"; a group of that key without such a verdict
+// joins the one of its configuration when that configuration has one, else stays under the key. A key whose groups name
+// one bug at most is not split
+function SplitByPatch(entries, libraries) {
+  const patchIds = ({ run, group }) => {
+    const verdictOf = VerdictOf(libraries, run.library, run.attempt);
+    return [...new Set((group.traces ?? []).flatMap(trace => {
+      const v = verdictOf?.(trace);
+      return v && VerdictKind(v) === 'patch' ? (v.entries ?? []) : [];
+    }))].sort().join('+');
+  };
+  for (const entry of entries) entry.patch = patchIds(entry);
+  const byKey = new Map();
+  for (const entry of entries) (byKey.get(entry.key) ?? byKey.set(entry.key, []).get(entry.key)).push(entry);
+  for (const [key, list] of byKey) {
+    if (new Set(list.map(e => e.patch).filter(Boolean)).size < 2) continue;
+    for (const entry of list) {
+      const own = entry.patch || (ids => ids.size === 1 ? [...ids][0] : '')(new Set(list.filter(e => e.patch && e.run.library === entry.run.library).map(e => e.patch)));
+      if (own) entry.key = `${key}|patch:${own}`;
+    }
+  }
+}
+
 export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobType = '') {
   // A bug is what the fuzzer recorded when it saved the objectives (crash location, or violated claim): objectives
   // whose replay does not reproduce it still belong to it. Only a replay that confirms another bug trace (another top
   // frame, another claim) makes another bug. Without a fuzzer record, the replay's signature identifies the bug.
   const bugs = new Map();
-  for (const run of runs) {
-    for (const group of run.groups ?? []) {
-      const fz = group.fuzzer;
-      const rFrames = group.frames ?? [];
-      const confirmed = !UNCONFIRMED.has(group.type);
-      // a fuzzer record by the first frame that locates it (its backtraces vary in depth and in mangling)
-      const fzTop = fz?.kind === 'crash' ? LocationFrames(fz.frames)[0] : undefined;
-      const fzKey = fz ? (fz.kind === 'crash' ? `crash|${fzTop || run.library}` : `claim|${fz.detail}`) : '';
-      const same = fz && (!confirmed || group.type === 'crash'
-          || (fz.kind === 'crash' && rFrames.length && fzTop && LocationFrames(rFrames)[0] === fzTop)
-          || (fz.kind === 'claim' && group.type === 'security-violation' && rFrames.join(' < ') === fz.detail));
-      // a claim set apart (CVE-2024-5814) only where its scope says: the same claim elsewhere is another bug, a real one;
-      // and only in a run that looks for a target, as the job scripts set it apart from what the run looks for
-      // (PR_common.sh ObjectiveTargeted): a Vuln job, or a configuration with a target (a Vuln flow launched as another
-      // job); elsewhere (Perf, campaigns) it is a known CVE of its build like the others (📋). Never in the experiment that
-      // looks for that very bug (a custom benchmark of CVE-2024-5814): there it is the target
-      const claimOf = fz?.kind === 'claim' ? fz.detail : (group.type === 'security-violation' ? rFrames[0] : null);
-      const looksForTarget = /^vuln-/.test(String(jobType ?? '')) || !!targets?.[run.library];
-      const apartCve = looksForTarget && claimOf && notTargeted?.[claimOf] ? SetApart(notTargeted[claimOf], run) : null;
-      const apart = apartCve && apartCve !== targets?.[run.library]?.cve ? apartCve : null;
-      const scope = looksForTarget && claimOf && notTargeted?.[claimOf] ? (apart ? '|apart' : '|flagged') : '';
-      // the harness aborting on a claim (tlspuffin before ac3b89aff logs the claim, then aborts): the fuzzer may have
-      // recorded the abort instead of the claim, which the replay confirms: the claim's bug, as when it recorded the claim
-      const abortOfClaim = fz?.kind === 'crash' && HarnessAbort(fz.frames) && group.type === 'security-violation';
-      // a replay without the fuzzer's record of its objective: a crash by the first frame that locates it too, so that
-      // it is the bug the fuzzer recorded at that place (as known_bugs.json: BugSignature), not another one
-      const rTop = !['security-violation', 'panic'].includes(group.type) ? LocationFrames(rFrames)[0] : undefined;
-      const key = (same ? fzKey
-          : abortOfClaim ? `claim|${rFrames.join(' < ')}`
-          : confirmed ? ((group.type === 'crash' && !rFrames.length) ? `crash|${run.library}`
-                         : rTop ? `crash|${rTop}` : `${group.type}|${rFrames.join(' < ')}`)
-          : `${group.type}|replay-only`) + scope;
+  // the key of each group first, then split by the bugs validation confirms by patch (SplitByPatch)
+  const entries = [];
+  for (const run of runs) for (const group of run.groups ?? []) entries.push({ run, group, ...GroupKey(run, group, notTargeted, targets, jobType) });
+  SplitByPatch(entries, libraries);
+  for (const { run, group, key, same, apart, fz, rFrames, confirmed } of entries) {
+    {
       let bug = bugs.get(key);
       if (!bug) {
         bug = { key, count: 0, reproduced: 0, notReplayed: 0, runs: new Map(), types: new Map(), frames: [], summary: '', excerpt: '',
