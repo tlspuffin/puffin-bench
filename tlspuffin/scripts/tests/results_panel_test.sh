@@ -3,7 +3,8 @@
 # panel of its row, from the task's objectives report through bugs.js AnalyseReport), under node with the page's own
 # code (results_page.mjs), on reports made here:
 #   - objectives never replayed (beyond the replays of the experiment) are not "not reproduced": the button and
-#     the panel count them apart, "not replayed".
+#     the panel count them apart, "not replayed";
+#   - a bug of several configurations: each row's verdict badges count its objectives there, not the task's (F20).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 command -v node > /dev/null || { echo "SKIP: no node"; exit 0; }
@@ -37,6 +38,23 @@ const p = await Panel('101', 'WolfSSL');
 check(/9 objective\(s\), 2 bug\(s\)/.test(p.panel), 'the panel: the 9 objectives and 2 bugs of the configuration');
 check(!/not reproduced/.test(p.panel) && !/not reproduced/.test(p.title), `objectives never replayed are not "not reproduced": ${p.title}`);
 check(/3 not replayed/.test(p.panel) && /objective-not-replayed[^>]*>not replayed</.test(p.panel), 'they are counted as not replayed, a bug none of whose was replayed says so');
+// a claim of CVE-2024-5814 in two experiments of a custom task: 1 objective in custom2_SIG, 4 in custom2_SKIP, each with
+// its validation verdict (not removed by the patches here, its signature: CVE-2024-5814, no patch at this version)
+const claim = "Negotiated cipher is not in agent's configured ciphers list";
+const unpatched = { verdict: 'not-patched', entries: [], known_unpatched: ['CVE-2024-5814'] };
+const lib = (name, traces) => ({ library: name, runs: 1, validation: { catalogue: { source: 'commit', commit: 'c' },
+  entries: { 'CVE-2024-5814': { oracle: { kind: 'claim', violation: claim } } },
+  byTrace: Object.fromEntries(traces.map(t => [`0/${t}`, unpatched])) } });
+const run = (name, traces) => ({ library: name, attempt: 0, found: traces.length, replayed: traces.length, reports: traces.length,
+  cli: { vendor: 'wolfssl:wolfssl511-asan', library: { name: 'wolfssl', version: '511' } },
+  groups: [{ type: 'security-violation', frames: [claim], count: traces.length, traces, excerpt: '', fuzzer: { kind: 'claim', detail: claim, frames: [] } }] });
+WriteFixture(root, 'objectives/102.json', { task: '102', commit: 'c', job_type: 'vuln-custom',
+  libraries: [lib('custom2_SIG', ['s1']), lib('custom2_SKIP', ['k1', 'k2', 'k3', 'k4'])],
+  runs: [run('custom2_SIG', ['s1']), run('custom2_SKIP', ['k1', 'k2', 'k3', 'k4'])] });
+const sig = await Panel('102', 'custom2_SIG'), skip = await Panel('102', 'custom2_SKIP');
+const badge = p => (/class="objective-validation validation-signature[^"]*"[^>]*>([^<]*)</.exec(p.panel) ?? [])[1] ?? '';
+check(/×1$/.test(badge(sig)), `custom2_SIG: its badge counts its 1 objective, not the task's 5: ${badge(sig)}`);
+check(/×4$/.test(badge(skip)), `custom2_SKIP: its badge counts its 4: ${badge(skip)}`);
 process.exit(fail);
 JS
 WORK="${work}" REPO="$( cd "${here}/../../.." && pwd )" node "${work}/test.mjs"

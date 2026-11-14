@@ -237,7 +237,7 @@ function ReportBugs(taskID) {
         bugs.uncategorised = module.Uncategorised?.(report.runs ?? []) ?? null;
         bugs.forEach((bug, i) => { bug.letter = module.Letter(i); });
         bugs.cves = await module.LoadCves?.() ?? null;
-        return { bugs, module };
+        return { bugs, module, report };
       } catch (error) {
         return null;
       }
@@ -319,7 +319,9 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     }
     return;
   }
-  const { bugs, module } = result;
+  const { bugs, module, report } = result;
+  // the catalogue the report's verdicts rest on, as AnalyseReport takes it without one (its digest)
+  const catalogue = report?.catalogue_digest?.format === 'vulnerabilities.toml' ? report.catalogue_digest : null;
   ExplainMissing(button?.closest('table')?.querySelector(`.lib-fail-row[data-library="${CSS.escape(library)}"] .fail-missing`),
       bugs.runEnds?.[library], bugs.endErrors?.[library]);
   // 🚨🚨🚨 before the chip: a new bug of this configuration (bugs.js NewBugs)
@@ -371,13 +373,18 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
         : missing ? ` <span class="objective-warn">⚠ ${missing} not reproduced</span>` : '')
         + (notReplayed ? ` <span class="objective-not-replayed" title="Beyond the replays of its experiment: the fuzzer's record tells the bug">${notReplayed === count ? 'not replayed' : `${notReplayed} not replayed`}</span>` : '')
         + (bug.notTarget ? ` <span class="objective-not-target" title="Not the CVE this job looks for (another known CVE of the library); it does not end the experiment">not the target · ${EscapeAttribute(bug.notTarget)}</span>` : '');
-    // what the validation says of its objectives (bugs.js BugValidation, the parts of the objectives page), in the
-    // words of the pages
-    const verdicts = (bug.validation?.parts ?? []).filter(part => part.kind !== 'none').map(part => {
+    // what the validation says of its objectives in this configuration (bugs.js BugValidation on the bug's runs and
+    // objectives here, the parts of the objectives page), in the words of the pages: a bug of several configurations
+    // has its counts of each row, not those of the task
+    const validation = module.BugValidation
+        ? module.BugValidation({ ...bug, objectives: (bug.objectives ?? []).filter(o => o.library === library), runs, count, run: runs[0] ?? bug.run },
+            report?.libraries ?? [], catalogue, !!report?.live)
+        : bug.validation;
+    const verdicts = (validation?.parts ?? []).filter(part => part.kind !== 'none').map(part => {
       const v = VERDICTS[part.kind] ?? VERDICTS.none;
       const ids = part.ids.join(part.kind === 'signature' ? ' or ' : ', ');
       // the bug and how strong; its signature in the hover
-      const signature = part.kind === 'signature' ? [...new Set(part.ids.map(id => SignatureText(bug.validation.oracles?.[id])))].join(' or ') : '';
+      const signature = part.kind === 'signature' ? [...new Set(part.ids.map(id => SignatureText(validation.oracles?.[id])))].join(' or ') : '';
       const sig = part.kind === 'signature' ? (part.weak ? ' · weak' : ' with its stack') + (part.recognised ? ' · not validated' : '') : '';
       return ` <span class="objective-validation validation-${EscapeAttribute(part.kind)}${part.kind === 'signature' && part.weak ? ' validation-weak' : ''}" title="${EscapeAttribute(`${v.mark} ${v.tip}${signature ? `\nits signature: ${signature}` : ''}`)}">${v.mark} ${EscapeAttribute(ids ? `${ids} · ${v.word}` : v.word)}${EscapeAttribute(sig)} ×${part.count}</span>`;
     }).join('');
