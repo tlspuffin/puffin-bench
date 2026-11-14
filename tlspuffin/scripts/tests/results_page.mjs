@@ -29,6 +29,10 @@ export class FakeEl {
     if (pos === 'beforeend') this.innerHTML += html; else if (pos === 'afterbegin') this.innerHTML = html + this.innerHTML; else throw new Error(`pos ${pos}`);
   }
   closest(sel) { return this.up?.[sel] ?? null; }
+  get previousElementSibling() { return this.before.at(-1) ?? null; }
+  get nextElementSibling() { return (this.afterEls ??= [])[0] ?? null; }
+  after(el) { (this.afterEls ??= []).unshift(el); }
+  remove() { this.removed = true; }
   append(...els) { this.children.push(...els); }
   appendChild(el) { this.children.push(el); return el; }
   insertBefore(el, ref) { if (ref) ref.before.push(el); else this.children.push(el); return el; }

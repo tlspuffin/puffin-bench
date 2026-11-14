@@ -209,4 +209,43 @@ check("its column: the bug's signature and its place, never \"no signature\"",
       and 'no signature' not in dom)
 sys.exit(fail)
 PY
+# objectives never replayed (beyond the replays of their experiment: not-replayed): neither "not reproduced" nor "ran
+# without error", counted as not replayed; a bug some of whose objectives were replayed, and one none of whose were
+cat > "${pages}/9.json" <<'EOF'
+{ "task": "9", "commit": "1957fba63754933fa99a2ed26d2acee1d8cc9ab1", "name": "PR@1957fba-Perf", "job_type": "perf", "libraries": [{ "library": "WolfSSL", "runs": 1 }],
+  "runs": [{ "library": "WolfSSL", "attempt": 0, "found": 9, "replayed": 2, "reports": 2,
+    "cli": { "vendor": "wolfssl:wolfssl540-asan", "library": { "name": "wolfssl", "version": "540" } },
+    "groups": [
+      { "type": "heap-buffer-overflow", "frames": ["ParseOne", "ParseTwo", "ParseThree"], "count": 2, "traces": ["r1", "r2"], "excerpt": "",
+        "fuzzer": { "kind": "crash", "detail": "SIGABRT · ASan heap-buffer-overflow", "frames": ["ParseOne", "ParseTwo"] } },
+      { "type": "not-replayed", "frames": [], "count": 3, "traces": ["p1", "p2", "p3"], "excerpt": "", "replay_reasons": [{ "reason": "", "count": 3 }],
+        "fuzzer": { "kind": "crash", "detail": "SIGABRT · ASan heap-buffer-overflow", "frames": ["ParseOne", "ParseTwo"] } },
+      { "type": "not-replayed", "frames": [], "count": 4, "traces": ["q1", "q2", "q3", "q4"], "excerpt": "", "replay_reasons": [{ "reason": "", "count": 4 }],
+        "fuzzer": { "kind": "claim", "detail": "Some claim", "frames": [] } } ] }] }
+EOF
+sed 's/data-json="8.json"/data-json="9.json"/' "${pages}/8.html" > "${pages}/9.html"
+timeout 90 "${chrome}" --headless=new --disable-gpu --no-sandbox --user-data-dir="${work}/chrome" --virtual-time-budget=10000 \
+  --dump-dom "http://127.0.0.1:${port}/html/objectives/9.html" > "${work}/dom9.html" 2> /dev/null || true
+python3 -I - "${work}/dom9.html" <<'PY' || status=1
+import re, sys
+dom = open(sys.argv[1], encoding='utf-8').read()
+fail = 0
+def check(what, ok):
+    global fail
+    print(('ok   ' if ok else 'FAIL ') + what)
+    if not ok: fail = 1
+rows = re.findall(r'<details class="bug".*?</details>', dom, re.S)
+partly = next((r for r in rows if 'ParseOne' in r), '')
+never = next((r for r in rows if 'Some claim' in r), '')
+check('a bug partly replayed: its objectives not replayed counted as such, not as not reproduced',
+      '(3 not replayed)' in partly and 'not reproduced' not in partly)
+check('a bug never replayed: "not replayed", never "not reproduced by the replay"',
+      'not replayed</span>' in never and 'not reproduced' not in never)
+check('no "ran without error" for objectives that never ran', 'ran without error' not in dom)
+note = re.search(r'<p class="unconf">.*?</p>', dom, re.S)
+check('the note: "Of 9 objectives: 7 not replayed.", nothing of replays that did not reproduce',
+      note is not None and 'Of 9 objectives: 7 not replayed.' in note.group(0) and 'not reproduced' not in note.group(0))
+check('not "seen only by the fuzzer" (a replay that did not reproduce it): nothing was replayed', 'seen only by the fuzzer' not in dom)
+sys.exit(fail)
+PY
 exit "${status}"

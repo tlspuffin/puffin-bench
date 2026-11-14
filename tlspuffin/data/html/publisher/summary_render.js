@@ -346,7 +346,9 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     const runs = bug.runs.filter(run => run.library === library);
     const count = runs.reduce((sum, run) => sum + run.count, 0);
     const reproduced = runs.reduce((sum, run) => sum + run.reproduced, 0);
-    return { bug, runs, count, reproduced };
+    // beyond the replays of the experiment (bugs.js: notReplayed): neither reproduced nor "not reproduced"
+    const notReplayed = runs.reduce((sum, run) => sum + (run.notReplayed ?? 0), 0);
+    return { bug, runs, count, reproduced, notReplayed };
   }).filter(entry => entry.count > 0);
   const expected = bugs.expectedRuns?.[library];
   // neither objectives nor an expected bug for this configuration: no chip (a placeholder chip of a row without
@@ -357,16 +359,17 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
   }
   const total = own.reduce((sum, entry) => sum + entry.count, 0);
   // not reproduced by their replay, but those of the bugs known not to replay (CDOS: as expected)
-  const notReproduced = own.filter(entry => !(entry.bug.noReplay ?? []).length).reduce((sum, entry) => sum + entry.count - entry.reproduced, 0);
-  const rows = own.map(({ bug, runs, count, reproduced }) => {
+  const notReproduced = own.filter(entry => !(entry.bug.noReplay ?? []).length).reduce((sum, entry) => sum + entry.count - entry.reproduced - entry.notReplayed, 0);
+  const rows = own.map(({ bug, runs, count, reproduced, notReplayed }) => {
     const kind = bug.type;
     const where = (bug.frames ?? []).map(EscapeAttribute).join(' &lt; ') || EscapeAttribute(bug.summary || '—');
-    const missing = count - reproduced;
+    const missing = count - reproduced - notReplayed;
     // a bug known not to replay (the catalogue's replayable = false: CDOS): its objectives not reproduced, as expected
     const noReplay = (bug.noReplay ?? []).length > 0;
     const badge = (noReplay && reproduced === 0 ? ` <span class="objective-validation validation-no-replay" title="${EscapeAttribute(`${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].tip}`)}">${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].word}</span>`
-        : (reproduced === 0 && bug.fuzzer) ? ' <span class="objective-warn" title="The fuzzer recorded it; no replay reproduces it">⚠ not reproduced</span>'
+        : (reproduced === 0 && bug.fuzzer && missing) ? ' <span class="objective-warn" title="The fuzzer recorded it; no replay reproduces it">⚠ not reproduced</span>'
         : missing ? ` <span class="objective-warn">⚠ ${missing} not reproduced</span>` : '')
+        + (notReplayed ? ` <span class="objective-not-replayed" title="Beyond the replays of its experiment: the fuzzer's record tells the bug">${notReplayed === count ? 'not replayed' : `${notReplayed} not replayed`}</span>` : '')
         + (bug.notTarget ? ` <span class="objective-not-target" title="Not the CVE this job looks for (another known CVE of the library); it does not end the experiment">not the target · ${EscapeAttribute(bug.notTarget)}</span>` : '');
     // what the validation says of its objectives (bugs.js BugValidation, the parts of the objectives page), in the
     // words of the pages

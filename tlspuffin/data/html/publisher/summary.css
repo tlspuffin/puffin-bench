@@ -1836,6 +1836,7 @@ header {
 .lib-bug { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; padding: 3px 0; }
 .lib-bug .objective-letter { font-weight: 700; font-size: 12px; white-space: nowrap; }
 .lib-bug .objective-warn { color: #ffb74d; font-size: 12px; white-space: nowrap; }
+.lib-bug .objective-not-replayed { color: #8b949e; font-size: 12px; white-space: nowrap; }
 .lib-bug .muted { color: var(--color-text-light); }
 .lib-bug .objective-not-target { color: var(--color-text-light); border: 1px dashed currentColor; border-radius: 999px; padding: 0 6px; font-size: 11px; white-space: nowrap; }
 /* 🕘 N runs: the tasks of the commit kept by the publisher (runs page) */

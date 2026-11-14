@@ -277,7 +277,7 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
           : `${group.type}|replay-only`) + scope;
       let bug = bugs.get(key);
       if (!bug) {
-        bug = { key, count: 0, reproduced: 0, runs: new Map(), types: new Map(), frames: [], summary: '', excerpt: '',
+        bug = { key, count: 0, reproduced: 0, notReplayed: 0, runs: new Map(), types: new Map(), frames: [], summary: '', excerpt: '',
           first_trace: '', library: run.library, run, fuzzer: same ? fz : null, reasons: new Map(), tries: new Map(),
           replayType: group.type, traces: [] };
         bugs.set(key, bug);
@@ -285,6 +285,10 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
       if (apart) bug.apartCve = apart;
       const n = group.count ?? 0;
       bug.count += n;
+      // objectives beyond the replays of their experiment (objectives_report.sh: not-replayed): no replay ran, so they
+      // are neither reproduced nor "not reproduced", and give no replay reason
+      const notReplayed = group.type === 'not-replayed';
+      if (notReplayed) bug.notReplayed += n;
       // the expected bug of this configuration (targets: vuln_targets.json); targets declared: every library the bug
       // was found in has one, then a bug that is none of them is unexpected
       if (targets?.[run.library]) {
@@ -316,16 +320,17 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
           summary: group.summary ?? '' });
       }
       if (same && !bug.fuzzer?.excerpt && fz?.excerpt) bug.fuzzer = fz;
-      const r = bug.runs.get(`${run.library}|${run.attempt}`) ?? { library: run.library, attempt: run.attempt, count: 0, reproduced: 0, cli: run.cli };
-      r.count += n; if (confirmed) r.reproduced += n;
+      const r = bug.runs.get(`${run.library}|${run.attempt}`) ?? { library: run.library, attempt: run.attempt, count: 0, reproduced: 0, notReplayed: 0, cli: run.cli };
+      r.count += n; if (confirmed) r.reproduced += n; if (notReplayed) r.notReplayed += n;
       bug.runs.set(`${run.library}|${run.attempt}`, r);
-      for (const x of group.replay_reasons ?? []) bug.reasons.set(x.reason || '', (bug.reasons.get(x.reason || '') ?? 0) + x.count);
+      if (!notReplayed) for (const x of group.replay_reasons ?? []) bug.reasons.set(x.reason || '', (bug.reasons.get(x.reason || '') ?? 0) + x.count);
       for (const t of group.tries ?? []) bug.tries.set(t.tries, (bug.tries.get(t.tries) ?? 0) + t.count);
     }
   }
   for (const bug of bugs.values()) {
     bug.runs = [...bug.runs.values()];
-    bug.notReproduced = bug.count - bug.reproduced;
+    // replayed without reproducing it (the objectives never replayed are apart: notReplayed)
+    bug.notReproduced = bug.count - bug.reproduced - bug.notReplayed;
     // the most precise type: the replay's sanitizer/claim/panic signature, else what the fuzzer saw
     const precise = [...bug.types.keys()].find(t => t !== 'crash');
     bug.type = precise ?? (bug.reproduced ? 'crash' : bug.fuzzer ? (bug.fuzzer.kind === 'crash' ? 'crash' : 'security-violation')
@@ -350,8 +355,10 @@ export function FuzzerText(fz) {
       : `claim violated: ${fz.detail}`;
 }
 
-// the fuzzer saw a crash or a claim violation, but no replay confirms it
-export const Mismatch = (bug) => bug.reproduced === 0 && !!bug.fuzzer;
+// the fuzzer saw a crash or a claim violation, but no replay confirms it: replays ran and none reproduced it
+export const Mismatch = (bug) => bug.reproduced === 0 && !!bug.fuzzer && bug.notReproduced > 0;
+// none of its objectives was replayed (beyond the replays of its experiment): what the fuzzer saw is all there is
+export const NotReplayed = (bug) => bug.reproduced === 0 && bug.notReproduced === 0 && bug.notReplayed > 0;
 // a bug some of whose objectives were reproduced by their replay, and others not
 export const Partly = (bug) => bug.reproduced > 0 && bug.notReproduced > 0;
 

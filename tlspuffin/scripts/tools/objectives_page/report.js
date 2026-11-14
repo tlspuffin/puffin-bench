@@ -5,7 +5,7 @@
 
 import '../board/frame.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
-import { UNCONFIRMED, TYPE_LABELS, FuzzerText, Mismatch, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, RunFailures, ExpectedConclusion, ExpectedChipTip, KnownByValidation, TargetText, AnalyseReport } from './bugs.js';
+import { UNCONFIRMED, TYPE_LABELS, FuzzerText, Mismatch, NotReplayed, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, RunFailures, ExpectedConclusion, ExpectedChipTip, KnownByValidation, TargetText, AnalyseReport } from './bugs.js';
 import { PlaceOf, FrameName } from '../common/signatures.js';
 import { TERMS, VERDICTS, VERDICT_ORDER, NO_VERDICT, TAGS, LEVELS, SignatureText, SignatureWithStack, BenchText } from '../common/verdicts.js';
 
@@ -271,8 +271,10 @@ function UnconfirmedNote(found, replayed, notReproduced, errors, confirmedBugs, 
   const fz = fuzzerOnly ? ` For ${count(fuzzerOnly)} of them the fuzzer's own log shows a crash or a claim violation
     when it saved them (⚠ not reproduced): the fuzzer runs every input in one process, a replay starts a fresh one;
     they count with the bug the fuzzer recorded.` : '';
-  return `<p class="unconf">${head}: ${parts.join(', ')}.${fz} An objective not reproduced may depend on the state of
-    the fuzzer or on the memory layout; its trace, report and the fuzzer's logs are in the artefacts.</p>`;
+  // (objectives only not replayed: nothing to say of a replay)
+  const why = notReproduced || fuzzerOnly ? ` An objective not reproduced may depend on the state of the fuzzer or on the
+    memory layout; its trace, report and the fuzzer's logs are in the artefacts.` : '';
+  return `<p class="unconf">${head}: ${parts.join(', ')}.${fz}${why}</p>`;
 }
 
 function Duration(ms) {
@@ -335,7 +337,8 @@ function NotTargetBadge(bug) {
 // the letter of a bug, colored by what was found; ⚠ when only the fuzzer saw it
 function LetterBadge(bug) {
   const what = `${TYPE_LABELS[bug.type] ?? bug.type}${bug.frames.length ? ': ' + bug.frames.join(' < ') : bug.summary ? ': ' + bug.summary : ''}`;
-  const repro = bug.notReproduced ? ` (${bug.notReproduced} not reproduced by the replay)` : '';
+  const repro = (bug.notReproduced ? ` (${bug.notReproduced} not reproduced by the replay)` : '')
+      + (bug.notReplayed ? ` (${bug.notReplayed} not replayed)` : '');
   const notTarget = bug.notTarget ? ` — not the target of this job: ${bug.notTarget}` : '';
   return `<a class="type letter ${TypeClass(bug.type)}${bug.notTarget ? ' not-target-letter' : ''}" href="#bug-${bug.letter}" title="${esc(DisplayName(bug))}: ${esc(what)} (${bug.count} objectives${esc(repro)})${esc(notTarget)}">${esc(DisplayName(bug, true))}${Mismatch(bug) ? ' ⚠' : ''}</a>`;
 }
@@ -489,6 +492,10 @@ function TypeBadges(bug) {
   if (Partly(bug)) {
     return `${type} <span class="mismatch" data-click-tip="The fuzzer saw the same bug for all these objectives; the replay reproduced ${bug.reproduced} of them. ${why}">⚠ ${count(bug.notReproduced)} not reproduced</span>`;
   }
+  // never replayed (beyond the replays of its experiment): no replay to compare with, the fuzzer's record is the evidence
+  if (NotReplayed(bug)) {
+    return `${type} <span class="muted" data-click-tip="None of these objectives was replayed (each experiment replays its first ones only): the fuzzer's record is what tells the bug">not replayed</span>`;
+  }
   return type;
 }
 
@@ -583,7 +590,7 @@ function BugRow(bug, open) {
   const replayed = bug.run?.replayed;
   return `<details class="bug" id="bug-${esc(bug.letter)}" data-kind="${bug.notTarget ? 'not-target' : bug.reproduced ? 'confirmed' : bug.noReplay?.length ? 'no-replay' : bug.fuzzer ? 'fuzzer' : bug.type}" ${open ? 'open' : ''}>
     <summary>
-      <div class="count"><span class="bugletter"><span class="chev" title="Click: replay report and fuzzer log">▸</span> ${esc(DisplayName(bug))}</span>${count(bug.count)} <small>objective${bug.count > 1 ? 's' : ''}</small>${bug.notReproduced && bug.reproduced ? `<small class="nr">(${count(bug.notReproduced)} not reproduced)</small>` : ''}</div>
+      <div class="count"><span class="bugletter"><span class="chev" title="Click: replay report and fuzzer log">▸</span> ${esc(DisplayName(bug))}</span>${count(bug.count)} <small>objective${bug.count > 1 ? 's' : ''}</small>${bug.notReproduced && bug.reproduced ? `<small class="nr">(${count(bug.notReproduced)} not reproduced)</small>` : ''}${bug.notReplayed && bug.notReplayed < bug.count ? `<small class="nr">(${count(bug.notReplayed)} not replayed)</small>` : ''}</div>
       <div>${TypeBadges(bug)}</div>
       <div class="symptom"><div class="frames" title="${esc((bug.frames.join(' < ') || bug.summary) + (reasons.length ? '\nnot reproduced: ' + reasons.join(', ') : ''))}">${frames}</div>${BugTags(bug) ? `<div class="bug-tags">${BugTags(bug)}</div>` : ''}${ValidationHTML(bug, LIVE)}</div>
       <div class="where">${where}</div>
