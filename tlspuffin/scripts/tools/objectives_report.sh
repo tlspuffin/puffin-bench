@@ -177,8 +177,9 @@ Report() {
     rmdir "${tracesDir}" 2> /dev/null;
     # build and ASAN of the library, from the record of the experiment step (first line of its user run state)
     local cli;
-    cli=$( jq -c --arg lib "${lib}" 'first(.task.steps[] | select(.id == $lib) | .user_run_state // "" | split("\n")[]
-        | (try fromjson catch null) | select(type == "object" and has("cputs"))) // {}' "${J}" 2> /dev/null ) || cli='{}';
+    # ([…][0], not first(…): jq 1.6, pesto's, does not stop first(…) at its first value when a try is in it)
+    cli=$( jq -c --arg lib "${lib}" '[.task.steps[] | select(.id == $lib) | .user_run_state // "" | split("\n")[]
+        | (try fromjson catch null) | select(type == "object" and has("cputs"))][0] // {}' "${J}" 2> /dev/null ) || cli='{}';
     [ -n "${cli}" ] || cli='{}';
     libs=$( jq --arg lib "${lib}" --argjson a "${attempt}" --argjson found "${found}" --argjson replayed "${replayed}" \
         --argjson logFiles "${logFiles:-0}" --argjson recordCount "${recordCount:-0}" \
@@ -213,8 +214,8 @@ Report() {
           ended: (if ($times | length) > 0 then ($times | max / 1000 | floor | todate) else null end),
           task_url: "\($board)/files/board/task.html?id=\(.task.id // "")",
           libraries: ([.task.steps[] | select(.name == "ExperimentWithCargo")] | group_by(.id)
-            | map((first(.[] | .user_run_state // "" | split("\n")[] | (try fromjson catch null)
-                  | select(type == "object" and has("cputs"))) // null) as $cli
+            | map(([.[] | .user_run_state // "" | split("\n")[] | (try fromjson catch null)
+                  | select(type == "object" and has("cputs"))][0] // null) as $cli
               | { library: .[0].id, runs: length, asan: $cli.asan.instrumented,
                   # how the scheduler ended each run (attempt: Done, TimedOut, Failed, Cancelled…): a run that found its
                   # bug and did not end Done is counted, without a time to find (untimed, Results says why)
@@ -223,8 +224,8 @@ Report() {
           # the errors of the end-of-run summaries (vuln_experiment_end.js, in the run state of its step, e.g. "Error
           # with stats.json"), per configuration and attempt: a run without summary has no metrics, Results says why
           | map(.library as $lib | . + { end_errors: ([$steps[] | select(.name == "ExperimentEnd" and .id == $lib)
-              | { key: (.attempt_id | tostring), value: first(.user_run_state // "" | split("\n")[]
-                  | (try fromjson catch null) | select(type == "object" and (.error | type) == "string") | .error) }]
+              | { key: (.attempt_id | tostring), value: ([.user_run_state // "" | split("\n")[]
+                  | (try fromjson catch null) | select(type == "object" and (.error | type) == "string") | .error][0] // empty) }]
               | from_entries) } + (if $outcomes[.library] then { outcomes: $outcomes[.library] } else {} end)
               + (if $script[.library] then { script: $script[.library] } else {} end)) }' "${J}" 2> /dev/null ) || info='{}';
   [ -n "${info}" ] || info='{}';
