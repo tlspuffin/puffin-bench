@@ -1325,7 +1325,7 @@ export class JobLauncher {
     const [vendor, name] = this.#vendorListInput.value.trim().split(':');
     const presets = this.#presetsData?.vendors?.[vendor];
     if (name === JobLauncher.#LATEST) {
-      const latest = presets ? JobLauncher.#latestAsan(presets) : null;
+      const latest = presets ? JobLauncher.#latestAsan(presets, this.#presetsData?.latest?.[vendor]) : null;
       return latest ? { vendor, ...latest, latest: true } : null;
     }
     const preset = presets?.find(p => p.name === name);
@@ -1391,11 +1391,14 @@ export class JobLauncher {
     return b.localeCompare(a, 'en', { numeric: true });
   }
 
-  // latest-asan of a library: the ASAN preset of its newest release at the commit (master/main left out: moving
-  // branches), or null
-  static #latestAsan(presets) {
+  // latest-asan of a library: the ASAN preset of its newest release at the commit: the one its presets.toml declares
+  // (tlspuffin [library] latest: git_restapi's latest), else the highest version (master/main left out: moving
+  // branches; versions whose names do not sort, BoringSSL's 1.1.1g+git.… before 0.20260508.0, need the declared one),
+  // or null
+  static #latestAsan(presets, latest = null) {
     const asan = presets.filter(p => JobLauncher.#splitPreset(p.name).variant === 'asan' && !/^(master|main)$/.test(p.version));
-    return asan.sort((a, b) => JobLauncher.#compareVersions(a.version, b.version))[0] ?? null;
+    const declared = latest ? asan.find(p => p.version === latest) : null;
+    return declared ?? asan.sort((a, b) => JobLauncher.#compareVersions(a.version, b.version))[0] ?? null;
   }
 
   #renderPresetPanel() {
@@ -1468,7 +1471,7 @@ export class JobLauncher {
     const describe = (preset) => `${preset.name}${preset.asan ? ' · ASAN' : ''}`
         + (preset.fix.length ? ' · patches ' + preset.fix.join(', ') : ' · no patch')
         + (preset.postauth === false ? ' · postauth off' : '');
-    const latest = JobLauncher.#latestAsan(presets);
+    const latest = JobLauncher.#latestAsan(presets, data.latest?.[lib]);
     const latestOn = !!current?.latest && current.vendor === lib;
     const latestChip = latest ? [chip(`latest-asan · ${latest.version}`, latestOn,
         `${lib}:latest-asan, the newest release of ${JobLauncher.#LIBRARY_NAMES[lib] ?? lib} at the commit, with ASAN `

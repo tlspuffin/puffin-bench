@@ -212,13 +212,16 @@ from the commit's `puffin-build/vendors/<vendor>/presets.toml` in the clone, wit
   "vendors": {
     "wolfssl": [ { "name": "wolfssl540-sdos2", "version": "5.4.0", "asan": false, "sancov": true,
                    "fix": ["CVE-2022-39173"], "postauth": false } ]
-  }
+  },
+  "latest": { "wolfssl": "5.8.4" }
 }
 ```
 
 `format` is `none` (and `vendors` empty) for commits before the presets files (2024-09-12). `asan_link`: the commit
 contains tlspuffin 854dbaa11, from which an ASAN preset links the ASAN runtime by itself (before, only with the `asan`
-cargo feature). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
+cargo feature). `latest`: the newest release of each vendor that declares one (`presets.toml` format 2, `[library] latest`,
+one of its versions), which the launcher's `latest-asan` takes: the names of a vendor's versions need not sort (BoringSSL's
+`1.1.1g+git.<commit>` builds are older than `0.20260508.0`). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
 not change); an abbreviated id is answered from the cache only when it names exactly one cached commit. An unknown
 commit triggers one `git fetch --all` (a commit pushed since the last fetch) before the 404.
 

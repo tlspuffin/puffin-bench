@@ -2,10 +2,13 @@
 # tlspuffin_presets.sh <repository> <commit>: the vendor presets of tlspuffin at a commit, as JSON on stdout:
 #   {"commit": "<sha>", "format": "presets.toml" | "none", "presets_format": 1 | 2, "asan_link": true | false,
 #    "vendors": {"wolfssl": [{"name": "wolfssl540-sdos2",
-#     "version": "5.4.0", "asan": false, "sancov": true, "fix": ["CVE-2022-39173"], "postauth": false}, …], …}}
+#     "version": "5.4.0", "asan": false, "sancov": true, "fix": ["CVE-2022-39173"], "postauth": false}, …], …},
+#    "latest": {"wolfssl": "5.8.4", …}}
 # Read from puffin-build/vendors/<vendor>/presets.toml (tlspuffin since 2024-09-12); before, "format": "none". Format 2
 # (tlspuffin pr/vuln-catalogue: [library], [versions], [modifiers], [aliases]) is listed as format 1 was: the build of
 # each version under its name, the same with ASan (<name>-asan, a name of puffin-build's grammar), and the aliases.
+# latest: the newest release of each vendor that says it (format 2: [library] latest, one of [versions]); its versions'
+# names need not sort (BoringSSL: 1.1.1g+git.<commit>, then 0.20260508.0), so the launcher's latest-asan takes it.
 # asan_link: the commit contains tlspuffin 854dbaa11 ("build: dynamically register the PUT instrumentation"), from
 # which an ASAN preset links the ASAN runtime by itself; before, only with the asan cargo feature.
 # Exit status 2: the commit is not in the repository.
@@ -66,7 +69,7 @@ def format2(vendor, table):
 
 listing = git("ls-tree", "--name-only", sha, "--", "puffin-build/vendors/")
 dirs = listing.stdout.decode().split() if listing.returncode == 0 else []
-vendors, versions_format = {}, 1
+vendors, versions_format, latest = {}, 1, {}
 for d in dirs:
     vendor = d.rsplit("/", 1)[-1]
     content = git("show", f"{sha}:{d}/presets.toml")
@@ -79,8 +82,11 @@ for d in dirs:
     if table.get("format") == 2:
         versions_format = 2
         vendors[vendor] = format2(vendor, table)
+        newest = (table.get("library") or {}).get("latest")
+        if isinstance(newest, str) and newest in (table.get("versions") or {}):
+            latest[vendor] = newest
     else:
         vendors[vendor] = format1(table)
 print(json.dumps({"commit": sha, "format": "presets.toml" if dirs else "none", "presets_format": versions_format,
-                  "asan_link": asan_link, "vendors": vendors}, separators=(",", ":")))
+                  "asan_link": asan_link, "vendors": vendors, "latest": latest}, separators=(",", ":")))
 PY

@@ -16,7 +16,9 @@
 #     timeout), listed first, never removed, their names not saved over;
 #   - a campaign's latest-asan gets the asan cargo feature only at a commit without tlspuffin 854dbaa11 (git_restapi's
 #     asan_link false): at a commit with it, the ASAN runtime comes with the preset (tlspuffin 838bd9588 has no such
-#     feature: the build failed).
+#     feature: the build failed);
+#   - latest-asan is the release presets.toml declares ([library] latest, git_restapi's latest: BoringSSL 0.20260508.0),
+#     else the highest version name (1.1.1g+git.… for BoringSSL, whose names do not sort).
 # The scheduler's health check is left out (board/health.js: a stub).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -48,6 +50,7 @@ const out = document.getElementById('out');
 let fail = 0;
 const check = (ok, what) => { out.textContent += `${ok ? 'ok  ' : 'FAIL'} ${what}\n`; if (!ok) fail = 1; };
 const LINKED = { ['a'.repeat(40)]: true, ['b'.repeat(40)]: false };
+const LATEST = { ['a'.repeat(40)]: { boringssl: '0.20260508.0' } };
 const store = {
   VulnT: { saved_at: Date.now(), definition: { name: 'VulnT', description: 'saved with everything', others: 'patched',
     catalogue: { source: 'commit', commit: SHA }, attempts: 2, cores: 7, timeout: { d: 0, h: 1, m: 5 }, smt: 'one',
@@ -66,7 +69,7 @@ window.fetch = async (url, options = {}) => {
   // two commits of the campaign case, with and without tlspuffin 854dbaa11 (asan_link), the presets of SHA otherwise
   if ((m = /\/api\/git\/presets\/tlspuffin\/([0-9a-f]{40})$/.exec(url)) && m[1] in LINKED) {
     const presets = await (await realFetch('/git/presets.json')).json();
-    return json(200, { ...presets, commit: m[1], asan_link: LINKED[m[1]] });
+    return json(200, { ...presets, commit: m[1], asan_link: LINKED[m[1]], latest: LATEST[m[1]] ?? {} });
   }
   if (url.includes(`/api/git/catalogue/tlspuffin/${SHA}`)) return realFetch('/git/catalogue.json');
   if (url.includes('/api/git/catalogue/tlspuffin/dev')) return json(200, { commit: '0'.repeat(40), format: 'none' });
@@ -223,6 +226,19 @@ try {
     const features = document.querySelector('.jl-features-row input, input[placeholder^="e.g. introspection"]')?.value ?? '';
     check(!!latest && /:latest-asan$/.test($('.jl-vendor-line input')?.value ?? '') && features.split(/[\s,]+/).includes('asan') === !link,
       `a campaign on latest-asan at a commit ${link ? 'with' : 'without'} tlspuffin 854dbaa11: ${link ? 'no' : 'the'} asan feature (features "${features}")`);
+  }
+  // BoringSSL's latest-asan: the release presets.toml declares, else the highest version name
+  for (const commit of Object.keys(LINKED)) {
+    const declared = !!LATEST[commit];
+    launcher.close();
+    launcher.open({ jobType: 'campaign', commit });
+    await until(() => !!$('.jl-preset-btn'));
+    $('.jl-preset-btn').click();
+    const boring = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === 'BoringSSL'));
+    boring?.click(); await settle();
+    const latest = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent)));
+    check(!!boring && !!latest && (latest.textContent === 'latest-asan · 0.20260508.0') === declared,
+      `BoringSSL's latest-asan ${declared ? 'as presets.toml declares it' : 'without a declared one: the highest name'} (${latest?.textContent})`);
   }
 } catch (err) {
   check(false, `error: ${err.stack ?? err}`);

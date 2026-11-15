@@ -316,9 +316,11 @@ tlspuffin_presets.sh <repo_dir> <commit>
 Resolves `<commit>` with `git rev-parse` (exit status **2** if it is not in the clone), then reads, without checking anything out, `puffin-build/vendors/<vendor>/presets.toml` at that commit (`git ls-tree` / `git show <sha>:<path>`), and parses each file with `awk`. Prints one JSON object on stdout:
 ```
 {"commit": "<sha>", "format": "presets.toml" | "none", "asan_link": true | false,
- "vendors": {"<vendor>": [{"name", "version", "asan", "sancov", "postauth", "fix": [...]}, ...], ...}}
+ "vendors": {"<vendor>": [{"name", "version", "asan", "sancov", "postauth", "fix": [...]}, ...], ...},
+ "latest": {"<vendor>": "<version>", ...}}
 ```
 - `format` is `none` (and `vendors` empty) when the commit has no `puffin-build/vendors/` (tlspuffin before 2024-09-12).
+- `latest`: the newest release of each vendor whose `presets.toml` (format 2) declares one (`[library] latest`, one of `[versions]`), for the launcher's `latest-asan`.
 - `asan_link` is true when the commit contains tlspuffin `854dbaa11` (`git merge-base --is-ancestor`), from which an ASAN preset links the ASAN runtime by itself. This hash is hardcoded in the script.
 
 ---
