@@ -31,9 +31,9 @@
 #     patched), fix-all; a bug that needs an option sets it (SDOS2: no-postauth), the option turned back drops the bug's
 #     choice; the aliases of presets.toml say what they are (heap: 5.4.0 · ASan · only HEAP; sdos2: what it leaves), a
 #     modifier on an alias keeps it (wolfssl540-heap,gcov); a
-#     name typed by hand is read back, and what mk_vendor would refuse is said (no false "not a preset"); a preset, a
-#     comma, only-<bug> is shown with ASan as mk_vendor builds it, with dashes without; a bug named alone, launched,
-#     records its bug (the task page says "only HEAP").
+#     name typed by hand is read back, and what mk_vendor would refuse is said (no false "not a preset"); the presets are
+#     shown from the start; a preset, a comma, only-<bug> is shown with ASan as mk_vendor builds it, with dashes without;
+#     a bug named alone, launched, records its bug (the task page says "only HEAP").
 # The scheduler's health check is left out (board/health.js: a stub).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -244,7 +244,6 @@ try {
     launcher.close();
     launcher.open({ jobType: 'campaign', commit });
     await until(() => !!$('.jl-preset-btn'));
-    $('.jl-preset-btn').click();
     const latest = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent)));
     latest?.click(); await settle();
     const features = document.querySelector('.jl-features-row input, input[placeholder^="e.g. introspection"]')?.value ?? '';
@@ -257,7 +256,6 @@ try {
     launcher.close();
     launcher.open({ jobType: 'campaign', commit });
     await until(() => !!$('.jl-preset-btn'));
-    $('.jl-preset-btn').click();
     const boring = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === 'BoringSSL'));
     boring?.click(); await settle();
     const latest = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent)));
@@ -311,7 +309,6 @@ try {
   launcher.close();
   launcher.open({ jobType: 'campaign', commit: Object.keys(LATEST)[0] });
   await until(() => !!$('.jl-preset-btn'));
-  $('.jl-preset-btn').click();
   (await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === 'BoringSSL')))?.click(); await settle();
   (await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent))))?.click(); await settle();
   const line = $('.jl-presets-info b');
@@ -321,7 +318,8 @@ try {
   launcher.close();
   launcher.open({ jobType: 'campaign', commit: SHA });
   await until(() => !!$('.jl-preset-btn'));
-  $('.jl-preset-btn').click();
+  check($('.jl-presets')?.classList.contains('open') && $('.jl-preset-btn')?.textContent.startsWith('－'),
+    'the presets of the commit shown from the start, without a click');
   const chipOf = text => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === text);
   const field = () => $('.jl-vendor-line input')?.value ?? '';
   const info = () => $('.jl-presets-info')?.textContent ?? '';

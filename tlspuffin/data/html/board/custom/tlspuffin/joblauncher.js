@@ -1066,12 +1066,12 @@ export class JobLauncher {
     this.#vendorListInput.input.addEventListener('input', () => this.#onVendorChange(false));
     this.#presetBtn = this.#el('button', 'jl-preset-btn');
     this.#presetBtn.type = 'button';
-    this.#presetBtn.textContent = '＋ presets of this commit';
     this.#presetBtn.title = 'Pick a vendor preset among those of the chosen commit (puffin-build/vendors/*/presets.toml)';
     this.#presetBtn.addEventListener('click', () => this.#togglePresetPanel());
     const vendorLine = this.#el('div', 'jl-vendor-line');
     vendorLine.append(this.#vendorListInput.node, this.#presetBtn);
     this.#presetPanel = this.#el('div', 'jl-presets');
+    this.#showPresetPanel(true);   // the presets of the commit shown from the start (the picker of builds)
     this.#vendorNote = this.#el('div', 'jl-vendor-note');
     const vendorField = this.#el('div', 'jl-vendor-field');
     vendorField.append(vendorLine, this.#presetPanel, this.#vendorNote);
@@ -1441,11 +1441,16 @@ export class JobLauncher {
     });
   }
 
-  #togglePresetPanel() {
-    const open = !this.#presetPanel.classList.contains('open');
+  // the presets panel shown or folded, its button saying which
+  #showPresetPanel(open) {
     this.#presetPanel.classList.toggle('open', open);
     this.#presetBtn.classList.toggle('on', open);
     this.#presetBtn.textContent = open ? '－ presets of this commit' : '＋ presets of this commit';
+  }
+
+  #togglePresetPanel() {
+    const open = !this.#presetPanel.classList.contains('open');
+    this.#showPresetPanel(open);
     if (open) {
       this.#presetLib = null;
       this.#refreshPresets();
@@ -2200,7 +2205,15 @@ export class JobLauncher {
     this.#featuresInput.value    = '';
     this.#parametersInput.value  = '';
     this.#asanRemoved = false;
-    this.#presetPanel?.classList.remove('open');
+    // the presets as at the start: shown, no library forced, drawn again for the next commit (from the cache)
+    if (this.#presetPanel) {
+      this.#presetLib = null;
+      this.#presetsFor = null;
+      this.#presetsData = null;
+      this.#catalogueData = null;
+      this.#presetPanel.innerHTML = '';
+      this.#showPresetPanel(true);
+    }
     if (this.#vendorNote) this.#vendorNote.innerHTML = '';
     this.#nbAttemptsInput.value  = '1';
     this.#nbCoreInput.value      = '1';
