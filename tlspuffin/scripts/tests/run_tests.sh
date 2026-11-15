@@ -49,6 +49,7 @@ Run testFilePath "${build}/publisher/testFilePath"
 Run testCpuTopology "${build}/scheduler/testCpuTopology"
 Run testCpuset "${build}/scheduler/testCpuset"
 Run history_cancelled_test bash "${bench}/scheduler/tests/history_cancelled_test.sh" "${build}/scheduler/scheduler"
+Run per_commit_cache_test bash "${bench}/git_restapi/tests/per_commit_cache_test.sh" "${build}/git_restapi/git_restapi"
 
 # the job scripts and the pages
 Run attach_validation_test bash "${here}/attach_validation_test.sh" "" "${qjs}"
@@ -89,6 +90,7 @@ Run vendor_build_test bash "${here}/vendor_build_test.sh"
 Run vendor_names_test bash "${here}/vendor_names_test.sh"
 Run strip_aranges_test bash "${here}/strip_aranges_test.sh"
 Run presets_latest_test bash "${here}/presets_latest_test.sh"
+Run presets_builds_test bash "${here}/presets_builds_test.sh"
 Run signatures_test bash "${here}/signatures_test.sh" "${qjs}"
 
 echo

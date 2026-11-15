@@ -269,11 +269,11 @@ Attaches `pulls` to a commit of `Logs()`. Does nothing when `pullRefs_` is false
 ### `bool Presets(std::string const& commitID, std::string& result, bool& notFound)`
 
 The vendor presets of tlspuffin at a commit (`GET /api/git/presets`).
-- On the first call, loads `<directory_>/presets_cache.json` (full commit → JSON answer) into `presets_`. `presetsLock_` (a `std::mutex`, separate from the history/logs lock) guards `presets_` and `presetsLoaded_` for the whole call.
+- On the first call, loads `<directory_>/presets_cache.json` (full commit → JSON answer) into `presets_`, when it was written by the script as it is: the cache records the FNV-1a hash of the script that wrote it (`"#script"`), and a cache written by another version of it (a deploy that changed the script), or of the former format (no `"#script"`), is dropped: its answers may lack what the script gives now. `presetsLock_` (a `std::mutex`, separate from the history/logs lock) guards `presets_` and `presetsLoaded_` for the whole call. The catalogue's answers (`catalogue_cache.json`, `tlspuffin_catalogue.sh`) are cached the same way (`PerCommit`).
 - If `commitID` is a prefix of exactly one cached commit, returns its answer (a commit's presets never change).
 - Otherwise runs `<scriptsPath_>/tlspuffin_presets.sh "<directory_>/repo" <commitID>` via `popen()` under the shared lock. Exit status 2 (commit not in the clone) triggers one `git fetch --all` under the exclusive lock and a second run; still 2 → `notFound = true`, returns `false`.
 - Any other non-zero status, or an output that is not a JSON object with a string `commit` → returns `false` (`Error while running tlspuffin_presets.sh`).
-- On success, stores the answer under its full commit and rewrites the whole cache to `presets_cache.json` (`SaveFile()`).
+- On success, stores the answer under its full commit and rewrites the whole cache to `presets_cache.json` (`SaveFile()`), with the script's hash.
 
 ### `bool SaveFile(std::string const& file, std::string const& content)` (private)
 
@@ -315,12 +315,14 @@ tlspuffin_presets.sh <repo_dir> <commit>
 ```
 Resolves `<commit>` with `git rev-parse` (exit status **2** if it is not in the clone), then reads, without checking anything out, `puffin-build/vendors/<vendor>/presets.toml` at that commit (`git ls-tree` / `git show <sha>:<path>`), and parses each file with `awk`. Prints one JSON object on stdout:
 ```
-{"commit": "<sha>", "format": "presets.toml" | "none", "asan_link": true | false,
- "vendors": {"<vendor>": [{"name", "version", "asan", "sancov", "postauth", "fix": [...]}, ...], ...},
- "latest": {"<vendor>": "<version>", ...}}
+{"commit": "<sha>", "format": "presets.toml" | "none", "presets_format": 1 | 2, "asan_link": true | false,
+ "vendors": {"<vendor>": [{"name", "version", "asan", "sancov", "postauth", "fix": [...], "kind", "spec"?}, ...], ...},
+ "latest": {"<vendor>": "<version>", ...}, "modifiers": {"<vendor>": {"<modifier>": {"default", "doc"}, ...}, ...},
+ "names": true | false, "derived": true | false}
 ```
 - `format` is `none` (and `vendors` empty) when the commit has no `puffin-build/vendors/` (tlspuffin before 2024-09-12).
 - `latest`: the newest release of each vendor whose `presets.toml` (format 2) declares one (`[library] latest`, one of `[versions]`), for the launcher's `latest-asan`.
+- `kind`: `version` (format 2: the build of a version, plain or `-asan`), `alias` (format 2: a build of `[aliases]`, its definition in `spec`), `preset` (format 1). `modifiers`: format 2's `[modifiers]` of each vendor, with their default and doc. `names`: the commit has `puffin-build/src/catalogue/spec.rs` (puffin-build's names of builds, tlspuffin 54b07f490); `derived`: its `puffin-build/src/catalogue/mod.rs` has `DERIVED_ONLY` (mk_vendor builds `-only-`, `-fix-`, `-fix-all`, tlspuffin 17a624fcc). The launcher's picker composes builds where `names` is true.
 - `asan_link` is true when the commit contains tlspuffin `854dbaa11` (`git merge-base --is-ancestor`), from which an ASAN preset links the ASAN runtime by itself. This hash is hardcoded in the script.
 
 ---

@@ -1,6 +1,7 @@
 #include "git_api.hxx"
 #include "../../utils/logs.hxx"
 #include "../../utils/rapidjson.hxx"
+#include <cstdint>
 #include <fstream>
 #include <algorithm>
 #include <set>
@@ -501,17 +502,31 @@ bool ns_GIT::GitAPI::PerCommit(std::string const& script, std::string const& cac
   std::lock_guard cacheLock(cache.lock);
   if (!cache.loaded) {
     cache.loaded = true;
+    // the hash of the script as it is (FNV-1a): the answers of another version of it are not kept
+    std::ifstream sfs(scriptsPath_ / script, std::ios::binary);
+    std::string const scriptText((std::istreambuf_iterator<char>(sfs)), {});
+    uint64_t hash = 14695981039346656037ULL;
+    for (unsigned char const c : scriptText) {
+      hash = (hash ^ c) * 1099511628211ULL;
+    }
+    cache.script = std::to_string(hash);
     std::ifstream ifs(cacheFile);
     std::string content((std::istreambuf_iterator<char>(ifs)), {});
     rapidjson::Document doc;
     doc.Parse(content.c_str());
-    if (!doc.HasParseError() && doc.IsObject()) {
+    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("#script") && doc["#script"].IsString() &&
+        (cache.script == doc["#script"].GetString())) {
       for (auto const& entry : doc.GetObject()) {
+        if (std::string(entry.name.GetString()) == "#script") {
+          continue;
+        }
         rapidjson::StringBuffer buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
         entry.value.Accept(writer);
         cache.answers[entry.name.GetString()] = buffer.GetString();
       }
+    } else if (!content.empty()) {
+      LOGI << cacheName << ": written by another version of " << script << ", dropped" << Log::Flags::End;
     }
   }
   // the latest head of a branch: fetch first (a commit id needs no fetch: an unknown one is fetched below)
@@ -579,6 +594,7 @@ bool ns_GIT::GitAPI::PerCommit(std::string const& script, std::string const& cac
 
   rapidjson::Document all;
   all.SetObject();
+  all.AddMember("#script", rapidjson::Value(cache.script.c_str(), all.GetAllocator()), all.GetAllocator());
   for (auto const& [commit, json] : cache.answers) {
     rapidjson::Document one(&all.GetAllocator());
     one.Parse(json.c_str());

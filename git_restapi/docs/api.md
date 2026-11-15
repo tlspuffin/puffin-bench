@@ -211,9 +211,13 @@ from the commit's `puffin-build/vendors/<vendor>/presets.toml` in the clone, wit
   "asan_link": true,
   "vendors": {
     "wolfssl": [ { "name": "wolfssl540-sdos2", "version": "5.4.0", "asan": false, "sancov": true,
-                   "fix": ["CVE-2022-39173"], "postauth": false } ]
+                   "fix": ["CVE-2022-39173"], "postauth": false, "kind": "alias",
+                   "spec": "5.4.0,no-postauth,fix-CVE-2022-39173" } ]
   },
-  "latest": { "wolfssl": "5.8.4" }
+  "latest": { "wolfssl": "5.8.4" },
+  "modifiers": { "wolfssl": { "asan": { "default": false, "doc": "AddressSanitizer: …" }, "postauth": { "default": true, "doc": "…" } } },
+  "names": true,
+  "derived": true
 }
 ```
 
@@ -221,8 +225,8 @@ from the commit's `puffin-build/vendors/<vendor>/presets.toml` in the clone, wit
 contains tlspuffin 854dbaa11, from which an ASAN preset links the ASAN runtime by itself (before, only with the `asan`
 cargo feature). `latest`: the newest release of each vendor that declares one (`presets.toml` format 2, `[library] latest`,
 one of its versions), which the launcher's `latest-asan` takes: the names of a vendor's versions need not sort (BoringSSL's
-`1.1.1g+git.<commit>` builds are older than `0.20260508.0`). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
-not change); an abbreviated id is answered from the cache only when it names exactly one cached commit. An unknown
+`1.1.1g+git.<commit>` builds are older than `0.20260508.0`). `kind`: `version` (format 2: the build of a version, plain or with ASan), `alias` (format 2: a named build of `[aliases]`, its definition in `spec`), `preset` (format 1). `modifiers`: format 2's `[modifiers]` of each vendor (asan, sancov, gcov, llvm_cov, the builder's options: wolfSSL's postauth), with their default and doc. `names`: the commit's puffin-build has the names of builds (`puffin-build/src/catalogue/spec.rs`, tlspuffin 54b07f490: `<vendor>:<version>[,<modifier>…]` and a catalogue part, a preset followed by `-<modifier>`s and a catalogue part); `derived`: its mk_vendor builds the catalogue's derived builds (`<preset>-only-<IDs>`, `-fix-<IDs>`, `-fix-all`: tlspuffin 17a624fcc). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
+not change), by the script as it is (a cache written by another version of it is dropped: a deploy that changes the script takes effect on every commit); an abbreviated id is answered from the cache only when it names exactly one cached commit. An unknown
 commit triggers one `git fetch --all` (a commit pushed since the last fetch) before the 404.
 
 ### Errors

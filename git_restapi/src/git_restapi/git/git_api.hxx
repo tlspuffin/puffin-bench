@@ -29,10 +29,13 @@ public:
   bool Catalogue(std::string const& commitID, std::string& result, bool& notFound, bool fetch = false);
 
 private:
-  // What a script prints for a commit, cached for ever per full commit in `<storage>/<name>/<cacheName>`
+  // What a script prints for a commit, cached for ever per full commit in `<storage>/<name>/<cacheName>`, by the
+  // script as it is: the cache records the hash of the script that wrote it ("#script"), and one written by another
+  // version of it is dropped (its answers may lack what the script gives now)
   struct PerCommitCache {
     std::mutex lock;
     bool loaded = false;
+    std::string script;  // the hash of the script the answers are from
     std::unordered_map<std::string, std::string> answers;  // full commit -> JSON
   };
   bool PerCommit(std::string const& script, std::string const& cacheName, PerCommitCache& cache,
