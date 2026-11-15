@@ -35,6 +35,19 @@ source <( jq -r '"OBJECTIVES_NOT_TARGETED=(", (._not_targeted // {} | to_entries
 declare -F ObjectiveSignature > /dev/null || { echo "ObjectiveSignature not found" >&2; exit 1; }
 mkdir -p "${OUT}" "${STATE}" || exit 1
 
+# nix-shell, where cron's PATH does not have it (pesto: in /nix/var/nix/profiles/default/bin; cassis: /usr/bin): the
+# replays run in the checkout's shell.nix, with its llvm-symbolizer; without it they run directly, unsymbolized (their
+# crashes then have no stack, so no place to check)
+NixInPath() {
+  command -v nix-shell > /dev/null && return 0;
+  local d;
+  for d in ${NIX_BIN_DIRS:-/nix/var/nix/profiles/default/bin ${HOME:-/nonexistent}/.nix-profile/bin}; do
+    [ -x "${d}/nix-shell" ] && { PATH="${PATH}:${d}"; return 0; };
+  done
+  return 1;
+}
+NixInPath || true
+
 # one call at a time
 exec 9> "${STATE}/.lock"
 flock -n 9 || exit 0

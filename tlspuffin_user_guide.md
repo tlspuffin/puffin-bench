@@ -41,7 +41,8 @@ Ports above are the installer's defaults (`--port-git`/`--port-scheduler`/`--por
 ## Prerequisites on the machine running campaigns
 
 - The scheduler must be running (and reachable from wherever you submit jobs); publisher/git_restapi/vis_comparator are only needed if you want results browsing/history/comparison.
-- **Nix** must be installed — the job scripts run inside a Nix shell.
+- **Nix** must be installed — the job scripts run inside a Nix shell (the live tool, run by cron, looks for `nix-shell` in
+  the Nix profile, `/nix/var/nix/profiles/default/bin`, when cron's `PATH` lacks it, as on pesto).
 - Any `awk` (gawk, or mawk: Debian's default) and jq 1.6 or later: the job scripts and the cron tools run on both (pesto
   has mawk 1.3.4 and jq 1.6, cassis gawk 5 and jq 1.7); their awk programs run under `LC_ALL=C`, times in UTC by `TZ`.
 - Enough CPU cores: performance/vulnerability configurations each reserve a fixed core count per attempt (see the retry×timeout table below) — the scheduler's `schedule.executors.local.nbCores` bounds how many attempts run in parallel.
