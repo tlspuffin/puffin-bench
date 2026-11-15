@@ -61,6 +61,8 @@ SetCache() { command cp -f "$2" "${work}/cache/$1"; echo "${work}/cache/$1"; }
 git clone -q "${src}" "${work}/out/repo"
 export THEJOB_OUT_PATH="${work}/out" THEJOB_NB_CORES=1 VALIDATION_LIBS_ROOT="${work}/libs" VALIDATION_CATALOGUE=commit
 vendor=wolfssl:p
+# the binary built, without its .debug_aranges (PR_common.sh, as in the job scripts)
+source <( sed -n '/^StripDebugAranges()/,/^}/p' "${here}/../PR_common.sh" )
 # shellcheck source=../PR_validate.sh
 source "${here}/../PR_validate.sh"
 

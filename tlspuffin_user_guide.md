@@ -492,7 +492,10 @@ bug's verdict on the pages is its strongest part; the words and badges are in [W
    others stand, and an experiment looking for X lets the fuzzer's record decide. The executions are symbolized (`llvm-symbolizer` of the tree), so
    the stack of each witness is recorded with the validation (`witness_frames`); the witness of a crash bug without
    patch runs once on F for its stack. That stack gives the bug's place (below). Without a symbolizer no stack is
-   recorded (a warning in the step's log), nor a stack whose frames are only the binary's file name.
+   recorded (a warning in the step's log), nor a stack whose frames are only the binary's file name. The binaries the
+   bench builds (the fuzzer's and validation's) lose their `.debug_aranges` after the build: LLVM's symbolizer trusts
+   that index before the debug info itself, and in the builds of rustc 1.94 one of its entries claims the whole
+   program, so that ASan's stacks (the replays', validation's) had function names without files or lines.
 4. **The objectives.** A run's first 20 objectives are replayed on F and the V_X: the targeted ones, then one of each
    bug (by the fuzzer's record), then by time, within 30 min of executions (the rest: "… not validated").
 5. **The verdict of each objective**, from those replays:

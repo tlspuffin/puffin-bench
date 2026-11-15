@@ -6,7 +6,9 @@ html/common/signatures.js, whatever the catalogue's top frames), computed once f
 validation recorded it itself (its controls give
 witness_frames since the symbolized executions): the witness runs on the validation build of a preset the bench used
 for that bug (an experiment's vendor) without its patch (<preset>-only-<ID>), else with every patch (<preset>-fix-all), with the validation builds of the
-bench's cache (data/cache/validation-*) and ASan's symbolizer of the checkout's nix-shell. Written to
+bench's cache (data/cache/validation-*), each run from a copy without its .debug_aranges (as the job scripts strip the
+binaries they build: PR_common.sh StripDebugAranges; with the wrong entry of rustc 1.94's builds, ASan's llvm-symbolizer
+gives no file nor line), and ASan's symbolizer of the checkout's nix-shell. Written to
 <data>/catalogue-cache/witness_frames.json ({ID: {frames, put, binary, at}}), which report_verdicts.js adds to the entries
 of every report (objectives_report.sh Verdicts, PB_WITNESS_FRAMES). A bug already there is kept; run it at deploy time,
 on core 0 at idle priority (taskset -c 0 nice -n 19)."""
@@ -59,6 +61,22 @@ symbolizer = subprocess.run(['nix-shell', '--run', 'command -v llvm-symbolizer']
 env = dict(os.environ, PUFFIN_BUILD_DIR=f'{checkout}/puffin-build', ASAN_SYMBOLIZER_PATH=symbolizer[0],
            ASAN_OPTIONS='verify_asan_link_order=1:detect_leaks=0:abort_on_error=1')
 binaries = sorted(glob.glob(f'{data}/cache/validation-*'), key=os.path.getmtime, reverse=True)
+
+# a copy of a cached binary without .debug_aranges (one at a time: they weigh about 150 MB), else the binary itself
+copies = tempfile.mkdtemp(prefix='witness-stacks-')
+current = {}
+def without_aranges(binary):
+    if current.get('of') == binary:
+        return current['path']
+    if current.get('path'):
+        os.unlink(current['path'])
+    current.clear()
+    path = os.path.join(copies, os.path.basename(binary))
+    if subprocess.run(['objcopy', '--remove-section', '.debug_aranges', binary, path], capture_output=True).returncode != 0:
+        return binary
+    os.chmod(path, 0o755)
+    current.update(of=binary, path=path)
+    return path
 for id_ in sorted(entries):
     if id_ in known:
         print(f'{id_}: kept ({" < ".join(known[id_]["frames"][:3])})')
@@ -73,7 +91,7 @@ for id_ in sorted(entries):
         for binary in binaries:
             with tempfile.TemporaryDirectory() as tmp:
                 outcome = f'{tmp}/w.json'
-                subprocess.run(['timeout', '-k', '5', '120', binary, '--put', put, 'witness', id_, '--runs', '1', '--outcome', outcome],
+                subprocess.run(['timeout', '-k', '5', '120', without_aranges(binary), '--put', put, 'witness', id_, '--runs', '1', '--outcome', outcome],
                                env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
                     runs = json.load(open(outcome))
@@ -95,6 +113,9 @@ for id_ in sorted(entries):
     else:
         print(f'{id_}: no stack (presets {sorted(presets.get(id_, [])) or "none"})')
 
+if current.get('path'):
+    os.unlink(current['path'])
+os.rmdir(copies)
 os.makedirs(os.path.dirname(out_file), exist_ok=True)
 tmp = f'{out_file}.tmp'
 json.dump(known, open(tmp, 'w'), indent=1, sort_keys=True)

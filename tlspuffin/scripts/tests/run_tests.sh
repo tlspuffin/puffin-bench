@@ -85,6 +85,7 @@ Run shared_build_test bash "${here}/shared_build_test.sh"
 Run crash_stats_test bash "${here}/crash_stats_test.sh"
 Run ab_scripts_test bash "${here}/ab_scripts_test.sh"
 Run build_features_test bash "${here}/build_features_test.sh"
+Run strip_aranges_test bash "${here}/strip_aranges_test.sh"
 Run signatures_test bash "${here}/signatures_test.sh" "${qjs}"
 
 echo

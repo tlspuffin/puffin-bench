@@ -226,9 +226,12 @@ ValidationPrepare() {
   mkdir -p "${VENDOR_DIR}" && touch "${VENDOR_DIR}/.used";
   # the folders no task used for 30 days (.used: touched at each use)
   find "${libsRoot}" -mindepth 2 -maxdepth 2 -name .used -mtime +30 -printf '%h\0' 2> /dev/null | xargs -0 -r rm -rf;
-  # the binary: cached per what it is made from (the crates, the build files, the toolchain) and the set it bundles
+  # the binary: cached per what it is made from (the crates, the build files, the toolchain) and the set it bundles,
+  # without its .debug_aranges (StripDebugAranges, PR_common.sh: its stacks with files and lines), which the key says, so
+  # that a binary cached with the section is built again
   local cacheId="validation-$( { ValidationInputsHash "${tree}" .cargo Cargo.lock Cargo.toml rust-toolchain.toml shell.nix crates \
-      puffin puffin-build puffin-macros tlspuffin tlspuffin-claims extractable-macro tools; echo "${set}"; } | md5sum | cut -d' ' -f1 )";
+      puffin puffin-build puffin-macros tlspuffin tlspuffin-claims extractable-macro tools; echo "${set}"; echo 'without .debug_aranges'; } \
+      | md5sum | cut -d' ' -f1 )";
   local binary cached=false; binary=$( QueryCache -q "${cacheId}" ) || binary='';
   if [ -z "${binary}" ] || [ ! -x "${binary}" ]; then
     local build;
@@ -239,6 +242,7 @@ ValidationPrepare() {
     ( cd "${tree}" && nix-shell --run "cargo build --bin tlspuffin --release --features=cputs -j ${THEJOB_NB_CORES:-1}" ) ||
       { ValidationFail "cannot build the validation binary"; return 0; };
     binary="${tree}/target/release/tlspuffin";
+    StripDebugAranges "${binary}";
     SetCache "${cacheId}" "${binary}" > /dev/null;
     cached=true;
   fi

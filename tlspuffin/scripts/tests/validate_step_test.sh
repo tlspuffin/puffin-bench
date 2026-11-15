@@ -37,6 +37,8 @@ SetCache() { command cp -f "$2" "${work}/cache/$1"; echo "${work}/cache/$1"; }
 CreateArtefact() { mkdir -p "${work}/artefacts/$( dirname "$2" )"; command cp -rf "$1" "${work}/artefacts/$2"; }
 export THEJOB_OUT_PATH="${work}/out" THEJOB_STEP_ID=test THEJOB_STEP_ATTEMPT_ID=0 THEJOB_NB_CORES="${THEJOB_NB_CORES:-1}"
 COMMIT_ID="${sha}"
+# the binary built, without its .debug_aranges (PR_common.sh, as in the job scripts)
+source <( sed -n '/^StripDebugAranges()/,/^}/p' "${here}/../PR_common.sh" )
 # shellcheck source=../PR_validate.sh
 source "${here}/../PR_validate.sh"
 

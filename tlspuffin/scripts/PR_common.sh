@@ -1359,6 +1359,28 @@ ExperimentReplayObjectives() {
   return 0;
 }
 
+# StripDebugAranges <binary>: a binary built here without its .debug_aranges section, for ASan's symbolized stacks (the
+# replays, the live replays, validation). The section indexes the address ranges of each compile unit, and LLVM's tools,
+# ASan's llvm-symbolizer among them, trust it before the units' own ranges (DW_AT_ranges). In the builds of rustc 1.94
+# one entry is wrong: libafl_targets' unit claims [0x0, 0x3040000), the whole program, so every address was taken for it
+# and no frame had a file or a line (its function from the symbol table, its file from the nearest FILE symbol:
+# "AddPacketInfo cryptocb.c"). Without the section they read each unit's own ranges, as the fuzzer's backtraces do
+# (gimli's addr2line prefers them). The code does not change, nor the file's inode (target/release/<bin> and
+# target/release/deps/<bin>-<hash> are one file, which cargo keeps). A binary without the section, or one objcopy
+# cannot rewrite, is left as it is (said).
+StripDebugAranges() {
+  local binary="$1" stripped;
+  [ -f "${binary}" ] && readelf -S -W "${binary}" 2> /dev/null | grep -q '[[:space:]]\.debug_aranges[[:space:]]' || return 0;
+  stripped=$( mktemp "${binary}.XXXXXX" ) || return 0;
+  if objcopy --remove-section .debug_aranges "${binary}" "${stripped}" 2> /dev/null && cat "${stripped}" > "${binary}"; then
+    echo "StripDebugAranges: ${binary} without .debug_aranges (its symbolized stacks have files and lines)";
+  else
+    echo "StripDebugAranges: ${binary} kept as built, with .debug_aranges (its symbolized stacks may lack files and lines)" >&2;
+  fi
+  rm -f "${stripped}";
+  return 0;
+}
+
 # CargoAsanOptions <repository>: the ASAN_OPTIONS of the [env] of its .cargo/config.toml, which cargo run gives the
 # fuzzer when the variable is not set (empty: none)
 CargoAsanOptions() {
@@ -1882,6 +1904,7 @@ Build() {
     [ -n "${features}" ] && featuresCLI="--features=${features}";
     nix-shell --run "cargo build --bin \"${PACKAGE}\" --release ${featuresCLI} -j ${THEJOB_NB_CORES}" || return 1
     binary=$( realpath "./target/release/${PACKAGE}" )
+    StripDebugAranges "${binary}";
     SetCache "${cache_id}" "${binary}"
   else
     echo "Found in cache"
@@ -1955,6 +1978,8 @@ ForcedBuild() {
   rm -rf ./seeds
   echo "nix-shell --run \"cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed\""
   $( NoAslrPrefix ) nix-shell --run "cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+  # the binary just built, for ASan's stacks with files and lines in the replays (StripDebugAranges)
+  StripDebugAranges "./target/release/${PACKAGE}";
 
   rm -rf ./experiments
   echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help\""
