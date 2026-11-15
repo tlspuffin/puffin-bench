@@ -20,7 +20,10 @@
 #   - latest-asan is the release presets.toml declares ([library] latest, git_restapi's latest: BoringSSL 0.20260508.0),
 #     else the highest version name (1.1.1g+git.… for BoringSSL, whose names do not sort);
 #   - a campaign's configuration is named after its build's dashed name, however its vendor is written (wolfssl:584,asan:
-#     wolfssl584-asan, the library once), as written when the presets do not have its version.
+#     wolfssl584-asan, the library once), as written when the presets do not have its version;
+#   - the launcher shows a vendor short (its preset line, a task's settings), the vendor as written in their tooltip:
+#     wolfssl:wolfssl584-asan is wolfSSL · 5.8.4 · ASan, ASan as its preset has it (wolfssl540-heap); without its preset
+#     (a task launched before the launcher recorded it), as written: wolfssl:584,asan is wolfSSL · 584 · ASan.
 # The scheduler's health check is left out (board/health.js: a stub).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -253,6 +256,32 @@ try {
   }).map(([vendor, want]) => [vendor, CampaignConfigurationName(vendor, vendorsAtSha[vendor.split(':')[0]]), want]);
   check(named.every(([, got, want]) => got === want),
     `a campaign's configuration named after its build (${named.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || '10 spellings'})`);
+  // a vendor shown short: from its preset at the commit, else as written
+  const { VendorLabel } = await import('./board/custom/tlspuffin/joblauncher.js');
+  const presetOf = vendor => vendorsAtSha[vendor.split(':')[0]]?.find(p => p.name === vendor.split(':')[1]) ?? null;
+  const labels = [
+    ...Object.entries({ 'wolfssl:wolfssl584-asan': 'wolfSSL · 5.8.4 · ASan', 'wolfssl:wolfssl540-heap': 'wolfSSL · 5.4.0 · heap · ASan',
+      'wolfssl:wolfssl540-asan-perf': 'wolfSSL · 5.4.0 · perf · ASan', 'wolfssl:wolfssl540': 'wolfSSL · 5.4.0',
+      'boringssl:boringssl20260508-asan': 'BoringSSL · 0.20260508.0 · ASan' }).map(([vendor, want]) => [vendor, presetOf(vendor), want]),
+    ...Object.entries({ 'wolfssl:wolfssl584-asan': 'wolfSSL · 584 · ASan', 'wolfssl:584,asan': 'wolfSSL · 584 · ASan',
+      'wolfssl:latest-asan': 'wolfSSL · latest · ASan', 'wolfssl540': 'wolfssl540' }).map(([vendor, want]) => [vendor, null, want]),
+  ].map(([vendor, preset, want]) => [vendor, VendorLabel(vendor, preset), want]);
+  check(labels.every(([, got, want]) => got === want),
+    `a vendor shown short (${labels.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || '9 vendors'})`);
+  const settingsRow = custom => launcher.describeSettings({ launcher: { custom }, args: [] }).find(r => r.label === 'vendor')?.html;
+  const ran = settingsRow({ vendor: 'wolfssl:latest-asan', vendorResolved: 'wolfssl:wolfssl584-asan', vendorPreset: { version: '5.8.4', asan: true } });
+  const older = settingsRow({ vendor: 'wolfssl:584,asan' });
+  check(ran === '<span title="wolfssl:latest-asan → wolfssl:wolfssl584-asan">wolfSSL · 5.8.4 · ASan (latest release)</span>'
+    && older === '<span title="wolfssl:584,asan">wolfSSL · 584 · ASan</span>', `a task's settings: the vendor shown short, as written in its tooltip (${ran}; ${older})`);
+  launcher.close();
+  launcher.open({ jobType: 'campaign', commit: Object.keys(LATEST)[0] });
+  await until(() => !!$('.jl-preset-btn'));
+  $('.jl-preset-btn').click();
+  (await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === 'BoringSSL')))?.click(); await settle();
+  (await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent))))?.click(); await settle();
+  const line = $('.jl-presets-info b');
+  check(line?.textContent === 'BoringSSL · 0.20260508.0 · ASan' && line.title === 'boringssl:latest-asan → boringssl:boringssl20260508-asan'
+    && line.parentElement.textContent.includes('(latest release)'), `the preset line: the vendor shown short, as written in its tooltip (${line?.parentElement.textContent}; ${line?.title})`);
 } catch (err) {
   check(false, `error: ${err.stack ?? err}`);
 }

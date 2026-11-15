@@ -4,6 +4,7 @@ import { resolveCommits, parseTaskName, commitLineHTML } from '../../../common/c
 import { CheckScheduler } from '../../health.js'
 import { CustomBenchmark } from './custombench.js'
 import { LEVELS } from '../../../common/verdicts.js'
+import { esc, libraryName } from '../../../common/format.js'
 
 // its style, once a launcher is created (the pages of the scheduler): the other pages that load the plugin (Results,
 // reports) keep their own look of the commit lines
@@ -77,6 +78,24 @@ export function CampaignConfigurationName(vendor, presets) {
       && (p.version === first || String(p.version).replace(/\./g, '') === first));
   const base = names.has(first) ? first : ofVersion.length === 1 ? ofVersion[0].name : null;
   return base ? (rest ? `${base}-${rest}` : base) : build;
+}
+
+// A vendor as the launcher shows it (its preset line, a task's settings): wolfssl:wolfssl584-asan is "wolfSSL · 5.8.4
+// · ASan". The library's name, the version, the rest of the build's name (perf, a custom library's heap…), then ASan.
+// preset: the vendor's preset at the commit ({ version, asan }): its version as presets.toml writes it, ASan when it
+// has it (wolfssl540-heap does, its name does not say so); without it, both as the vendor writes them (584,asan: 584).
+// Only the display: the field, the task's arguments and the label's tooltip keep the vendor as written. A vendor
+// without ':' (a Rust harness feature): as written.
+export function VendorLabel(vendor, preset = null) {
+  const colon = vendor.indexOf(':');
+  if (colon < 0) return vendor;
+  const lib = vendor.slice(0, colon);
+  const build = vendor.slice(colon + 1);
+  const [first, ...rest] = build.split(build.includes(',') ? ',' : '-');
+  const version = preset?.version || (first.startsWith(lib) && first.length > lib.length ? first.slice(lib.length) : first);
+  const asan = preset ? !!preset.asan : rest.includes('asan');
+  return [libraryName(lib), version, ...rest.filter(part => !['asan', 'plain'].includes(part)), asan ? 'ASan' : '']
+    .filter(Boolean).join(' · ');
 }
 
 export class JobLauncher {
@@ -316,7 +335,6 @@ export class JobLauncher {
   // timeout, configurations and attempts, campaign settings, compat rules. From the launcher settings it was started
   // with (task.launcher.custom) and its arguments; what is unknown is left out (the page also lists every argument).
   describeSettings(task) {
-    const esc = (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const chips = (values) => values.map(value => `<span class="chip">${esc(value)}</span>`).join('');
     const custom = task?.launcher?.custom ?? {};
     const args = Object.fromEntries((task?.args ?? []).filter(arg => arg?.key).map(arg => [arg.key, arg.value]));
@@ -343,10 +361,11 @@ export class JobLauncher {
           ? { label: 'runs × cores', html: esc(`${attempts * 2} × 1 per configuration (twin: 2 runs per physical core)`) }
           : { label: 'attempts × cores', html: esc(`${attempts} × ${cores.join('/') || '?'} per configuration`) });
     }
-    // latest-asan: the preset it was resolved to at launch is in the run configuration
-    const ranVendor = /:latest-asan$/.test(custom.vendor ?? '') ? custom.vendorResolved : null;
-    if (custom.vendor) rows.push({ label: 'vendor', html: `<span class="mono">${esc(custom.vendor)}</span>`
-        + (ranVendor ? ` → <span class="mono">${esc(ranVendor)}</span>` : '') });
+    // the vendor's label (VendorLabel, from its preset at launch), the vendor as written in its tooltip; latest-asan:
+    // the preset it was resolved to at launch (the one in the run configuration)
+    const ranVendor = /:latest-asan$/.test(custom.vendor ?? '') && custom.vendorResolved !== custom.vendor ? custom.vendorResolved : null;
+    if (custom.vendor) rows.push({ label: 'vendor', html: `<span title="${esc(ranVendor ? `${custom.vendor} → ${ranVendor}` : custom.vendor)}">`
+        + `${esc(VendorLabel(ranVendor ?? custom.vendor, custom.vendorPreset))}${ranVendor ? ' (latest release)' : ''}</span>` });
     if (custom.features) rows.push({ label: 'features', html: `<span class="mono">${esc(custom.features)}</span>` });
     if (custom.parameters) rows.push({ label: 'parameters', html: `<span class="mono">${esc(custom.parameters)}</span>` });
     if (custom.campaignId || args.CAMPAIGN_ID) rows.push({ label: 'campaign', html: esc(custom.campaignId || args.CAMPAIGN_ID) });
@@ -1327,8 +1346,6 @@ export class JobLauncher {
   static #OPCUA = /^(open62541|s2opc)/i;
   static #PROTOCOLS = { tlspuffin: { label: 'TLS', test: (v) => !/ssh/i.test(v) && !JobLauncher.#OPCUA.test(v) },
                         sshpuffin: { label: 'SSH', test: (v) => /ssh/i.test(v) } };
-  static #LIBRARY_NAMES = { openssl: 'OpenSSL', boringssl: 'BoringSSL', libressl: 'LibreSSL', wolfssl: 'wolfSSL',
-                            libssh: 'libssh', wolfssh: 'wolfSSH' };
 
   #features() {
     return this.#featuresInput.value.split(/[\s,]+/).filter(Boolean);
@@ -1460,7 +1477,7 @@ export class JobLauncher {
     };
 
     row(protocol ? protocol.label : 'Library', vendors.map(v => chip(
-        JobLauncher.#LIBRARY_NAMES[v] ?? v, v === lib,
+        libraryName(v), v === lib,
         `${data.vendors[v].length} presets at this commit: ${data.vendors[v].map(p => p.name).join(', ')}`,
         () => { this.#presetLib = v; this.#renderPresetPanel(); })));
 
@@ -1493,7 +1510,7 @@ export class JobLauncher {
     const latest = JobLauncher.#latestAsan(presets, data.latest?.[lib]);
     const latestOn = !!current?.latest && current.vendor === lib;
     const latestChip = latest ? [chip(`latest-asan · ${latest.version}`, latestOn,
-        `${lib}:latest-asan, the newest release of ${JobLauncher.#LIBRARY_NAMES[lib] ?? lib} at the commit, with ASAN `
+        `${lib}:latest-asan, the newest release of ${libraryName(lib)} at the commit, with ASAN `
         + `(here ${latest.name}); resolved at launch, so a relaunch on another commit takes its latest. `
         + 'The default for fuzzing the latest version.',
         () => pick({ ...latest, name: JobLauncher.#LATEST }), 'latest')] : [];
@@ -1514,8 +1531,10 @@ export class JobLauncher {
     }
     if (current) {
       const info = this.#el('div', 'jl-presets-info');
-      info.innerHTML = (current.latest ? `<b>${current.vendor}:latest-asan</b> → ` : '') + `<b>${current.vendor}:${current.name}</b> · ${current.version}`
-        + ` · ${current.asan ? '<span class="jl-asan-on">ASAN✓</span>' : 'ASAN✗'}`
+      // its label (VendorLabel), the vendor as written in its tooltip
+      const vendor = `${current.vendor}:${current.name}`;
+      info.innerHTML = `<b title="${esc(current.latest ? `${current.vendor}:${JobLauncher.#LATEST} → ${vendor}` : vendor)}">`
+        + `${esc(VendorLabel(vendor, current))}</b>${current.latest ? ' (latest release)' : ''}${current.asan ? '' : ' · no ASan'}`
         + (current.fix.length ? ` · patches ${current.fix.join(', ')}` : ' · no patch')
         + (current.postauth === false ? ' · postauth off' : '');
       panel.appendChild(info);
@@ -1711,6 +1730,7 @@ export class JobLauncher {
   // Captures the current form state so the task can be reopened identically
   // via the board's "New task..." restart button (task.launcher.custom).
   #captureCustom(commit, name) {
+    const preset = this.#currentPreset();
     return {
       jobType:    this.#selectedType,
       commit,
@@ -1719,6 +1739,7 @@ export class JobLauncher {
       vendorImpl: this.#vendorImpl,
       vendor:     this.#vendorListInput.value.trim(),
       vendorResolved: this.#resolvedVendor(),  // <vendor>:latest-asan: the preset it ran with
+      vendorPreset: preset ? { version: preset.version, asan: !!preset.asan } : null,  // for its label (VendorLabel)
       features:   this.#featuresInput.value.trim(),
       parameters: this.#parametersInput.value.trim(),
       campaignId: this.#campaignIdInput.value.trim(),
