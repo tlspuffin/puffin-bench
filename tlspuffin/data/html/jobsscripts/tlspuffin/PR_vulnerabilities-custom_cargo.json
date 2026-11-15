@@ -21,6 +21,21 @@
       {
         "run": [],
         "configuration": {
+          "nb_cores": 4,
+          "nb_retry": 1
+        }
+      },
+      {
+        "step": "PrepareValidationOnce",
+        "configuration": {
+          "nb_cores": 4
+        }
+      }
+    ],
+    [
+      {
+        "run": [],
+        "configuration": {
           "nb_cores": ${RUNTIME_NB_CORES},
           "nb_retry": ${RUNTIME_NB_RUN}
         },

@@ -22,10 +22,10 @@
 #
 # ValidationPrepare: the checkout (validation/tree), the builds (the libraries in a folder shared by the tasks, one
 # binary cached by the scheduler, both named after what they are made from rather than the commit) and
-# the controls, recorded in validation/state.json, once per attempt: by PrepareValidation, a step before the experiment
-# (experiments naming their bug, target_bug: custom benchmarks, Vuln group A and B; the monitor then confirms the
-# experiment's objectives during the attempt, ConfirmObjective), else
-# by ValidateObjectives. ValidationVerdict: the verdict of one objective, kept in validation/verdicts/.
+# the controls, recorded in validation/state.json: once per experiment by PrepareValidationOnce, before its attempts
+# (experiments naming their bug, target_bug: custom benchmarks, Vuln group A and B), each attempt taking a copy (the
+# step PrepareValidation, before the experiment: the monitor then confirms the experiment's objectives during the
+# attempt, ConfirmObjective); in a flow without it, once per attempt, by PrepareValidation or ValidateObjectives. ValidationVerdict: the verdict of one objective, kept in validation/verdicts/.
 # ValidateObjectives, after ExperimentEnd: the verdicts of the attempt's objectives (the targeted ones first, at most
 # VALIDATION_MAX, within VALIDATION_BUDGET seconds of executions, and not past VALIDATION_DEADLINE when given (a value of
 # $SECONDS: the end of PerfObjectives' budget): the others are "not-validated"), recorded in
@@ -152,8 +152,8 @@ ValidationInputsHash() {
     done ) | sha256sum | cut -c1-32;
 }
 
-# ValidationPrepare: the validation of this attempt ready (validation/state.json, status ready, unsupported or error),
-# once per attempt
+# ValidationPrepare: the validation of this attempt ready (validation/state.json, status ready, unsupported or error):
+# a copy of the one prepared for its configuration when there is one (PrepareValidationOnce), else prepared here
 ValidationPrepare() {
   export VALIDATION_WORK="${PWD}/validation";
   local state="${VALIDATION_WORK}/state.json";
@@ -163,6 +163,8 @@ ValidationPrepare() {
       unsupported|error) return 0;;
     esac
   fi
+  # prepared once for the attempts of this configuration (PrepareValidationOnce): a copy, its checkout and binary shared
+  ValidationFromShared && return 0;
   rm -rf "${VALIDATION_WORK}"; mkdir -p "${VALIDATION_WORK}/runs" "${VALIDATION_WORK}/verdicts";
   local repo="${THEJOB_OUT_PATH}/repo" tree="${VALIDATION_WORK}/tree";
   local lib="${vendor%%:*}" preset="${vendor#*:}";
@@ -410,6 +412,49 @@ ConfirmObjective() {
 # PrepareValidation: a step before the experiment (custom benchmarks, Vuln group A and B): the validation ready, so that
 # the monitor can confirm the experiment's objectives before it ends the attempt (ConfirmObjective), with the cores of
 # this step
+# The validation of a configuration, prepared once for all its attempts: PrepareValidationOnce, the step of a group run
+# once per experiment before its attempts (Vuln group A and B, custom benchmarks), the experiments of a task preparing
+# theirs in parallel; before, each attempt prepared its own, the same builds made once per attempt at the same time
+# (the binary's cache has no lock on a miss). In <out>/validation-<configuration>/validation; each attempt takes a copy
+# of its files (ValidationFromShared: state.json, the listings, the controls' runs), and its own runs/ and verdicts/;
+# the checkout and the binary, named by state.json, are shared and removed once at the end (ValidationCleanupShared,
+# by CleanAllRepo).
+SharedValidationDir() { echo "${THEJOB_OUT_PATH}/validation-${THEJOB_STEP_ID}"; }
+
+PrepareValidationOnce() {
+  [ "${VALIDATION:-on}" == off ] && return 0;
+  local dir; dir=$( SharedValidationDir );
+  mkdir -p "${dir}" || return 1;
+  ( cd "${dir}" && ValidationPrepare &&
+    echo "Validation of ${THEJOB_STEP_ID}, for all its attempts: $( jq -r '.status + (if .message != "" then ": " + .message else "" end)' "${dir}/validation/state.json" )" );
+  return 0;
+}
+
+# ValidationFromShared: ./validation from the configuration's one (PrepareValidationOnce), when it was prepared and its
+# checkout and binary are there (unsupported, error: as they are). 1: none (the caller prepares its own)
+ValidationFromShared() {
+  local shared; shared="$( SharedValidationDir )/validation";
+  [ -s "${shared}/state.json" ] || return 1;
+  [ "$( realpath -m "${shared}" )" != "$( realpath -m "${PWD}/validation" )" ] || return 1;
+  if [ "$( jq -r .status "${shared}/state.json" )" == ready ]; then
+    [ -x "$( jq -r .binary "${shared}/state.json" )" ] && [ -d "$( jq -r .tree "${shared}/state.json" )" ] || return 1;
+  fi
+  rm -rf ./validation && mkdir -p ./validation/runs ./validation/verdicts || return 1;
+  find "${shared}" -maxdepth 1 -type f -exec cp {} ./validation/ \; &&
+    find "${shared}/runs" -maxdepth 1 -type f \( -name 'control-*' -o -name 'stack-*' \) -exec cp {} ./validation/runs/ \; ;
+}
+
+# ValidationCleanupShared: the checkouts of the validations prepared once per configuration, once every attempt ended
+# (CleanAllRepo, before the repository goes)
+ValidationCleanupShared() {
+  local dir;
+  for dir in "${THEJOB_OUT_PATH}"/validation-*/; do
+    [ -d "${dir}validation" ] || continue;
+    ( cd "${dir}" && ValidationCleanup );
+  done
+  return 0;
+}
+
 PrepareValidation() {
   [ -s ./.unsupported ] && return 0;
   [ "${VALIDATION:-on}" == off ] && return 0;

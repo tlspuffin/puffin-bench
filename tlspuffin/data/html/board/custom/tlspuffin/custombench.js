@@ -178,7 +178,10 @@ export class CustomBenchmark {
       const config = job?.config ? await read(job.config) : null;
       if (!config?.configurations) continue;
       const name = names[job.value] ?? job.value;
-      const run = (config.flow ?? []).find(Array.isArray)?.find(step => Array.isArray(step?.run))?.configuration ?? {};
+      // (the group of the experiment's attempts: the flow also has groups run once per experiment, PrepareValidationOnce)
+      const attempts = (config.flow ?? []).filter(Array.isArray)
+        .find(group => group.some(step => ['ExperimentWithCargo', 'Experiment', 'TwinExperiment'].includes(step?.step)));
+      const run = attempts?.find(step => Array.isArray(step?.run))?.configuration ?? {};
       const experiments = Object.entries(config.configurations).filter(([, c]) => c?.args?.target_bug && c.args.vendor)
         .map(([experiment, c]) => ({ name: `${name}_${experiment}`, bug: c.args.target_bug, preset: String(c.args.vendor).split(':')[1] }));
       if (!experiments.length) continue;

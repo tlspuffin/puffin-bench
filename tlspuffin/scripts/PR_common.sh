@@ -1912,6 +1912,8 @@ Clean() {
 
 CleanAllRepo() {
   ipcrm --all
+  # the checkouts of the validations prepared once per configuration (their worktrees are in the repository)
+  declare -F ValidationCleanupShared > /dev/null && ValidationCleanupShared;
   rm -rf "${THEJOB_OUT_PATH}/repo*"
 }
 

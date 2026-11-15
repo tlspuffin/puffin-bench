@@ -64,6 +64,21 @@
         "run": [],
         "configuration": {
           "nb_cores": 4,
+          "nb_retry": 1
+        }
+      },
+      {
+        "step": "PrepareValidationOnce",
+        "configuration": {
+          "nb_cores": 4
+        }
+      }
+    ],
+    [
+      {
+        "run": [],
+        "configuration": {
+          "nb_cores": 4,
           "nb_retry": 5
         },
         "streams": [

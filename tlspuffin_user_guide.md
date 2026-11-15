@@ -480,7 +480,9 @@ bug's verdict on the pages is its strongest part; the words and badges are in [W
    the run's library at the run's commit, with ASan, once with every patch (F) and once per patched bug X with all but
    X's patch (V_X). They are made once: the libraries of a set in a folder shared by the tasks
    (`data/validation-libs/`, named after what they are made from; a folder unused for 30 days goes), the binary in the
-   scheduler's cache per the sources it is built from.
+   scheduler's cache per the sources it is built from. Vuln group A and B and custom benchmarks prepare them once per
+   experiment, before its attempts (`PrepareValidationOnce`: the experiments of a task in parallel), and every attempt
+   uses that one, with the controls it ran.
 3. **The controls.** Each X's witness runs first on V_X (it must fail with X's signature) and on F (it must not): when it
    does not behave, the verdicts it can have made false have none ("○ no verdict: could not validate"): those naming X,
    and, when X's witness gives X's signature on F (F still has X), those of an objective with X's signature on F; the
