@@ -49,6 +49,7 @@ Run testFilePath "${build}/publisher/testFilePath"
 Run testCpuTopology "${build}/scheduler/testCpuTopology"
 Run testCpuset "${build}/scheduler/testCpuset"
 Run history_cancelled_test bash "${bench}/scheduler/tests/history_cancelled_test.sh" "${build}/scheduler/scheduler"
+Run duration_history_test bash "${bench}/scheduler/tests/duration_history_test.sh" "${build}/scheduler/scheduler"
 Run per_commit_cache_test bash "${bench}/git_restapi/tests/per_commit_cache_test.sh" "${build}/git_restapi/git_restapi"
 
 # the job scripts and the pages

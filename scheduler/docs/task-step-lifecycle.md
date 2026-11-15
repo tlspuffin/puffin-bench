@@ -472,10 +472,14 @@ the steps that finished.
 
 - A kind of step is its task `job_type`, its step name and a digest of its arguments (the `args` of its
   configuration, after the overrides; independent of their order): `perf|ExperimentWithCargo|9f2c4e1a…`.
-  The last 60 finished runs of each are kept (Done, failed or timed out; cancelled steps and launch errors
-  are ignored) with their duration, their duration context, their number of cores and whether they timed
-  out, in `<exportPath>/duration_history.json`. On a start without that file, they are learned from
-  `steps_done.json` (whose entries carry the task's `duration_context`; older entries have none).
+  The last 60 runs of each that ended (exit status 0) or timed out are kept with their duration, their
+  duration context, their number of cores and whether they timed out, in `<exportPath>/duration_history.json`
+  (`"#format": 2`). A failed run is not one of them: its duration says nothing of a run of that step (a
+  campaign whose build failed ended its experiments in a minute, and the next campaign of that configuration,
+  running for 5 hours, was "ending in 1 min" for its whole run); nor are cancelled steps and launch errors. On a
+  start without that file, or with a former format (failed runs among its samples), they are learned from
+  `steps_done.json` (its states and exit codes; its entries carry the task's `duration_context`, older entries
+  have none).
 - The **duration context** of a task says which runs are expected to last the same. It comes from the
   job's top-level `duration_context`, resolved against the task's arguments (`"${COMMIT_ID}"`: the runs
   of the same commit; tlspuffin's jobs use it), stored as its MD5. `""` means none. Without the key, it
