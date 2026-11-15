@@ -1296,9 +1296,11 @@ export class JobLauncher {
   // ── Vendor presets ────────────────────────────────────────────────────────
   // The picker: library (of the protocol of the package: TLS or SSH) → version → variant (plain, asan, perf, CVE
   // presets…), from puffin-build/vendors/*/presets.toml at the chosen commit. A vendor typed by hand that is not a
-  // preset there is flagged. ASAN: an ASAN preset gets the asan feature (needed before tlspuffin 854dbaa11,
-  // 2024-10-03, which links the ASAN runtime only with it; harmless after); the asan feature with a non-ASAN preset
-  // is flagged (before that commit it links the ASAN runtime against a library built without ASAN).
+  // preset there is flagged. ASAN: an ASAN preset gets the asan feature on a commit without tlspuffin 854dbaa11
+  // (2024-10-03), which links the ASAN runtime only with it; not on a commit with it: the runtime comes with the
+  // preset, and tlspuffin 838bd9588 has no cargo features any more (the job scripts drop an asan feature such a commit
+  // does not have). The asan feature with a non-ASAN preset is flagged (before 854dbaa11 it links the ASAN runtime
+  // against a library built without ASAN).
 
   static #ASAN_LINK_DATE = '2024-10-03';
   // protocol of a vendor from its name (libssh, wolfssh…: SSH; OPC UA vendors of other branches apart; the others:
@@ -1498,12 +1500,21 @@ export class JobLauncher {
     }
   }
 
-  // byPicker: chosen in the picker (adds the asan feature for an ASAN preset); typed: only the note
+  // whether an ASAN preset needs the asan feature at the commit: true without tlspuffin 854dbaa11 (git_restapi's
+  // asan_link, else the commit's date), false with it, null when neither tells
+  #asanFeatureNeeded() {
+    const data = this.#presetsData;
+    const date = this.#selectedCommit?.date ?? null;
+    return typeof data?.asan_link === 'boolean' ? !data.asan_link : date ? date < JobLauncher.#ASAN_LINK_DATE : null;
+  }
+
+  // byPicker: chosen in the picker (adds the asan feature for an ASAN preset where the commit needs it); typed: only
+  // the note
   #onVendorChange(byPicker) {
     const preset = this.#currentPreset();
     const asanName = /-asan(-|$)/.test(this.#vendorListInput.value.trim());
     if (byPicker) this.#asanRemoved = false;
-    if (byPicker && (preset?.asan ?? asanName) && !this.#features().includes('asan')) {
+    if (byPicker && (preset?.asan ?? asanName) && this.#asanFeatureNeeded() !== false && !this.#features().includes('asan')) {
       this.#featuresInput.value = [...this.#features(), 'asan'].join(',');
     }
     if (!byPicker) this.#presetLib = null;  // the picker follows a vendor typed by hand
@@ -1522,10 +1533,8 @@ export class JobLauncher {
       notes.push(`⚠ <b>${value.replace(/</g, '&lt;')}</b> is not a preset at ${sha.slice(0, 7)}: the build will fail. `
                + 'See ＋ presets of this commit.');
     }
-    // the commit contains tlspuffin 854dbaa11 (git_restapi: asan_link), else its date when unknown
-    const date = this.#selectedCommit?.date ?? null;
-    const before = typeof data?.asan_link === 'boolean' ? !data.asan_link
-                 : date ? date < JobLauncher.#ASAN_LINK_DATE : null;
+    // the commit lacks tlspuffin 854dbaa11 (git_restapi: asan_link), else its date when unknown
+    const before = this.#asanFeatureNeeded();
     const when = before === null ? 'on a commit without tlspuffin 854dbaa11 (2024-10-03)'
                : before ? 'at this commit (without tlspuffin 854dbaa11, 2024-10-03)' : null;
     const preset = this.#currentPreset();

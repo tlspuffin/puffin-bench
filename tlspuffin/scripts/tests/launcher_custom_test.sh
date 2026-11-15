@@ -13,7 +13,10 @@
 #   - the panel asks for a commit first; then the saved benchmarks, the launcher's timeout, attempts and cores, its CPU
 #     sharing, the bugs (those without witness hidden by default); the timeout goes back to its place for other jobs;
 #   - Vuln group A and B are built-in benchmarks (their configurations: bugs, presets as they are, attempts, cores,
-#     timeout), listed first, never removed, their names not saved over.
+#     timeout), listed first, never removed, their names not saved over;
+#   - a campaign's latest-asan gets the asan cargo feature only at a commit without tlspuffin 854dbaa11 (git_restapi's
+#     asan_link false): at a commit with it, the ASAN runtime comes with the preset (tlspuffin 838bd9588 has no such
+#     feature: the build failed).
 # The scheduler's health check is left out (board/health.js: a stub).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -44,6 +47,7 @@ cat >> "${work}/html/test.html" <<'EOF'
 const out = document.getElementById('out');
 let fail = 0;
 const check = (ok, what) => { out.textContent += `${ok ? 'ok  ' : 'FAIL'} ${what}\n`; if (!ok) fail = 1; };
+const LINKED = { ['a'.repeat(40)]: true, ['b'.repeat(40)]: false };
 const store = {
   VulnT: { saved_at: Date.now(), definition: { name: 'VulnT', description: 'saved with everything', others: 'patched',
     catalogue: { source: 'commit', commit: SHA }, attempts: 2, cores: 7, timeout: { d: 0, h: 1, m: 5 }, smt: 'one',
@@ -59,6 +63,11 @@ window.fetch = async (url, options = {}) => {
   let m;
   if (url.includes('/api/git/history/')) return realFetch('/git/history.json');
   if (url.includes(`/api/git/presets/tlspuffin/${SHA}`)) return realFetch('/git/presets.json');
+  // two commits of the campaign case, with and without tlspuffin 854dbaa11 (asan_link), the presets of SHA otherwise
+  if ((m = /\/api\/git\/presets\/tlspuffin\/([0-9a-f]{40})$/.exec(url)) && m[1] in LINKED) {
+    const presets = await (await realFetch('/git/presets.json')).json();
+    return json(200, { ...presets, commit: m[1], asan_link: LINKED[m[1]] });
+  }
   if (url.includes(`/api/git/catalogue/tlspuffin/${SHA}`)) return realFetch('/git/catalogue.json');
   if (url.includes('/api/git/catalogue/tlspuffin/dev')) return json(200, { commit: '0'.repeat(40), format: 'none' });
   if (url.endsWith('/api/benchmarks/tlspuffin')) return json(200, { success: true, data: structuredClone(store) });
@@ -203,6 +212,18 @@ try {
   const ended = launcher.describeMonitor({ id: 16, job_type: 'vuln-custom', steps: { s: { state: 'TimedOut' } } }, json);
   check(/objectives\/live-16\.html/.test(running.summary) && /objectives\/16\.html/.test(ended.summary) && !/live-16/.test(ended.summary),
     'the objectives chip: the live page while the task runs, its final report once it ended');
+  // a campaign on latest-asan: the asan cargo feature only where the commit lacks tlspuffin 854dbaa11
+  for (const [commit, link] of Object.entries(LINKED)) {
+    launcher.close();
+    launcher.open({ jobType: 'campaign', commit });
+    await until(() => !!$('.jl-preset-btn'));
+    $('.jl-preset-btn').click();
+    const latest = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent)));
+    latest?.click(); await settle();
+    const features = document.querySelector('.jl-features-row input, input[placeholder^="e.g. introspection"]')?.value ?? '';
+    check(!!latest && /:latest-asan$/.test($('.jl-vendor-line input')?.value ?? '') && features.split(/[\s,]+/).includes('asan') === !link,
+      `a campaign on latest-asan at a commit ${link ? 'with' : 'without'} tlspuffin 854dbaa11: ${link ? 'no' : 'the'} asan feature (features "${features}")`);
+  }
 } catch (err) {
   check(false, `error: ${err.stack ?? err}`);
 }

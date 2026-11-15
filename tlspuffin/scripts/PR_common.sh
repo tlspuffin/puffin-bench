@@ -226,6 +226,17 @@ ComputeBuildRuntimeInfo() {
   if [ -n "${required_features}" ]; then
     ref_features="${required_features},${ref_features}"
   fi
+  # the asan cargo feature of an ASAN preset (the launcher gave it for the commits before tlspuffin 854dbaa11, which
+  # link the ASAN runtime only with it): tlspuffin 838bd9588 has no cargo features any more; at a commit without it, the
+  # ASAN preset builds and links ASAN itself, so the feature is dropped, said (else no ASAN build of a recent commit)
+  if [[ ",${ref_features}," == *,asan,* && "${vendor#*:}" =~ (^|[-,])asan([-,]|$) ]] &&
+      ! grep -E -q "^[[:space:]]*asan[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/${package}/Cargo.toml"; then
+    local feature requested=() kept=();
+    IFS=',' read -r -a requested <<< "${ref_features}";
+    for feature in "${requested[@]}"; do [ "${feature}" == asan ] || kept+=("${feature}"); done
+    ref_features=$( IFS=','; echo "${kept[*]}" );
+    echo "asan: no such cargo feature at this commit; the preset ${vendor#*:} builds the library with ASAN: dropped";
+  fi
   for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
     grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/${package}/Cargo.toml" || {
       echo "Unsupported feature $i";

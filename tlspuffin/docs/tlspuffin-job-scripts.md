@@ -62,7 +62,7 @@ At least one of `vendor`/`features` must be non-empty — enforced by an `[ -z "
 
 1. If `vendor` is non-empty, `./tools/mk_vendor` exists in the repo, `puffin-build/vendors/<library>/presets.toml` has a `[<version>]` section for it, *and* (for `tlspuffin` specifically) the package's `Cargo.toml` declares a `cputs` feature → the C vendor is supported on this commit: `cputs=true`, and `features` is overwritten to the single literal feature `cputs` (the C build doesn't need a Rust feature per library version — `mk_vendor` handles that).
 2. Otherwise → `cputs=false`, and `features` is left as passed in — the Rust path.
-3. Either way, `required_features` is prepended to `features` afterwards, and every resulting feature name is checked against the package's `Cargo.toml` (`Unsupported feature $i` aborts the step if one doesn't exist).
+3. Either way, `required_features` is prepended to `features` afterwards, and every resulting feature name is checked against the package's `Cargo.toml` (`Unsupported feature $i` aborts the step if one doesn't exist). One exception: the `asan` feature of an ASAN preset (`<version>-asan…`) at a commit whose `Cargo.toml` has no such feature (tlspuffin 838bd9588 removed the cargo features) is dropped, said in the step's log: the preset builds and links ASAN itself (since tlspuffin 854dbaa11), and the launcher gave that feature to the ASAN presets of every commit until 2026-11-15.
 
 This lets the same `vendor`+`features` pair track TLS-library support as it's added to tlspuffin over its git history: old commits (no `cputs` Cargo feature yet) silently fall back to the Rust reimplementation + the matching CVE-fix feature flag; newer commits build against the real C library.
 
