@@ -23,7 +23,17 @@
 #     wolfssl584-asan, the library once), as written when the presets do not have its version;
 #   - the launcher shows a vendor short (its preset line, a task's settings), the vendor as written in their tooltip:
 #     wolfssl:wolfssl584-asan is wolfSSL · 5.8.4 · ASan, ASan as its preset has it (wolfssl540-heap); without its preset
-#     (a task launched before the launcher recorded it), as written: wolfssl:584,asan is wolfSSL · 584 · ASan.
+#     (a task launched before the launcher recorded it), as written: wolfssl:584,asan is wolfSSL · 584 · ASan;
+#   - a campaign's configuration is named after its build's slug, its bugs by their aliases (5.4.0,only-SDOS2:
+#     wolfssl540-asan-no-postauth-only-SDOS2; 5.4.0,no-asan,fix-all: wolfssl540-fix-all; gcov: no-sancov written);
+#   - at a commit with puffin-build's names of builds, the picker composes the build: a version gives its build with
+#     ASan (wolfssl:5.4.0,asan), ASan can be turned off; only <bug> by its alias (only-HEAP: the info line says what is
+#     patched), fix-all; a bug that needs an option sets it (SDOS2: no-postauth), the option turned back drops the bug's
+#     choice; the aliases of presets.toml say what they are (heap: 5.4.0 · ASan · only HEAP; sdos2: what it leaves), a
+#     modifier on an alias keeps it (wolfssl540-heap,gcov); a
+#     name typed by hand is read back, and what mk_vendor would refuse is said (no false "not a preset"); a preset, a
+#     comma, only-<bug> is shown with ASan as mk_vendor builds it, with dashes without; a bug named alone, launched,
+#     records its bug (the task page says "only HEAP").
 # The scheduler's health check is left out (board/health.js: a stub).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -36,6 +46,9 @@ trap '[ -n "${server}" ] && kill "${server}" 2> /dev/null; rm -rf "${work}"' EXI
 sha=$( git -C "${clone}" rev-parse "${commit}" )
 mkdir -p "${work}/html/board/custom/tlspuffin" "${work}/html/common" "${work}/git" "${work}/files/jobsscripts/tlspuffin"
 command cp -f "${bench}/tlspuffin/data/html/jobsscripts/tlspuffin/PR_vulnerabilities-group"[AB]"_cargo.json" "${work}/files/jobsscripts/tlspuffin/"
+# a campaign's job files, for a launch (the request is caught: the job script itself is not needed)
+command cp -f "${bench}/tlspuffin/data/html/jobsscripts/tlspuffin/"{PR_campaign.json,shell.nix,wolfssl_put.c.patch} "${work}/files/jobsscripts/tlspuffin/"
+echo '# the job script: not run here' > "${work}/files/jobsscripts/tlspuffin/PR_perf_full.sh"
 command cp -f "${bench}/tlspuffin/data/html/board/custom/tlspuffin/"*.{js,json,css} "${work}/html/board/custom/tlspuffin/"
 command cp -f "${bench}/tlspuffin/data/html/common/"*.js "${work}/html/common/"
 echo 'export async function CheckScheduler() { return {}; }' > "${work}/html/board/health.js"
@@ -64,6 +77,7 @@ const store = {
     catalogue: { source: 'commit', commit: SHA }, attempts: 1, cores: 2, experiments: [{ bug: 'CVE-2021-3336' }] } },
 };
 const realFetch = window.fetch.bind(window);
+const launched = [];
 window.fetch = async (url, options = {}) => {
   url = String(url);
   const method = options.method ?? 'GET';
@@ -82,6 +96,11 @@ window.fetch = async (url, options = {}) => {
   if ((m = /\/api\/benchmarks\/tlspuffin\/([A-Za-z0-9-]+)$/.exec(url)) && method === 'PUT') {
     store[m[1]] = { saved_at: Date.now(), definition: JSON.parse(options.body) };
     return json(200, { success: true });
+  }
+  // a launch: what the launcher records in the task (task.launcher.custom)
+  if (url.endsWith('/api/task/new') && method === 'POST') {
+    launched.push(JSON.parse(options.body.get('runtime[RUNTIME_LAUNCHER]')).custom);
+    return json(200, { success: true, task_id: '1' });
   }
   if (url.endsWith('/objectives/live.json')) return json(200, { tasks: [{ task: 11, level: 'new', new: 1 }, { task: 12, level: 'known' }] });
   if (url.endsWith('/custom/tlspuffin/task_links.json')) return json(200, { 13: [{ source: 'objectives_report', label: '🐞', count: 2, level: 'unexpected' }],
@@ -247,15 +266,24 @@ try {
   }
   // a campaign's configuration: its build's dashed name, however the vendor is written
   const { CampaignConfigurationName } = await import('./board/custom/tlspuffin/joblauncher.js');
-  const vendorsAtSha = (await (await realFetch('/git/presets.json')).json()).vendors;
+  const presetsAtSha = await (await realFetch('/git/presets.json')).json(), vendorsAtSha = presetsAtSha.vendors;
+  const catalogueAtSha = await (await realFetch('/git/catalogue.json')).json();
+  // the build's slug (as mk_vendor), its bugs by their aliases: what only-<bug> brings written (5.4.0,only-SDOS2), a
+  // no-<modifier> that restates a default not (5.4.0,no-asan,fix-all), gcov's no-sancov written; a bug alone its
+  // reference build; an alias with a modifier, the build it is
   const named = Object.entries({
     'wolfssl:584,asan': 'wolfssl584-asan', 'wolfssl:5.8.4,asan': 'wolfssl584-asan', 'wolfssl:584-asan': 'wolfssl584-asan',
     'wolfssl:wolfssl584-asan': 'wolfssl584-asan', 'openssl:341,asan': 'openssl341-asan', 'libressl:421,asan': 'libressl421-asan',
-    'boringssl:0.20260508.0,asan': 'boringssl20260508-asan', 'wolfssl:5.4.0,only-BUF': 'wolfssl540-only-BUF',
-    'wolfssl:9.9.9,asan': '9.9.9,asan', 'wolfssl540': 'wolfssl540',
-  }).map(([vendor, want]) => [vendor, CampaignConfigurationName(vendor, vendorsAtSha[vendor.split(':')[0]]), want]);
+    'boringssl:0.20260508.0,asan': 'boringssl20260508-asan', 'wolfssl:5.4.0,only-BUF': 'wolfssl540-asan-only-BUF',
+    'wolfssl:9.9.9,asan': '9.9.9,asan', 'wolfssl540': 'wolfssl540', 'wolfssl:5.4.0,asan,only-HEAP': 'wolfssl540-asan-only-HEAP',
+    'wolfssl:5.4.0,asan,no-postauth,only-SDOS2': 'wolfssl540-asan-no-postauth-only-SDOS2',
+    'wolfssl:5.4.0,only-SDOS2': 'wolfssl540-asan-no-postauth-only-SDOS2', 'wolfssl:5.4.0,no-asan,fix-all': 'wolfssl540-fix-all',
+    'wolfssl:5.4.0,gcov': 'wolfssl540-no-sancov-gcov', 'wolfssl:wolfssl540-heap,gcov': 'wolfssl540-asan-no-sancov-gcov-fix-BUF',
+    'wolfssl:HEAP': 'wolfssl540-asan-only-HEAP', 'wolfssl:wolfssl530-cdos,fix-BUF': 'wolfssl530-cdos',
+  }).map(([vendor, want]) => { const lib = vendor.split(':')[0]; return [vendor, CampaignConfigurationName(vendor, vendorsAtSha[lib],
+    presetsAtSha.modifiers?.[lib] ?? null, catalogueAtSha.vendors?.[lib]?.entries ?? null), want]; });
   check(named.every(([, got, want]) => got === want),
-    `a campaign's configuration named after its build (${named.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || '10 spellings'})`);
+    `a campaign's configuration named after its build (${named.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || `${named.length} spellings`})`);
   // a vendor shown short: from its preset at the commit, else as written
   const { VendorLabel } = await import('./board/custom/tlspuffin/joblauncher.js');
   const presetOf = vendor => vendorsAtSha[vendor.split(':')[0]]?.find(p => p.name === vendor.split(':')[1]) ?? null;
@@ -263,11 +291,18 @@ try {
     ...Object.entries({ 'wolfssl:wolfssl584-asan': 'wolfSSL · 5.8.4 · ASan', 'wolfssl:wolfssl540-heap': 'wolfSSL · 5.4.0 · heap · ASan',
       'wolfssl:wolfssl540-asan-perf': 'wolfSSL · 5.4.0 · perf · ASan', 'wolfssl:wolfssl540': 'wolfSSL · 5.4.0',
       'boringssl:boringssl20260508-asan': 'BoringSSL · 0.20260508.0 · ASan' }).map(([vendor, want]) => [vendor, presetOf(vendor), want]),
+    ['wolfssl:wolfssl540-heap,gcov', { version: '5.4.0', asan: true }, 'wolfSSL · 5.4.0 · heap · gcov · ASan'],
     ...Object.entries({ 'wolfssl:wolfssl584-asan': 'wolfSSL · 584 · ASan', 'wolfssl:584,asan': 'wolfSSL · 584 · ASan',
-      'wolfssl:latest-asan': 'wolfSSL · latest · ASan', 'wolfssl540': 'wolfssl540' }).map(([vendor, want]) => [vendor, null, want]),
+      'wolfssl:latest-asan': 'wolfSSL · latest · ASan', 'wolfssl540': 'wolfssl540',
+      'wolfssl:5.4.0,asan,only-HEAP': 'wolfSSL · 5.4.0 · only HEAP · ASan', 'wolfssl:5.4.0,asan,fix-all': 'wolfSSL · 5.4.0 · fix-all · ASan',
+      'wolfssl:5.4.0,asan,no-postauth,only-SDOS2': 'wolfSSL · 5.4.0 · postauth off · only SDOS2 · ASan',
+      'wolfssl:wolfssl540-asan-only-CVE-2022-42905': 'wolfSSL · 540 · only CVE-2022-42905 · ASan' }).map(([vendor, want]) => [vendor, null, want]),
+    // a bug named alone: its reference build, only that bug left, its name (not its ID cut at its dashes)
+    ['wolfssl:HEAP', { version: '5.4.0', asan: true, bug: 'HEAP' }, 'wolfSSL · 5.4.0 · only HEAP · ASan'],
+    ['wolfssl:CVE-2022-42905', { version: '5.4.0', asan: true, bug: 'HEAP' }, 'wolfSSL · 5.4.0 · only HEAP · ASan'],
   ].map(([vendor, preset, want]) => [vendor, VendorLabel(vendor, preset), want]);
   check(labels.every(([, got, want]) => got === want),
-    `a vendor shown short (${labels.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || '9 vendors'})`);
+    `a vendor shown short (${labels.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || `${labels.length} vendors`})`);
   const settingsRow = custom => launcher.describeSettings({ launcher: { custom }, args: [] }).find(r => r.label === 'vendor')?.html;
   const ran = settingsRow({ vendor: 'wolfssl:latest-asan', vendorResolved: 'wolfssl:wolfssl584-asan', vendorPreset: { version: '5.8.4', asan: true } });
   const older = settingsRow({ vendor: 'wolfssl:584,asan' });
@@ -282,6 +317,82 @@ try {
   const line = $('.jl-presets-info b');
   check(line?.textContent === 'BoringSSL · 0.20260508.0 · ASan' && line.title === 'boringssl:latest-asan → boringssl:boringssl20260508-asan'
     && line.parentElement.textContent.includes('(latest release)'), `the preset line: the vendor shown short, as written in its tooltip (${line?.parentElement.textContent}; ${line?.title})`);
+  // the picker of builds, at a commit with puffin-build's names (the commit under test)
+  launcher.close();
+  launcher.open({ jobType: 'campaign', commit: SHA });
+  await until(() => !!$('.jl-preset-btn'));
+  $('.jl-preset-btn').click();
+  const chipOf = text => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === text);
+  const field = () => $('.jl-vendor-line input')?.value ?? '';
+  const info = () => $('.jl-presets-info')?.textContent ?? '';
+  (await until(() => chipOf('wolfSSL')))?.click(); await settle();
+  (await until(() => chipOf('5.4.0')))?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan' && chipOf('ASan')?.classList.contains('on'),
+    `the picker of builds: a version gives its build with ASan, in puffin-build's short form (${field()})`);
+  chipOf('ASan')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0' && /no ASan/.test(info()), `ASan can be turned off (${field()}; ${info()})`);
+  chipOf('ASan')?.click(); await settle();
+  (await until(() => chipOf('only HEAP')))?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan,only-HEAP' && info().includes('only HEAP · ASan') && /patched: BUF/.test(info()),
+    `only one known bug, by its alias: the others with a patch patched, said (${field()}; ${info()})`);
+  chipOf('fix-all')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan,fix-all' && /patched: BUF, HEAP|patched: HEAP, BUF/.test(info()), `fix-all (${field()}; ${info()})`);
+  chipOf('only SDOS2')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan,no-postauth,only-SDOS2' && !chipOf('postauth')?.classList.contains('on'),
+    `a bug that needs an option (SDOS2: postauth off): the option set (${field()})`);
+  chipOf('postauth')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan' && chipOf('as released')?.classList.contains('on'),
+    `that option turned back: the bug's choice dropped (${field()})`);
+  const heap = chipOf('heap 5.4.0'), sdos2 = chipOf('sdos2 5.4.0');
+  check(!!heap && heap.title.includes('the build 5.4.0 · ASan · only HEAP'), `an alias: what it is (${heap?.title})`);
+  check(!!sdos2 && !sdos2.title.includes('the build') && /left: .*HEAP/.test(sdos2.title),
+    `an alias that is not only its own bug: what it leaves (${sdos2?.title})`);
+  heap?.click(); await settle();
+  check(field() === 'wolfssl:wolfssl540-heap' && chipOf('heap 5.4.0')?.classList.contains('on'), `an alias picked: its name (${field()})`);
+  chipOf('gcov')?.click(); await settle();
+  check(field() === 'wolfssl:wolfssl540-heap,gcov' && chipOf('heap 5.4.0')?.classList.contains('on') && info().includes('heap · gcov')
+    && /patched: BUF/.test(info()), `a modifier on an alias: the alias with it, its patch kept (${field()}; ${info()})`);
+  check(!chipOf('sancov')?.classList.contains('on') && /gcov implies no-sancov/.test(chipOf('sancov')?.title ?? ''),
+    `gcov on: sancov shown off, as mk_vendor builds it, and why (${chipOf('sancov')?.title})`);
+  // a name typed by hand: read back; what mk_vendor would refuse, said
+  const typed = async value => {
+    const input = $('.jl-vendor-line input'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+    return $('.jl-vendor-note')?.textContent ?? '';
+  };
+  const good = await typed('wolfssl:584,asan');
+  check(!good.includes('⚠') && chipOf('5.8.4')?.classList.contains('on') && chipOf('ASan')?.classList.contains('on'),
+    `a good name typed (wolfssl:584,asan): read back (5.8.4, ASan), no warning (${good})`);
+  const bad = await typed('wolfssl:5.8.4,asaan');
+  check(bad.includes('⚠') && /asaan: not a modifier/.test(bad) && !/is not a preset/.test(bad), `a name mk_vendor would refuse: what is wrong said (${bad})`);
+  // as mk_vendor reads names: a bug alone is its reference build; a version written otherwise is that version; a bug
+  // that is not in the build is refused, and why
+  const alone = await typed('wolfssl:HEAP'), aloneInfo = info(), byId = (await typed('wolfssl:CVE-2022-42905'), info());
+  check(!alone.includes('⚠') && aloneInfo.startsWith('wolfSSL · 5.4.0 · only HEAP · ASan')
+    && byId.startsWith('wolfSSL · 5.4.0 · only HEAP · ASan'),
+    `a bug named alone: no warning, its reference build said (${alone}; ${aloneInfo}; ${byId})`);
+  const absent = await typed('wolfssl:5.4.0,only-CDOS');
+  check(absent.includes('⚠') && /does not affect 5\.4\.0/.test(absent),
+    `a bug not in the build: refused, why said (${absent})`);
+  const written = await typed('openssl:3.4');
+  check(!written.includes('⚠'), `a version written otherwise (openssl:3.4, 3.4.0): no warning (${written})`);
+  // what only-<bug> brings, as mk_vendor builds it: after a preset and a comma, what the bug needs, ASan
+  // (wolfssl540,only-HEAP is wolfssl540-asan-only-CVE-2022-42905); after a preset and dashes, nothing (wolfssl540-only-HEAP:
+  // no ASan)
+  await typed('wolfssl:wolfssl540,only-HEAP');
+  const commaInfo = info(), commaAsan = !!chipOf('ASan')?.classList.contains('on');
+  await typed('wolfssl:wolfssl540-only-HEAP');
+  const dashedInfo = info(), dashedAsan = !!chipOf('ASan')?.classList.contains('on');
+  check(commaAsan && commaInfo.includes('only HEAP · ASan') && !/no ASan/.test(commaInfo) && !dashedAsan,
+    `a preset, a comma, only-<bug>: with ASan, as mk_vendor builds it; with dashes, without (${commaInfo}; ${dashedInfo})`);
+  // a bug named alone, launched: the task records its bug, so its page says "only HEAP" (VendorLabel), not a plain 5.4.0
+  const user = [...document.querySelectorAll('input')].find(input => input.placeholder === 'your name');
+  user.value = 'tester'; user.dispatchEvent(new Event('input', { bubbles: true }));
+  await typed('wolfssl:HEAP');
+  $('.jl-launch-btn').click();
+  await until(() => launched.length > 0);
+  const recorded = launched[0]?.vendorPreset;
+  check(recorded?.bug === 'HEAP' && VendorLabel('wolfssl:HEAP', recorded) === 'wolfSSL · 5.4.0 · only HEAP · ASan',
+    `a bug named alone, launched: the task records its bug, its page says only HEAP (${JSON.stringify(recorded)}; launch: ${$('.jl-launch-btn').disabled ? 'disabled' : 'enabled'})`);
 } catch (err) {
   check(false, `error: ${err.stack ?? err}`);
 }

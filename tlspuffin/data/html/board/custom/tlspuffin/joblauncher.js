@@ -5,6 +5,8 @@ import { CheckScheduler } from '../../health.js'
 import { CustomBenchmark } from './custombench.js'
 import { LEVELS } from '../../../common/verdicts.js'
 import { esc, libraryName } from '../../../common/format.js'
+import { inRange, needsAsan, patchedAt } from '../../../common/catalogue.js'
+import { Versions, Compose, Contents, Parse, Needs, bugName, idOf, Slug } from '../../../common/buildname.js'
 
 // its style, once a launcher is created (the pages of the scheduler): the other pages that load the plugin (Results,
 // reports) keep their own look of the commit lines
@@ -30,7 +32,10 @@ export const helpTexts = {
   'tlspuffin.timeout':    'Maximum run time. The scheduler stops the run after this delay (Timed out).',
   'tlspuffin.campaignid': 'Campaign identifier, used in the task name. Letters, digits, _, @ and - only.',
   'tlspuffin.impl':       'C: vendor is a library:version pair (e.g. wolfssl:wolfssl540). Rust: vendor is a cargo feature (e.g. wolfssl540).',
-  'tlspuffin.vendor':     'Library under test. The suggestions depend on the package and Impl.',
+  'tlspuffin.vendor':     'Library under test. The suggestions depend on the package and Impl. ＋ presets of this commit: '
+                        + 'at a commit with puffin-build\'s names of builds (tlspuffin 2026-11-10 on), compose the build: its version, '
+                        + 'its modifiers (ASan on by default), and its known bugs as released, all patched (fix-all) or one alone (only <bug>). '
+                        + 'A name typed by hand is read as mk_vendor reads it: what it would refuse is said, and why.',
   'tlspuffin.features':   'Extra cargo features required for the build, comma-separated',
   'tlspuffin.parameters': 'Extra command-line flags passed to the fuzzer',
   'tlspuffin.attempts':   'Number of independent runs',
@@ -61,15 +66,25 @@ async function LoadObjectivesLevels() {
 LoadObjectivesLevels();
 setInterval(LoadObjectivesLevels, 60000);
 
-// The name of a campaign's configuration (its steps on the board, its row on Results): the dashed name puffin-build
-// gives its build (wolfssl584-asan), however the vendor is written (wolfssl:584,asan, wolfssl:5.8.4,asan,
-// wolfssl:584-asan, wolfssl:wolfssl584-asan): the library in it, once. presets: the vendor's presets at the commit
-// (git_restapi), whose builds of a version are named without modifier; a version as presets.toml writes it or without
-// its dots. A vendor without ':' (a Rust harness feature), or a version the presets do not have: as written after ':'.
-export function CampaignConfigurationName(vendor, presets) {
+// The name of a campaign's configuration (its steps on the board, its row on Results): the slug puffin-build gives its
+// build (buildname.js Slug, as mk_vendor list: wolfssl584-asan), however the vendor is written (wolfssl:584,asan,
+// wolfssl:5.8.4,asan, wolfssl:584-asan, wolfssl:wolfssl584-asan), with what it writes and the name does not
+// (5.4.0,only-SDOS2: wolfssl540-asan-no-postauth-only-SDOS2) and without what the name restates (5.4.0,no-asan,fix-all:
+// wolfssl540-fix-all; gcov: no-sancov written): one build, one row. The bugs of its catalogue part by their aliases
+// when they have one (only-HEAP, as the picker writes them). presets, modifiers, entries: the vendor's builds, its
+// [modifiers] and its catalogue entries at the commit (git_restapi). Without the slug (a commit without puffin-build's
+// names, a name it refuses, no catalogue): the dashed form of what is written, a version's build named without
+// modifier, a version as presets.toml writes it or without its dots. A vendor without ':' (a Rust harness feature), or a
+// version the presets do not have: as written after ':'.
+export function CampaignConfigurationName(vendor, presets, modifiers = null, entries = null) {
   const colon = vendor.indexOf(':');
   if (colon < 0) return vendor;
   const build = vendor.slice(colon + 1);
+  const slug = modifiers && entries ? Slug(build, { presets, modifiers, entries }) : null;
+  if (slug) {
+    return slug.replace(/-(only|fix)-(?!all$)(.+)$/,
+        (_, kind, ids) => `-${kind}-${ids.split('+').map(id => bugName(id, entries[id])).join('+')}`);
+  }
   const names = new Set((presets ?? []).map(p => p.name));
   if (names.has(build)) return build;
   const [first] = build.split(build.includes(',') ? ',' : '-');
@@ -81,21 +96,33 @@ export function CampaignConfigurationName(vendor, presets) {
 }
 
 // A vendor as the launcher shows it (its preset line, a task's settings): wolfssl:wolfssl584-asan is "wolfSSL · 5.8.4
-// · ASan". The library's name, the version, the rest of the build's name (perf, a custom library's heap…), then ASan.
-// preset: the vendor's preset at the commit ({ version, asan }): its version as presets.toml writes it, ASan when it
-// has it (wolfssl540-heap does, its name does not say so); without it, both as the vendor writes them (584,asan: 584).
-// Only the display: the field, the task's arguments and the label's tooltip keep the vendor as written. A vendor
-// without ':' (a Rust harness feature): as written.
+// · ASan", wolfssl:5.4.0,asan,only-HEAP "wolfSSL · 5.4.0 · only HEAP · ASan". The library's name, the version, the rest
+// of the build's name (perf, a custom library's heap, postauth off…), its catalogue part (only <bugs>, fix <bugs>,
+// fix-all: whole, its IDs have dashes), then ASan. preset: the vendor's build at the commit ({ version, asan }): its
+// version as presets.toml writes it, ASan when it has it (wolfssl540-heap does, its name does not say so); without it,
+// both as the vendor writes them (584,asan: 584). A bug named alone (wolfssl:HEAP, wolfssl:CVE-2022-42905: its
+// reference build, only that bug left) with preset.bug, its name: "wolfSSL · 5.4.0 · only HEAP · ASan". Only the
+// display: the field, the task's arguments and the label's tooltip keep the vendor as written. A vendor without ':' (a
+// Rust harness feature): as written.
 export function VendorLabel(vendor, preset = null) {
   const colon = vendor.indexOf(':');
   if (colon < 0) return vendor;
   const lib = vendor.slice(0, colon);
   const build = vendor.slice(colon + 1);
-  const [first, ...rest] = build.split(build.includes(',') ? ',' : '-');
+  if (preset?.bug) {
+    return [libraryName(lib), preset.version, `only ${preset.bug}`, preset.asan ? 'ASan' : ''].filter(Boolean).join(' · ');
+  }
+  const catalogue = /(?:^|[-,])((?:only|fix)-.+)$/.exec(build);
+  const head = catalogue ? build.slice(0, catalogue.index) : build;
+  let [first, ...rest] = head.split(build.includes(',') ? ',' : '-');
+  // the short form with a preset's name in the version's place (wolfssl540-heap,gcov): that preset's own name kept
+  if (build.includes(',') && first.includes('-')) [first, ...rest] = [...first.split('-'), ...rest];
   const version = preset?.version || (first.startsWith(lib) && first.length > lib.length ? first.slice(lib.length) : first);
   const asan = preset ? !!preset.asan : rest.includes('asan');
-  return [libraryName(lib), version, ...rest.filter(part => !['asan', 'plain'].includes(part)), asan ? 'ASan' : '']
-    .filter(Boolean).join(' · ');
+  const parts = rest.filter(part => part && !['asan', 'no-asan', 'plain'].includes(part))
+      .map(part => part.startsWith('no-') ? `${part.slice(3)} off` : part);
+  if (catalogue) parts.push(catalogue[1] === 'fix-all' ? 'fix-all' : catalogue[1].replace(/^(only|fix)-/, '$1 '));
+  return [libraryName(lib), version, ...parts, asan ? 'ASan' : ''].filter(Boolean).join(' · ');
 }
 
 export class JobLauncher {
@@ -145,6 +172,10 @@ export class JobLauncher {
   #presetBtn       = null;
   #presetPanel     = null;
   #presetLib       = null;
+  // the catalogue of the commit (git_restapi /api/git/catalogue), for the picker's known bugs at a commit whose
+  // mk_vendor builds -only-/-fix-all (git_restapi's derived)
+  #catalogues      = new Map();   // full commit -> Promise of the catalogue (null: error)
+  #catalogueData   = null;        // that of the current commit, once loaded
   #vendorNote      = null;
   #asanRemoved     = false;       // the user removed the asan feature that the preset added
   #usernameInput  = null;
@@ -1382,9 +1413,10 @@ export class JobLauncher {
     if (this.#presetsFor === sha) return;
     this.#presetsFor = sha;
     this.#presetsData = null;
+    this.#catalogueData = null;
+    const origin = new URL(this.#config.commitsUrl).origin;
     if (!this.#presets.has(sha)) {
-      const url = `${new URL(this.#config.commitsUrl).origin}/api/git/presets/tlspuffin/${sha}`;
-      this.#presets.set(sha, fetch(url).then(r => r.ok ? r.json() : null).catch(() => null));
+      this.#presets.set(sha, fetch(`${origin}/api/git/presets/tlspuffin/${sha}`).then(r => r.ok ? r.json() : null).catch(() => null));
     }
     this.#renderPresetPanel();
     this.#presets.get(sha).then(data => {
@@ -1394,6 +1426,18 @@ export class JobLauncher {
       this.#updateVendorOptions();
       this.#renderPresetPanel();
       this.#updateVendorNote();
+      // the known bugs of the picker: the commit's catalogue, where its mk_vendor builds -only-/-fix-all
+      if (!data?.derived) return;
+      if (!this.#catalogues.has(sha)) {
+        this.#catalogues.set(sha, fetch(`${origin}/api/git/catalogue/tlspuffin/${sha}`).then(r => r.ok ? r.json() : null).catch(() => null));
+      }
+      this.#catalogues.get(sha).then(catalogue => {
+        if (this.#presetsFor !== sha) return;
+        if (!catalogue) this.#catalogues.delete(sha);  // retried next time
+        this.#catalogueData = catalogue ?? { error: true };
+        this.#renderPresetPanel();
+        this.#updateVendorNote();
+      });
     });
   }
 
@@ -1481,6 +1525,9 @@ export class JobLauncher {
         `${data.vendors[v].length} presets at this commit: ${data.vendors[v].map(p => p.name).join(', ')}`,
         () => { this.#presetLib = v; this.#renderPresetPanel(); })));
 
+    // a commit whose puffin-build has the names of builds: the picker of builds
+    if (data.names && Versions(data.vendors[lib] ?? []).length) return this.#renderComposer(panel, data, lib, row, chip);
+
     // a preset is a build modifier of a version (plain, asan, perf, asan-perf) or a custom library: a version with
     // its own modifications (CVE presets such as buf, heap, sdos2), listed apart
     const presets = data.vendors[lib] ?? [];
@@ -1541,6 +1588,202 @@ export class JobLauncher {
     }
   }
 
+  // ── The picker of builds ──────────────────────────────────────────────────────────────────────────────────────
+  // At a commit whose puffin-build has the names of builds (git_restapi's names: tlspuffin 54b07f490 on), a build is
+  // composed from its version, its modifiers (presets.toml's [modifiers]; ASan on by default) and a catalogue part (as
+  // released, fix-all, only <bug>, by its alias when it has one: where mk_vendor builds them, git_restapi's derived),
+  // and the field gets its name in puffin-build's short form (wolfssl:5.4.0,asan,only-HEAP: buildname.js, checked
+  // against mk_vendor). The aliases of presets.toml are listed apart, each with what it is. A name typed in the field is
+  // read back (Parse), so the picker shows it.
+
+  static #ASAN_DEFAULT = true;   // the picker's ASan when nothing says otherwise: campaigns fuzz with ASan
+
+  // what the picker shows of the vendor field for a library: { latest, alias, version, options, part, defaults }
+  // (version null: nothing chosen for it yet)
+  #composerState(lib, data) {
+    const presets = data.vendors?.[lib] ?? [];
+    const modifiers = data.modifiers?.[lib] ?? {};
+    const defaults = Object.fromEntries(Object.entries(modifiers).map(([m, d]) => [m, !!d.default]));
+    const fresh = { ...defaults, ...('asan' in modifiers ? { asan: JobLauncher.#ASAN_DEFAULT } : {}) };
+    const state = { latest: false, alias: null, version: null, options: fresh, part: null, defaults };
+    const value = this.#vendorListInput.value.trim();
+    const colon = value.indexOf(':');
+    if (colon < 0 || value.slice(0, colon) !== lib) return state;
+    const name = value.slice(colon + 1);
+    if (name === JobLauncher.#LATEST) {
+      const latest = JobLauncher.#latestAsan(presets, data.latest?.[lib]);
+      return { ...state, latest: true, version: latest?.version ?? null, options: { ...defaults, asan: true } };
+    }
+    const entries = this.#catalogueData?.vendors?.[lib]?.entries ?? null;
+    const parsed = Parse(name, { presets, modifiers, entries });
+    const preset = parsed.preset ? presets.find(p => p.name === parsed.preset) : null;
+    // a preset's own options (presets.toml: asan, sancov, postauth), those of the modifiers this vendor has
+    const ofPreset = preset ? Object.fromEntries(['asan', 'sancov', 'postauth'].filter(m => m in modifiers && m in preset)
+        .map(m => [m, !!preset[m]])) : {};
+    // an alias, with modifiers or not (wolfssl540-heap,gcov): the alias and its own options, those written over them
+    // gcov implies no-sancov (a gcov build measures coverage, it is not fuzzed): sancov shown off, as built
+    const built = options => (options.gcov && 'sancov' in options ? { ...options, sancov: false } : options);
+    if (preset?.kind === 'alias' && !parsed.part) {
+      const aliasOptions = { ...defaults, ...ofPreset };
+      return { ...state, alias: preset.name, aliasOptions, version: preset.version, options: built({ ...aliasOptions, ...parsed.options }) };
+    }
+    // only-<bug> brings what the bug needs (its options, ASan), unless the name says otherwise, as Parse reads it
+    // (implies): not after a preset followed by modifiers in the form of slugs (wolfssl540-only-HEAP); after a preset
+    // and a comma, it does (wolfssl540,only-HEAP is built with ASan)
+    const bugs = parsed.part?.bugs ?? [];
+    const implied = parsed.implies ? Object.assign({}, ...bugs.map(id => Needs(entries?.[id]))) : {};
+    const part = !parsed.part ? null : parsed.part.kind === 'fix-all' ? { kind: 'fix-all' }
+        : { kind: parsed.part.kind, bug: bugs.map(id => bugName(id, entries?.[id])).join('+') || name.split(/[-,]only-|[-,]fix-/).pop() };
+    return { ...state, version: parsed.version, part, alone: parsed.alone,
+             options: built({ ...defaults, ...ofPreset, ...implied, ...parsed.options }) };
+  }
+
+  // the field from what the picker chose: <vendor>:latest-asan for the latest release as it is (resolved at launch),
+  // else the composed name, the version written out
+  #setComposed(lib, data, next) {
+    const asLatest = next.latest && !next.part
+        && Object.entries(next.options).every(([m, on]) => on === (m === 'asan' ? true : !!next.defaults[m]));
+    let value;
+    if (next.alias) value = `${lib}:${Compose({ version: next.alias, modifiers: next.options, defaults: next.aliasOptions ?? next.options })}`;
+    else if (asLatest) value = `${lib}:${JobLauncher.#LATEST}`;
+    else if (next.version) value = `${lib}:${Compose({ version: next.version, modifiers: next.options, defaults: next.defaults, part: next.part })}`;
+    else return;
+    this.#vendorListInput.value = value;
+    this.#onVendorChange(true);
+    this.#validate();
+    this.#renderPresetPanel();
+  }
+
+  // bugs by their names, each "(no patch here)" when it has none at that version
+  static #bugNames(ids, entries, version) {
+    return ids.map(id => bugName(id, entries[id]) + (patchedAt(entries[id], version) ? '' : ' (no patch here)')).join(', ');
+  }
+
+  #renderComposer(panel, data, lib, row, chip) {
+    const presets = data.vendors?.[lib] ?? [];
+    const modifiers = data.modifiers?.[lib] ?? {};
+    const entries = data.derived ? (this.#catalogueData?.vendors?.[lib]?.entries ?? null) : null;
+    const state = this.#composerState(lib, data);
+    const set = change => this.#setComposed(lib, data, { ...state, alias: null, ...change });
+    const latest = JobLauncher.#latestAsan(presets, data.latest?.[lib]);
+    // a catalogue part kept on another version only where its bug is
+    const keepPart = version => state.part?.kind === 'only' && entries
+        && !String(state.part.bug).split('+').every(b => { const id = idOf(b, entries); return id && inRange(entries[id].affected ?? '', version); })
+        ? null : state.part;
+
+    row('Version', [
+      ...(latest ? [chip(`latest-asan · ${latest.version}`, state.latest,
+        `${lib}:latest-asan, the newest release of ${libraryName(lib)} at the commit, with ASan (here ${latest.name}); `
+        + 'resolved at launch, so a relaunch on another commit takes its latest. The default for fuzzing the latest '
+        + 'version. Another modifier or a known bug choice writes the version out.',
+        () => set({ latest: true, version: latest.version, options: { ...state.defaults, asan: true }, part: null }), 'latest')] : []),
+      ...Versions(presets).map(v => chip(v.version, !state.latest && state.version === v.version, `${v.version} (${v.name})`,
+        () => set({ latest: false, version: v.version, part: keepPart(v.version) })))]);
+    if (!state.version) return this.#renderComposerInfo(panel, lib, data, state, entries);
+
+    // the modifiers, each a toggle; one a catalogue part needs, turned the other way, drops that part
+    if (Object.keys(modifiers).length) {
+      const partNeeds = state.part?.kind === 'only' && entries
+          ? Object.assign({}, ...String(state.part.bug).split('+').map(b => entries[idOf(b, entries)]?.requires ?? {})) : {};
+      row('Build', Object.entries(modifiers).map(([m, d]) => chip(m === 'asan' ? 'ASan' : m, !!state.options[m],
+          `${m}: ${d.doc || '(no doc)'}; ${d.default ? 'on' : 'off'} by default${m === 'asan' ? ', on in this picker' : ''}`
+          + (m === 'sancov' && state.options.gcov ? ' (off here: gcov implies no-sancov, a gcov build is not fuzzed; turn gcov off first)'
+             : ` (${state.options[m] ? 'on' : 'off'} here: click to turn it ${state.options[m] ? 'off' : 'on'})`),
+          () => {
+            const options = { ...state.options, [m]: !state.options[m] };
+            // on an alias: the alias with that modifier (wolfssl540-heap,gcov); else the composed build
+            if (state.alias) this.#setComposed(lib, data, { ...state, options });
+            else set({ options, part: m in partNeeds && partNeeds[m] !== options[m] ? null : state.part });
+          }, m === 'asan' && state.options[m] ? 'asan' : '')));
+    }
+
+    // the known bugs of the version (the commit's catalogue), where mk_vendor builds -only-/-fix-all
+    if (data.derived && !entries) {
+      const wait = this.#el('div', 'jl-presets-status');
+      wait.textContent = this.#catalogueData === null ? 'Loading the catalogue of this commit (its known bugs)…'
+          : this.#catalogueData.error ? 'The catalogue could not be read (git_restapi): no known bug to choose.'
+          : `No catalogue for ${libraryName(lib)} at this commit: no known bug to choose.`;
+      panel.appendChild(wait);
+    }
+    if (entries) {
+      const version = state.version;
+      const ids = Object.entries(entries).filter(([, e]) => e.affected && inRange(e.affected, version)).map(([id]) => id);
+      const asIs = Contents({ version, options: state.options, fix: [] }, entries);
+      const allFixed = Contents({ version, options: state.options, fix: [], part: { kind: 'fix-all' } }, entries);
+      const onlyOn = id => !state.alias && state.part?.kind === 'only' && idOf(state.part.bug, entries) === id;
+      row('Bugs', [
+        chip('as released', !state.alias && !state.part,
+          `every known bug of ${version} in it${asIs.present.length ? ': ' + JobLauncher.#bugNames(asIs.present, entries, version) : ' (none in the catalogue)'}`,
+          () => set({ part: null })),
+        chip('fix-all', !state.alias && state.part?.kind === 'fix-all',
+          `every known bug that has a patch at ${version} patched${allFixed.patched.length ? ': ' + JobLauncher.#bugNames(allFixed.patched, entries, version) : ' (none has one)'}`
+          + `; left: ${allFixed.left.length ? JobLauncher.#bugNames(allFixed.left, entries, version) : 'none'}`,
+          () => set({ part: { kind: 'fix-all' } })),
+        ...ids.map(id => {
+          const e = entries[id], needs = Needs(e), name = bugName(id, e);
+          const requires = Object.entries(e.requires ?? {}).map(([o, v]) => `${o} ${v ? 'on' : 'off'}`).join(', ');
+          return chip(`only ${name}`, onlyOn(id),
+            `${id}${e.alias ? ` (${e.alias})` : ''}${e.summary ? ': ' + e.summary : ''}. Every other known bug with a patch at ${version} patched`
+            + (patchedAt(e, version) ? '' : '; it has no patch of its own here')
+            + (requires ? `; needs ${requires} (set)` : '') + (needsAsan(e) ? '; only an ASan report shows it (ASan set)' : ''),
+            () => set({ part: { kind: 'only', bug: name }, options: { ...state.options, ...needs } }), needsAsan(e) ? 'cve asan' : 'cve');
+        })]);
+    }
+
+    // the aliases of presets.toml: named builds, each with what it is
+    const aliases = presets.filter(p => p.kind === 'alias')
+        .sort((a, b) => JobLauncher.#compareVersions(a.version, b.version) || a.name.localeCompare(b.name));
+    if (aliases.length) {
+      row('Named', aliases.map(p => chip(`${JobLauncher.#splitPreset(p.name).variant} ${p.version}`, state.alias === p.name,
+          this.#aliasTitle(p, modifiers, entries), () => {
+            const aliasOptions = Object.fromEntries(Object.keys(modifiers).map(m => [m, m in p ? !!p[m] : !!modifiers[m].default]));
+            set({ alias: p.name, aliasOptions, options: aliasOptions, part: null });
+          }, p.asan ? 'cve asan' : 'cve')));
+    }
+    this.#renderComposerInfo(panel, lib, data, state, entries);
+  }
+
+  // what an alias of presets.toml is: its definition, the build it equals when it is fix-all or only its own bug
+  // (wolfssl540-heap: 5.4.0 · ASan · only HEAP), else the bugs it leaves and patches (wolfssl540-sdos2 leaves HEAP too)
+  #aliasTitle(alias, modifiers, entries) {
+    const title = [`${alias.name} = ${alias.spec ?? '?'}`];
+    if (!entries) return title[0];
+    const options = Object.fromEntries(Object.keys(modifiers).map(m => [m, m in alias ? !!alias[m] : !!modifiers[m].default]));
+    const held = Contents({ version: alias.version, options, fix: alias.fix ?? [] }, entries);
+    const own = JobLauncher.#splitPreset(alias.name).variant.toLowerCase();
+    const same = (a, b) => a.length === b.length && a.every(x => b.includes(x));
+    const equal = [{ kind: 'fix-all' }, ...held.present.filter(id => bugName(id, entries[id]).toLowerCase() === own).map(id => ({ kind: 'only', bug: bugName(id, entries[id]) }))]
+        .find(part => same(Contents({ version: alias.version, options, fix: [], part }, entries).patched, alias.fix ?? []));
+    if (equal) title.push(`the build ${alias.version}${options.asan ? ' · ASan' : ''} · ${equal.kind === 'fix-all' ? 'fix-all' : 'only ' + equal.bug}`);
+    title.push(`left: ${held.left.length ? JobLauncher.#bugNames(held.left, entries, alias.version) : 'none'}`
+        + ` · patched: ${(alias.fix ?? []).map(id => bugName(id, entries[id])).join(', ') || 'none'}`);
+    return title.join('; ');
+  }
+
+  // the line under the picker: the build's label, the vendor as written in its tooltip, what it holds
+  #renderComposerInfo(panel, lib, data, state, entries) {
+    const value = this.#vendorListInput.value.trim();
+    if (!value.startsWith(`${lib}:`) || !state.version) return;
+    const presets = data.vendors?.[lib] ?? [];
+    const latest = state.latest ? JobLauncher.#latestAsan(presets, data.latest?.[lib]) : null;
+    const alias = state.alias ? presets.find(p => p.name === state.alias) : null;
+    const shown = latest ? `${lib}:${latest.name}` : value;
+    const info = this.#el('div', 'jl-presets-info');
+    let held = '';
+    if (entries) {
+      const contents = Contents({ version: state.version, options: state.options, fix: alias?.fix ?? [], part: alias ? null : state.part }, entries);
+      held = ` · bugs in it: ${contents.left.length ? JobLauncher.#bugNames(contents.left, entries, state.version) : 'none known'}`
+          + (contents.patched.length || alias?.fix?.length
+            ? ` · patched: ${(alias ? alias.fix : contents.patched).map(id => bugName(id, entries[id])).join(', ')}` : '');
+    }
+    info.innerHTML = `<b title="${esc(latest ? `${lib}:${JobLauncher.#LATEST} → ${shown}` : value)}">`
+      + `${esc(VendorLabel(shown, { version: state.version, asan: !!state.options.asan,
+                                     bug: state.alone ? state.part?.bug : null }))}</b>`
+      + `${latest ? ' (latest release)' : ''}`
+      + `${state.options.asan ? '' : ' · no ASan'}${esc(held)}`;
+    panel.appendChild(info);
+  }
+
   // whether an ASAN preset needs the asan feature at the commit: true without tlspuffin 854dbaa11 (git_restapi's
   // asan_link, else the commit's date), false with it, null when neither tells
   #asanFeatureNeeded() {
@@ -1563,6 +1806,21 @@ export class JobLauncher {
     this.#updateVendorNote();
   }
 
+  // the check of a vendor at a commit with the names of builds (Parse): { problems: what mk_vendor would refuse, none
+  // when it reads well; unchecked: what could not be checked, the commit's catalogue not loaded }
+  #nameCheck(value, data) {
+    const colon = value.indexOf(':');
+    const lib = colon < 0 ? value : value.slice(0, colon), name = colon < 0 ? '' : value.slice(colon + 1);
+    if (!data.vendors?.[lib]) {
+      const libraries = Object.keys(data.vendors ?? {}).join(', ');
+      return { problems: [`${lib}: not a library at this commit (${libraries})`], unchecked: [] };
+    }
+    if (name === JobLauncher.#LATEST) return { problems: [], unchecked: [] };
+    const { problems, unchecked } = Parse(name, { presets: data.vendors[lib], modifiers: data.modifiers?.[lib] ?? {},
+                                                  entries: this.#catalogueData?.vendors?.[lib]?.entries ?? null });
+    return { problems, unchecked };
+  }
+
   #updateVendorNote() {
     const note = this.#vendorNote;
     if (!note) return;
@@ -1570,9 +1828,20 @@ export class JobLauncher {
     const value = this.#vendorListInput.value.trim();
     const data = this.#presetsData;
     const sha = this.#commitSha();
+    // a name the commit's mk_vendor would refuse: where it has the names of builds, any name of them is good, and what
+    // is wrong is said (Parse); before, a vendor is one of the presets
+    const lib = value.split(':')[0];
+    const composed = this.#vendorImpl === 'c' && data?.names && data.vendors?.[lib] ? this.#composerState(lib, data) : null;
     if (this.#vendorImpl === 'c' && value && data?.format === 'presets.toml' && !this.#currentPreset()) {
-      notes.push(`⚠ <b>${value.replace(/</g, '&lt;')}</b> is not a preset at ${sha.slice(0, 7)}: the build will fail. `
-               + 'See ＋ presets of this commit.');
+      const check = data.names ? this.#nameCheck(value, data) : null;
+      if (check === null) {
+        notes.push(`⚠ <b>${esc(value)}</b> is not a preset at ${sha.slice(0, 7)}: the build will fail. See ＋ presets of this commit.`);
+      } else if (check.problems.length) {
+        notes.push(`⚠ <b>${esc(value)}</b>: ${check.problems.map(esc).join('; ')}. `
+                 + 'mk_vendor would refuse it: the build would fail. See ＋ presets of this commit.');
+      } else if (check.unchecked.length) {
+        notes.push(`⚠ <b>${esc(value)}</b>: ${check.unchecked.map(esc).join('; ')}.`);
+      }
     }
     // the commit lacks tlspuffin 854dbaa11 (git_restapi: asan_link), else its date when unknown
     const before = this.#asanFeatureNeeded();
@@ -1581,13 +1850,14 @@ export class JobLauncher {
     const preset = this.#currentPreset();
     // the presets of the commit known: only an existing preset counts (an unknown one is flagged above)
     const known = data?.format !== 'presets.toml';
-    const asanPreset = this.#vendorImpl === 'c' && (preset ? preset.asan : (known && /-asan(-|$)/.test(value)));
+    const asanPreset = this.#vendorImpl === 'c' && (preset ? preset.asan
+        : composed?.version ? !!composed.options.asan : (known && /-asan(-|$)/.test(value)));
     const asanFeature = this.#features().includes('asan');
     if (asanPreset && !asanFeature) {
       notes.push(when ? `⚠ ASAN preset without the <b>asan</b> feature: ${when} the ASAN runtime is then not linked.`
                       : '<span class="jl-note-ok">ASAN preset without the <b>asan</b> feature: fine at this commit (the runtime is linked from the preset).</span>');
     }
-    if (this.#vendorImpl === 'c' && value && asanFeature && !asanPreset && (preset || known)) {
+    if (this.#vendorImpl === 'c' && value && asanFeature && !asanPreset && (preset || known || composed?.version)) {
       notes.push(when ? `⚠ <b>asan</b> feature with a preset built without ASAN: ${when} the ASAN runtime is linked against a library that is not instrumented.`
                       : '<span class="jl-note-ok"><b>asan</b> feature with a preset built without ASAN: no effect at this commit.</span>');
     }
@@ -1731,6 +2001,10 @@ export class JobLauncher {
   // via the board's "New task..." restart button (task.launcher.custom).
   #captureCustom(commit, name) {
     const preset = this.#currentPreset();
+    // a build composed by the picker: its version and ASan as the picker reads its name
+    const lib = this.#vendorListInput.value.trim().split(':')[0];
+    const composed = !preset && this.#presetsData?.names && this.#presetsData.vendors?.[lib]
+        ? this.#composerState(lib, this.#presetsData) : null;
     return {
       jobType:    this.#selectedType,
       commit,
@@ -1739,7 +2013,10 @@ export class JobLauncher {
       vendorImpl: this.#vendorImpl,
       vendor:     this.#vendorListInput.value.trim(),
       vendorResolved: this.#resolvedVendor(),  // <vendor>:latest-asan: the preset it ran with
-      vendorPreset: preset ? { version: preset.version, asan: !!preset.asan } : null,  // for its label (VendorLabel)
+      // for its label (VendorLabel): a bug named alone with its bug (wolfssl:HEAP: "wolfSSL · 5.4.0 · only HEAP · ASan")
+      vendorPreset: preset ? { version: preset.version, asan: !!preset.asan }
+          : composed?.version ? { version: composed.version, asan: !!composed.options.asan,
+                                  ...(composed.alone && composed.part?.bug ? { bug: composed.part.bug } : {}) } : null,
       features:   this.#featuresInput.value.trim(),
       parameters: this.#parametersInput.value.trim(),
       campaignId: this.#campaignIdInput.value.trim(),
@@ -1823,7 +2100,9 @@ export class JobLauncher {
       }
       if (isCampaign) {
         // named after its build, however the vendor is written (CampaignConfigurationName)
-        const configName = vendor ? CampaignConfigurationName(vendor, this.#presetsData?.vendors?.[vendor.split(':')[0]]) : 'campaign';
+        const lib = vendor?.split(':')[0];
+        const configName = vendor ? CampaignConfigurationName(vendor, this.#presetsData?.vendors?.[lib],
+            this.#presetsData?.modifiers?.[lib] ?? null, this.#catalogueData?.vendors?.[lib]?.entries ?? null) : 'campaign';
         const conf = { args: {} };
         if (this.#vendorImpl === 'c'    && vendor)   conf.args.vendor             = vendor;
         if (this.#vendorImpl === 'rust' && vendor)   conf.args.features           = vendor;

@@ -33,15 +33,16 @@ export function Versions(presets) {
 // The name of a build from its parts: version (as presets.toml writes it), the modifiers chosen ({ asan: true, ... }),
 // the vendor's defaults ([modifiers]: { asan: false, ... }), a catalogue part ({ kind: 'only', bug: 'HEAP' } or
 // { kind: 'fix-all' }, or null). A modifier is written when it differs from its default; ASan always with a catalogue
-// part (only-<bug> would bring it).
+// part (only-<bug> would bring it); not sancov off with gcov (gcov implies it).
 export function Compose({ version, modifiers = {}, defaults = {}, part = null }) {
   const tokens = [];
   for (const [m, on] of Object.entries(modifiers)) {
+    if (m === 'sancov' && !on && modifiers.gcov) continue;
     const byDefault = !!defaults[m];
     if (on !== byDefault || (m === 'asan' && part)) tokens.push(on ? m : `no-${m}`);
   }
   if (part?.kind === 'fix-all') tokens.push('fix-all');
-  else if (part?.kind === 'only') tokens.push(`only-${part.bug}`);
+  else if (part?.kind) tokens.push(`${part.kind}-${part.bug}`);   // only-<bug>, or as typed: fix-<bugs>, only-<A+B>
   return [version, ...tokens].join(',');
 }
 
@@ -103,29 +104,36 @@ function ReferenceVersion(id, entry, presets, versions, defaults) {
   return withBug.map(p => p.version).sort((a, b) => compareVersions(b, a))[0] ?? null;
 }
 
+// mk_vendor's presets among git_restapi's builds: those of presets.toml, not the ones git_restapi derives, each version's
+// build with ASan (<its name>-asan: a name of puffin-build's grammar, no preset, so no start: wolfssl584-asan,gcov is
+// refused; dashed, wolfssl584-asan-gcov is wolfssl584 with asan and gcov, and wolfssl584-asan-no-asan says both).
+// → { names: Map of the presets by name, derived: Set of the derived names }
+function TomlPresets(presets) {
+  const plain = new Set((presets ?? []).filter(p => p.kind === 'version').map(p => p.name));
+  const derived = new Set((presets ?? []).filter(p => p.kind === 'version' && p.asan && p.name.endsWith('-asan')
+      && plain.has(p.name.slice(0, -'-asan'.length))).map(p => p.name));
+  return { derived, names: new Map((presets ?? []).filter(p => !derived.has(p.name)).map(p => [p.name, p])) };
+}
+
 // Parse a name (what follows "<vendor>:") against the vendor's builds at a commit, for the launcher's note on a name
 // typed by hand, as mk_vendor reads it: { version, preset, options, part, alone, problems, unchecked } (problems: what
 // mk_vendor would refuse, in words; empty when the name reads well; options: the modifiers the name says; alone: a bug
-// named alone, its reference build; unchecked: what could not be checked, the catalogue not loaded). presets:
+// named alone, its reference build (reference: the version is that build's, also for only-<bug> alone); implies: its only-<bugs> brings what they need (Needs: their options, ASan), as
+// mk_vendor does unless the name is a preset followed by modifiers in the form of slugs (wolfssl540-only-HEAP), the
+// options the launcher shows (#composerState); unchecked: what could not be checked, the catalogue not loaded). presets:
 // git_restapi's builds of the vendor; modifiers: its [modifiers]; entries: its catalogue entries (null: catalogue parts
 // not checked).
 export function Parse(name, { presets = [], modifiers = {}, entries = null } = {}) {
   const problems = [], unchecked = [];
-  // the builds git_restapi derives, each version's with ASan (<its name>-asan): names of puffin-build's grammar, not
-  // presets of presets.toml, so not a start for mk_vendor: wolfssl584-asan,gcov is refused; dashed, wolfssl584-asan-gcov
-  // is wolfssl584 with asan and gcov (so wolfssl584-asan-no-asan says both)
-  const plain = new Set((presets ?? []).filter(p => p.kind === 'version').map(p => p.name));
-  const derived = new Set((presets ?? []).filter(p => p.kind === 'version' && p.asan && p.name.endsWith('-asan')
-      && plain.has(p.name.slice(0, -'-asan'.length))).map(p => p.name));
-  const names = new Map((presets ?? []).filter(p => !derived.has(p.name)).map(p => [p.name, p]));
+  const { derived, names } = TomlPresets(presets);
   const versions = Versions(presets);
   const defaults = Object.fromEntries(Object.entries(modifiers ?? {}).map(([m, d]) => [m, !!d?.default]));
-  const result = { version: null, preset: null, options: {}, part: null, alone: false, problems, unchecked };
+  const result = { version: null, preset: null, options: {}, part: null, alone: false, implies: false, problems, unchecked };
   if (!name) { problems.push('no build named'); return result; }
   // a bug alone: its reference build, only that bug left, with ASan
   const alone = entries && !names.has(name) ? idOf(name, entries) : null;
   if (alone) {
-    Object.assign(result, { part: { kind: 'only', bugs: [alone] }, alone: true, options: { asan: true },
+    Object.assign(result, { part: { kind: 'only', bugs: [alone] }, alone: true, implies: true, reference: true, options: { asan: true },
                             version: ReferenceVersion(alone, entries[alone], presets, versions, defaults) });
     if (!result.version) problems.push(`${name}: no build of this library has it here (write a version first)`);
     return result;
@@ -199,6 +207,8 @@ export function Parse(name, { presets = [], modifiers = {}, entries = null } = {
     said[modifier] = !off;
   }
   result.options = said;
+  // only-<bugs> brings what they need, unless the name is a preset followed by modifiers in the form of slugs
+  result.implies = result.part?.kind === 'only' && !(result.preset && !name.includes(','));
   if (said.gcov === true && said.sancov === true) {
     problems.push('gcov and sancov: a gcov build measures coverage, it is not fuzzed (gcov implies no-sancov)');
   }
@@ -207,6 +217,7 @@ export function Parse(name, { presets = [], modifiers = {}, entries = null } = {
     // only-<bug> alone starts from its reference build; several bugs, or another catalogue part, need a version
     if (result.part?.kind === 'only' && bugs.length === 1 && entries) {
       result.version = ReferenceVersion(bugs[0], entries[bugs[0]], presets, versions, defaults);
+      result.reference = true;
       if (!result.version) {
         problems.push(`only-${bugs[0]}: no build of this library has it here (write a version first)`);
       }
@@ -221,7 +232,7 @@ export function Parse(name, { presets = [], modifiers = {}, entries = null } = {
   // nothing), not fixed by the preset it starts from; and for fix-<bugs>, with a patch at its version
   if (entries && result.version && bugs.length && result.part.kind !== 'fix-all') {
     const preset = result.preset ? names.get(result.preset) : null;
-    const implies = result.part.kind === 'only' && !(preset && !name.includes(','));
+    const implies = result.implies;
     const required = implies ? Object.assign({}, ...bugs.map(id => entries[id]?.requires ?? {})) : {};
     for (const id of bugs) {
       for (const [option, value] of implies ? Object.entries(entries[id]?.requires ?? {}) : []) {
@@ -272,4 +283,88 @@ export function PartLabels(tokens, entries = null) {
     else out.push(token);
   }
   return { parts: out, asan };
+}
+
+// puffin-build's modifiers in its order (spec.rs modifiers: the instrumentation, then the builder's options by name)
+const INSTRUMENTATION = ['asan', 'sancov', 'gcov', 'llvm_cov'];
+
+// The slug of a build, as puffin-build names it (spec.rs build: the name of its directory and of its PUT, which mk_vendor
+// list gives): the name of a preset with that build, else that of the build it starts from (the preset written, or the
+// plainest preset of its version) followed by -<modifier>s where it differs from it, then its catalogue part
+// (only-<IDs>, fix-<IDs>, fix-all; a fix- that gives a preset's build is that preset); a preset followed by -<modifier>s
+// (the form of slugs) keeps them, nothing implied; a bug alone (or only-<bug> alone) starts from its reference preset
+// (the newest version with the bug, the fewest fixes, ASan, the shortest name). null when Parse finds a problem, the
+// catalogue is not loaded, or the builds have no kinds (git_restapi's format 1). Checked against mk_vendor
+// (scripts/tests/buildname_test.sh).
+export function Slug(name, { presets = [], modifiers = {}, entries = null } = {}) {
+  const parsed = Parse(name, { presets, modifiers, entries });
+  if (parsed.problems.length || parsed.unchecked.length || !(presets ?? []).some(p => p.kind)) return null;
+  const { names } = TomlPresets(presets);
+  if (names.has(name)) return name;
+  const order = [...INSTRUMENTATION, ...Object.keys(modifiers ?? {}).filter(m => !INSTRUMENTATION.includes(m)).sort()];
+  const defaults = Object.fromEntries(Object.entries(modifiers ?? {}).map(([m, d]) => [m, !!d?.default]));
+  const valueOf = (build, m) => (m in build ? !!build[m] : !!defaults[m]);
+  const plainValue = m => (m === 'sancov' ? true : INSTRUMENTATION.includes(m) ? false : !!defaults[m]);
+  const sortedFix = build => [...(build.fix ?? [])].sort().join('+');
+  const same = (a, b) => a.version === b.version && sortedFix(a) === sortedFix(b) && order.every(m => valueOf(a, m) === valueOf(b, m));
+  const byName = (a, b) => a.name.length - b.name.length || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const presetWith = build => [...names.values()].filter(p => same(p, build)).sort(byName)[0]?.name ?? null;
+  // build_name: the preferred preset if it is that build, else another preset that is, else from's name and the modifiers
+  // that differ from it
+  const buildName = (build, prefer, from) => {
+    if (names.has(prefer) && same(names.get(prefer), build)) return prefer;
+    return presetWith(build)
+        ?? [from.name, ...order.filter(m => valueOf(build, m) !== valueOf(from, m)).map(m => (valueOf(build, m) ? m : `no-${m}`))].join('-');
+  };
+  // plain_preset: of a version, without fixes: no ASan, the fewest options off their plain value, the shortest name
+  const plainOf = version => [...names.values()].filter(p => p.version === version && !(p.fix ?? []).length)
+      .map(p => ({ p, asan: valueOf(p, 'asan') ? 1 : 0, away: order.filter(m => m !== 'asan' && valueOf(p, m) !== plainValue(m)).length }))
+      .sort((a, b) => a.asan - b.asan || a.away - b.away || byName(a.p, b.p))[0]?.p ?? null;
+  const part = parsed.part ? { kind: parsed.part.kind, ids: [...parsed.part.bugs].sort() } : null;
+  const text = select => (select.kind === 'fix-all' ? 'fix-all' : `${select.kind}-${select.ids.join('+')}`);
+  // where it starts: the preset written, the bug's reference preset, or the plainest preset of the version written
+  let start;
+  if (parsed.reference) {
+    const id = part?.ids[0], entry = entries?.[id];
+    if (!entry?.affected) return null;
+    if (entry.reference) start = names.get(entry.reference) ?? null;
+    else {
+      const withBug = [...names.values()].filter(p => !parseVersion(p.version).head
+          && presentOn(id, entry, { ...defaults, ...p, fix: p.fix ?? [] }));
+      start = withBug.sort((a, b) => compareVersions(b.version, a.version) || (a.fix ?? []).length - (b.fix ?? []).length
+          || (valueOf(b, 'asan') ? 1 : 0) - (valueOf(a, 'asan') ? 1 : 0) || byName(a, b))[0] ?? null;
+    }
+  } else start = parsed.preset ? names.get(parsed.preset) : plainOf(parsed.version);
+  if (!start) return null;
+  const exact = !!parsed.preset && !name.includes(',');
+  const flags = { ...(parsed.alone ? { asan: true } : {}), ...parsed.options };
+  const info = { version: start.version, fix: [...(start.fix ?? [])], ...Object.fromEntries(order.map(m => [m, valueOf(start, m)])) };
+  Object.assign(info, flags);
+  if (flags.gcov === true) info.sancov = false;
+  // what the bugs of only- need, unless said otherwise (a slug says everything)
+  if (!exact && part?.kind === 'only') {
+    for (const id of part.ids) {
+      for (const [option, wanted] of Object.entries(entries?.[id]?.requires ?? {})) if (!(option in flags)) info[option] = wanted;
+      if (entries?.[id] && needsAsan(entries[id]) && !('asan' in flags)) info.asan = true;
+    }
+  }
+  if (exact) {
+    const base = Object.keys(flags).length ? buildName(info, start.name, start) : start.name;
+    return part ? `${base}-${text(part)}` : base;
+  }
+  // named from its version: the fixes of the preset it starts from join its catalogue part
+  const startFixes = info.fix;
+  info.fix = [];
+  let select = part;
+  if (select?.kind === 'fix') select = { kind: 'fix', ids: [...new Set([...select.ids, ...startFixes])].sort() };
+  else if (!select && startFixes.length) select = { kind: 'fix', ids: [...startFixes].sort() };
+  const plain = plainOf(info.version);
+  if (!plain) return null;
+  const base = buildName(info, start.name, plain);
+  if (!select) return base;
+  if (select.kind === 'fix') {
+    const preset = presetWith({ ...info, fix: select.ids });
+    if (preset) return preset;
+  }
+  return `${base}-${text(select)}`;
 }

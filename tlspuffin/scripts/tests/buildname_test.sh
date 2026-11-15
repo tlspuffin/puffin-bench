@@ -6,7 +6,8 @@
 #     says (Contents), and the name reads well to the picker's check of names typed by hand (Parse);
 #   - each alias of presets.toml that the picker says is an only-<bug> or fix-all build (heap: 5.4.0 · ASan · only HEAP)
 #     is that build for mk_vendor (same fixes, same ASan);
-#   - names typed by hand: problems said (an unknown version, modifier or bug; two catalogue parts), none for good ones.
+#   - names typed by hand: problems said (an unknown version, modifier or bug; two catalogue parts), none for good ones;
+#   - the slug of each name mk_vendor builds (Slug: a campaign's configuration is named after it) is mk_vendor's.
 # Needs the clone's mk_vendor built (target/debug/mk_vendor, or MK_VENDOR=<path>) and git_restapi's scripts.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -26,7 +27,7 @@ cat > "${work}/run.mjs" <<'EOF'
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const [, , work, clone, mkVendor] = process.argv;
-const { Versions, Compose, Contents, Parse, Needs, bugName, idOf } = await import(`${work}/html/common/buildname.js`);
+const { Versions, Compose, Contents, Parse, Needs, bugName, idOf, Slug } = await import(`${work}/html/common/buildname.js`);
 const { inRange } = await import(`${work}/html/common/catalogue.js`);
 let fail = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fail = 1; };
@@ -37,7 +38,7 @@ const list = (vendor, name) => {
   catch (e) { return { error: String(e.stderr ?? e).split('\n').filter(Boolean).pop() }; }
 };
 const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
-let names = 0; const wrong = [], refused = [], unread = [];
+let names = 0; const wrong = [], refused = [], unread = [], unslugged = [];
 for (const [vendor, builds] of Object.entries(presets.vendors)) {
   const entries = catalogue.vendors?.[vendor]?.entries ?? {};
   const defaults = Object.fromEntries(Object.entries(presets.modifiers?.[vendor] ?? {}).map(([m, d]) => [m, !!d.default]));
@@ -58,6 +59,8 @@ for (const [vendor, builds] of Object.entries(presets.vendors)) {
           wrong.push(`${vendor}:${name}: picker fixes [${predicted.patched}] asan ${asan}, mk_vendor fixes [${mk.fix}] asan ${mk.asan}`);
         const parsed = Parse(name, { presets: builds, modifiers: presets.modifiers?.[vendor] ?? {}, entries });
         if (parsed.problems.length) unread.push(`${vendor}:${name}: ${parsed.problems.join('; ')}`);
+        const slug = Slug(name, { presets: builds, modifiers: presets.modifiers?.[vendor] ?? {}, entries });
+        if (slug !== mk.slug) unslugged.push(`${vendor}:${name}: Slug ${slug}, mk_vendor ${mk.slug}`);
       }
     }
   }
@@ -66,6 +69,7 @@ check(names > 100, `${names} names composed`);
 check(refused.length === 0, `mk_vendor builds every one${refused.length ? ': refused ' + refused.slice(0, 5).join(', ') : ''}`);
 check(wrong.length === 0, `with the fixes and ASan the picker says${wrong.length ? ': ' + wrong.slice(0, 5).join('; ') : ''}`);
 check(unread.length === 0, `each reads well to the check of typed names${unread.length ? ': ' + unread.slice(0, 5).join('; ') : ''}`);
+check(unslugged.length === 0, `each has mk_vendor's slug (Slug: a campaign's configuration is named after it)${unslugged.length ? ': ' + unslugged.slice(0, 5).join('; ') : ''}`);
 // aliases the picker gives an equivalent: that build for mk_vendor
 const claims = [];
 for (const [vendor, builds] of Object.entries(presets.vendors)) {
@@ -98,7 +102,7 @@ const bad = { '202403,asan': /not a version/, '5.8.4,asaan': /not a modifier/, '
 check(Object.entries(bad).every(([n, re]) => problems(n).some(p => re.test(p))),
   `bad names: the problem said (${Object.keys(bad).map(n => `${n}: ${problems(n).join('; ')}`).join(' | ')})`);
 // names typed by hand as mk_vendor reads them: the check says a problem exactly when mk_vendor refuses the name, and
-// reads the version it builds when it does not. The case of modifiers and keywords; a version written otherwise (3.4,
+// reads the version it builds when it does not, and its slug (Slug, a campaign's configuration name). The case of modifiers and keywords; a version written otherwise (3.4,
 // master for main); a bug alone and only-<bug> alone (its reference build); a bug not in the build (its version, the
 // options it requires), a required option said otherwise, a preset that fixes it; fix-<bug> without a patch at its
 // version; both m and no-m; gcov with sancov; no-<modifier> and a '-' left in the dashed form. A version's build with
@@ -121,7 +125,9 @@ const asTyped = {
             'wolfssl584-asan,gcov', 'wolfsslmaster-asan,gcov', 'wolfssl584-asan,fix-all', 'wolfssl584-asan-no-asan',
             'wolfssl584-asan', 'wolfssl584-asan-gcov', 'wolfssl584-asan-fix-all', ',only-HEAP', ',asan', '5.8.4,,asan',
             'wolfssl530-cdos,fix-BUF', 'wolfssl530-cdos,gcov,fix-BUF', 'wolfssl530-cdos-fix-BUF', 'wolfssl530-cdos,only-BUF',
-            'wolfssl530-cdos-only-BUF', 'wolfssl540-heap-no-asan', 'wolfssl540-heap,no-asan', 'wolfssl540-asan-perf-no-asan'],
+            'wolfssl530-cdos-only-BUF', 'wolfssl540-heap-no-asan', 'wolfssl540-heap,no-asan', 'wolfssl540-asan-perf-no-asan',
+            '5.8.4,gcov', '5.4.0,asan,gcov,fix-all', 'wolfssl540-heap,gcov', 'master,asan,gcov', '5.4.0,no-asan,fix-all',
+            '5.4.0,llvm_cov,only-BUF', '5.4.0,no-postauth', 'wolfssl540-sdos2,asan'],
 };
 const disagree = [];
 for (const [vendor, typed] of Object.entries(asTyped)) {
@@ -134,6 +140,10 @@ for (const [vendor, typed] of Object.entries(asTyped)) {
                   + `the check ${p.problems.length ? `says ${p.problems.join('; ')}` : 'says nothing'}`);
     } else if (!mk.error && p.version !== mk.version) {
       disagree.push(`${vendor}:${name}: version ${p.version}, mk_vendor's ${mk.version}`);
+    } else if (!mk.error) {
+      const slug = Slug(name, { presets: presets.vendors[vendor] ?? [], modifiers: presets.modifiers?.[vendor] ?? {},
+                                entries: catalogue.vendors?.[vendor]?.entries ?? null });
+      if (slug !== mk.slug) disagree.push(`${vendor}:${name}: slug ${slug}, mk_vendor's ${mk.slug}`);
     }
   }
 }
