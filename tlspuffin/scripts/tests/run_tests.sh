@@ -94,6 +94,7 @@ Run vendor_names_test bash "${here}/vendor_names_test.sh"
 Run strip_aranges_test bash "${here}/strip_aranges_test.sh"
 Run presets_latest_test bash "${here}/presets_latest_test.sh"
 Run presets_builds_test bash "${here}/presets_builds_test.sh"
+Run installed_pages_test bash "${here}/installed_pages_test.sh"
 Run signatures_test bash "${here}/signatures_test.sh" "${qjs}"
 
 echo
