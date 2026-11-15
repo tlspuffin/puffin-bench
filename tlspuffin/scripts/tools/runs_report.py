@@ -167,10 +167,12 @@ def global_execs_at(z, name, time_ms):
     return None
 
 
-def set_apart_claims(vendor):
-    """the claims set apart (NOT_TARGETED) for what a run of that vendor preset builds ("wolfssl:wolfssl540-buf":
-    wolfssl 540), as NotTargetedCVE in PR_common.sh"""
-    m = re.search(r'([a-z]+)(\d{3,})', vendor.split(':')[-1])
+def set_apart_claims(vendor, build=None):
+    """the claims set apart (NOT_TARGETED) for what a run of that vendor builds, as NotTargetedCVE in PR_common.sh: its
+    library and version from its build's slug (the run's record, vendor_build: "wolfssl:5.4.0,asan" builds
+    wolfssl540-asan, wolfssl 540), else from the vendor as given (a preset's name is its slug:
+    "wolfssl:wolfssl540-buf")"""
+    m = re.search(r'([a-z]+)(\d{3,})', (build or {}).get('slug') or vendor.split(':')[-1])
     claims = set()
     for claim, e in NOT_TARGETED.items():
         if not e.get('library'):
@@ -254,7 +256,8 @@ def vuln_metrics(z, summary, report, targets, vendors):
                              'to_target': None, 'measured': None})
                 continue
             times = sorted(objs.get((lib, a), []))
-            warns, crashes = log_events(z, fuzzer_logs(z, lib, a), set_apart_claims(vendors.get(lib, ''))) if times else ([], [])
+            apart = set_apart_claims(vendors.get(lib, ''), (info.get('cli') or {}).get('vendor_build'))
+            warns, crashes = log_events(z, fuzzer_logs(z, lib, a), apart) if times else ([], [])
             targeted = []
             for t, name in times:
                 nt = any(abs(t - w) <= 500 for w in warns) and not any(-2000 <= t - c <= 2000 for c in crashes)

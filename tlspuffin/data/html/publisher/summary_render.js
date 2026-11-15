@@ -85,8 +85,11 @@ function GetAsanBadge(cli) {
   if (asan?.instrumented === false) {
     return `<span class="lib-asan asan-off" data-click-tip="Built without ASAN${asan.requested ? ' although it was requested' : ''}">ASAN✗</span>`;
   }
+  // requested: the asan feature, or the build's ASan (mk_vendor's, vendor_build), else its name (-asan, puffin-build's
+  // short form ,asan)
   const requested = (typeof cli === 'object') &&
-      ((`,${cli?.features ?? ''},`.includes(',asan,')) || (cli?.vendor ?? '').includes('-asan'));
+      ((`,${cli?.features ?? ''},`.includes(',asan,')) || cli?.vendor_build?.asan === true
+       || (cli?.vendor_build?.asan === undefined && /(^|[-,:])asan([-,]|$)/.test(cli?.vendor ?? '')));
   return `<span class="lib-asan asan-unknown" data-click-tip="ASAN not verified (older result); ${requested ? 'requested' : 'not requested'} in features/vendor">ASAN?</span>`;
 }
 
@@ -592,7 +595,12 @@ function GetBuildCell(cli) {
     const at = src.commit ?? (src.hash ? `archive ${src.hash}` : 'not resolved');
     return `source ${src.name}: ${src.repo ?? src.url ?? '?'} ${src.ref ?? ''} → ${at}`;
   });
-  const title = [GetBuildDescription(cli), cli.features ? `features: ${cli.features}` : '', ...sourceLines,
+  // the vendor as the task gave it, with the build mk_vendor made of it when that reads otherwise (puffin-build's short
+  // form: wolfssl:5.8.4,asan, its build wolfssl584-asan: cli.vendor_build, see ResolveVendor)
+  const vb = cli.vendor_build;
+  const vendorLine = cli.vendor && vb?.slug && !String(cli.vendor).endsWith(`:${vb.slug}`)
+      ? `vendor: ${cli.vendor} (its build ${vb.slug}${vb.canonical && vb.canonical !== cli.vendor ? `, ${vb.canonical}` : ''})` : '';
+  const title = [GetBuildDescription(cli), vendorLine, cli.features ? `features: ${cli.features}` : '', ...sourceLines,
                  cli.flags ? `flags: ${cli.flags}` : ''].filter(Boolean).join('\n');
   let token = '';
   if (sources.length > 0) {
@@ -602,7 +610,7 @@ function GetBuildCell(cli) {
   } else if (cli.cputs === false && cli.library?.name && cli.library.name !== 'NA') {
     token = `${cli.library.name}${cli.library.version ?? ''}`;
   } else {
-    token = (cli.vendor ?? '').split(':').pop() || cli.features || '';
+    token = cli.vendor_build?.slug || (cli.vendor ?? '').split(':').pop() || cli.features || '';
   }
   const flags = String(cli.flags ?? '').trim();
   const flagList = flags ? flags.split(/\s+(?=--)/) : [];
