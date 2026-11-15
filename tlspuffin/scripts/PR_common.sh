@@ -1651,7 +1651,8 @@ BuildOnce() {
 SharedRunDir() {
   local build entry; build=$( SharedBuildDir )
   [ -r "${build}/.unsupported" ] && { cp "${build}/.unsupported" .; return 0; }
-  [ -x "${build}/target/release/${PACKAGE:-tlspuffin}" ] || { echo "no build in ${build}"; return 1; }
+  [ -x "${build}/target/release/${PACKAGE:-tlspuffin}" ] ||
+      { echo "no build in ${build}: the experiment's build (BuildOnce) failed, its log says why"; return 1; }
   for entry in seeds target vendor .cargo; do
     [ -e "${build}/${entry}" ] && ln -sfn "${build}/${entry}" "./${entry}"
   done
@@ -1867,6 +1868,18 @@ Init () {
   return 0;
 }
 
+# MakeVendor <vendor> [--asan]: the vendor library of a build (mk_vendor make, in the checkout). Its failure stops the
+# build: tlspuffin built without the library has no PUT for it, and its experiments started on the fuzzer's default
+# PUT (tcp), every client exiting at once (the campaigns of 2026-11-15, whose build folder had a comma: mk_vendor's
+# patch step cut the path there). mk_vendor exits non-zero only on an error, in every version (2024-04 on).
+MakeVendor() {
+  local vendor="$1" asanFlag="${2:+$2 }";
+  echo "nix-shell --run \"./tools/mk_vendor make ${asanFlag}'${vendor}'\""
+  nix-shell --run "./tools/mk_vendor make ${asanFlag}'${vendor}'" && return 0;
+  echo "mk_vendor could not build ${vendor} (its error above): the build stops here";
+  return 1;
+}
+
 Build() {
   if [ -z "${features}" ] && [ -z "${vendor}" ]; then
     echo "Missing required global variable: features | vendor"
@@ -1898,7 +1911,7 @@ Build() {
     cp -apr "${THEJOB_OUT_PATH}/repo" . || return 1;
     cd repo || return 1;
     if ${cputs}; then
-      nix-shell --run "./tools/mk_vendor make '${vendor}'"
+      MakeVendor "${vendor}" || return 1;
     fi
     local featuresCLI='';
     [ -n "${features}" ] && featuresCLI="--features=${features}";
@@ -1954,9 +1967,8 @@ ForcedBuild() {
     fi
     rm -rf ./vendor
     # a custom benchmark's experiment whose bug is only recognised with ASan (asan_build): ASan whatever the preset
-    local asanFlag=''; [ "${asan_build:-}" == true ] && asanFlag='--asan ';
-    echo "nix-shell --run \"./tools/mk_vendor make ${asanFlag}'${vendor}'\""
-    nix-shell --run "./tools/mk_vendor make ${asanFlag}'${vendor}'"
+    local asanFlag=''; [ "${asan_build:-}" == true ] && asanFlag='--asan';
+    MakeVendor "${vendor}" ${asanFlag} || return 1;
     # an experiment naming its bug (custom benchmarks, Vuln group A and B): its target must be in the library built
     # (the launcher cannot know every PUT capability); a library the catalogue says is without it (unaffected, fixed)
     # makes the attempt unsupported, as for the compat rules (a custom benchmark: anything but active). A commit without
