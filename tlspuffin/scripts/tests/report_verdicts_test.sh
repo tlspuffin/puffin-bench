@@ -287,6 +287,29 @@ printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/b
   'print(JSON.stringify([r.catalogue_digest?.latest, a.headline.level, a.bugs.flatMap(b => (b.validation?.parts ?? []).filter(p => p.recognised).map(p => [p.ids, p.weak, p.latest]))]));' > "${work}/recognised.js"
 check 'an older task without catalogue: its crash at the place of SDOS2 in the latest catalogue is recognised as SDOS2 (strong, not validated): known' \
   '[ "$( "${qjs}" --std -m "${work}/recognised.js" "${work}/old.json" )" == "[true,\"known\",[[[\"CVE-2022-38152\"],false,true]]]" ]'
+# a bug of two stacks, recognised by any of them: CALLB on wolfSSL 5.5.2, its crashes in AddPacketInfo on the TLS 1.2
+# path first (3 objectives, not its place), then on the TLS 1.3 one (2, its place): one bug (the fuzzer's key: the
+# first frame), recognised as CALLB by the 2, not validated, known; before, by its first stack only: 🚨 new (task
+# 1794741331008, live)
+callbGroup() { # <second frame> <count> <trace prefix>
+  jq -nc --arg f "$1" --argjson n "$2" --arg t "$3" '{ type: "heap-buffer-overflow", frames: ["AddPacketInfo", $f, ($f | sub("Type$"; ""))],
+    count: $n, traces: [range($n) | "\($t)\(.)"],
+    fuzzer: { kind: "crash", detail: "SIGABRT · ASan heap-buffer-overflow", frames: ["AddPacketInfo", $f, ($f | sub("Type$"; ""))] } }'
+}
+jq -n --argjson g "[$( callbGroup DoHandShakeMsgType 3 t ), $( callbGroup DoTls13HandShakeMsgType 2 u )]" '{ task: "9", commit: "abc", job_type: "vuln-custom",
+  catalogue_digest: { format: "vulnerabilities.toml", commit: "abc", vendors: { wolfssl: { entries: { "CVE-2023-6936": { alias: "CALLB",
+    oracle: { kind: "crash", asan: "heap-buffer-overflow" }, top_frames: ["AddPacketInfo", "DoTls13HandShakeMsgType"], affected: ">= 5.5.2, < 5.6.6" } } } } },
+  runs: [{ library: "WolfSSL", attempt: 0, found: 5, replayed: 0, reports: 0, groups: $g,
+           cli: { vendor: "wolfssl:wolfssl552-asan", library: { name: "wolfssl", version: "552" }, vulnerabilities: { declared: ["CVE-2023-6936"] } } }],
+  libraries: [{ library: "WolfSSL", runs: 1 }] }' > "${work}/twostacks.json"
+printf '%s\n' "import { AnalyseReport } from '${here}/../tools/objectives_page/bugs.js';" \
+  'const r = JSON.parse(std.loadFile(scriptArgs[1])); const a = AnalyseReport(r, null, r.catalogue_digest);' \
+  'print(JSON.stringify([a.headline.level, a.bugs.length, a.bugs.flatMap(b => (b.validation?.parts ?? []).filter(p => p.recognised).map(p => [p.ids, p.count, p.of ?? null]))]));' > "${work}/twostacks.js"
+check 'a bug of two stacks, the first not at the place of CALLB: recognised as CALLB by the objectives at its place (2 of 5), known' \
+  '[ "$( "${qjs}" --std -m "${work}/twostacks.js" "${work}/twostacks.json" )" == "[\"known\",1,[[[\"CVE-2023-6936\"],2,5]]]" ]'
+jq '.runs[0].groups |= map(select(.frames[1] == "DoHandShakeMsgType"))' "${work}/twostacks.json" > "${work}/onestack.json"
+check 'its TLS 1.2 objectives alone: not at its place, not recognised (validation tells)' \
+  '[ "$( "${qjs}" --std -m "${work}/twostacks.js" "${work}/onestack.json" )" == "[\"new\",1,[]]" ]'
 # a bug of tlspuffin's harness, given by commits (affected_commits): recognised in a commit without its fix
 # (PB_COMMIT_AFFECTED, from git: objectives_report.sh CommitAffected), not in one that has it
 hkdf='{ "type": "global-buffer-overflow", "frames": ["MemcmpInterceptorCommon(void*,", "tls13_hkdf_expand_label_with_length", "tls13_hkdf_expand_label"], "count": 1, "traces": ["k1"] }'

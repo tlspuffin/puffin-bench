@@ -368,6 +368,12 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
       if (apart) bug.apartCve = apart;
       const n = group.count ?? 0;
       bug.count += n;
+      // every stack of the bug, with its objectives: the replay's when it reproduced the group, else the fuzzer's record
+      // of its crash. A bug is recognised, and a signature weighed, by the stacks of the objectives concerned
+      // (StrongSignature), not by its first one only: the crashes in AddPacketInfo on the TLS 1.2 and TLS 1.3 paths are
+      // one bug, whose first stack was the TLS 1.2 one, not CVE-2023-6936's place (task 1794741331008: 🚨 new)
+      const stack = confirmed && rFrames.length ? rFrames : (fz?.kind === 'crash' ? (fz.frames ?? []) : []);
+      if (stack.length) (bug.stacks ??= []).push({ frames: stack, count: n, objectives: (group.traces ?? []).map(name => `${run.library}|${run.attempt}/${name}`) });
       // objectives beyond the replays of their experiment (objectives_report.sh: not-replayed): no replay ran, so they
       // are neither reproduced nor "not reproduced", and give no replay reason
       const notReplayed = group.type === 'not-replayed';
@@ -728,9 +734,22 @@ export function VendorOfRun(run) {
 // bypass is CVE-2021-3336's, SIG's and SKIP's), a crash whose bug has no known place, or a stack without it. A weak
 // signature names a bug without telling it apart from another failure of the same kind: it never makes a bug known by
 // itself (NewBugs, BugsHeadline)
-export function StrongSignature(oracle, place, bug) {
+export function StrongSignature(oracle, place, bug, objectives = null) {
   if (oracle?.kind !== 'crash' || !(place ?? []).length) return false;
-  return HasPlace(place, bug.frames) || HasPlace(place, bug.fuzzer?.frames);
+  return StacksOf(bug, objectives).some(frames => HasPlace(place, frames));
+}
+// the stacks of a bug (Bugs: one per group, with its objectives "<library>|<attempt>/<name>"), those of the objectives
+// given when some stack names them (a group names at most TRACES_PER_GROUP of its objectives: else all of them); a bug
+// made otherwise, without stacks: its frames and the fuzzer's record
+function StacksOf(bug, objectives = null) {
+  const stacks = bug.stacks ?? [];
+  if (!stacks.length) return [bug.frames ?? [], bug.fuzzer?.frames ?? []];
+  const theirs = objectives?.size ? stacks.filter(s => s.objectives.some(o => objectives.has(o))) : [];
+  return (theirs.length ? theirs : stacks).map(s => s.frames);
+}
+// how many of a bug's objectives have a stack with the place (its stacks' counts)
+function ObjectivesAtPlace(bug, place) {
+  return (bug.stacks ?? []).filter(s => HasPlace(place, s.frames)).reduce((n, s) => n + s.count, 0);
 }
 
 // The verdict of a bug from those of its objectives (report.libraries[].validation.byTrace, by "<attempt>/<trace>"),
@@ -773,7 +792,7 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   // a verdict that a control of its run failing can have made false has none (UntrustedBy)
   const sameAsBug = { fuzzer: bug.fuzzer, type: bug.type, frames: bug.frames };
   const untrustedBy = (v, o) => UntrustedBy(byLib[o.library], o.attempt, v, sameAsBug, oracleOf);
-  const verdicts = [], withVerdict = new Map(), newIn = new Set(), untrusted = new Map();
+  const verdicts = [], withVerdict = new Map(), newIn = new Set(), untrusted = new Map(), objectiveOf = new Map();
   for (const o of objectives) {
     const v = byLib[o.library]?.byTrace?.[`${o.attempt}/${o.name}`];
     if (!v) continue;
@@ -784,7 +803,7 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
       untrusted.set(`${o.library}|${o.attempt}`, u);
       continue;
     }
-    verdicts.push(v);
+    verdicts.push(v); objectiveOf.set(v, `${o.library}|${o.attempt}/${o.name}`);
     if (VerdictKind(v) === 'new') newIn.add(o.library);
     withVerdict.set(`${o.library}|${o.attempt}`, (withVerdict.get(`${o.library}|${o.attempt}`) ?? 0) + 1);
   }
@@ -831,9 +850,12 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
     parts.push(created);
     return created;
   };
+  // (the objectives of each part, for the strength of a signature: their own stacks)
+  const objectivesOf = new Map();
   for (const v of verdicts) {
     const [kind, ids] = partOf(v);
     const part = kind === 'inconclusive' && noReplay.length ? add('no-replay', noReplay) : add(kind, ids);
+    (objectivesOf.get(part) ?? objectivesOf.set(part, new Set()).get(part)).add(objectiveOf.get(v));
     if (kind === 'error' && v.failure?.message) {
       part.failures ??= [];
       const what = `${v.failure.build === 'F' ? 'the build with every patch' : `the build without the patch of ${v.failure.build}`}: ${v.failure.message}`;
@@ -865,11 +887,14 @@ export function BugValidation(bug, libraries, catalogue = null, live = false) {
   // has none), not validated
   if (!verdicts.length && recognised.length) {
     const part = add('signature', recognised);
-    Object.assign(part, { count: base.objectives, recognised: true, catalogue: catalogue?.commit ?? null, latest: !!catalogue?.latest });
+    // the objectives whose stack has the place of a bug it is recognised as (all of them for a bug of one stack)
+    const at = Math.max(...recognised.map(id => ObjectivesAtPlace(bug, topFramesOf(id))));
+    Object.assign(part, { count: at > 0 ? at : base.objectives, recognised: true, catalogue: catalogue?.commit ?? null, latest: !!catalogue?.latest });
+    if (at > 0 && at < base.objectives) part.of = base.objectives;
   }
   // a signature verdict: strong for the bugs whose top frames the stack has (named first), else weak
   for (const part of parts.filter(p => p.kind === 'signature')) {
-    const strong = part.ids.filter(id => StrongSignature(oracleOf(id), topFramesOf(id), bug));
+    const strong = part.ids.filter(id => StrongSignature(oracleOf(id), topFramesOf(id), bug, objectivesOf.get(part)));
     part.weak = strong.length === 0;
     // the reference stack of each bug named (the catalogue's top frames, else its witness's crash location), for the badge
     part.references = Object.fromEntries(part.ids.map(id => [id, topFramesOf(id)]));

@@ -79,7 +79,8 @@ const NamedBugs = bug => bug.validation?.ids?.length ? bug.validation.ids : bug.
 const Badge = (kind, html, tip, extra = '') => `<span class="val val-${kind}${extra}" data-click-tip="${esc(`${VERDICTS[kind].mark} ${tip}`)}">${VERDICTS[kind].mark} ${html}</span>`;
 // what each verdict says, as the badge of a part of a bug's objectives (BugValidation parts)
 function ValidationPart(part, live, bug = null) {
-  const n = ` ×${count(part.count)}`;
+  // (a bug recognised by the stacks of some of its objectives: "×21 of 51")
+  const n = ` ×${count(part.count)}${part.of ? ` of ${count(part.of)}` : ''}`;
   const v = VERDICTS[part.kind] ?? VERDICTS.none;
   switch (part.kind) {
     case 'patch': return Badge('patch', `${EntryNames(part.ids, ', ')} · ${v.word}${n}`, v.tip);
@@ -102,7 +103,7 @@ function ValidationPart(part, live, bug = null) {
       const ruledOut = (bug?.expected ?? []).filter(id => !part.ids.includes(id) && EntryOracle(id) && same(id));
       const notIt = ruledOut.length ? ` · not ${EntryNames(ruledOut)}` : '';
       return Badge('signature', `${EntryNames(part.ids)} · ${v.word}${label}${notIt}${n}`,
-          `${part.recognised ? `recognised by its signature with its stack, not validated: against the catalogue of tlspuffin ${String(part.catalogue ?? '?').slice(0, 10)}${part.latest ? ' (the latest one: the commit of this task has none)' : ''}\n` : `${v.tip}\n`}its signature: ${sigs}\n${how}${part.weak ? `\nweak signature: ${TERMS.find(t => t[0] === 'weak signature')[1]}`
+          `${part.recognised ? `recognised by its signature with its stack, not validated: against the catalogue of tlspuffin ${String(part.catalogue ?? '?').slice(0, 10)}${part.latest ? ' (the latest one: the commit of this task has none)' : ''}\n${part.of ? `${part.count} of its ${part.of} objectives have its place in their stack; the others, with another stack, are not recognised: validation tells\n` : ''}` : `${v.tip}\n`}its signature: ${sigs}\n${how}${part.weak ? `\nweak signature: ${TERMS.find(t => t[0] === 'weak signature')[1]}`
               : `\nstrong signature: ${TERMS.find(t => t[0] === 'strong signature')[1]}`}`
           + (ruledOut.length ? `\nnot ${ruledOut.join(', ')}, the expected bug, which has the same signature: its patch is on the build with every patch, where this objective still gives the signature` : ''),
           part.weak ? ' val-weak' : '');
