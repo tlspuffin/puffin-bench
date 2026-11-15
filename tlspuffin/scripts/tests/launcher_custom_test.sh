@@ -18,7 +18,9 @@
 #     asan_link false): at a commit with it, the ASAN runtime comes with the preset (tlspuffin 838bd9588 has no such
 #     feature: the build failed);
 #   - latest-asan is the release presets.toml declares ([library] latest, git_restapi's latest: BoringSSL 0.20260508.0),
-#     else the highest version name (1.1.1g+git.… for BoringSSL, whose names do not sort).
+#     else the highest version name (1.1.1g+git.… for BoringSSL, whose names do not sort);
+#   - a campaign's configuration is named after its build's dashed name, however its vendor is written (wolfssl:584,asan:
+#     wolfssl584-asan, the library once), as written when the presets do not have its version.
 # The scheduler's health check is left out (board/health.js: a stub).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -240,6 +242,17 @@ try {
     check(!!boring && !!latest && (latest.textContent === 'latest-asan · 0.20260508.0') === declared,
       `BoringSSL's latest-asan ${declared ? 'as presets.toml declares it' : 'without a declared one: the highest name'} (${latest?.textContent})`);
   }
+  // a campaign's configuration: its build's dashed name, however the vendor is written
+  const { CampaignConfigurationName } = await import('./board/custom/tlspuffin/joblauncher.js');
+  const vendorsAtSha = (await (await realFetch('/git/presets.json')).json()).vendors;
+  const named = Object.entries({
+    'wolfssl:584,asan': 'wolfssl584-asan', 'wolfssl:5.8.4,asan': 'wolfssl584-asan', 'wolfssl:584-asan': 'wolfssl584-asan',
+    'wolfssl:wolfssl584-asan': 'wolfssl584-asan', 'openssl:341,asan': 'openssl341-asan', 'libressl:421,asan': 'libressl421-asan',
+    'boringssl:0.20260508.0,asan': 'boringssl20260508-asan', 'wolfssl:5.4.0,only-BUF': 'wolfssl540-only-BUF',
+    'wolfssl:9.9.9,asan': '9.9.9,asan', 'wolfssl540': 'wolfssl540',
+  }).map(([vendor, want]) => [vendor, CampaignConfigurationName(vendor, vendorsAtSha[vendor.split(':')[0]]), want]);
+  check(named.every(([, got, want]) => got === want),
+    `a campaign's configuration named after its build (${named.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || '10 spellings'})`);
 } catch (err) {
   check(false, `error: ${err.stack ?? err}`);
 }

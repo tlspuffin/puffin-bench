@@ -60,6 +60,25 @@ async function LoadObjectivesLevels() {
 LoadObjectivesLevels();
 setInterval(LoadObjectivesLevels, 60000);
 
+// The name of a campaign's configuration (its steps on the board, its row on Results): the dashed name puffin-build
+// gives its build (wolfssl584-asan), however the vendor is written (wolfssl:584,asan, wolfssl:5.8.4,asan,
+// wolfssl:584-asan, wolfssl:wolfssl584-asan): the library in it, once. presets: the vendor's presets at the commit
+// (git_restapi), whose builds of a version are named without modifier; a version as presets.toml writes it or without
+// its dots. A vendor without ':' (a Rust harness feature), or a version the presets do not have: as written after ':'.
+export function CampaignConfigurationName(vendor, presets) {
+  const colon = vendor.indexOf(':');
+  if (colon < 0) return vendor;
+  const build = vendor.slice(colon + 1);
+  const names = new Set((presets ?? []).map(p => p.name));
+  if (names.has(build)) return build;
+  const [first] = build.split(build.includes(',') ? ',' : '-');
+  const rest = build.slice(first.length + 1).replace(/,/g, '-');
+  const ofVersion = (presets ?? []).filter(p => !p.name.includes('-')
+      && (p.version === first || String(p.version).replace(/\./g, '') === first));
+  const base = names.has(first) ? first : ofVersion.length === 1 ? ofVersion[0].name : null;
+  return base ? (rest ? `${base}-${rest}` : base) : build;
+}
+
 export class JobLauncher {
   #config;
   #data = { dev: [], pr_open: [], pr: [], all: [] };
@@ -1782,7 +1801,8 @@ export class JobLauncher {
         fd.append('runtime[RUNTIME_NB_CORES]',   String(this.#custom.cores));
       }
       if (isCampaign) {
-        const configName = vendor ? vendor.split(':').pop() : 'campaign';
+        // named after its build, however the vendor is written (CampaignConfigurationName)
+        const configName = vendor ? CampaignConfigurationName(vendor, this.#presetsData?.vendors?.[vendor.split(':')[0]]) : 'campaign';
         const conf = { args: {} };
         if (this.#vendorImpl === 'c'    && vendor)   conf.args.vendor             = vendor;
         if (this.#vendorImpl === 'rust' && vendor)   conf.args.features           = vendor;
