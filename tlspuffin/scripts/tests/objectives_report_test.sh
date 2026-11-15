@@ -47,8 +47,9 @@ import json, sys, zipfile
 d, task = sys.argv[1], sys.argv[2]
 cli = {'cputs': True, 'build': 'C harness, wolfssl540-asan', 'vendor': 'wolfssl:wolfssl540-asan', 'features': 'cputs',
        'library': {'name': 'wolfssl', 'version': '540'}, 'asan': {'instrumented': True}}
+# its run state: a line that is no JSON, then two records of what it built, the first one kept (jq 1.6 gave both)
 steps = [{'name': 'ExperimentWithCargo', 'id': 'WolfSSL', 'attempt_id': 0, 'state': 'Done', 'time_points_ms': [1000, 2000],
-          'user_run_state': json.dumps(cli)},
+          'user_run_state': '\n'.join(['launched', json.dumps(cli), json.dumps({**cli, 'build': 'a later record'})])},
          {'name': 'ExperimentEnd', 'id': 'WolfSSL', 'attempt_id': 0, 'state': 'Done', 'time_points_ms': [2000, 3000],
           'executor_data': {'launcher_file': '/x/4-0-0-launcher'}}]
 json.dump({'task': {'id': int(task), 'name': 'Vuln test', 'user': 'u', 'job_type': 'vuln-a',
@@ -88,6 +89,8 @@ check 'the report: one run, its 4 objectives in 3 groups (an ASan crash, a claim
   '[ "$( jq -c "[.runs[0].found, ([.runs[0].groups[].type] | sort)]" "${report}" )" == "[4,[\"heap-buffer-overflow\",\"not-replayed\",\"security-violation\"]]" ]'
 check 'the 2 beyond the replays: one group, their claim as the fuzzer recorded it, no frames' \
   '[ "$( jq -c "[.runs[0].groups[] | select(.type == \"not-replayed\") | [.count, .fuzzer.kind, .fuzzer.detail, .fuzzer.frames]]" "${report}" )" == "[[2,\"claim\",\"Some claim\",[]]]" ]'
+check 'what the run built: the first record of its run state, once, also under jq 1.6' \
+  '[ "$( jq -c "[.runs[0].cli.build, .libraries[0].cli.build]" "${report}" )" == "[\"C harness, wolfssl540-asan\",\"C harness, wolfssl540-asan\"]" ]'
 check 'its traces next to the page, named in the report' \
   '[ "$( find "${out}/${task}-traces/WolfSSL/0" -name "*.trace" | wc -l )" -eq 4 ] && [ "$( jq "[.runs[0].groups[].traces[]] | length" "${report}" )" -eq 4 ]'
 check 'its verdicts (report_verdicts.js) and its page' 'jq -e ".verdicts.headline" "${report}" > /dev/null && grep -q "data-json=\"${task}.json\"" "${out}/${task}.html"'

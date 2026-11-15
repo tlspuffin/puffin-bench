@@ -323,8 +323,8 @@ ValidationVerdict() {
   if jq -e "${VALIDATION_JQ} any(.[]; objective)" <<< "${onF}" > /dev/null; then
     result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson unpatched "${unpatched}" --argjson candidates "${candidates}" "${VALIDATION_JQ}
       ([\$f[] | select(objective)][0]) as \$o
-      | { trace: \$t, verdict: \"not-patched\", entries: [], known_unpatched: [\$unpatched[] | select(.oracle as \$or | \$o | matches(\$or)) | .id],
-          signature_of_patched: [\$candidates[] | select(.oracle.kind != \"crash\") | select(.oracle as \$or | \$o | matches(\$or)) | .id], f: \$f }" <<< 'null' );
+      | { trace: \$t, verdict: \"not-patched\", entries: [], known_unpatched: [\$unpatched[] | select(.oracle as \$oracle | \$o | matches(\$oracle)) | .id],
+          signature_of_patched: [\$candidates[] | select(.oracle.kind != \"crash\") | select(.oracle as \$oracle | \$o | matches(\$oracle)) | .id], f: \$f }" <<< 'null' );
   elif jq -e "${VALIDATION_JQ} any(.[]; failed)" <<< "${onF}" > /dev/null; then
     # F could not run it: nothing to compare the builds without a patch with
     result=$( jq -c --arg t "${name}" --argjson f "${onF}" "${VALIDATION_JQ}
@@ -338,8 +338,8 @@ ValidationVerdict() {
     # confirmed, else another signature, else an error when a build could not run it (that bug was not checked), else
     # inconclusive
     result=$( jq -c --arg t "${name}" --argjson f "${onF}" --argjson v "${onV}" --argjson candidates "${candidates}" "${VALIDATION_JQ}
-      [\$candidates[] | .id as \$id | .oracle as \$or | select(any(\$v[\$id][]?; matches(\$or))) | \$id] as \$confirmed
-      | [\$candidates[] | .id as \$id | .oracle as \$or | select((any(\$v[\$id][]?; matches(\$or)) | not) and any(\$v[\$id][]?; objective)) | \$id] as \$other
+      [\$candidates[] | .id as \$id | .oracle as \$oracle | select(any(\$v[\$id][]?; matches(\$oracle))) | \$id] as \$confirmed
+      | [\$candidates[] | .id as \$id | .oracle as \$oracle | select((any(\$v[\$id][]?; matches(\$oracle)) | not) and any(\$v[\$id][]?; objective)) | \$id] as \$other
       | [\$v | to_entries[] | .key as \$id | .value[] | select(failed) | { build: \$id, message: failure }] as \$failed
       | { trace: \$t, verdict: (if (\$confirmed | length) > 0 then \"confirmed\" elif (\$other | length) > 0 then \"other-signature\"
                                elif (\$failed | length) > 0 then \"error\" else \"inconclusive\" end),
