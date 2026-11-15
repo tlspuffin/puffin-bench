@@ -43,6 +43,12 @@
         }
       },
       {
+        "step": "BuildOnce",
+        "configuration": {
+          "nb_cores": 8
+        }
+      },
+      {
         "step": "PrepareValidationOnce",
         "configuration": {
           "nb_cores": 4
@@ -59,9 +65,6 @@
         "streams": [
           { "name": "error", "path": "current_log/error.log" }
         ]
-      },
-      {
-        "step": "ForcedBuild"
       },
       {
         "step": "PrepareValidation",

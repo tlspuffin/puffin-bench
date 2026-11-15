@@ -172,9 +172,12 @@ Init
     patched in the sources), see "Compat Rules" in tlspuffin/docs/tlspuffin-job-scripts.md
 
 [parallel branch per library/configuration]
- ForcedBuild
+ BuildOnce: ForcedBuild once per experiment, before its attempts
   └─ cargo build --release --features=… inside nix-shell, fresh checkout, no cache
   └─ seed + help once, to warm/validate the binary
+  (Vuln group A, B and custom benchmarks: then PrepareValidationOnce, the validation once per experiment; every
+   attempt then runs the experiment's binary directly, with a copy of its validation; a campaign prepares the
+   validation once too, on demand, when an attempt has objectives)
   (Perf: BuildOnce, one ForcedBuild per library before its runs; then TwinExperiment and TwinExperimentEnd, two
    runs per step in its folders twin0 and twin1, each as below; then, once every run of every library ended,
    PerfObjectives: the replays and the validation of their objectives, so that nothing heavy runs while runs measure)
@@ -642,8 +645,8 @@ and from each bug):
    user of the board, with its bugs, attempts, cores per attempt, timeout and CPU sharing (`/api/benchmarks/tlspuffin`,
    stored in `exports/benchmarks.json`). Saving under the name of a saved benchmark replaces it, once confirmed.
 
-Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report) and its validation set
-(before the attempt, cached), runs with the bug's flags, and stops only on a recognised find: an objective whose signature
+Each experiment builds its vendor with mk_vendor (ASan when the bug's oracle is an ASan report) and its validation set,
+once for all its attempts and before them (the experiments of a task in parallel), runs with the bug's flags, and stops only on a recognised find: an objective whose signature
 is the bug's oracle is replayed on the validation builds while the fuzzer goes on, and ends the attempt when validation
 recognises it (confirmed by patch differential; a bug without patch: its signature on the build with every patch, and
 for a crash its stack at the bug's place, from its witness's stack); one it does not recognise leaves the attempt going,

@@ -16,7 +16,7 @@ here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
 fail=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
-source <( sed -n '/^SharedBuildDir()/p; /^TwinRunDir()/,/^}/p; /^PerfObjectives()/,/^}/p; /^PerfObjectivesRun()/,/^}/p' "${here}/../PR_perf.sh" )
+source <( sed -n '/^SharedBuildDir()/p; /^SharedRunDir()/,/^}/p' "${here}/../PR_common.sh"; sed -n '/^TwinRunDir()/p; /^PerfObjectives()/,/^}/p; /^PerfObjectivesRun()/,/^}/p' "${here}/../PR_perf.sh" )
 
 export THEJOB_OUT_PATH="${work}/out" THEJOB_ARTEFACTS_PATH="${work}/artefacts" THEJOB_STEP_ID=WolfSSL THEJOB_NB_CORES=2
 build="${THEJOB_OUT_PATH}/build-WolfSSL"

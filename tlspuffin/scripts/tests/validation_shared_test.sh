@@ -45,6 +45,14 @@ rm -rf "${THEJOB_OUT_PATH}/validation-BUF"
 ( THEJOB_STEP_ID=BUF; ValidationPrepare() { mkdir -p validation && jq -n --arg d "${PWD}" '{ status: "unsupported", message: $d }' > validation/state.json; }; PrepareValidationOnce ) > "${work}/once.log" 2>&1 || true
 check 'PrepareValidationOnce: the validation prepared in <out>/validation-<configuration>' \
   '[ "$( jq -r .message "${THEJOB_OUT_PATH}/validation-BUF/validation/state.json" 2> /dev/null )" == "${THEJOB_OUT_PATH}/validation-BUF" ] && grep -q "for all its attempts: unsupported" "${work}/once.log"'
+# a flow without PrepareValidationOnce (campaigns): the first attempt that needs a validation prepares it for all (in the
+# configuration's folder, under its lock), the next one takes a copy: one checkout (here refused: an unknown commit)
+: > "${work}/git.calls"
+cd "${work}" && mkdir -p campA campB
+( cd campA && THEJOB_STEP_ID=CAMP COMMIT_ID=0123456789abcdef0123456789abcdef01234567 ValidationPrepare ) > /dev/null 2>&1 || true
+( cd campB && THEJOB_STEP_ID=CAMP COMMIT_ID=0123456789abcdef0123456789abcdef01234567 ValidationPrepare ) > /dev/null 2>&1 || true
+check 'a campaign: prepared once for its attempts, on demand (one checkout), each attempt a copy' \
+  '[ "$( grep -c "worktree add" "${work}/git.calls" )" -eq 1 ] && [ "$( jq -r .status "${THEJOB_OUT_PATH}/validation-CAMP/validation/state.json" )" == unsupported ] && cmp -s campA/validation/state.json campB/validation/state.json && cmp -s campA/validation/state.json "${THEJOB_OUT_PATH}/validation-CAMP/validation/state.json"'
 # the end of the task: the shared checkout goes
 unset -f git
 ValidationCleanupShared || true

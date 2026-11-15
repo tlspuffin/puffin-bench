@@ -165,6 +165,19 @@ ValidationPrepare() {
   fi
   # prepared once for the attempts of this configuration (PrepareValidationOnce): a copy, its checkout and binary shared
   ValidationFromShared && return 0;
+  # a flow without that step (campaigns: validation only for attempts with objectives): the first attempt that needs it
+  # prepares it for all, in the configuration's folder under its lock, and the others take a copy; in that folder
+  # itself (PrepareValidationOnce, or that first attempt), prepared here
+  # (only in a step of a task: its output folder and its configuration known)
+  if [ -n "${THEJOB_OUT_PATH:-}" ] && [ -n "${THEJOB_STEP_ID:-}" ]; then
+    local sharedDir; sharedDir=$( SharedValidationDir );
+    if [ "$( realpath -m "${sharedDir}/validation" )" != "$( realpath -m "${VALIDATION_WORK}" )" ]; then
+      mkdir -p "${sharedDir}" &&
+        ( flock 9 && { [ -s "${sharedDir}/validation/state.json" ] || ( cd "${sharedDir}" && ValidationPrepare ); } ) 9> "${sharedDir}/.lock";
+      export VALIDATION_WORK="${PWD}/validation";
+      ValidationFromShared && return 0;
+    fi
+  fi
   rm -rf "${VALIDATION_WORK}"; mkdir -p "${VALIDATION_WORK}/runs" "${VALIDATION_WORK}/verdicts";
   local repo="${THEJOB_OUT_PATH}/repo" tree="${VALIDATION_WORK}/tree";
   local lib="${vendor%%:*}" preset="${vendor#*:}";
@@ -419,7 +432,7 @@ ConfirmObjective() {
 # of its files (ValidationFromShared: state.json, the listings, the controls' runs), and its own runs/ and verdicts/;
 # the checkout and the binary, named by state.json, are shared and removed once at the end (ValidationCleanupShared,
 # by CleanAllRepo).
-SharedValidationDir() { echo "${THEJOB_OUT_PATH}/validation-${THEJOB_STEP_ID}"; }
+SharedValidationDir() { echo "${THEJOB_OUT_PATH:-}/validation-${THEJOB_STEP_ID:-}"; }
 
 PrepareValidationOnce() {
   [ "${VALIDATION:-on}" == off ] && return 0;
@@ -433,6 +446,7 @@ PrepareValidationOnce() {
 # ValidationFromShared: ./validation from the configuration's one (PrepareValidationOnce), when it was prepared and its
 # checkout and binary are there (unsupported, error: as they are). 1: none (the caller prepares its own)
 ValidationFromShared() {
+  [ -n "${THEJOB_OUT_PATH:-}" ] && [ -n "${THEJOB_STEP_ID:-}" ] || return 1;
   local shared; shared="$( SharedValidationDir )/validation";
   [ -s "${shared}/state.json" ] || return 1;
   [ "$( realpath -m "${shared}" )" != "$( realpath -m "${PWD}/validation" )" ] || return 1;

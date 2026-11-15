@@ -1599,6 +1599,35 @@ ExperimentRun() {
   return 0;
 }
 
+# ── One build per experiment ──
+# BuildOnce, the step of a group of the flow run once per configuration before its attempts (Perf, Vuln group A and B,
+# custom benchmarks, campaigns), builds the library and tlspuffin (ForcedBuild) in SharedBuildDir; each attempt (each
+# run) works from it (SharedRunDir), the binary run directly, as cargo run would. Before, every attempt of a Vuln
+# experiment or campaign made the same build, at the same time.
+SharedBuildDir() { echo "${THEJOB_OUT_PATH:-}/build-${THEJOB_STEP_ID:-}"; }
+
+BuildOnce() {
+  local dir; dir=$( SharedBuildDir )
+  rm -rf "${dir}" && mkdir -p "${dir}" || return 1
+  ( cd "${dir}" && ForcedBuild "${@}" )
+}
+
+# SharedRunDir: the folder of one attempt or run from the shared build: its binary, seeds, vendor libraries and cargo
+# configuration linked, its records and nix shell copied; the build's .unsupported copied when the experiment cannot
+# run (then nothing else)
+SharedRunDir() {
+  local build entry; build=$( SharedBuildDir )
+  [ -r "${build}/.unsupported" ] && { cp "${build}/.unsupported" .; return 0; }
+  [ -x "${build}/target/release/${PACKAGE:-tlspuffin}" ] || { echo "no build in ${build}"; return 1; }
+  for entry in seeds target vendor .cargo; do
+    [ -e "${build}/${entry}" ] && ln -sfn "${build}/${entry}" "./${entry}"
+  done
+  for entry in .asan_info.json .vendor_sources.json .vendor_vulnerabilities.json client_log_config.yml shell.nix; do
+    [ -e "${build}/${entry}" ] && cp -a "${build}/${entry}" .
+  done
+  return 0
+}
+
 ExperimentRunWithCargo() {
   if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
     echo "Missing global variable AFL_CORES_GRAMMAR"
@@ -1643,6 +1672,15 @@ ExperimentRunWithCargo() {
 
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
+  # the experiment's build, made once (BuildOnce): this attempt runs from it; else (a flow without it) from its own
+  # build (ForcedBuild in this folder), by cargo run
+  local shared=false;
+  if [ -d "$( SharedBuildDir )" ]; then
+    SharedRunDir || return 1;
+    [ -r ./.unsupported ] && { echo "Unsupported: $( < ./.unsupported )"; return 1; };
+    shared=true;
+  fi
+
   CompatApplyFlags extra_flags;
 
   local last_core=0;
@@ -1650,6 +1688,28 @@ ExperimentRunWithCargo() {
   CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
+  if ${shared}; then
+    # its binary run directly, with the ASAN_OPTIONS cargo run would give it (the build's cargo configuration)
+    local binary="./target/release/${PACKAGE}";
+    if [ -z "${ASAN_OPTIONS+x}" ]; then
+      local asan; asan=$( CargoAsanOptions "$( SharedBuildDir )" );
+      [ -n "${asan}" ] && export ASAN_OPTIONS="${asan}";
+    fi
+    echo "nix-shell --run exec ${PREFIX_FAKETIME} ${binary} --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\" (the experiment's build, BuildOnce; ASAN_OPTIONS=${ASAN_OPTIONS:-unset})"
+    echo "exec ${PREFIX_FAKETIME} ${binary}" > .currentcmd
+    ExperimentSaveExecution "${binary}" "${extra_flags}" false
+    ExperimentSaveLaunchInfo
+    $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+    ref_tlspuffin_pid=$!
+    echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
+    ref_tlspuffin_killed=0
+    if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveData}" "${features:-none}"; then
+      echo "KILLING tlspuffin, experiment post launch setup failed" >&2
+      kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
+      ref_tlspuffin_killed=1
+    fi
+    return 0;
+  fi
   local featuresCLI='';
   [ -n "${features}" ] && featuresCLI="--features=${features}";
   echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""

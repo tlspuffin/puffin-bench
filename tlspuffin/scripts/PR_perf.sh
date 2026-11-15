@@ -13,6 +13,8 @@ Experiment () {
 }
 
 ExperimentWithCargo () {
+  # (the experiment's build made once, BuildOnce: this folder from it first, then whether the experiment can run)
+  [ -d "$( SharedBuildDir )" ] && { SharedRunDir || return 1; }
   [ -r ./.unsupported ] && { echo "Skipped: $( < ./.unsupported )"; return 0; }
   local tlspuffin_pid=0;
   local tlspuffin_killed=0;
@@ -77,27 +79,10 @@ SummaryRun () {
 # twice as many runs as one 2-client run per core, all with the same neighbour: a smaller change is seen (a run
 # varies by about 12 %, from its fuzzing path). See docs/tlspuffin-job-scripts.md.
 
-SharedBuildDir() { echo "${THEJOB_OUT_PATH}/build-${THEJOB_STEP_ID}"; }
+# (SharedBuildDir, BuildOnce: PR_common.sh, shared with the Vuln flows and campaigns)
 
-BuildOnce() {
-  local dir; dir=$( SharedBuildDir )
-  rm -rf "${dir}" && mkdir -p "${dir}" || return 1
-  ( cd "${dir}" && ForcedBuild "${@}" )
-}
-
-# the folder of one run: the build's binary, seeds and vendor libraries linked, its records and nix shell copied
-TwinRunDir() {
-  local build entry; build=$( SharedBuildDir )
-  [ -r "${build}/.unsupported" ] && { cp "${build}/.unsupported" .; return 0; }
-  [ -x "${build}/target/release/${PACKAGE:-tlspuffin}" ] || { echo "no build in ${build}"; return 1; }
-  for entry in seeds target vendor; do
-    [ -e "${build}/${entry}" ] && ln -sfn "${build}/${entry}" "./${entry}"
-  done
-  for entry in .asan_info.json .vendor_sources.json .vendor_vulnerabilities.json client_log_config.yml shell.nix; do
-    [ -e "${build}/${entry}" ] && cp -a "${build}/${entry}" .
-  done
-  return 0
-}
+# the folder of one run: from the shared build (SharedRunDir, PR_common.sh)
+TwinRunDir() { SharedRunDir; }
 
 # one fuzzer of the build on THEJOB_CORES, from this folder: what ExperimentRunWithCargo runs, without cargo (the
 # binary it would run, with the ASAN_OPTIONS cargo would give it); the fuzzer's stderr also kept in ./.fuzzer_stderr
