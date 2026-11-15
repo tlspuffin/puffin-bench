@@ -55,6 +55,7 @@ Run per_commit_cache_test bash "${bench}/git_restapi/tests/per_commit_cache_test
 Run attach_validation_test bash "${here}/attach_validation_test.sh" "" "${qjs}"
 Run bugs_page_test bash "${here}/bugs_page_test.sh" "${clone}" "${commit}"
 Run custombench_test env MK_VENDOR="${mk_vendor}" bash "${here}/custombench_test.sh" "${clone}" "${commit}"
+Run buildname_test env MK_VENDOR="${mk_vendor}" bash "${here}/buildname_test.sh" "${clone}" "${commit}"
 Run custom_target_test bash "${here}/custom_target_test.sh" "${clone}" "${commit}"
 Run launcher_custom_test bash "${here}/launcher_custom_test.sh" "${clone}" "${commit}"
 Run saved_benchmarks_test bash "${here}/saved_benchmarks_test.sh" "${clone}" "${commit}"
