@@ -168,6 +168,7 @@ FindFile() {
 # Mirrored for older results (no "build" in cli-<library>.json) by summary_render.js and objectives_report.sh.
 BuildDescription() {
   local cputs="$1" vendor="$2" features="$3" library="$4" version="$5";
+  [ -n "${vendor}" ] && vendor=$( VendorSlug "${vendor}" );   # the build by its own name (wolfssl:584,asan: wolfssl584-asan)
   if [ "${cputs}" == true ]; then
     echo "C harness, ${vendor#*:}";
     return 0;
@@ -343,8 +344,9 @@ ExperimentSetupForCargo() {
   local library=$( echo "${vendor}" | cut -d: -f1 )
   local library_version='NA'
   if ${cputs}; then
-    # "wolfssl:wolfssl580-asan" → wolfssl + 580
-    library_version=$( echo "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
+    # "wolfssl:wolfssl580-asan" → wolfssl + 580; puffin-build's short form by its build's name (wolfssl:5.8.0,asan:
+    # wolfssl580-asan, VendorSlug)
+    library_version=$( VendorSlug "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
   else
     # ",?wolfssl540,?" → wolfssl + 540
     # ",?libressl,?" → libressl + 333
@@ -398,7 +400,7 @@ ExperimentSetupForCargo() {
   echo "${build}" > ./.build_info;
   echo "Build: ${build}";
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\", \"release\": $( [ -n "${library_release}" ] && echo "\"${library_release}\"" || echo null ) }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ), \"custom\": $( CustomExperimentJSON ) }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\", \"release\": $( [ -n "${library_release}" ] && echo "\"${library_release}\"" || echo null ) }, \"build\": \"${build}\", \"vendor_build\": $( VendorBuildJSON "${vendor}" ), \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ), \"custom\": $( CustomExperimentJSON ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -604,8 +606,12 @@ DetectAsan() {
   fi
   local -n ref_asan=$4;
 
-  local requested=false;
-  [[ ",${features}," == *",asan,"* || "${vendor}" == *-asan* || "${asan_build:-}" == true ]] && requested=true;
+  # requested: the asan feature, the build's ASan as mk_vendor says it (ResolveVendor: wolfssl540-heap has it, its name
+  # does not say so), else its name, or a bug only seen with ASan
+  local requested=false resolved;
+  resolved=$( VendorBuildJSON "${vendor}" | jq -r '.asan | select(. != null)' 2> /dev/null );   # (not //: false is kept)
+  [[ ",${features}," == *",asan,"* || "${resolved}" == true || ( -z "${resolved}" && "${vendor}" =~ (^|[-,:])asan([-,]|$) )
+     || "${asan_build:-}" == true ]] && requested=true;
 
   local instrumented=null;
   local runtime='unknown';
@@ -1511,10 +1517,49 @@ DetectVendorSources() {
   ref_sources="[${ref_sources}]";
 }
 
+# Names of a vendor's build. The vendor (`<library>:<name>`, a step argument) is a preset of presets.toml, or, at a
+# commit whose puffin-build has its names (tlspuffin 54b07f490, 2026-11-10), any of them: puffin-build's short form
+# `wolfssl:5.8.4,asan`, `wolfssl:5.4.0,asan,only-HEAP`. Its build has one name of its own, its slug (`wolfssl584-asan`,
+# no comma): its folder (./vendor/<slug>) and PUT. The scripts name the build by it wherever a name is a path, a title or
+# a description: tlspuffin's build cuts paths at commas, and the records of earlier runs use it.
+#
+# ResolveVendor <vendor>: in the checkout, what mk_vendor says the build is (`mk_vendor list --json`, which builds
+# nothing): its slug, canonical name, version, ASan, and the base of a build derived from the catalogue; kept for the
+# task's other steps (VendorResolvedFile). Nothing at a commit whose mk_vendor does not say it (a preset: its own slug),
+# nor for a name it refuses (the build then says why: MakeVendor).
+ResolveVendor() {
+  local vendor="$1" file json;
+  [[ "${vendor}" == *:* ]] && [ -r "./puffin-build/vendors/${vendor%%:*}/presets.toml" ] && [ -x ./tools/mk_vendor ] || return 0;
+  file=$( VendorResolvedFile "${vendor}" ) || return 0;
+  json=$( nix-shell --run "./tools/mk_vendor list '${vendor}' --json" 2> /dev/null ) || return 0;
+  jq -e -c '{ slug, canonical, version, asan, base: (.derived.base // null) } | select((.slug | type) == "string" and .slug != "")' \
+      <<< "${json}" > "${file}.tmp" 2> /dev/null && mv -f "${file}.tmp" "${file}" || rm -f "${file}.tmp";
+  [ -s "${file}" ] && echo "The build of ${vendor}: $( jq -r '.slug' "${file}" ) ($( jq -r '.canonical // "?"' "${file}" ))";
+  return 0;
+}
+# VendorResolvedFile <vendor>: where ResolveVendor keeps what it found (the task's output folder); fails without one
+VendorResolvedFile() {
+  [ -n "${THEJOB_OUT_PATH:-}" ] && [ -n "$1" ] || return 1;
+  mkdir -p "${THEJOB_OUT_PATH}/vendor-builds" 2> /dev/null || return 1;
+  echo "${THEJOB_OUT_PATH}/vendor-builds/$( printf '%s' "$1" | md5sum | cut -c1-16 ).json";
+}
+# VendorSlug <vendor>: "<library>:<slug>", the vendor as its build is named (ResolveVendor); the vendor as given when
+# not resolved (a preset name, its own slug; a Rust harness feature)
+VendorSlug() {
+  local file slug='';
+  file=$( VendorResolvedFile "$1" ) && [ -s "${file}" ] && slug=$( jq -r '.slug // empty' "${file}" 2> /dev/null );
+  if [ -n "${slug}" ]; then echo "${1%%:*}:${slug}"; else echo "$1"; fi
+}
+# VendorBuildJSON <vendor>: what ResolveVendor found ({ slug, canonical, version, asan, base }), for the run's record;
+# null when not resolved
+VendorBuildJSON() {
+  local file; file=$( VendorResolvedFile "$1" ) && [ -s "${file}" ] && jq -c . "${file}" 2> /dev/null || echo null;
+}
+
 # VendorRelease <vendor preset "<library>:<name>">: the release of the library its build is of, dotted ("5.5.2"), from
-# puffin-build's record of the build (./vendor/<name>/.vendor_config: [sources] version); nothing when not recorded
+# puffin-build's record of the build (./vendor/<slug>/.vendor_config: [sources] version); nothing when not recorded
 VendorRelease() {
-  local name="${1#*:}" config;
+  local name; name=$( VendorSlug "$1" ); name="${name#*:}"; local config;
   config="./vendor/${name}/.vendor_config";
   [ -n "${name}" ] && [ -r "${config}" ] || return 0;
   awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && $1 == "version" { gsub(/"/, "", $2); if ($2 ~ /^[0-9]+(\.[0-9]+)*[a-z]*$/) print $2; exit }' "${config}";
@@ -1526,7 +1571,7 @@ VendorRelease() {
 # {"known": [...], "fixed": [...], "declared": known minus fixed}; null when the preset was not built here (Rust harness,
 # commits before puffin-build). The objectives pages do not flag a bug as new when it is one of the declared CVEs.
 DetectVendorVulnerabilities() {
-  local name="${1#*:}" info;
+  local name; name=$( VendorSlug "$1" ); name="${name#*:}"; local info;
   [ -n "${name}" ] && info=$( ls -1 ./vendor/"${name}"/build/vendorinfo.sh 2> /dev/null | head -1 );
   [ -n "${info}" ] && [ -r "${info}" ] || { echo null; return 0; }
   local known fixed;
@@ -1567,7 +1612,15 @@ ExperimentEndCommon() {
   ipcrm --all
 }
 
+# ExperimentTitle: the experiment's name for the fuzzer (its -d and -t, the name of its folder): the experiment's own,
+# its build's name when it is the vendor (a campaign's experiment is its vendor: wolfssl:5.8.4,asan is named
+# wolfssl:wolfssl584-asan, VendorSlug: no comma in the folder)
+ExperimentTitle() {
+  if [ -n "${vendor:-}" ] && [ "${experiment}" == "${vendor}" ]; then VendorSlug "${vendor}"; else echo "${experiment}"; fi
+}
+
 ExperimentRun() {
+  local title; title=$( ExperimentTitle );
   if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
     echo "Missing global variable AFL_CORES_GRAMMAR"
     return 1;
@@ -1620,7 +1673,7 @@ ExperimentRun() {
   # the objective replays run exactly this: binary, options, prefixes, ASAN_OPTIONS
   ExperimentSaveExecution "${binary}" "${extra_flags}" false
   ExperimentSaveLaunchInfo
-  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\"" &
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
@@ -1663,6 +1716,7 @@ SharedRunDir() {
 }
 
 ExperimentRunWithCargo() {
+  local title; title=$( ExperimentTitle );
   if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
     echo "Missing global variable AFL_CORES_GRAMMAR"
     return 1;
@@ -1729,11 +1783,11 @@ ExperimentRunWithCargo() {
       local asan; asan=$( CargoAsanOptions "$( SharedBuildDir )" );
       [ -n "${asan}" ] && export ASAN_OPTIONS="${asan}";
     fi
-    echo "nix-shell --run exec ${PREFIX_FAKETIME} ${binary} --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\" (the experiment's build, BuildOnce; ASAN_OPTIONS=${ASAN_OPTIONS:-unset})"
+    echo "nix-shell --run exec ${PREFIX_FAKETIME} ${binary} --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\" (the experiment's build, BuildOnce; ASAN_OPTIONS=${ASAN_OPTIONS:-unset})"
     echo "exec ${PREFIX_FAKETIME} ${binary}" > .currentcmd
     ExperimentSaveExecution "${binary}" "${extra_flags}" false
     ExperimentSaveLaunchInfo
-    $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+    $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\"" &
     ref_tlspuffin_pid=$!
     echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
     ref_tlspuffin_killed=0
@@ -1746,13 +1800,13 @@ ExperimentRunWithCargo() {
   fi
   local featuresCLI='';
   [ -n "${features}" ] && featuresCLI="--features=${features}";
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\""
   echo "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI}" > .currentcmd
   # the objective replays run exactly this: the binary cargo runs (built by ForcedBuild), options, prefixes,
   # ASAN_OPTIONS
   ExperimentSaveExecution "${CARGO_TARGET_DIR:-target}/release/${PACKAGE}" "${extra_flags}" true
   ExperimentSaveLaunchInfo
-  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -1941,6 +1995,8 @@ ForcedBuild() {
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
   rm -f ./.unsupported
+  # the build's own name and facts, for the steps after this one (puffin-build's short form: wolfssl:5.8.4,asan)
+  ResolveVendor "${vendor}"
 
   local cputs=false
   ComputeBuildRuntimeInfo "${PACKAGE}" "${vendor}" features cputs || {

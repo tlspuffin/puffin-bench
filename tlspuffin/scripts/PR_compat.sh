@@ -370,7 +370,7 @@ CompatApplyFiles() {
 # perf experiments of LibreSSL must run with ASAN.
 #   $1 package, $2 vendor, $3 cputs (true|false), $4 reference to the features.
 # The Rust harness gets the "asan" feature if missing. Sets COMPAT_UNSUPPORTED (and returns 0) when
-# ASAN is impossible: C vendor preset without ASAN, or libressl-src without ASAN support (before cd649d6bf).
+# ASAN is impossible: a C vendor whose build has no ASAN, or libressl-src without ASAN support (before cd649d6bf).
 CompatBuildRules() {
   local package="$1";
   local vendor="$2";
@@ -383,8 +383,11 @@ CompatBuildRules() {
   CompatIsDisabled libressl_asan && return 0;
 
   if ${cputs}; then
-    [[ "${vendor}" == *-asan ]] ||
-        COMPAT_UNSUPPORTED="LibreSSL: ASAN unsupported (vendor ${vendor} is not an -asan preset)";
+    # ASAN as mk_vendor says the build has it (ResolveVendor), whatever the vendor's form (libressl:4.2.1,asan), else as
+    # a preset's name says it (-asan)
+    local asan; asan=$( VendorBuildJSON "${vendor}" | jq -r '.asan | select(. != null)' 2> /dev/null );
+    [[ "${asan}" == true || ( -z "${asan}" && "${vendor}" == *-asan ) ]] ||
+        COMPAT_UNSUPPORTED="LibreSSL: ASAN unsupported (vendor ${vendor}: its build has no ASAN)";
     return 0;
   fi
   if [[ ",${ref_cbr_features}," != *,asan,* ]]; then

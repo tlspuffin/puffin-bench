@@ -204,6 +204,10 @@ ValidationPrepare() {
   export VENDOR_DIR="${VALIDATION_WORK}/vendor";
   ( cd "${tree}" && nix-shell --run "./tools/mk_vendor list '${vendor}' --json" ) > "${VALIDATION_WORK}/list.json" ||
     { ValidationFail "mk_vendor list ${vendor} failed"; return 0; };
+  # the build by its own name, the slug of its folder and PUT (puffin-build's short form, wolfssl:5.8.4,asan: its builds
+  # are wolfssl584-asan-fix-all, …-only-<ID>, not 5.8.4,asan-fix-all); the name as given where mk_vendor has no slug
+  local slug; slug=$( jq -r '.slug // empty' "${VALIDATION_WORK}/list.json" );
+  [ -n "${slug}" ] && preset="${slug}";
   # a build derived from the catalogue (<vendor>:<ID>, <preset>-only-<IDs>, -fix-…: custom benchmarks): the validation
   # set of its base preset, shared with every experiment on that preset
   local base; base=$( jq -r '.derived.base // empty' "${VALIDATION_WORK}/list.json" );

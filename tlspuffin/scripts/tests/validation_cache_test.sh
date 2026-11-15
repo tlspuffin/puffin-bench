@@ -5,7 +5,9 @@
 #     made from: another commit that changes neither puffin-build's build code nor the vendor's files reuses them;
 #   - the binary is cached per what it is made from: a commit that changes only the documentation reuses it, one that
 #     changes the Rust code builds it again (not the libraries); a change of a vendor's patch builds both;
-#   - a library folder no task used for 30 days goes.
+#   - a library folder no task used for 30 days goes;
+#   - a vendor in puffin-build's short form (wolfssl:584,asan): validated on its build's own name, mk_vendor's slug (its
+#     builds are <slug>-fix-all, …), not on "584,asan-fix-all".
 # Quick: nothing is really built.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -38,6 +40,9 @@ cat > "${work}/bin/nix-shell" <<'EOF'
 [ "$1" == --run ] && shift
 cmd="$1"
 case "${cmd}" in
+  *"mk_vendor list 'wolfssl:584,asan'"*)
+    echo '{"slug":"p","canonical":"wolfssl:5.8.4,asan","catalogue":"cat1","derived":null,"validation_set":["p-fix-all","p-only-CVE-1"],
+           "entries":[{"id":"CVE-1","state":"active","patchable":true,"replayable":true}]}';;
   *"mk_vendor list"*)
     echo '{"catalogue":"cat1","derived":null,"validation_set":["p-fix-all","p-only-CVE-1"],
            "entries":[{"id":"CVE-1","state":"active","patchable":true,"replayable":true}]}';;
@@ -93,4 +98,8 @@ touch -d '-40 days' "${dirD}/.used"
 rm -rf "${work}/step-${B}"   # another attempt (a step prepares once)
 Prepare "${B}" > /dev/null
 check 'a library folder unused for 30 days goes, the one in use stays' '[ ! -d "${dirD}" ] && [ -d "${dirA}/p-fix-all" ]'
+# puffin-build's short form: the validation of the build mk_vendor names p
+vendor='wolfssl:584,asan'; mkdir -p "${work}/step-short" && ( cd "${work}/step-short" && COMMIT_ID="${B}" ValidationPrepare > /dev/null 2>&1 )
+check "the short form wolfssl:584,asan: validated on its build's own name (p, p-fix-all), as wolfssl:p is" \
+  '[ "$( jq -r ".status + \" \" + .preset + \" \" + .fixAll" "${work}/step-short/validation/state.json" )" == "ready p p-fix-all" ]'
 exit "${fail}"

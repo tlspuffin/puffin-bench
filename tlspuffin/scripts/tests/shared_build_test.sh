@@ -10,7 +10,8 @@ here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
 fail=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
-source <( sed -n '/^SharedBuildDir()/p; /^SharedRunDir()/,/^}/p; /^ExperimentRunWithCargo()/,/^}/p; /^CargoAsanOptions()/,/^}/p; /^ExperimentSaveExecution()/,/^}/p' "${here}/../PR_common.sh" )
+source <( sed -n '/^SharedBuildDir()/p; /^SharedRunDir()/,/^}/p; /^ExperimentRunWithCargo()/,/^}/p; /^CargoAsanOptions()/,/^}/p; /^ExperimentSaveExecution()/,/^}/p;
+                  /^ExperimentTitle()/,/^}/p; /^VendorSlug()/,/^}/p; /^VendorResolvedFile()/,/^}/p' "${here}/../PR_common.sh" )
 # what the launch needs around it, stood in: the run's setup (cores), the compat rules, the launch info, the monitor
 ExperimentSetupForCargo() { local -n lc=$1; lc=1; RESERVED_PORT=4242; }
 CompatApplyFlags() { local -n f=$1; f='--flag'; }

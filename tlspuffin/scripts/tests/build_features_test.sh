@@ -34,4 +34,26 @@ check 'another feature the commit lacks: unsupported, as before' '[ "${rc}" -eq 
 printf '[features]\ndefault = ["sancov"]\nasan = []\ncputs = []\n' > "${work}/repo/tlspuffin/Cargo.toml"
 build wolfssl:wolfssl540-asan asan
 check 'a commit with the asan feature: kept' '[ "${rc}" -eq 0 ] && [ "${features}" == "asan," ] && ! grep -q dropped <<< "${out}"'
+
+# the LibreSSL rule of Perf (PR_compat.sh CompatBuildRules): a build of LibreSSL without ASan is unsupported; ASan as
+# mk_vendor says the build has it (ResolveVendor's record), whatever the vendor's form: libressl:4.2.1,asan has it
+source <( sed -n '/^CompatBuildRules()/,/^}/p' "${here}/../PR_compat.sh" )
+source <( sed -n '/^VendorResolvedFile()/,/^}/p;/^VendorBuildJSON()/,/^}/p' "${here}/../PR_common.sh" )
+CompatIsDisabled() { return 1; }
+rules() {
+  TYPE=perf; COMPAT_UNSUPPORTED=''; features='';
+  CompatBuildRules tlspuffin "$1" true features > /dev/null; echo "${COMPAT_UNSUPPORTED}";
+}
+resolved() {   # <vendor> <slug> <asan>: what ResolveVendor records of its build
+  jq -nc --arg s "$2" --argjson a "$3" '{ slug: $s, canonical: null, version: null, asan: $a, base: null }' \
+    > "$( VendorResolvedFile "$1" )";
+}
+resolved libressl:4.2.1,asan libressl421-asan true
+check 'Perf of LibreSSL in the short form with ASan (libressl:4.2.1,asan): supported' \
+  '[ -z "$( rules libressl:4.2.1,asan )" ]'
+resolved libressl:4.2.1 libressl421 false
+check 'Perf of LibreSSL without ASan (libressl:4.2.1): unsupported, as before' \
+  '[[ "$( rules libressl:4.2.1 )" == "LibreSSL: ASAN unsupported"* ]]'
+check 'Perf of LibreSSL, a preset named -asan that mk_vendor does not resolve (an older commit): supported, as before' \
+  '[ -z "$( rules libressl:libressl333-asan )" ]'
 exit "${fail}"
