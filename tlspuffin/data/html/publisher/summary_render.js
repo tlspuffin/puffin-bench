@@ -475,6 +475,7 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     const notReproduced = targetNoReplay ? 0 : expected.found.size - (expected.reproduced?.size ?? expected.found.size);
     const counted = expected.counted ?? expected.found, untimed = expected.untimed ?? [];
     button.innerHTML = `🎯 ${counted.size}/${expected.runs.size}`
+        + (expected.weak?.size ? ` <span class="badge-weak">· weak</span>` : '')
         + (untimed.length ? ` <span class="badge-untimed">· ${untimed.length} untimed</span>` : '')
         + (notReproduced > 0 ? ` <span class="badge-nr">· no replay</span>` : '')
         + (notTarget ? ` <span class="badge-nt">+${notTarget} ⦸</span>` : '')

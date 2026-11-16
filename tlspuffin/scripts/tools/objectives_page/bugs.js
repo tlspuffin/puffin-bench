@@ -31,12 +31,18 @@ export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'repl
 // the signature); a verdict naming another bug, or none (not-patched without it, another signature), never. Without a
 // verdict that decides (inconclusive, an error, not validated): the target's signature for a custom one (provisional
 // until validation says), the place or the claim of vuln_targets.json for the others.
+// 'weak' (true for every caller that counts) for a crash target named by its signature only whose place is not known
+// (no witness stack, no top frames): its signature alone, as its run ends on it (PR_validate.sh ConfirmObjective: the
+// fuzzer's record) and the launcher takes it (custombench.js); the 🎯 says weak (ExpectedRuns weak, ExpectedChipTip).
 export function IsExpected(target, group, verdictOf = null) {
   if (!target) return false;
   const verdicts = (group.traces ?? []).map(trace => verdictOf?.(trace, group)).filter(Boolean);
   const crash = target.custom ? target.oracle?.kind === 'crash' : target.kind === 'crash';
   if (verdicts.some(v => (v.entries ?? []).includes(target.cve))) return true;
-  if (verdicts.some(v => (v.known_unpatched ?? []).includes(target.cve))) return !crash || AtPlace(target.place, group);
+  if (verdicts.some(v => (v.known_unpatched ?? []).includes(target.cve))) {
+    if (!crash) return true;
+    return (target.place ?? []).length ? AtPlace(target.place, group) : 'weak';
+  }
   if (verdicts.some(v => ['confirmed', 'not-patched', 'other-signature'].includes(v.verdict))) return false;
   if (target.custom) return OracleMatchesGroup(target.oracle, group);
   const fz = group.fuzzer;
@@ -170,7 +176,8 @@ export function RunFailures(lib, jobType) {
 // in runs, also those without objective (libraries[]: the task's steps)
 export function ExpectedRuns(runs, targets = {}, libraries = [], catalogue = null) {
   const out = {};
-  const entry = (library) => out[library] ??= { target: targets[library], runs: new Set(), found: new Set(), reproduced: new Set() };
+  const entry = (library) => out[library] ??= { target: targets[library], runs: new Set(), found: new Set(), reproduced: new Set(),
+                                                 weak: new Set() };
   for (const lib of libraries ?? []) {
     if (!targets?.[lib.library]) continue;
     // the runs the scheduler started (ends: a run still Pending never ran, e.g. in a cancelled task: not a run), else
@@ -185,8 +192,11 @@ export function ExpectedRuns(runs, targets = {}, libraries = [], catalogue = nul
     const o = entry(run.library);
     o.runs.add(run.attempt);
     const verdictOf = VerdictOf(libraries, run.library, run.attempt, catalogue);
-    const expected = (run.groups ?? []).filter(g => IsExpected(target, g, verdictOf));
+    const matched = (run.groups ?? []).map(g => [g, IsExpected(target, g, verdictOf)]).filter(([, m]) => m);
+    const expected = matched.map(([g]) => g);
     if (expected.length) o.found.add(run.attempt);
+    // found by the target's signature alone (a crash target without known place: IsExpected 'weak'): counted, weak
+    if (matched.length && matched.every(([, m]) => m === 'weak')) o.weak.add(run.attempt);
     // reproduced: a replay confirmed it in this run (else the fuzzer's log is the only evidence)
     if (expected.some(g => !UNCONFIRMED.has(g.type))) o.reproduced.add(run.attempt);
   }
@@ -217,12 +227,16 @@ export function CountRuns(o, outcomes) {
 }
 
 // ExpectedChipTip(library, o, marks): the hover of a 🎯 chip, the same on Results and on the objectives report: its
-// target, then one line per mark of the chip as it is displayed (🎯 k/n, · k untimed and each of those runs with why,
-// · no replay, +k ⦸, ⚠ k). marks: { why(attempt): why a run did not succeed, notReproduced, notTarget, unexpected, alias }
+// target, then one line per mark of the chip as it is displayed (🎯 k/n, · weak, · k untimed and each of those runs with
+// why, · no replay, +k ⦸, ⚠ k). marks: { why(attempt): why a run did not succeed, notReproduced, notTarget, unexpected, alias }
 export function ExpectedChipTip(library, o, { why = () => null, notReproduced = 0, notTarget = 0, unexpected = 0, alias = '', noReplay = false } = {}) {
   const t = o.target;
   return [`🎯 ${library}: ${t.cve}${alias && alias !== library ? ` (${alias})` : ''}, expected ${TargetText(t)}`,
       `🎯 ${o.counted.size}/${o.runs.size}: runs that found it / runs${o.provisional ? ' (provisional: runs not ended)' : ''}`,
+      ...(o.weak?.size ? [`· weak: ${o.weak.size === o.counted.size ? (o.weak.size > 1 ? 'these runs' : 'this run') : `${o.weak.size} of these runs`} found it by its `
+          + `signature alone (${SignatureText(t.oracle ?? { kind: t.kind, asan: null })}), validation naming it by that `
+          + 'signature (no patch at this version) and its place not known (no witness stack, no top frames): any crash of that '
+          + 'type there is taken for it, as the run ends on it'] : []),
       ...(o.preTarget ? ['before targets: the job scripts of this task had no expected bug (before 2026-10-07): a run '
           + 'ended on its first objective, whatever the bug, and succeeded with it; 🎯 counts the runs whose objectives '
           + 'include the expected bug'] : []),

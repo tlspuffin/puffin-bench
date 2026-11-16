@@ -9,7 +9,8 @@
 #     ones, as the badges do;
 #   - it counts a verdict that a failed control can have made false as could not validate, as the badges and the 🎯 do
 #     (bugs.js UntrustedBy): a "confirmed X" when X's control failed, a "not patched" with X's signature when X's
-#     witness triggered with every patch; the others stand.
+#     witness triggered with every patch; the others stand;
+#   - a target found by its signature alone (a custom crash target without patch nor known place): its 🎯 says weak.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 command -v node > /dev/null || { echo "SKIP: no node"; exit 0; }
@@ -108,6 +109,19 @@ heapReport('105', patchedSide, [heapCrash, uaf]);
 const side = line(await Panel('105', 'HEAP', patchedSide)).replace(/<[^>]*>/g, '');
 check(/🚨 1 no known bug's signature/.test(side) && /○ 1 could not validate \(failed control of CVE-2022-42905\)/.test(side),
   `HEAP's witness triggered with every patch: the one with its signature could not validate, the other stands: ${side}`);
+// a custom crash target without patch nor known place, named by its signature (N2): 🎯 1/1 · weak, why in its hover
+const weakValidation = { catalogue: { source: 'commit', commit: 'c' },
+  entries: { 'CVE-2022-42905': { alias: 'HEAP', oracle: { kind: 'crash', asan: 'heap-use-after-free' } } },
+  byTrace: { '0/u1': { verdict: 'not-patched', entries: [], known_unpatched: ['CVE-2022-42905'] } } };
+WriteFixture(root, 'objectives/106.json', { task: '106', commit: 'c', job_type: 'vuln-custom',
+  libraries: [{ library: 'C_HEAP', runs: 1, outcomes: { 0: 'success' }, validation: weakValidation }],
+  runs: [{ library: 'C_HEAP', attempt: 0, found: 1, replayed: 1, reports: 1,
+    cli: { vendor: 'wolfssl:wolfssl540-asan-only-CVE-2022-42905', library: { name: 'wolfssl', version: '540' },
+           custom: { benchmark: 'C', target: 'CVE-2022-42905', oracle: { kind: 'crash', asan: 'heap-use-after-free' } } },
+    groups: [{ type: 'heap-use-after-free', frames: ['FreeKeyExchange', 'Caller'], count: 1, traces: ['u1'], excerpt: '' }] }] });
+const weak = await Panel('106', 'C_HEAP', weakValidation);
+check(/🎯 1\/1 · weak/.test(weak.button) && /· weak: this run found it by its signature alone/.test(weak.title),
+  `a target found by its signature alone (no place known): 🎯 1/1 · weak, why in its hover (${weak.button}; ${weak.title.split('\n')[2] ?? ''})`);
 process.exit(fail);
 JS
 WORK="${work}" REPO="$( cd "${here}/../../.." && pwd )" node "${work}/test.mjs"

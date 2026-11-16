@@ -6,6 +6,7 @@
 #   - a bug the validation finds with no known bug's signature: new (🚨), its 🐞 red, whatever the registry;
 #   - a weak signature (SDOS2: any ASan SEGV) does not make a crash elsewhere known: new by its stack;
 #   - a claim split by patch (SplitByPatch): a verdict that a failed control can have made false has no say there either;
+#   - a custom crash target without patch nor known place, named by its signature: the find, its 🎯 weak;
 #   - a custom benchmark's experiments get their 🎯 (their target, recognised by validation; by its signature before),
 #     also a configuration whose runs found nothing (🎯 0/n: the task is not all found);
 #   - objectives but nothing reproduced and no fuzzer record: unclear, its 🐞 outlined (warning);
@@ -196,6 +197,14 @@ jq --argjson t "${tHeap}" --argjson c "${heapFailed}" '.targets = $t | .librarie
   "${work}/ctlplace.json" > "${work}/ctl.tmp" && mv "${work}/ctl.tmp" "${work}/ctlplace.json"
 check "Vuln group A: a crash at HEAP's place with HEAP's control failed: the find, by its place" \
   '[ "$( verdicts ctlplace "[.verdicts.conclusion.counted, .verdicts.conclusion.level]" )" == "[1,\"all\"]" ]'
+# a custom crash target without patch at its version nor known place (no witness stack, no top frames): a crash that
+# validation names by its signature only (any crash of its ASan type: the run ends on it, the launcher takes it) is the
+# find, counted weak (the 🎯 says so); before, never (🎯 0/1)
+customU='{ "benchmark": "C", "target": "CVE-2022-42905", "oracle": { "kind": "crash", "asan": "heap-use-after-free" } }'
+report weaktarget vuln-custom "[$( run 0 '["CVE-2022-42905"]' "[${uaf}]" "${customU}" )]" \
+  "$( validation '{ "0/u1": { "verdict": "not-patched", "known_unpatched": ["CVE-2022-42905"] } }' )"
+check 'a custom crash target without patch nor place, named by its signature: the find (🎯 1/1), weak' \
+  '[ "$( verdicts weaktarget "[.verdicts.conclusion.counted, .verdicts.conclusion.level, .verdicts.libraries.WolfSSL.weak]" )" == "[1,\"all\",[0]]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'

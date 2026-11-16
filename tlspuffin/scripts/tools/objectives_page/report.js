@@ -392,7 +392,7 @@ function ExpectedBanner(expectedRuns, libraries) {
   const chips = Object.entries(expectedRuns).map(([library, o]) => {
     const tip = ExpectedChipTip(library, o, { alias: CVES?.[o.target.cve]?.alias ?? '', noReplay: NoReplayTarget(o.target.cve, libraries),
         why: attempt => failures.find(f => f.library === library && f.attempt === attempt)?.why });
-    return `<span class="exp-chip exp-${(o.provisional && o.level === 'all') ? 'provisional' : o.level}" data-click-tip="${esc(tip)}">${esc(library)} ${o.counted.size}/${o.runs.size}${o.untimed.length ? ` · ${o.untimed.length} untimed` : ''}</span>`;
+    return `<span class="exp-chip exp-${(o.provisional && o.level === 'all') ? 'provisional' : o.level}" data-click-tip="${esc(tip)}">${esc(library)} ${o.counted.size}/${o.runs.size}${o.weak?.size ? ' · weak' : ''}${o.untimed.length ? ` · ${o.untimed.length} untimed` : ''}</span>`;
   }).join('');
   // provisional (a live report: whether each run succeeds is known once the task ended): never green
   const level = (conclusion.provisional && conclusion.level === 'all') ? 'provisional' : conclusion.level;
@@ -418,7 +418,7 @@ function ExpectedRunsChip(library, o) {
   const failures = Failures(REPORT_LIBRARIES).failures;
   const tip = ExpectedChipTip(library, o, { alias: CVES?.[o.target.cve]?.alias ?? '', noReplay: NoReplayTarget(o.target.cve, REPORT_LIBRARIES),
       why: attempt => failures.find(f => f.library === library && f.attempt === attempt)?.why });
-  return `<span class="exp-chip exp-${level}" data-click-tip="${esc(tip)}">🎯 ${o.counted.size}/${o.runs.size}${o.untimed.length ? ` · ${o.untimed.length} untimed` : ''}</span> · `;
+  return `<span class="exp-chip exp-${level}" data-click-tip="${esc(tip)}">🎯 ${o.counted.size}/${o.runs.size}${o.weak?.size ? ' · weak' : ''}${o.untimed.length ? ` · ${o.untimed.length} untimed` : ''}</span> · `;
 }
 
 // The runs that did not succeed because something went wrong, one line each with why, under the tiles: they are not in

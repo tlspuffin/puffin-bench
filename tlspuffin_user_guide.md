@@ -662,7 +662,8 @@ commit without the catalogue. The run's summary says which decided: `confirmed_b
 confirmed the objective that ended it.
 The objectives page, Results and History give each experiment its 🎯 (runs that found its target, as for Vuln group
 A): an objective is the target when validation names the target for it (by patch; by its signature only, a crash at the
-target's place only), not when validation names another bug or none, else, until validation says or when it cannot
+target's place only, or any crash of its type when its place is not known, no witness stack nor top frames: its 🎯
+then says `· weak`, as the run ends on such a crash), not when validation names another bug or none, else, until validation says or when it cannot
 (no verdict, or one that a failed control of its run can have made false), when it has the target's signature (a crash: at the target's place). An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
 it, `cli-<experiment>.json`): the task's conclusion counts it, never "all found" without it.
 

@@ -1858,6 +1858,8 @@ header {
 .lib-objectives.target-chip.target-partial { border-color: #d4a72c; color: #e3b341; background: transparent; }
 .lib-objectives.target-chip.target-none { border-color: #f85149; color: #ff7b72; background: transparent; }
 .lib-objectives.target-chip .badge-untimed { color: #e3b341; font-weight: 600; }
+/* · weak: found by the target's signature alone, its place not known (bugs.js IsExpected 'weak') */
+.lib-objectives.target-chip .badge-weak { color: #e3b341; }
 .lib-objectives .badge-nt { border: 1px dashed currentColor; border-radius: 999px; padding: 0 4px; font-size: 10.5px; opacity: .7; }
 .lib-objectives .badge-ux { color: #ffb74d; font-size: 10.5px; }
 .lib-bug .objective-expected { color: #7ee787; font-size: 11px; white-space: nowrap; }

@@ -109,7 +109,7 @@ for (const [library, o] of Object.entries(expected)) {
     if (script !== found) disagrees.push({ attempt: Number(attempt), script, report: found });
   }
   out[library] = { cve: o.target.cve, runs: [...o.runs].sort((a, b) => a - b), found: [...o.found].sort((a, b) => a - b),
-                   counted: [...o.counted].sort((a, b) => a - b),
+                   counted: [...o.counted].sort((a, b) => a - b), weak: [...(o.weak ?? [])].sort((a, b) => a - b),
                    untimed: o.untimed.map(attempt => ({ attempt, why: why[attempt] ?? null })), level: o.level,
                    provisional: o.provisional, pre_target: o.preTarget, first_expected: firstExpected, script_disagrees: disagrees };
 }
