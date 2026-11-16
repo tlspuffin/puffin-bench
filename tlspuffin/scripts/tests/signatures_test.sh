@@ -81,6 +81,16 @@ cli 'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' '__asan_memcpy < Re
     'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' &&
   echo "ok   tools/js/has_place.js --witness: the place of a witness's stack (SDOS2's: its crash in glibc's memmove, not BUF's)" ||
   { echo "FAIL tools/js/has_place.js --witness does not answer as PlaceOf and HasPlace"; fail=1; }
+# --place-of: the place the pages give a bug (PlaceOf: its witness's stack, else the catalogue's top frames), for the run
+# of an experiment naming its bug when validation cannot tell (PR_validate.sh TargetAtPlace); 3 when neither is known
+placeOf() { "${qjs}" --std -m "${data}/tools/js/has_place.js" --place-of "$1" "$2" "$3"; echo $?; }
+[ "$( placeOf '' '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType' '__memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType' )" == 0 ] &&
+  [ "$( placeOf 'AddPacketInfo < DoTls13HandShakeMsgType' '' 'AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg' )" == 0 ] &&
+  [ "$( placeOf 'AddPacketInfo < DoTls13HandShakeMsgType' '' 'ParseCertRelative < ProcessPeerCerts < DoHandShakeMsgType' )" == 1 ] &&
+  [ "$( placeOf 'AddPacketInfo < DoTls13HandShakeMsgType' 'RefineSuites < CheckPreSharedKeys < DoTls13ClientHello' 'AddPacketInfo < DoTls13HandShakeMsgType < X' )" == 1 ] &&
+  [ "$( placeOf '' '' 'AddPacketInfo < DoTls13HandShakeMsgType < X' )" == 3 ] &&
+  echo "ok   tools/js/has_place.js --place-of: the witness's stack, else the top frames; 3 without either" ||
+  { echo "FAIL tools/js/has_place.js --place-of does not answer as PlaceOf and HasPlace"; fail=1; }
 sed -n '/^TargetMatches()/,/^}/p' "${here}/../PR_common.sh" | grep -q 'HasPlace ' && grep -q 'js/has_place.js' "${here}/../PR_common.sh" &&
   echo "ok   PR_common.sh TargetMatches asks HasPlace (tools/js/has_place.js)" || { echo "FAIL PR_common.sh TargetMatches has a rule of its own"; fail=1; }
 # the frame rule of before (a frame among the first 3), nowhere

@@ -106,6 +106,16 @@ TargetedObjectiveFound() {
         confirmations=$(( confirmations + 1 ));
         what="the signature of ${target_bug}"; (( rc == 0 )) || what="no record in the fuzzer's logs";
         why=$( ConfirmObjective "${trace}" ); confirmed=$?;
+        # validation cannot tell (2): the fuzzer's record decides, at the target's place when it is known (a crash of its
+        # type elsewhere is another bug: the experiment goes on), by its type alone when not; as the report counts it
+        # (bugs.js IsExpected: the 🎯 says weak then)
+        if (( confirmed == 2 )) && (( rc == 0 )) && [ "$( jq -r '.kind // empty' <<< "${target_oracle:-null}" 2> /dev/null )" == crash ]; then
+          TargetAtPlace "$( FuzzerVerdict "${records}" "${name}" | cut -f3 )";
+          case $? in
+            1) confirmed=1; why="${why}; its record not at the place of ${target_bug}: another crash of its type";;
+            3) why="${why}; its place not known: its type alone";;
+          esac
+        fi
         if (( confirmed == 1 )); then
           ref_verdicts[${name}]=not-targeted;
           echo "objective ${name}: ${what}, not ${target_bug} (${why}): the experiment goes on" >&2;

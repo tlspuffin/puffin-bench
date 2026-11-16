@@ -7,6 +7,8 @@
 #   - a weak signature (SDOS2: any ASan SEGV) does not make a crash elsewhere known: new by its stack;
 #   - a claim split by patch (SplitByPatch): a verdict that a failed control can have made false has no say there either;
 #   - a custom crash target without patch nor known place, named by its signature: the find, its 🎯 weak;
+#   - a custom crash target without a verdict that decides: a crash of its type at its place when known (elsewhere, not
+#     the find), by its type alone when not (weak);
 #   - a custom benchmark's experiments get their 🎯 (their target, recognised by validation; by its signature before),
 #     also a configuration whose runs found nothing (🎯 0/n: the task is not all found);
 #   - objectives but nothing reproduced and no fuzzer record: unclear, its 🐞 outlined (warning);
@@ -205,6 +207,27 @@ report weaktarget vuln-custom "[$( run 0 '["CVE-2022-42905"]' "[${uaf}]" "${cust
   "$( validation '{ "0/u1": { "verdict": "not-patched", "known_unpatched": ["CVE-2022-42905"] } }' )"
 check 'a custom crash target without patch nor place, named by its signature: the find (🎯 1/1), weak' \
   '[ "$( verdicts weaktarget "[.verdicts.conclusion.counted, .verdicts.conclusion.level, .verdicts.libraries.WolfSSL.weak]" )" == "[1,\"all\",[0]]" ]'
+# a custom crash target whose place is known (its witness's stack in the validation's record), no verdict that decides
+# (none, inconclusive): a crash of its type elsewhere is not the find, as the run does not end on it (F1 of the audit of
+# 2026-11-16: the place, when known, as Vuln group A); at its place, the find, not weak; its place not known: its type
+# alone, weak
+customH='{ "benchmark": "C", "target": "CVE-2022-42905", "oracle": { "kind": "crash", "asan": "heap-buffer-overflow" } }'
+hboElsewhere='{ "type": "heap-buffer-overflow", "frames": ["ParseCertRelative", "ProcessPeerCerts"], "count": 1, "traces": ["e1"] }'
+hboAtPlace='{ "type": "heap-buffer-overflow", "frames": ["AddPacketInfo", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg"], "count": 1, "traces": ["e1"] }'
+heapWitness='.libraries[0].validation.entries["CVE-2022-42905"].witness_frames = ["AddPacketInfo", "DoTls13HandShakeMsgType", "DoTls13HandShakeMsg", "ProcessReplyEx"]'
+custom_case() { # <name> <group> <byTrace JSON> <with its place: yes|no>
+  report "$1" vuln-custom "[$( run 0 '["CVE-2022-42905"]' "[$2]" "${customH}" )]" "$( validation "$3" )"
+  [ "$4" == yes ] && { jq "${heapWitness}" "${work}/$1.json" > "${work}/t.json" && mv "${work}/t.json" "${work}/$1.json"; }
+  verdicts "$1" "[.verdicts.conclusion.counted, .verdicts.libraries.WolfSSL.weak]"
+}
+check 'custom target, its place known, a crash of its type elsewhere without verdict: not the find (🎯 0/1)' \
+  '[ "$( custom_case f1none "${hboElsewhere}" "{}" yes )" == "[0,[]]" ]'
+check 'custom target, its place known, a crash of its type elsewhere, inconclusive: not the find (🎯 0/1)' \
+  '[ "$( custom_case f1inconclusive "${hboElsewhere}" "{ \"0/e1\": { \"verdict\": \"inconclusive\", \"entries\": [] } }" yes )" == "[0,[]]" ]'
+check 'custom target, its place known, a crash at its place without verdict: the find, not weak (🎯 1/1)' \
+  '[ "$( custom_case f1atplace "${hboAtPlace}" "{}" yes )" == "[1,[]]" ]'
+check 'custom target, its place not known (no witness stack, no top frames), a crash of its type without verdict: the find, weak' \
+  '[ "$( custom_case f1noplace "${hboElsewhere}" "{}" no )" == "[1,[0]]" ]'
 report customlive vuln-custom "[$( run 0 '["CVE-2022-38152"]' "[${segv}]" "${custom}" )]"
 # a custom benchmark of the claim set apart on wolfSSL < 5.7.2 (CVE-2024-5814): its claim is its target there, not set apart
 c5814='{ "benchmark": "C", "target": "CVE-2024-5814", "oracle": { "kind": "claim", "violation": "Negotiated cipher is not in agent'"'"'s configured ciphers list" } }'

@@ -6,6 +6,8 @@
 #   - validation cannot tell (a bug that does not replay, a build that could not run it): the fuzzer's record ends the
 #     run, and its summary does not say validation;
 #   - validation rejects it: the run goes on;
+#   - validation cannot tell and the target's place is known: the fuzzer's record ends the run at that place only, a
+#     crash of its type elsewhere being another bug;
 #   - a Vuln A target recognised by its place, the bench's tools without the pages' module (has_place.js cannot load
 #     common/signatures.js): the objective is left pending, said, never another bug; the end-of-run counts say it could
 #     not be checked.
@@ -52,6 +54,36 @@ check 'its summary: not confirmed by validation' "$( RunConfirmation )" ''
 Attempt 1
 check 'validation rejects the find: the run goes on' "${found}" 1
 check 'its summary: not confirmed by validation' "$( RunConfirmation )" ''
+
+# validation cannot tell, the target's place known (its witness's stack recorded when the validation was prepared): the
+# fuzzer's record ends the run only at that place; a crash of its type elsewhere is another bug, the run goes on (F1 of
+# the audit of 2026-11-16, as the report counts it)
+qjs="${QJS:-/srv/puffin-bench/data/tools/qjs}"
+if [ -x "${qjs}" ]; then
+  mkdir -p "${work}/full/tools" "${work}/full/html/common" && ln -s "${qjs}" "${work}/full/tools/qjs" &&
+    command cp -r "${here}/../../data/tools/js" "${work}/full/tools/js" && command cp -f "${here}/../../data/html/common/signatures.js" "${work}/full/html/common/"
+  export THEJOB_TOOLS_PATH="${work}/full/tools"
+  # the record as the fuzzer's crash handler writes it: its first 3 frames (all 853 crash records of the stored reports)
+  FuzzerRecords() {
+    printf '%s\tcrash\tSIGABRT\tRefineSuites < CheckPreSharedKeys < DoTls13ClientHello\t%s\tobjective/%s\n' "$(( $( ms "${objective}" ) - 80 ))" 2026-11-10T08:05:00.120+00:00 "${objective}"
+    printf '%s\tasan\tstack-buffer-overflow\tRefineSuites < CheckPreSharedKeys < DoTls13ClientHello\t%s\t\n' "$(( $( ms "${objective}" ) + 900 ))" 2026-11-10T08:05:01.100+00:00
+  }
+  WitnessAttempt() { # <name> <witness's stack (JSON)>: the place of BUF known, validation cannot tell
+    local dir="${work}/attempt-$1";
+    mkdir -p "${dir}/experiments/test/objective" "${dir}/validation" && cd "${dir}" || exit 1;
+    jq -n --argjson w "$2" '{ status: "ready", controls: [{ entry: "CVE-2022-39173", ok: true, witness_frames: $w }] }' > validation/state.json;
+    echo trace > "experiments/test/objective/${objective}.trace";
+    eval "ConfirmObjective() { echo 'stand-in'; return 2; }";
+    declare -gA verdicts=();
+    TargetedObjectiveFound verdicts 2> monitor.log; found=$?;
+  }
+  WitnessAttempt atplace '["RefineSuites", "CheckPreSharedKeys", "DoTls13ClientHello"]'
+  check "validation cannot tell, the fuzzer's record at the target's place: the run ends" "${found}" 0
+  WitnessAttempt elsewhere '["MatchSuite", "DoTls13ClientHello", "DoTls13HandShakeMsgType"]'
+  check "validation cannot tell, the fuzzer's record of its type elsewhere: another bug, the run goes on" "${found}" 1
+  check 'the monitor says why' "$( grep -c 'not at the place of CVE-2022-39173' monitor.log )" 1
+  unset THEJOB_TOOLS_PATH
+fi
 
 # Vuln group A: BUF recognised by its place (vuln_targets.json), the tools without html/common beside them
 qjs="${QJS:-/srv/puffin-bench/data/tools/qjs}"

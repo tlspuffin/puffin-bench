@@ -383,6 +383,35 @@ HasWitnessPlace() {
   return "${rc}";
 }
 
+# TargetAtPlace <frames "a < b < c">: whether a crash's stack (the fuzzer's record of an objective) has the place of the
+# experiment's bug (target_bug), the place the pages give it (common/signatures.js PlaceOf, has_place.js --place-of): its
+# witness's stack recorded when the validation was prepared, else the catalogue's top frames (the vulnerabilities.toml
+# of the validation's checkout, else of the experiment's). 0 yes, 1 no (another crash of its type), 2 cannot tell (no
+# stack in the record, has_place.js could not run: said), 3 its place not known (no witness stack, no top frames)
+TargetAtPlace() {
+  local state="${PWD}/validation/state.json" witness top tree catalogue rc;
+  witness=$( jq -r --arg id "${target_bug:-}" '[.controls[]? | select(.entry == $id) | .witness_frames | select(. != null and length > 0)][0] // [] | join(" < ")' "${state}" 2> /dev/null );
+  for tree in "$( jq -r '.tree // empty' "${state}" 2> /dev/null )" "${THEJOB_OUT_PATH:-}/repo"; do
+    catalogue="${tree}/puffin-build/vendors/${vendor%%:*}/vulnerabilities.toml";
+    [ -n "${tree}" ] && [ -r "${catalogue}" ] && break;
+    catalogue='';
+  done
+  [ -n "${catalogue}" ] && top=$( python3 -I - "${catalogue}" "${target_bug:-}" <<'PY' 2> /dev/null
+import sys, tomllib
+try:
+    entry = tomllib.load(open(sys.argv[1], 'rb')).get(sys.argv[2]) or {}
+except (OSError, ValueError):
+    entry = {}
+print(' < '.join(entry.get('top_frames') or []))
+PY
+  );
+  [ -n "${witness}${top:-}" ] || return 3;
+  [ -n "$1" ] || return 2;
+  "${THEJOB_TOOLS_PATH:-}/qjs" --std -m "${THEJOB_TOOLS_PATH:-}/js/has_place.js" --place-of "${top:-}" "${witness}" "$1" 2> /dev/null; rc=$?;
+  if (( rc == 2 || rc > 3 )); then echo "TargetAtPlace: ${THEJOB_TOOLS_PATH:-}/js/has_place.js could not run (exit ${rc})" >&2; return 2; fi
+  return "${rc}";
+}
+
 # ConfirmObjective <trace>: whether an objective of an experiment naming its bug is that bug (target_bug), by its
 # verdict: 0 confirmed, by patch differential when the target has a patch at this version, else by its signature on the
 # build with every patch (verdict not-patched, the target named); 1 not confirmed (another bug, not reproduced); 2 not

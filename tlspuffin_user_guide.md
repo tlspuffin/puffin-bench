@@ -662,11 +662,16 @@ makes the experiment "unsupported" instead of running for nothing. When the vali
 commit without the catalogue. The run's summary says which decided: `confirmed_by: "validation"` only when validation
 confirmed the objective that ended it.
 The objectives page, Results and History give each experiment its 🎯 (runs that found its target, as for Vuln group
-A): an objective is the target when validation names the target for it (by patch; by its signature only, a crash at the
-target's place only, or any crash of its type when its place is not known, no witness stack nor top frames: its 🎯
-then says `· weak`, as the run ends on such a crash), not when validation names another bug or none, else, until validation says or when it cannot
-(no verdict, or one that a failed control of its run can have made false), when it has the target's signature (a crash: at the target's place). An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as its runs recorded
-it, `cli-<experiment>.json`): the task's conclusion counts it, never "all found" without it.
+A). An objective is the target:
+- when validation names the target for it: by patch, or by its signature only (no patch at that version);
+- not when validation names another bug, or none;
+- else (no verdict, or one that a failed control of its run can have made false), when it has the target's signature.
+
+For a crash, the signature counts only at the target's place: its witness's stack, else the catalogue's top frames. When
+neither is known, any crash of its type is taken for it, and its 🎯 says `· weak`. A run ends on an objective by the same
+rule: when validation cannot tell, on the fuzzer's record of a crash at the target's place; a crash of its type elsewhere
+is another bug, and the run goes on. An experiment whose runs found nothing has its 🎯 too, `0/n` in red (its target as
+its runs recorded it, `cli-<experiment>.json`): the task's conclusion counts it, never "all found" without it.
 
 ## Performance configurations
 

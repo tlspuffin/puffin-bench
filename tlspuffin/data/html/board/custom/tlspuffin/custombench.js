@@ -589,13 +589,14 @@ export class CustomBenchmark {
       }
       if (!x.preset.patched) {
         const crash = x.entry.oracle?.kind === 'crash';
-        // a crash with a witness: at its place only, during the run too (PR_validate.sh ConfirmObjective); else weak
-        const how = crash && !x.entry.no_witness
+        // a crash whose place is known (its witness's stack, else the catalogue's top frames): at its place only, during
+        // the run too (PR_validate.sh ConfirmObjective, PR_vulnerabilities.sh TargetAtPlace when validation cannot tell);
+        // else weak: any such failure is taken for it, its 🎯 says weak (bugs.js IsExpected)
+        const how = crash && (!x.entry.no_witness || x.entry.top_frames?.length)
           ? `a crash of its type at its place only, ${place(x) ? `<code>${esc(place(x))}</code>` : 'the first 3 frames of its witness\'s stack'}:
             one elsewhere leaves the attempt going`
           : `a weak signature: ${x.entry.oracle?.kind === 'claim' ? 'any objective with this claim' : 'any such failure'} there is taken for it,
-            whatever its stack${crash && x.entry.top_frames?.length ? `; the reports then tell it by its stack: strong, green, when the
-            objective's stack has its place, <code>${esc(place(x))}</code>` : ''}`;
+            whatever its stack${crash ? ' (its place is not known: no witness, no top frames); its 🎯 says weak' : ''}`;
         return [`⚠ <b>${label}</b> has no patch at ${version}: a find is recognised by its signature only: the objective must reproduce, with
           ${esc(describe(x.entry.oracle))}, on the build with every other patch (${how})${twins.length ? `; ${twins.join(', ')}, left in that build with the same
           signature, would be taken for it` : ''}. A patch for it in tlspuffin's catalogue would make it a patch differential.`, ...noWitness];

@@ -31,9 +31,10 @@ export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'repl
 // the signature); a verdict naming another bug, or none (not-patched without it, another signature), never. Without a
 // verdict that decides (inconclusive, an error, not validated): the target's signature for a custom one (provisional
 // until validation says), the place or the claim of vuln_targets.json for the others.
-// 'weak' (true for every caller that counts) for a crash target named by its signature only whose place is not known
-// (no witness stack, no top frames): its signature alone, as its run ends on it (PR_validate.sh ConfirmObjective: the
-// fuzzer's record) and the launcher takes it (custombench.js); the 🎯 says weak (ExpectedRuns weak, ExpectedChipTip).
+// 'weak' (true for every caller that counts) for a crash target whose place is not known (no witness stack, no top
+// frames), named by its signature only or without a verdict that decides: its type alone, as its run ends on it
+// (PR_validate.sh ConfirmObjective, PR_vulnerabilities.sh TargetAtPlace: the fuzzer's record) and the launcher takes
+// it (custombench.js); the 🎯 says weak (ExpectedRuns weak, ExpectedChipTip). Its place known, a crash elsewhere never.
 export function IsExpected(target, group, verdictOf = null) {
   if (!target) return false;
   const verdicts = (group.traces ?? []).map(trace => verdictOf?.(trace, group)).filter(Boolean);
@@ -44,7 +45,14 @@ export function IsExpected(target, group, verdictOf = null) {
     return (target.place ?? []).length ? AtPlace(target.place, group) : 'weak';
   }
   if (verdicts.some(v => ['confirmed', 'not-patched', 'other-signature'].includes(v.verdict))) return false;
-  if (target.custom) return OracleMatchesGroup(target.oracle, group);
+  // a custom target without a verdict that decides: its signature, a crash at the target's place when it is known
+  // (elsewhere, another crash of its type: the run does not end on it either, PR_vulnerabilities.sh TargetAtPlace), by
+  // its type alone when not, weak
+  if (target.custom) {
+    if (!OracleMatchesGroup(target.oracle, group)) return false;
+    if (!crash) return true;
+    return (target.place ?? []).length ? AtPlace(target.place, group) : 'weak';
+  }
   const fz = group.fuzzer;
   if (target.kind === 'claim') {
     return (fz?.kind === 'claim' && fz.detail === target.match)
@@ -109,7 +117,10 @@ function ReportTargets(report, catalogue = null) {
 }
 // TargetText(target): how a configuration's expected bug is recognised, in words
 export function TargetText(t) {
-  if (t?.custom) return `${SignatureText(t.oracle)} (its signature), validation deciding`;
+  if (t?.custom) {
+    const where = t.oracle?.kind !== 'crash' ? '' : (t.place ?? []).length ? ` at its place, ${t.place.join(' < ')}` : ', its place not known';
+    return `${SignatureText(t.oracle)}${where} (its signature), validation deciding`;
+  }
   return t?.kind === 'claim' ? `the claim “${t.match}”` : `a crash whose stack has its place, ${(t?.place ?? []).join(' < ')}`;
 }
 // VerdictOf(libraries, library, attempt, catalogue): the validation verdict of an objective of that run, by its trace
