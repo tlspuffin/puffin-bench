@@ -9,7 +9,9 @@
 #     report whole, with its verdicts, and the task's traces; nothing is left beside them;
 #   - a bug's place from the stacks the Bugs reference has (witness_frames.json, published by --all: the newest
 #     validation's), not only those computed once; --all replaces that file only when a stack changes, and makes
-#     the reports again when it does.
+#     the reports again when it does;
+#   - --all removes the report of a deleted task (its export gone), not one waiting for its export, and none when no
+#     export is found at all.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 qjs="${1:-/srv/puffin-bench/data/tools/qjs}"
@@ -132,4 +134,25 @@ page=$( stat -c %y "${out}/${task}.html" ) frames=$( stat -c %y "${out}/witness_
 all; all
 check '--all: only the task that recorded a stack changed: witness_frames.json kept, the report not made again' \
   '[ "$( stat -c %y "${out}/witness_frames.json" )" == "${frames}" ] && [ "$( stat -c %y "${out}/${task}.html" )" == "${page}" ]'
+# --all: the report of a task whose export is gone (the task deleted) is removed, its JSON, page and traces; not one
+# waiting for its export (pending_final: the live tool's), not one whose export is being archived (exports/<id>/), and
+# none when no export is found at all (the storage not mounted)
+orphan=1790000000002 pending=1790000000003 archiving=1790000000004
+for id in "${orphan}" "${pending}" "${archiving}"; do
+  command cp -f "${out}/${task}.json" "${out}/${id}.json"; touch "${out}/${id}.html"; mkdir -p "${out}/${id}-traces/WolfSSL"
+done
+jq '.pending_final = true' "${out}/${task}.json" > "${out}/${pending}.json"
+mkdir -p "${root}/data/exports/${archiving}"
+all
+check "--all: a deleted task's report removed (its JSON, page and traces); the task with its export kept" \
+  '[ ! -e "${out}/${orphan}.json" ] && [ ! -e "${out}/${orphan}.html" ] && [ ! -e "${out}/${orphan}-traces" ] &&
+   [ -e "${out}/${task}.json" ] && [ -e "${out}/${task}.html" ] && grep -q "${orphan}: its task.s export is gone" "${work}/all.log"'
+check '--all: kept, a report waiting for its export (pending_final) and one whose export is being archived' \
+  '[ -e "${out}/${pending}.json" ] && [ -e "${out}/${pending}.html" ] && [ -e "${out}/${archiving}.json" ] && [ -e "${out}/${archiving}-traces" ]'
+command cp -f "${out}/${task}.json" "${out}/${orphan}.json"; touch "${out}/${orphan}.html"
+mv "${root}/data/exports" "${root}/data/exports.away"; mkdir -p "${root}/data/exports"
+all
+check '--all: no export found at all (the storage not mounted): no report removed' \
+  '[ -e "${out}/${orphan}.json" ] && [ -e "${out}/${task}.json" ] && [ -e "${out}/${pending}.json" ]'
+rm -rf "${root}/data/exports"; mv "${root}/data/exports.away" "${root}/data/exports"
 exit "${fail}"

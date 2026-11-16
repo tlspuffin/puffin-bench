@@ -351,6 +351,28 @@ AllTasks() {
   done | sort -k1,1n -k2,2nr | cut -d' ' -f2
 }
 
+# --all: the report of a task whose export is gone (the task deleted: export and run folder removed, the scheduler says
+# it does not exist) is removed, its JSON, page and traces: it could only stay as it was made, whatever the tools say
+# later (the audit of 2026-11-15, N3: the report of task 1794741331008 said a new bug the tools call known). TaskLinks
+# and known_bugs.js, after, read the reports left. Not a report waiting for its export (pending_final: the live page
+# kept until it, objectives_live.sh), not one whose export is being archived (exports/<id>/: its json, no zip yet), and
+# none when no export is found at all (the publisher's storage not mounted: every report would go).
+RemoveOrphans() {
+  local f id;
+  find -L "${PB_ROOT}/data/exports" "${PB_ROOT}/data/exports/Canceled" -maxdepth 1 -name '*.json' 2> /dev/null |
+      grep -qE '/[0-9]+\.json$' || { echo "$( date '+%F %T' ) no export found: no report removed" >&2; return 0; };
+  for f in "${OUT}"/[0-9]*.json; do
+    [ -e "${f}" ] || continue;
+    id=$( basename "${f}" .json );
+    [[ "${id}" =~ ^[0-9]+$ ]] || continue;
+    [ -n "$( TaskFile "${id}" )" ] && continue;
+    [ -e "${PB_ROOT}/data/exports/${id}" ] && continue;
+    grep -q '"pending_final": *true' "${f}" 2> /dev/null && continue;
+    rm -rf "${OUT:?}/${id}.json" "${OUT:?}/${id}.html" "${OUT:?}/${id}-traces" "${OUT:?}/${id}-traces.new" || return 1;
+    echo "$( date '+%F %T' ) ${id}: its task's export is gone (the task deleted): its report removed";
+  done
+}
+
 # 🐞 button on the cards of the scheduler's history page (board/custom/tlspuffin/task_links.json, read by the tlspuffin
 # plugin of the board, custom/tlspuffin/history.js; urls relative to the history page): one per task whose page lists
 # objectives and whose export still exists. Rewritten on every call; a file whose entries
@@ -486,6 +508,7 @@ fi
 [ "$1" == "--all" ] && tasks=( $( AllTasks ) );
 status=0;
 for t in "${tasks[@]}"; do Report "${t}" || status=1; done
+[ "$1" == "--all" ] && { RemoveOrphans || status=1; };
 TaskLinks || status=1;
 # the registry of the bugs found so far, per library (🚨 new bug on the pages): known_bugs.json
 if [ "$1" == "--all" ] && [ -x "${PB_ROOT}/data/tools/qjs" ]; then
