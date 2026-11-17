@@ -131,6 +131,12 @@ Replay() {
     status=$?;
   fi
   echo "exit status: ${status}" >> "${report}";
+  # killed by the budget of the call, not by its own limit (less than REPLAY_TIMEOUT was left): no replay, the next call
+  # does it (3). Kept, a replay of BoringSSL given 1 s was signed a timeout and never replayed again (2026-11-17)
+  if (( status == 124 || status == 137 )) && (( left < REPLAY_TIMEOUT )); then
+    rm -f "${report}"; rm -rf "${work}";
+    return 3;
+  fi
   ReplayTimed "${report}" "${limit}";
   # past the fuzzer's timeout by its whole time (the start of the binary, the reading of the trace and the exit are in
   # it): tlspuffin's own timeout on the execution alone decides (ReplayConfirm), run directly as the fallback above
@@ -328,15 +334,16 @@ for taskDir in "${RUNS}"/[0-9]*; do
       # a timeout of the fuzzer: replayed when core 0 is quiet (CoreZeroQuiet), not replayed yet meanwhile
       [ "${verdict%%$'\t'*}" == timeout ] && ! CoreZeroQuiet && continue;
       report="${taskState}/${id}-${name}.txt";
-      tries=0; sig='';
+      tries=0; sig=''; cut='';
       while (( tries < REPLAY_TRIES )); do
         tries=$(( tries + 1 ));
-        Replay "${runDir}" "${trace}" "${report}" "${fuzzerTimeout}";
+        # cut by the budget of the call (Replay: 3): not replayed, the next call does it
+        Replay "${runDir}" "${trace}" "${report}" "${fuzzerTimeout}" || { cut=1; break; };
         [ -e "${trace}" ] || break;
         sig=$( ObjectiveSignature < "${report}" );
         [ "${sig%%$'\t'*}" == no-crash ] && ! OverBudget || break;
       done
-      [ -e "${trace}" ] || { rm -f "${report}"; continue; };
+      [ -e "${trace}" ] && [ -z "${cut}" ] || { rm -f "${report}"; continue; };
       FuzzerExcerpt "${logDir}" "$( cut -f4 <<< "${verdict}" )" "$( cut -f1 <<< "${verdict}" )" | cut -c1-300 \
           > "${taskState}/${id}-${name}.fuzzer.txt" 2> /dev/null;
       # then how long the replay ran, the fuzzer's timeout (ReplayMsOf: two columns) and the size of the trace

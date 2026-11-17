@@ -1351,14 +1351,14 @@ ObjectiveSignature() {
       else if (panic != "") printf "panic\t%s\t\t0\n", panic
       else if (crashed != "") printf "crash\t\t%s (SIGSEGV or SIGABRT, no sanitizer report)\t%d\n", crashed, cstart
       # the timeout of the fuzzer, reproduced: the timeout of tlspuffin itself fired on the execution alone
-      # (ReplayConfirm); without it (a binary without --outcome), a replay killed by its own limit or past twice the
-      # timeout of the fuzzer (its time includes the start and the exit of the binary: seconds with a large trace).
+      # (ReplayConfirm); without it (a binary without --outcome), a replay past twice the timeout of the fuzzer (its time
+      # includes the start and the exit of the binary: seconds with a large trace), killed by its own limit or not. A
+      # replay killed sooner says nothing of it (a live call left 1 s to a replay of BoringSSL, 2026-11-17: no timeout).
       # Seconds without the decimal point of the locale (mawk prints 7,2 under fr_FR)
       else if (lim > 0 && confirmed != "no" && replayerr !~ /error while loading|binary not found|could not compile|binary changed/ &&
-               (confirmed == "yes" || rms >= 2 * lim || replayerr ~ /^replay timed out/)) {
-        ran = (rms > 0) ? sprintf("replay ran %d.%d s", int(rms / 1000), int(rms / 100) % 10) : "replay killed by its time limit";
-        printf "timeout\t\t%s, past the fuzzer timeout (%d.%d s)%s\t0\n", ran, int(lim / 1000), int(lim / 100) % 10,
-               (confirmed == "yes" ? ", its execution alone too" : "") }
+               (confirmed == "yes" || rms >= 2 * lim)) {
+        printf "timeout\t\treplay ran %d.%d s, past the fuzzer timeout (%d.%d s)%s\t0\n", int(rms / 1000), int(rms / 100) % 10,
+               int(lim / 1000), int(lim / 100) % 10, (confirmed == "yes" ? ", its execution alone too" : "") }
       else if (replayerr != "") printf "replay-error\t\t%s\t0\n", replayerr
       else if (diverged != "") { key = diverged; sub(/ *-->/, "", key); sub(/ *\(.*/, "", key); gsub(/\t/, " ", diverged)
                                  printf "no-crash\t%s\t%s\t%d\n", key, diverged, dstart }

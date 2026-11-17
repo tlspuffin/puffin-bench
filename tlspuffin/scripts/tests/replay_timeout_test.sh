@@ -73,6 +73,10 @@ check 'killed by the time limit of the replay itself, past the fuzzer timeout: a
   '[ "$( sig "exit status: 124\nreplay time: 60012 ms\nfuzzer timeout: 5000 ms\n" | cut -f1 )" == timeout ]'
 check 'killed, the fuzzer timeout unknown (older reports): a replay error, as before' \
   '[ "$( sig "exit status: 124\n" | cut -f1 )" == replay-error ]'
+check 'killed sooner than the fuzzer timeout (a live call left it 1 s, BoringSSL 2026-11-17): no timeout, a replay error' \
+  '[ "$( sig "exit status: 124\nreplay time: 1012 ms\nfuzzer timeout: 5000 ms\n" | cut -f1 )" == replay-error ]'
+check 'killed past it but under twice it, without the check of tlspuffin: no timeout either' \
+  '[ "$( sig "exit status: 124\nreplay time: 7004 ms\nfuzzer timeout: 5000 ms\n" | cut -f1 )" == replay-error ]'
 check 'a crash past the fuzzer timeout stays the crash' \
   '[ "$( sig "==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x1\n    #0 0x10 in AddPacketInfo /src/internal.c:1\n\nexit status: 1\nreplay time: 9000 ms\nfuzzer timeout: 5000 ms\n" | cut -f1,2 )" == $'"'"'heap-buffer-overflow\tAddPacketInfo'"'"' ]'
 check 'a replay that could not run, whatever its time, a replay error' \
@@ -105,6 +109,10 @@ check 'one slower than the fuzzer timeout whose execution alone is not: run agai
 FAKE_SLEEP=1.3 FAKE_OUTCOME=timeout Replay "${work}/run" "${work}/t.trace" "${work}/slower.txt" 1000 || true
 check 'one whose execution alone times out too: a timeout reproduced' \
   'grep -qx "fuzzer timeout reproduced: yes" "${work}/slower.txt" && [ "$( ObjectiveSignature < "${work}/slower.txt" | cut -f1 )" == timeout ]'
+# a call with 1 s of its budget left kills a replay that needs 3 s: no replay (3), no report, the next call does it (kept,
+# a replay of BoringSSL given 1 s was signed a timeout and never replayed again, 2026-11-17)
+rc=0; start=$(( $( date +%s ) - BUDGET + 1 )) FAKE_SLEEP=3 Replay "${work}/run" "${work}/t.trace" "${work}/cut.txt" 1000 || rc=$?
+check 'a replay cut by the budget of its call: not replayed (3), no report left' '[ "${rc}" == 3 ] && [ ! -e "${work}/cut.txt" ]'
 
 # the live pages replay a timeout only while core 0 is quiet: no pass of objectives_report.sh (its lock) runs beside
 source <( sed -n '/^CoreZeroQuiet()/,/^}/p' "${here}/../tools/objectives_live.sh" )
