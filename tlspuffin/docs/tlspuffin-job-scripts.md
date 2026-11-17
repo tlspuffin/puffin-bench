@@ -269,6 +269,8 @@ synthetic fuzzer records), `tests/custombench_test.sh` (the launcher's rules aga
 
 Set `DISABLE_KILL_ON_HANG=1` in the flow's `args` to disable this entirely and rely only on the step's own `timeout` (from `functions.sh`).
 
+A timeout of the fuzzer (`Timeout in fuzz run.`) does not end a run: the fuzzer restarts the client and goes on, and the objective it saved is replayed and judged like any other (a reproduced timeout is the bug "timeout", one under the fuzzer's limit a timeout under load). Until 2026-11-17 the check ended a run when it found that line in the live `error.log`, so by chance: a run with `--with-bit` rolls that file within a second, a quieter one keeps the line.
+
 ## QuickJS Post-Processing (`data/tools/js/`)
 
 All five scripts are run via `qjs --std <script>.js <args...>` and share `utils.js` (an ES module: JSON I/O helpers, `stat.json`-log parsing, argument validation). They communicate failure uniformly: `Utils.EndErrorMessage(msg)` builds `{"args":[...], "error": msg}`, printed to stdout by the caller (`console.log(Utils.EndErrorMessage(...))`) before the script exits non-zero — the calling shell function doesn't parse this specially, it just ends up in the step's captured output/logs.

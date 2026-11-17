@@ -28,10 +28,9 @@ ExperimentCheckAllThreadsRunning() {
     return 1;
   fi
 
-  local logsPath=$( dirname "${stats}" )
-  local errorFile="${logsPath}/error.log"
-  [ ! -e "${errorFile}" ] && { errorFile="${logsPath}/log/error.log"; [ ! -e "${errorFile}" ] && errorFile=""; }
-  [ -e "${errorFile}" ] && grep -q "Timeout in fuzz run" "${errorFile}" && { echo "Timeout found in error.log" >&2; return 1; }
+  # (A timeout of the fuzzer does not end the run, since 2026-11-17: the fuzzer restarts the client and goes on, and the
+  # objective it saved is replayed and judged. The run ended when a check found "Timeout in fuzz run" in the live
+  # error.log, so by chance: a run with --with-bit rolls that file within a second, a quieter one keeps the line.)
 
   local lastTS=$( "${THEJOB_TOOLS_PATH}/qjs" --std "${THEJOB_TOOLS_PATH}/js/get_last_stats_time.js" "${stats}" );
   local now; now=$( date +%s );

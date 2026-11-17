@@ -83,6 +83,7 @@ Run objectives_report_latest_test bash "${here}/objectives_report_latest_test.sh
 Run inrun_end_test bash "${here}/inrun_end_test.sh"
 Run fuzzer_records_awk_test bash "${here}/fuzzer_records_awk_test.sh"
 Run replay_timeout_test bash "${here}/replay_timeout_test.sh"
+Run vital_check_test bash "${here}/vital_check_test.sh"
 Run jq_portability_test bash "${here}/jq_portability_test.sh"
 Run objectives_live_nix_test bash "${here}/objectives_live_nix_test.sh"
 Run validation_shared_test bash "${here}/validation_shared_test.sh"
