@@ -6,7 +6,7 @@
 # What they record: a crash, a timeout ("Timeout in fuzz run."), a claim (a message of tlspuffin's security policies
 # only: a bit-level mutation that failed, "mutation::MakeMessage failed …", is no claim, campaigns of 2026-11-16), an
 # ASan report, a restart of a client by the broker (a timeout whose line the clients' logs lost; a crash when an ASan
-# report dates from it).
+# report dates from it; not the first spawn of each client, id 0).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
@@ -31,7 +31,8 @@ printf '%s\n' $'2026-11-11T01:00:00.002000000+01:00\tERROR\tCrashed with SIGABRT
 printf '%s\n' $'2026-11-11T01:00:09.000000000+01:00\tWARN\tAuthentication bypass' $'2026-11-11T01:00:20.000000000+01:00\tERROR\tTimeout in fuzz run.' \
   $'2026-11-11T01:00:30.000000000+01:00\tWARN\tmutation::MakeMessage failed (with_focus: false) due to error in PUT : Out of order message, fatal' \
   $'2026-11-11T01:00:31.000000000+01:00\tWARN\t       Skipped ReadMessage as we failed to choose a term with payload in the trace.' > "${work}/log/warn.log"
-printf '%s\n' '==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602 at pc 0x55 bp 0x7f sp 0x7e' \
+printf '%s\n' $'2026-11-11T00:59:58+01:00\tSpawning next client (id 0)' $'2026-11-11T00:59:58+01:00\tSpawning next client (id 0)' \
+  '==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602 at pc 0x55 bp 0x7f sp 0x7e' \
   '    #0 0x55 in AddPacketInfo /src/internal.c:1' '    #1 0x56 in DoTls13HandShakeMsgType /src/tls13.c:2' \
   '    #2 0x57 in DoTls13HandShakeMsg /src/tls13.c:3' 'SUMMARY: AddressSanitizer: heap-buffer-overflow /src/internal.c:1 in AddPacketInfo' \
   '2026-11-11T01:00:00.004000000+01:00 [INFO] restart' $'2026-11-11T01:00:41+01:00\tSpawning next client (id 1)' \

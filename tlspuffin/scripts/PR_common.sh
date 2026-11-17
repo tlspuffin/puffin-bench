@@ -841,8 +841,8 @@ FuzzerRecordsOf() {
   local claims="Authentication bypass|Could not choose exactly one server and client|Encrypt-then-MAC used without having been negotiated|Encrypt-then-MAC was silently downgraded to MAC-then-Encrypt|Mismatching ciphers|Mismatching client random|Mismatching encrypt-then-MAC|Mismatching ephemeral kex method|Mismatching groups|Mismatching master secrets|Mismatching server certificate|Mismatching server certificate hash|Mismatching server random|Mismatching session ids|mismatching signature algorithms|Mismatching versions|Negotiated cipher is not in agent's configured ciphers list|Negotiated signature algorithm is not in agent's configured signature algorithms list|Not the best cipher choosen|Resumed session under a different SNI|Server Done not found in server claims|transport handshake completed with a null/none cipher|transport handshake completed without a key exchange|Version undefined after handshake";
   # only a file that no longer changes: a rotated .gz, or one not modified for 5 minutes (an ended attempt)
   if [ -n "${FUZZER_RECORDS_CACHE:-}" ] && { [[ "${f}" == *.gz ]] || (( $( date +%s ) - $( stat -c %Y "${f}" ) > 300 )); }; then
-    # (v6: the version of the records; a change of what is recorded makes a new key)
-    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v6 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
+    # (v7: the version of the records; a change of what is recorded makes a new key)
+    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v7 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
     [ -f "${cached}" ] && { cat "${cached}"; return; };
   fi
   { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } |
@@ -907,8 +907,9 @@ FuzzerRecordsOf() {
       inb && /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+/ { ts = $0; sub(/[ \t].*/, "", ts);
                                            for (i = 1; i <= np; i++) printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), pt[i], pf[i], ts;
                                            printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), t, fr, ts; np = 0; inb = 0 }
-      # the broker restarting a client that ended (a crash or a timeout), dated to the second
-      /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+\tSpawning next client/ {
+      # the broker restarting a client that ended (a crash or a timeout), dated to the second; not the first spawn of each
+      # client, with id 0 (its restarter counts from 0), which a timeout of the first seconds of the run would take
+      /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+\tSpawning next client \(id [1-9]/ {
         rt = $0; sub(/\t.*/, "", rt); rm = $0; sub(/^[^\t]*\t/, "", rm); sub(/[ \r]+$/, "", rm);
         printf "%s\trestart\t%s\t\t%s\t\n", iso2ms(rt), rm, rt }';
   fi |
