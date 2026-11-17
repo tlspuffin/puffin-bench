@@ -634,7 +634,8 @@ DetectAsan() {
   ref_asan="{ \"requested\": ${requested}, \"instrumented\": ${instrumented}, \"runtime\": \"${runtime}\", \"asan_report_refs\": ${reports}, \"method\": \"readelf+ldd\" }";
 }
 
-# Size of a rolled log file: every tlspuffin log config rolls its files at 10 MB
+# Size of a rolled log file: every tlspuffin log config rolls its files at 10 MB (the commits whose clients log each to
+# its own folder, client-<id>/: each of the n clients at 10 MB / n, tlspuffin's log.rs client_log_size)
 LOG_ROLL_SIZE_BYTES=$(( 10 * 1024 * 1024 ))
 
 # Log volume of an experiment, as a JSON record in the referenced variable.
@@ -671,14 +672,19 @@ ExperimentLogStats() {
 
   local -a dirs=( ./log );
   [ -n "${experiment_base}" ] && dirs+=( "${experiment_base}/log" );
+  # the clients that log each to its own folder (client-<id>/), each rolling its files at 1/n of LOG_ROLL_SIZE_BYTES
+  # (a folder of dirs may not exist: find fails, never the step under pipefail)
+  local clients; clients=$( { find "${dirs[@]}" -mindepth 1 -maxdepth 1 -type d -name 'client-*' 2>/dev/null || true; } | wc -l );
 
   local bytes=0 estimated=0 files=0 rolled=0 verbose='' monitor=0 end=0;
-  local file name size rollSize mtime;
+  local file name size roll rollSize mtime;
   while IFS= read -r -d '' file; do
     name=$( basename "${file}" );
     [[ "${name}" == stats.json* ]] && continue;
     size=$( stat --format=%s "${file}" ) || continue;
-    rollSize=$(( size > LOG_ROLL_SIZE_BYTES ? size : LOG_ROLL_SIZE_BYTES ));
+    roll=${LOG_ROLL_SIZE_BYTES};
+    [[ "${file}" == */client-*/* ]] && (( clients > 0 )) && roll=$(( LOG_ROLL_SIZE_BYTES / clients ));
+    rollSize=$(( size > roll ? size : roll ));
     # the broker's log and its rotations (./log0 … ./log19, 100 MB each, "log{}" roller of tlspuffin's log.rs)
     if [[ "${name}" == stats_puffin_main_broker.log* ]] || [[ "${file}" =~ ^\./log[0-9]+$ ]]; then
       [[ "${name}" == *.gz ]] && (( monitor += rollSize )) || (( monitor += size ));
@@ -695,9 +701,11 @@ ExperimentLogStats() {
       verbose+="${verbose:+, }\"${file#./}\"";
     fi
   done < <(
-    find "${dirs[@]}" -maxdepth 1 -type f -print0 2>/dev/null;
+    # (each find on its own: a folder of dirs may not exist, and under errexit a find that failed ended the list)
+    find "${dirs[@]}" -maxdepth 1 -type f -print0 2>/dev/null || true;
+    find "${dirs[@]}" -mindepth 2 -maxdepth 2 -type f -path '*/client-*/*' -print0 2>/dev/null || true;
     [ -n "${experiment_base}" ] &&
-        find "${experiment_base}" -maxdepth 1 -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null;
+        { find "${experiment_base}" -maxdepth 1 -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null || true; };
     find . -maxdepth 1 -type f -regex './log[0-9]+' -print0 2>/dev/null
   )
 
@@ -748,12 +756,15 @@ ExperimentSaveLogStats() {
 # none of them (read nowhere before, their objectives had no record of the fuzzer: the expected bug of their VulnA runs
 # was not found): 2f38bf2 (2025-07) in ./log, the working directory of the step, archived as <attempt>-log_root, where
 # the replays of the end of the run log too (stderr.log, not the fuzzer's); 1957fba (2024-09) in one tlspuffin.log of
-# every level, in <experiment>, archived as <attempt>-tlspuffin.log.
+# every level, in <experiment>, archived as <attempt>-tlspuffin.log. The commits whose clients log each to its own
+# folder (tlspuffin's log.rs client_log_size) write them in <experiment>/log/client-<id>/, each client rolling its own
+# files (the shared files, rolled by each client on its own, lost lines), read with the shared ones.
 # FuzzerLogDir <experiment dir>: the folder of the fuzzer's logs of a running or ended experiment
 FuzzerLogDir() {
   local exp="${1%/}" d;
   for d in "${exp}/log" "${exp}" "${exp}/../../log"; do
-    compgen -G "${d}/error.*" > /dev/null || compgen -G "${d}/warn.*" > /dev/null || [ -e "${d}/tlspuffin.log" ] || continue;
+    compgen -G "${d}/error.*" > /dev/null || compgen -G "${d}/warn.*" > /dev/null || [ -e "${d}/tlspuffin.log" ] ||
+        compgen -G "${d}/client-*/error.*" > /dev/null || compgen -G "${d}/client-*/warn.*" > /dev/null || continue;
     echo "${d}"; return 0;
   done
   echo "${exp}/log";
@@ -765,7 +776,8 @@ FuzzerLogDir() {
 ArchivedFuzzerLogDir() {
   local dir="${1%/}" scratch="${2%/}" f name;
   local -a old=();
-  if ! compgen -G "${dir}/error.*" > /dev/null && ! compgen -G "${dir}/warn.*" > /dev/null; then
+  if ! compgen -G "${dir}/error.*" > /dev/null && ! compgen -G "${dir}/warn.*" > /dev/null &&
+      ! compgen -G "${dir}/client-*/error.*" > /dev/null && ! compgen -G "${dir}/client-*/warn.*" > /dev/null; then
     for f in "${dir}_root"/error.log "${dir}_root"/error.*.gz "${dir}_root"/warn.log "${dir}_root"/warn.*.gz; do
       [ -e "${f}" ] && old+=( "${f}" );
     done
@@ -784,13 +796,14 @@ ArchivedFuzzerLogDir() {
 # and the claim violations (the WARN line the harness logs when the security oracle fires, warn.log: a message of
 # tlspuffin's security policies only, see FuzzerRecordsOf); all of them in tlspuffin.log for the older commits. From the
 # broker's stderr: the ASan reports, and the restarts of the clients ("Spawning next client": a client ended by a crash or
-# a timeout, the one record of an objective whose lines the clients' logs lost; their files rotate, each client on its
-# own, and lose lines then).
+# a timeout, the one record of an objective whose lines the clients' logs lost; their shared files rotate, each client
+# on its own, and lose lines then: not those of the commits whose clients log each to its own folder, client-<id>/).
 # FuzzerRecords <log dir> prints one record per line, sorted by time: <epoch ms> TAB crash|timeout|warn|asan|restart TAB
 # <signal or message> TAB <top frames "a < b < c"> TAB <time as logged> TAB <input file saved, crashes>.
 FuzzerRecords() {
   local dir="$1" f;
-  for f in "${dir}"/error.log "${dir}"/error.*.gz "${dir}"/warn.log "${dir}"/warn.*.gz "${dir}"/tlspuffin.log; do
+  for f in "${dir}"/error.log "${dir}"/error.*.gz "${dir}"/warn.log "${dir}"/warn.*.gz "${dir}"/tlspuffin.log \
+      "${dir}"/client-*/error.log "${dir}"/client-*/error.*.gz "${dir}"/client-*/warn.log "${dir}"/client-*/warn.*.gz; do
     [ -e "${f}" ] || continue;
     FuzzerRecordsOf "${f}" crash;
   # by time, each record once: warn.log also has the ERROR lines, so a crash is read from error.log and from warn.log;
@@ -1196,7 +1209,8 @@ FuzzerExcerpt() {
   local dir="$1" ts="$2" kind="$3" f base;
   [ -n "${ts}" ] || return 0;
   case "${kind}" in crash|timeout) base=error;; *) base=warn;; esac;
-  for f in "${dir}/${base}.log" "${dir}/${base}".*.gz "${dir}"/tlspuffin.log "${dir}"/*stderr*.log; do
+  for f in "${dir}/${base}.log" "${dir}/${base}".*.gz "${dir}"/client-*/"${base}".log "${dir}"/client-*/"${base}".*.gz \
+      "${dir}"/tlspuffin.log "${dir}"/*stderr*.log; do
     [ -e "${f}" ] || continue;
     { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } | LC_ALL=C awk -v ts="${ts}" -v kind="${kind}" '
       !on && index($0, ts) == 1 { on = 1; print; if (kind != "crash") exit; next }
@@ -2339,17 +2353,20 @@ MonitorExperiment() {
       echo "  Corpus: Directory not found" >> ${outfile}
     fi
 
-    # Error log
+    # Error log: the live error.log, or the one of each client when each logs to its own folder (client-<id>/)
     if ! ${old_tlspuffin}; then
-      local log_file="$exp/log/error.log"
-      if [ -f "$log_file" ]; then
-        if [ -s "$log_file" ]; then
+      local log_file="$exp/log/error.log" error_log;
+      local -a error_logs=();
+      for error_log in "$log_file" "$exp"/log/client-*/error.log; do [ -f "$error_log" ] && error_logs+=( "$error_log" ); done
+      if (( ${#error_logs[@]} > 0 )); then
+        if [ -n "$( find "${error_logs[@]}" -size +0c -print -quit )" ]; then
           echo -n "   --> ❌ Errors while fuzzing: " >> ${outfile}
-          nb_errors=$(grep -c ERROR "$log_file")
+          nb_errors=$( cat "${error_logs[@]}" | grep -c ERROR || true )
           echo -n "${nb_errors} errors, " >> ${outfile}
-          nb_crashes=$(grep -c CRASH "$log_file")
+          nb_crashes=$( cat "${error_logs[@]}" | grep -c CRASH || true )
           echo "${nb_crashes} crashes" >> ${outfile}
-          last_lines=$(grep ERROR "$log_file" | grep "\[" | tail -n 1  | cut -c1-180)
+          # the last of them all (their lines start with their time)
+          last_lines=$( cat "${error_logs[@]}" | grep ERROR | grep "\[" | LC_ALL=C sort | tail -n 1 | cut -c1-180 || true )
           if [ -n "$last_lines" ]; then
             echo "  $last_lines" >> ${outfile}
           fi
