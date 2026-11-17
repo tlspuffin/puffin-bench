@@ -413,7 +413,10 @@ TaskLinks() {
                       + (if .cancelled then "\ncancelled: the task was cancelled; its runs that had not started are not counted" else "" end)
                       + "\ngreen: every run; amber: every configuration, not every run; red: a configuration in no run\nClick: the objectives report (new tab)") }
                else empty end),
-              (if (.runs | length) > 0 then { label: (if ($v.headline.new // 0) > 0 then "🚨 🐞" else "🐞" end),
+              # its button: ⏱ when every objective is a timeout under load (no bug: report_verdicts.js under_load)
+              (if (.runs | length) > 0 then { label: (if ($v.headline.new // 0) > 0 then "🚨 🐞"
+                  elif $v.bugs.count == 0 and ($v.bugs.under_load // 0) > 0 and $v.bugs.under_load == $v.bugs.objectives then "⏱"
+                  else "🐞" end),
                   url: "../objectives/\($id).html", source: "objectives_report",
                   count: $v.bugs.objectives, bugs: $v.bugs.count,
                   # the new bugs and the title of the report (bugs.js BugsHeadline): the history page highlights the task

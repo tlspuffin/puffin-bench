@@ -24,7 +24,8 @@
 #   - timeouts: no replay past the time the fuzzer gives an execution, a timeout under load (puffin's: no bug, no
 #     level, ⏱ apart, with its traces' sizes and replay times); a replay past it, the bug "timeout" (new where none is
 #     declared);
-#   - TaskLinks (objectives_report.sh) writes those levels into task_links.json.
+#   - TaskLinks (objectives_report.sh) writes those levels into task_links.json; timeouts under load are no bug there
+#     either (a task with them alone: its ⏱).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 qjs="${1:-/srv/puffin-bench/data/tools/qjs}"
@@ -413,7 +414,8 @@ check 'a bug validation names by a PUFFIN- entry is a bug of puffin (only by pat
 command cp -f "${work}/known.json" "${work}/out/101.json"; command cp -f "${work}/none.json" "${work}/out/102.json"
 command cp -f "${work}/new.json" "${work}/out/103.json"; command cp -f "${work}/unclear.json" "${work}/out/104.json"
 command cp -f "${work}/cdos.json" "${work}/out/105.json"
-for id in 101 102 103 104 105; do touch "${work}/out/${id}.html"; done
+command cp -f "${work}/underload.json" "${work}/out/106.json"; command cp -f "${work}/dos.json" "${work}/out/107.json"
+for id in 101 102 103 104 105 106 107; do touch "${work}/out/${id}.html"; done
 (
   source <( sed -n '/^TaskLinks()/,/^}/p' "${here}/../tools/objectives_report.sh" )
   PB_ROOT="${work}/root" OUT="${work}/out"; TaskFile() { echo x; }
@@ -424,4 +426,11 @@ check 'TaskLinks: plain for known, gold for unexpected, red for new, warning for
   '[ "$( jq -c "[.\"101\"[0].level, .\"102\"[0].level, .\"103\"[0].level, .\"104\"[0].level, .\"103\"[0].label]" "${links}" )" == "[null,\"unexpected\",\"new\",\"warning\",\"🚨 🐞\"]" ]'
 check 'TaskLinks: plain for a known bug that no replay reproduces (CDOS, its 🎯 then its 🐞)' \
   '[ "$( jq -c "[.\"105\"[] | .level]" "${links}" )" == "[\"expected-all\",null]" ]'
+check 'TaskLinks: a task whose objectives are all timeouts under load: no bug, its ⏱, said so in its hover' \
+  '[ "$( jq -c "[.\"106\"[0] | .label, .level, .count, .bugs]" "${links}" )" == "[\"⏱\",null,5,0]" ] &&
+   jq -r ".\"106\"[0].title" "${links}" | grep -qx "🐞 5 objectives, 0 bugs, 0 objectives reproduced by a replay" &&
+   jq -r ".\"106\"[0].title" "${links}" | grep -qx "⏱ 5 timeouts under load (puffin.s, not bugs)"'
+check 'TaskLinks: a reproduced timeout among timeouts under load: one bug (the timeout), the others said apart' \
+  '[ "$( jq -c "[.\"107\"[0] | .label, .level, .count, .bugs]" "${links}" )" == "[\"🚨 🐞\",\"new\",4,1]" ] &&
+   jq -r ".\"107\"[0].title" "${links}" | grep -qx "⏱ 3 timeouts under load (puffin.s, not bugs)"'
 exit "${fail}"
