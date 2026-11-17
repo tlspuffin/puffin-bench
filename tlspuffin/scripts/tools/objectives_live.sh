@@ -145,6 +145,14 @@ Replay() {
   rm -rf "${work}";
 }
 
+# CoreZeroQuiet: no pass of objectives_report.sh runs (its lock is free: --all, or the report of a task that ended).
+# Those passes share core 0 with the replays, at idle priority as they (the cron cannot raise a replay above them:
+# RLIMIT_NICE 0), and slowed a replay two to four times (wolfSSL's executions of 2 to 4 s, past 5 s during the pass that
+# followed a deploy, 2026-11-17): the replay of a timeout, which its time decides, waits for a quiet core 0
+CoreZeroQuiet() {
+  ( flock -n 9 ) 9> "${OUT}/.report-all.lock" 2> /dev/null;
+}
+
 # Is the task running or waiting? (run directories of tasks lost by a scheduler restart stay behind)
 # The state of a live task is {"task": {...}}; "success" only appears, false, when the task does not exist.
 # Returns 0 when running or waiting, 1 when finished or unknown, 2 when the scheduler gives no usable answer:
@@ -316,6 +324,9 @@ for taskDir in "${RUNS}"/[0-9]*; do
       OverBudget && break;
       # the attempt may end (its step directory is removed) during the scan: its archive then gives the result
       found=$( date -r "${trace}" +%s 2> /dev/null ) || continue;
+      verdict=$( FuzzerVerdict "${records}" "${name}" ); [ -n "${verdict}" ] || verdict=$'\t\t\t';
+      # a timeout of the fuzzer: replayed when core 0 is quiet (CoreZeroQuiet), not replayed yet meanwhile
+      [ "${verdict%%$'\t'*}" == timeout ] && ! CoreZeroQuiet && continue;
       report="${taskState}/${id}-${name}.txt";
       tries=0; sig='';
       while (( tries < REPLAY_TRIES )); do
@@ -326,7 +337,6 @@ for taskDir in "${RUNS}"/[0-9]*; do
         [ "${sig%%$'\t'*}" == no-crash ] && ! OverBudget || break;
       done
       [ -e "${trace}" ] || { rm -f "${report}"; continue; };
-      verdict=$( FuzzerVerdict "${records}" "${name}" ); [ -n "${verdict}" ] || verdict=$'\t\t\t';
       FuzzerExcerpt "${logDir}" "$( cut -f4 <<< "${verdict}" )" "$( cut -f1 <<< "${verdict}" )" | cut -c1-300 \
           > "${taskState}/${id}-${name}.fuzzer.txt" 2> /dev/null;
       # then how long the replay ran, the fuzzer's timeout (ReplayMsOf: two columns) and the size of the trace

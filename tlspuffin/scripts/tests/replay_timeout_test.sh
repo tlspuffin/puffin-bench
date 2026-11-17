@@ -105,4 +105,13 @@ check 'one slower than the fuzzer timeout whose execution alone is not: run agai
 FAKE_SLEEP=1.3 FAKE_OUTCOME=timeout Replay "${work}/run" "${work}/t.trace" "${work}/slower.txt" 1000 || true
 check 'one whose execution alone times out too: a timeout reproduced' \
   'grep -qx "fuzzer timeout reproduced: yes" "${work}/slower.txt" && [ "$( ObjectiveSignature < "${work}/slower.txt" | cut -f1 )" == timeout ]'
+
+# the live pages replay a timeout only while core 0 is quiet: no pass of objectives_report.sh (its lock) runs beside
+source <( sed -n '/^CoreZeroQuiet()/,/^}/p' "${here}/../tools/objectives_live.sh" )
+OUT="${work}/out"; mkdir -p "${OUT}"
+check 'core 0 quiet: no report pass holds its lock' 'CoreZeroQuiet'
+flock "${OUT}/.report-all.lock" sleep 3 & holder=$!; sleep 0.5
+check 'a report pass running (its lock held): not quiet, the replay of a timeout waits' '! CoreZeroQuiet'
+wait "${holder}"
+check 'quiet again once it ended' 'CoreZeroQuiet'
 exit "${fail}"
