@@ -7,7 +7,7 @@
 // (runs/bench_times.json, written by runs_report.py), how a find is confirmed; with filters.
 import '../board/frame.js';
 import { urls } from './summary_config.js';
-import { presentOn, patchedAt, runOptions, confirmation, needsAsan } from '../common/catalogue.js';
+import { presentOn, patchedAt, runOptions, confirmation, needsAsan, inRange } from '../common/catalogue.js';
 import { esc, libraryName, duration, VENDORS } from '../common/format.js';
 import { TERMS, VERDICTS, VERDICT_ORDER, TAGS, LEVELS, SignatureText, SignatureWithStack } from '../common/verdicts.js';
 import { FrameName, PlaceOf, HasPlace, PLACE_RULE } from '../common/signatures.js';
@@ -487,6 +487,14 @@ const harnessNote = id => {
   if (!e?.bug_in_harness) return '';
   return ` <span class="muted">(a bug of tlspuffin's harness${e.affected_commits ? `: commits ${esc(e.affected_commits)}` : ''})</span>`;
 };
+// the version a registry entry's run built: its release as the build recorded it, else the compact version of its preset
+// ("540": 5.4.0; a longer one is ambiguous, not read), as the reports read it (PresentAtVersion)
+function versionOf(b) {
+  const release = b.library?.release;
+  if (typeof release === 'string' && /^\d+(\.\d+)*[a-z]*$/.test(release)) return release;
+  const m = /^(\d)(\d)(\d)([a-z]*)$/.exec(String(b.library?.version ?? ''));
+  return m ? `${m[1]}.${m[2]}.${m[3]}${m[4]}` : null;
+}
 function registrySection() {
   const groups = new Map();
   for (const [key, value] of Object.entries(known ?? {})) {
@@ -494,28 +502,46 @@ function registrySection() {
     const b = { config, kind, sig: rest.join('|'), ...value };
     // the library its configuration built (recorded since custom benchmarks: custom2_SKIP), else from its name
     const vendor = value?.vendor ?? vendorOf(config);
-    const id = `${vendor ?? config}|${kind}|${b.sig}`;
+    // the bug it is, when something tells it: the bugs validation confirmed (confirmed), else the bug its configuration
+    // expects or sets apart (vuln_targets.json), else a custom experiment's target with its signature: one row per bug,
+    // so that one claim found as several bugs makes several rows (SKIP's, CVE-2021-3336's, CERTTAIL's "Authentication
+    // bypass")
+    const identity = Object.keys(b.confirmed ?? {}).sort().join(',') || CveOf(b.config, b)?.cve
+        || (vendor && b.target && catalogueMatch(vendor, b).includes(b.target) ? b.target : '');
+    const id = `${vendor ?? config}|${kind}|${b.sig}|${identity}`;
     if (!groups.has(id)) groups.set(id, { vendor, kind, sig: b.sig, seen: [] });
     groups.get(id).seen.push(b);
   }
   const bugs = [...groups.values()].map(g => {
     g.seen.sort((x, y) => String(x.started ?? '').localeCompare(String(y.started ?? '')));
     const first = g.seen[0];
-    const ids = g.vendor ? catalogueMatch(g.vendor, first) : [];
+    // the catalogue's bugs with its signature that the versions its runs built can have (all of them when no run
+    // recorded its version)
+    const versions = g.seen.map(versionOf).filter(Boolean);
+    const ids = (g.vendor ? catalogueMatch(g.vendor, first) : []).filter(id => {
+      const e = entryOf(id);
+      return !versions.length || !e?.affected || versions.some(v => inRange(e.affected, v));
+    });
+    // the bugs validation confirmed it is, with the first task whose validation did
+    const confirmed = {};
+    for (const b of g.seen) for (const [cid, t] of Object.entries(b.confirmed ?? {})) confirmed[cid] ??= { task: t };
     // the expected bug of its configuration: a rule of vuln_targets.json (VulnA/VulnB), or a custom experiment's target
     // when the catalogue has the bug with that signature
     const rules = g.seen.map(b => ({ config: b.config, ...(CveOf(b.config, b) ?? (b.target && ids.includes(b.target) ? { cve: b.target, how: 'expected' } : {})) }))
       .filter(r => r.cve);
-    return { ...g, first, rules, ids, known: rules.length > 0 || ids.length > 0 };
+    return { ...g, first, rules, ids, confirmed, known: Object.keys(confirmed).length > 0 || rules.length > 0 || ids.length > 0 };
   }).sort((x, y) => (x.known - y.known) || String(x.vendor ?? '').localeCompare(String(y.vendor ?? ''))
     || String(x.first.started ?? '').localeCompare(String(y.first.started ?? '')));
   const whatItIs = bug => {
     const parts = [];
+    const confirmedIds = Object.keys(bug.confirmed);
+    if (confirmedIds.length) parts.push(`<span class="badge b-strong" title="${esc(VERDICTS.patch.tip)}">${VERDICTS.patch.mark} ${VERDICTS.patch.word}</span> ${confirmedIds.map(id => bugLink(id) + harnessNote(id)).join(', ')} <span class="muted">(validation of ${confirmedIds.map(id => task(bug.confirmed[id])).join(', ')})</span>`);
     const expected = bug.rules.filter(r => r.how === 'expected'), apart = bug.rules.filter(r => r.how !== 'expected');
     if (expected.length) parts.push(`<span class="badge b-exp" title="${esc(TAGS.expected.tip)}">${TAGS.expected.mark} ${TAGS.expected.word}</span> ${bugOrCve(expected[0].cve)} <span class="muted">in ${esc([...new Set(expected.map(r => r.config))].join(', '))}</span>`);
     if (apart.length) parts.push(`<span class="badge b-apart">⦸ ${esc(apart[0].how)}</span> ${bugOrCve(apart[0].cve)}`);
-    // the catalogue, when no rule of vuln_targets.json tells (a configuration without target, another library)
-    const more = bug.rules.length ? [] : bug.ids;
+    // the catalogue, when neither validation nor a rule of vuln_targets.json tells (a configuration without target,
+    // another library)
+    const more = bug.rules.length || confirmedIds.length ? [] : bug.ids;
     if (more.length) parts.push(`📚 ${more.map(id => bugLink(id) + harnessNote(id)).join(', ')} <span class="muted">(${bug.kind === 'claim' ? (more.length > 1 ? 'the same claim: one of them' : 'its claim')
       : 'its stack has the bug\'s place, same report type: a hint, the reports validate'})</span>`);
     return parts.join('<br>') || `<span class="badge b-new" title="${esc(TAGS.new.tip)}">${TAGS.new.mark} not a known bug</span>`;
@@ -523,7 +549,8 @@ function registrySection() {
   const task = b => `<a href="/html/objectives/${esc(b.task)}.html">task ${esc(b.task)}</a>`;
   const date = b => esc(String(b.started ?? '').slice(0, 10));
   return `<div class="card">
-    <p>One row per bug (its signature in a library), rebuilt from every final objectives report (<a href="${KNOWN}" target="_blank">known_bugs.json ↗</a>,
+    <p>One row per bug (its signature in a library, and the bug it is when validation confirmed it or its configuration expects it: one claim
+      can be several bugs), rebuilt from every final objectives report (<a href="${KNOWN}" target="_blank">known_bugs.json ↗</a>,
       <code>tools/known_bugs.js</code>, run by <code>objectives_report.sh --all</code>): what it is, and every configuration that found it.
       The bugs that are none of the known ones come first.</p>
     <details class="howto"><summary>When a bug is 🚨 new on a report</summary><p class="muted">A bug is identified by its claim, or by the top function of its
@@ -531,7 +558,7 @@ function registrySection() {
       in a configuration with a target (BUF, SKIP…), when no earlier task had its signature there; in a plain version (e.g. Perf's wolfSSL 5.8.0), when it
       is none of the CVEs tlspuffin declares for that build (its vendorinfo: known minus fixed vulnerabilities) recognised by vuln_targets.json, which are shown
       as 📋 known; it is then new on every task until it is added there. A crash without location cannot be told apart: it never counts as new.
-      📚 here: the catalogue's bug with that claim, or whose place its stack has (a hint for people, whatever the version; the reports name a find by validation, or by its stack among the bugs of the version it built).</p></details>
+      ✔ here: the bug validation confirmed it is (patch differential). 📚: the catalogue's bugs with that claim, or whose place its stack has, among those the versions it was found on can have (a hint for people; the reports name a find by validation, or by its stack among the bugs of the version it built).</p></details>
     <table class="registry"><tr><th>bug</th><th>what it is</th><th>found in</th><th>first seen</th><th>first report</th></tr>
     ${bugs.map(bug => `<tr class="${bug.known ? '' : 'unknown-bug'}">
       <td><span class="kind kind-${esc(bug.kind)}">${esc(bug.kind)}</span> <code>${esc(bug.sig)}</code>${reportType(bug.first) && reportType(bug.first) !== 'crash' ? ` <span class="muted">${esc(reportType(bug.first))}</span>` : ''}

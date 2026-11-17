@@ -79,6 +79,9 @@ mkdir -p "${work}/registry" && command cp -f "${work}/known.json" "${work}/regis
 "${qjs}" --std -m "${here}/../tools/known_bugs.js" "${work}/registry" > /dev/null
 check 'the registry of known bugs: the same key, not "a crash in memmove" (known_bugs.js)' \
   'jq -e "has(\"WolfSSL|crash|DoTls13ClientHello\") and (keys | map(select(test(\"memmove\"))) | length == 0) and .[\"WolfSSL|crash|DoTls13ClientHello\"].task == \"9\"" "${work}/registry/known_bugs.json" > /dev/null'
+check 'the registry: the bug validation confirmed (CVE-2022-42905, by task 9) and the version its run built; none for the one not patched' \
+  'jq -e ".[\"WolfSSL|crash|AddPacketInfo\"] | .confirmed == {\"CVE-2022-42905\": \"9\"} and .library.version == \"540\"" "${work}/registry/known_bugs.json" > /dev/null &&
+   jq -e ".[\"WolfSSL|crash|DoTls13ClientHello\"].confirmed == null" "${work}/registry/known_bugs.json" > /dev/null'
 
 report none perf "[$( run 0 '[]' "[${noCrash}]" )]"
 check 'Perf with objectives on a version that declares no known bug: unexpected, 🐞 gold' \

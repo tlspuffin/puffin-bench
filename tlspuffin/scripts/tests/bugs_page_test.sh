@@ -31,7 +31,10 @@ export JOBS_DIR="${bench}/tlspuffin/data/html/jobsscripts/tlspuffin"
 # a registry of the bugs found so far (known_bugs.json): the same crash in two configurations of wolfSSL (HEAP of the
 # catalogue, by its ASan report type and top frame), a crash of OpenSSL none of the known bugs, the crash of the LibreSSL
 # harness of past commits (in the catalogue since PUFFIN-LIBRESSL333-HKDF-CLAIM), a claim set apart, SDOS2 found by a
-# custom benchmark, its stack starting in glibc (no top frames in the catalogue: its witness's place, witness_frames.json)
+# custom benchmark, its stack starting in glibc (no top frames in the catalogue: its witness's place, witness_frames.json);
+# the claim "Authentication bypass" found as other bugs: in wolfSSL 5.8.4, confirmed by validation as WOLFSSL-PR10755
+# (one row of its own, whatever this catalogue has), and in 5.6.0 not validated, where no bug of this catalogue with
+# that claim can be (a compact version only, 560)
 cat > "${work}/known_bugs.json" <<'JSON'
 { "WolfSSL|crash|AddPacketInfo": { "task": "1790851747037", "started": "2026-10-01T10:49:07Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
   "wolfssl540-asan|crash|AddPacketInfo": { "task": "1791638282947", "started": "2026-10-10T08:00:00Z", "what": "heap-buffer-overflow: AddPacketInfo < DoTls13HandShakeMsgType < DoTls13HandShakeMsg" },
@@ -40,6 +43,8 @@ cat > "${work}/known_bugs.json" <<'JSON'
   "BUF|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237378849", "started": "2026-10-05T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
   "CDOS|claim|Negotiated cipher is not in agent's configured ciphers list": { "task": "1791237386132", "started": "2026-10-06T09:00:00Z", "what": "security-violation: Negotiated cipher is not in agent's configured ciphers list" },
   "custom2_SKIP|claim|Authentication bypass": { "task": "1794327919866", "started": "2026-11-10T16:39:18Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "target": "CVE-2022-25640" },
+  "wolfssl584-asan|claim|Authentication bypass": { "task": "1794783394605", "started": "2026-11-15T22:56:35Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "library": { "name": "wolfssl", "version": "584", "release": "5.8.4" }, "confirmed": { "WOLFSSL-PR10755": "1794783394605" } },
+  "wolfssl560-asan|claim|Authentication bypass": { "task": "1794700000000", "started": "2026-11-14T10:00:00Z", "what": "security-violation: Authentication bypass", "vendor": "wolfssl", "library": { "name": "wolfssl", "version": "560" } },
   "custom3_SDOS2|crash|__memmove_avx_unaligned_erms": { "task": "1794473217387", "started": "2026-11-12T09:47:00Z", "what": "SEGV: __memmove_avx_unaligned_erms < DoTls13ClientHello < DoTls13HandShakeMsgType", "vendor": "wolfssl", "target": "CVE-2022-38152" } }
 JSON
 echo '{ "CVE-2022-38152": { "frames": ["__memmove_avx_unaligned_erms", "DoTls13ClientHello", "DoTls13HandShakeMsgType"], "from": "the validation of task 1794483234047" } }' > "${work}/witness_frames.json"
@@ -160,9 +165,19 @@ else
     echo "ok   (registry): the LibreSSL crash, not in this catalogue, is not a known bug" || { echo "FAIL (registry): the LibreSSL crash"; fail=1; }
 fi
 grep -q 'set apart' <<< "$( grep -o "<code>Negotiated cipher.\{0,600\}" <<< "${registry}" )" && echo "ok   (registry): the claim set apart" || { echo "FAIL (registry): claim not set apart"; fail=1; }
-skip=$( grep -o '<code>Authentication bypass</code>.\{0,900\}' <<< "${registry}" | head -1 )
+skip=$( grep -o '<code>Authentication bypass</code>.\{0,900\}' <<< "${registry}" | grep 'custom2_SKIP' | head -1 )
 grep -q 'custom2_SKIP' <<< "${skip}" && grep -q '🎯 expected' <<< "${skip}" && grep -q 'CVE-2022-25640' <<< "${skip}" && ! grep -q 'not a known bug' <<< "${skip}" &&
   echo "ok   (registry): a custom experiment's claim is its target, expected (its library and target recorded)" || { echo "FAIL (registry): custom2_SKIP"; fail=1; }
+# one claim found as three bugs: three rows; the one validation confirmed, by its verdict; the other, by the versions
+[ "$( rows 'Authentication bypass' )" == 3 ] && echo "ok   (registry): one row per bug of the claim Authentication bypass (SKIP, the one confirmed, the unknown one)" ||
+  { echo "FAIL (registry): Authentication bypass rows $( rows 'Authentication bypass' )"; fail=1; }
+confirmed=$( grep -o '<code>Authentication bypass</code>.\{0,1200\}' <<< "${registry}" | sed 's|</tr>.*||' | grep 'wolfssl584-asan' | head -1 )
+grep -q 'confirmed by patch' <<< "${confirmed}" && grep -q 'href="#WOLFSSL-PR10755"' <<< "${confirmed}" && grep -q 'task 1794783394605' <<< "${confirmed}" &&
+  ! grep -q 'not a known bug\|📚' <<< "${confirmed}" &&
+  echo "ok   (registry): a find validation confirmed is that bug, with the task whose validation did" || { echo "FAIL (registry): the confirmed find: ${confirmed:0:400}"; fail=1; }
+older=$( grep -o '<code>Authentication bypass</code>.\{0,1200\}' <<< "${registry}" | sed 's|</tr>.*||' | grep 'wolfssl560-asan' | head -1 )
+grep -q 'not a known bug' <<< "${older}" && ! grep -q 'CVE-2022-25640\|CVE-2022-25638\|CVE-2021-3336' <<< "${older}" &&
+  echo "ok   (registry): no hint of a bug its version (5.6.0, from 560) cannot have" || { echo "FAIL (registry): the 5.6.0 find: ${older:0:400}"; fail=1; }
 check dev 'the TOML text of an entry is shown' 'TOML source, with its comments'
 check dev 'the notes heading a file are shown' 'About this file'
 check dev 'the reload button on dev' 'id="reload-dev"'
