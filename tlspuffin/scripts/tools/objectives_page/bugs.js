@@ -19,7 +19,8 @@ export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'repl
 // "timeout", ObjectiveSignature); otherwise a timeout under the load of fuzzing (bug.underLoad): puffin's, not the
 // library's, shown with how long its replays ran and how big its traces are (TimingText), never counted as a bug
 // (traces of several MB whose execution takes seconds, campaigns of 2026-11-16).
-// TimingText(timing): "traces 5.2–7.6 MB · replays 2.1–3.9 s (the fuzzer gives 5.0 s)" of a group's or a bug's timing
+// TimingText(timing): "traces 5.2–7.6 MB · replays 2.1–3.9 s, start of the binary included (the fuzzer gives the execution
+// 5.0 s)" of a group's or a bug's timing
 // ({ replay_ms: [min, max], limit_ms, size: [min, max] }), '' without one
 export function TimingText(timing) {
   if (!timing) return '';
@@ -28,8 +29,10 @@ export function TimingText(timing) {
   const bytes = n => n >= 1e6 ? [x => (x / 1e6).toFixed(1), 'MB'] : n >= 1e3 ? [x => String(Math.round(x / 1e3)), 'KB'] : [String, 'B'];
   const secs = () => [x => (x / 1000).toFixed(1), 's'];
   return [timing.size ? `trace${timing.size[0] === timing.size[1] ? '' : 's'} ${range(timing.size, bytes)}` : '',
-    timing.replay_ms ? `replay${timing.replay_ms[0] === timing.replay_ms[1] ? '' : 's'} ${range(timing.replay_ms, secs)}`
-        + (timing.limit_ms ? ` (the fuzzer gives ${range([timing.limit_ms, timing.limit_ms], secs)})` : '') : 'replay time not measured']
+    // (a replay's time includes the start of the binary and the reading of the trace: the fuzzer's limit is for the
+    // execution alone, which tlspuffin's own timeout checks, PR_common.sh ReplayConfirm)
+    timing.replay_ms ? `replay${timing.replay_ms[0] === timing.replay_ms[1] ? '' : 's'} ${range(timing.replay_ms, secs)}, start of the binary included`
+        + (timing.limit_ms ? ` (the fuzzer gives the execution ${range([timing.limit_ms, timing.limit_ms], secs)})` : '') : 'replay time not measured']
       .filter(Boolean).join(' · ');
 }
 // MergeTiming(into, timing): the ranges of both

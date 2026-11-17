@@ -1275,6 +1275,30 @@ ReplayTimed() {
 ReplayMsOf() {
   awk '/^replay time: [0-9]+ ms$/ { r = $3 } /^fuzzer timeout: [0-9]+ ms$/ { l = $3 } END { printf "%s\t%s\n", r, l }' "$1" 2> /dev/null || printf '\t\n';
 }
+# A replay's time includes the start of the binary, the reading of the trace and the exit: seconds with a trace of
+# several MB (5.0 to 5.3 s for wolfSSL's timeouts of 2026-11-17, whose executions take 2 to 4 s). A replay past the
+# fuzzer's timeout by that time is executed again with tlspuffin's own timeout, on the execution alone as in the
+# fuzzer (execute --outcome <file> --timeout <s>, the binaries with tlspuffin's catalogue: BinaryHasOutcome), and
+# ReplayConfirm adds what it says, "fuzzer timeout reproduced: yes" or "no (<outcome>)" (ObjectiveSignature).
+# ReplayPastLimit <report>: the replay ran past the fuzzer's timeout by its own time (ReplayTimed)
+ReplayPastLimit() {
+  awk '/^replay time: [0-9]+ ms$/ { r = $3 } /^fuzzer timeout: [0-9]+ ms$/ { l = $3 } END { exit !(l > 0 && r + 0 >= l + 0) }' "$1" 2> /dev/null;
+}
+# BinaryHasOutcome <binary>: its execute command has --outcome and --timeout
+BinaryHasOutcome() {
+  local help;
+  [ -x "$1" ] || return 1;
+  # (the help read whole: grep -q ending the pipe early would make it fail under pipefail)
+  help=$( timeout 30 "$1" execute --help 2>&1 ) || true;
+  grep -q -- '--timeout' <<< "${help}";
+}
+# ReplayConfirm <report> <outcome file of that execution>: nothing without an outcome
+ReplayConfirm() {
+  local outcome; outcome=$( jq -r '.[0].outcome.outcome // empty' "$2" 2> /dev/null ) || outcome='';
+  [ -n "${outcome}" ] || return 0;
+  if [ "${outcome}" == timeout ]; then echo 'fuzzer timeout reproduced: yes' >> "$1";
+  else echo "fuzzer timeout reproduced: no (${outcome})" >> "$1"; fi
+}
 
 ObjectiveSignature() {
   awk '
@@ -1306,9 +1330,12 @@ ObjectiveSignature() {
     /AddressSanitizer: nested bug in the same thread/ { nested = $0 }
     # killed by timeout (124, or 137 after -k): the objective was not replayed, which is not "no-crash"
     replayerr == "" && /^exit status: (124|137)$/ { replayerr = "replay timed out (" $0 ")" }
-    # how long the replay ran, and the time the fuzzer gives an execution (ReplayTimed)
+    # how long the replay ran, the time the fuzzer gives an execution (ReplayTimed), and what the timeout of tlspuffin
+    # itself said of the execution alone (ReplayConfirm)
     /^replay time: [0-9]+ ms$/ { rms = $3 + 0 }
     /^fuzzer timeout: [0-9]+ ms$/ { lim = $3 + 0 }
+    /^fuzzer timeout reproduced: yes/ { confirmed = "yes" }
+    /^fuzzer timeout reproduced: no/ { confirmed = "no" }
     # the forked execution died of SIGSEGV or SIGABRT ("execution finished with status Crashed", tlspuffin since
     # 482ebfe1e): reproduced, but without sanitizer report nor claim message (e.g. a library built without ASAN)
     crashed == "" && /execution finished with status Crashed/ { crashed = $0; sub(/^[^\t]*\t/, "", crashed); cstart = NR }
@@ -1323,12 +1350,15 @@ ObjectiveSignature() {
       else if (violation != "") { sub(/[ \r]+$/, "", violation); gsub(/\t/, " ", vline); printf "security-violation\t%s\t%s\t%d\n", violation, vline, vstart }
       else if (panic != "") printf "panic\t%s\t\t0\n", panic
       else if (crashed != "") printf "crash\t\t%s (SIGSEGV or SIGABRT, no sanitizer report)\t%d\n", crashed, cstart
-      # a replay that ran past the time the fuzzer gives an execution (killed by its own limit, or ended later): the
-      # timeout of the fuzzer, reproduced (seconds without a decimal point of the locale: mawk prints 7,2 under fr_FR)
-      else if (lim > 0 && replayerr !~ /error while loading|binary not found|could not compile|binary changed/ &&
-               (rms >= lim || replayerr ~ /^replay timed out/)) {
+      # the timeout of the fuzzer, reproduced: the timeout of tlspuffin itself fired on the execution alone
+      # (ReplayConfirm); without it (a binary without --outcome), a replay killed by its own limit or past twice the
+      # timeout of the fuzzer (its time includes the start and the exit of the binary: seconds with a large trace).
+      # Seconds without the decimal point of the locale (mawk prints 7,2 under fr_FR)
+      else if (lim > 0 && confirmed != "no" && replayerr !~ /error while loading|binary not found|could not compile|binary changed/ &&
+               (confirmed == "yes" || rms >= 2 * lim || replayerr ~ /^replay timed out/)) {
         ran = (rms > 0) ? sprintf("replay ran %d.%d s", int(rms / 1000), int(rms / 100) % 10) : "replay killed by its time limit";
-        printf "timeout\t\t%s, past the fuzzer timeout (%d.%d s)\t0\n", ran, int(lim / 1000), int(lim / 100) % 10 }
+        printf "timeout\t\t%s, past the fuzzer timeout (%d.%d s)%s\t0\n", ran, int(lim / 1000), int(lim / 100) % 10,
+               (confirmed == "yes" ? ", its execution alone too" : "") }
       else if (replayerr != "") printf "replay-error\t\t%s\t0\n", replayerr
       else if (diverged != "") { key = diverged; sub(/ *-->/, "", key); sub(/ *\(.*/, "", key); gsub(/\t/, " ", diverged)
                                  printf "no-crash\t%s\t%s\t%d\n", key, diverged, dstart }
@@ -1408,6 +1438,15 @@ ExperimentReplayObjectives() {
         RUST_LOG=info timeout -k 10 "${replayTimeout}" ${LAUNCH_NOASLR} nix-shell --run "${launch} execute ${quoted}" < /dev/null > "${report}" 2>&1;
         echo "exit status: $?" >> "${report}";
         ReplayTimed "${report}" "${fuzzerTimeout}";
+        # past the fuzzer's timeout by its whole time: tlspuffin's own timeout on the execution alone decides
+        if ReplayPastLimit "${report}" && BinaryHasOutcome "${LAUNCH_BINARY}"; then
+          local confirm; confirm=$( mktemp -d );
+          RUST_LOG=info timeout -k 10 $(( (fuzzerTimeout + 999) / 1000 + 60 )) ${LAUNCH_NOASLR} nix-shell --run \
+              "${launch} execute --outcome $( printf '%q' "${confirm}/outcome.json" ) --timeout $(( (fuzzerTimeout + 999) / 1000 )) ${quoted}" \
+              < /dev/null > "${confirm}/log" 2>&1;
+          ReplayConfirm "${report}" "${confirm}/outcome.json";
+          rm -rf "${confirm}";
+        fi
       else
         RUST_LOG=info timeout -k 10 "${replayTimeout}" $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${quoted}" < /dev/null > "${report}" 2>&1;
         echo "exit status: $?" >> "${report}";

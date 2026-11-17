@@ -32,7 +32,7 @@ STATE="${PB_ROOT}/data/objectives-live"
 RUNS="${PB_ROOT}/data/runs"
 API="${PB_SCHEDULER_API:-http://127.0.0.1:10082}"
 TOOLS="$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )"
-source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p;/^FuzzerTimeoutMs()/,/^}/p;/^ReplayStamp()/,/^}/p;/^ReplayTimed()/,/^}/p;/^ReplayMsOf()/,/^}/p' "${TOOLS}/../PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p;/^FuzzerTimeoutMs()/,/^}/p;/^ReplayStamp()/,/^}/p;/^ReplayTimed()/,/^}/p;/^ReplayMsOf()/,/^}/p;/^ReplayPastLimit()/,/^}/p;/^BinaryHasOutcome()/,/^}/p;/^ReplayConfirm()/,/^}/p' "${TOOLS}/../PR_common.sh" )
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)
 declare -gA OBJECTIVES_NOT_TARGETED=()
 source <( jq -r '"OBJECTIVES_NOT_TARGETED=(", (._not_targeted // {} | to_entries[] | "  [\(.key | @sh)]=\("\(.value.cve)|\(.value.library // "")|\(.value.below // "")" | @sh)"), ")"' "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" 2> /dev/null )
@@ -132,6 +132,16 @@ Replay() {
   fi
   echo "exit status: ${status}" >> "${report}";
   ReplayTimed "${report}" "${limit}";
+  # past the fuzzer's timeout by its whole time (the start of the binary, the reading of the trace and the exit are in
+  # it): tlspuffin's own timeout on the execution alone decides (ReplayConfirm), run directly as the fallback above
+  if ReplayPastLimit "${report}" && BinaryHasOutcome "${bin}"; then
+    local secs=$(( (limit + 999) / 1000 )) quotedOutcome;
+    printf -v quotedOutcome '%q' "${work}/outcome.json";
+    { ( cd "${work}" && timeout -k 5 $(( secs + 60 )) ${noAslr} \
+        bash -c "${asanCmd} exec ${LAUNCH_PREFIX} ${quotedBinary} ${LAUNCH_FLAGS} execute --outcome ${quotedOutcome} --timeout ${secs} ${quotedTrace}" ) \
+        < /dev/null > "${work}/confirm.log" 2>&1; } 2> /dev/null;
+    ReplayConfirm "${report}" "${work}/outcome.json";
+  fi
   rm -rf "${work}";
 }
 

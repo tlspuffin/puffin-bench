@@ -398,7 +398,7 @@ printf '%s\n' "import { AnalyseReport, TimingText, FuzzerText } from '${here}/..
   'const a = AnalyseReport(JSON.parse(std.loadFile(scriptArgs[1])));' \
   'print(JSON.stringify(a.bugs.map(b => [b.key, b.type, !!b.underLoad, b.count, TimingText(b.timing), FuzzerText(b.fuzzer)])));' > "${work}/timeouts.js"
 check 'one bug of puffin per configuration, its traces and replay times (TimingText)' \
-  '[ "$( "${qjs}" --std -m "${work}/timeouts.js" "${work}/underload.json" )" == "[[\"timeout-under-load|WolfSSL\",\"timeout-under-load\",true,5,\"traces 5.2–7.6 MB · replays 2.1–3.9 s (the fuzzer gives 5.0 s)\",\"timeout (Timeout in fuzz run.)\"]]" ]'
+  '[ "$( "${qjs}" --std -m "${work}/timeouts.js" "${work}/underload.json" )" == "[[\"timeout-under-load|WolfSSL\",\"timeout-under-load\",true,5,\"traces 5.2–7.6 MB · replays 2.1–3.9 s, start of the binary included (the fuzzer gives the execution 5.0 s)\",\"timeout (Timeout in fuzz run.)\"]]" ]'
 report dos campaign "[$( run 0 '[]' "[${load},${dos}]" )]"
 check 'a timeout a replay reproduces: the bug "timeout", new on a version that declares none; the others still apart' \
   '[ "$( verdicts dos "[.verdicts.headline.level, .verdicts.headline.real, .verdicts.headline.new, .verdicts.headline.underLoad]" )" == "[\"new\",1,1,3]" ]'
