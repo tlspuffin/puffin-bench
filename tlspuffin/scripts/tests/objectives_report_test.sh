@@ -66,12 +66,15 @@ with zipfile.ZipFile(f'{d}/{task}.zip', 'w') as z:
     for name in (heap, claim):
         z.writestr(f'artefacts/WolfSSL/0-objective/{name}.trace', 'trace')
     z.writestr(f'artefacts/WolfSSL/0-objective-reports/{heap}.txt', asan)
-    z.writestr(f'artefacts/WolfSSL/0-objective-reports/{claim}.txt', 'error because a security violation occurred. msg: Authentication bypass\n')
-    # beyond the replays: the fuzzer's records of their claims (warn.log, its local time; the names are UTC)
+    # (its replay timed by the job script, ReplayTimed)
+    z.writestr(f'artefacts/WolfSSL/0-objective-reports/{claim}.txt', 'error because a security violation occurred. msg: Authentication bypass\n'
+                                                                      'exit status: 0\nreplay time: 2400 ms\nfuzzer timeout: 5000 ms\n')
+    # beyond the replays: the fuzzer's records of their claims (warn.log, its local time; the names are UTC: a message
+    # of the security policies, the only warnings that are claims)
     for name in ('20261111-000000003-cccc', '20261111-000001004-dddd'):
         z.writestr(f'artefacts/WolfSSL/0-objective/{name}.trace', 'trace')
-    z.writestr('artefacts/WolfSSL/0-log/warn.log', '2026-11-11T01:00:00.002000000+01:00\tWARN\tSome claim\n'
-                                                   '2026-11-11T01:00:01.003000000+01:00\tWARN\tSome claim\n')
+    z.writestr('artefacts/WolfSSL/0-log/warn.log', '2026-11-11T01:00:00.002000000+01:00\tWARN\tMismatching session ids\n'
+                                                   '2026-11-11T01:00:01.003000000+01:00\tWARN\tMismatching session ids\n')
     z.writestr('artefacts/summary.json', json.dumps({'libraries': {'WolfSSL': {'cli': cli, 'data': [{'id': 0, 'state': 'success'}]}}}))
 PY
 # the catalogue of the task's commit (as git_restapi gives it, cached), HEAP with its 2 top frames; its witness's stack
@@ -90,7 +93,9 @@ report="${out}/${task}.json"
 check 'the report: one run, its 4 objectives in 3 groups (an ASan crash, a claim, 2 beyond the replays)' \
   '[ "$( jq -c "[.runs[0].found, ([.runs[0].groups[].type] | sort)]" "${report}" )" == "[4,[\"heap-buffer-overflow\",\"not-replayed\",\"security-violation\"]]" ]'
 check 'the 2 beyond the replays: one group, their claim as the fuzzer recorded it, no frames' \
-  '[ "$( jq -c "[.runs[0].groups[] | select(.type == \"not-replayed\") | [.count, .fuzzer.kind, .fuzzer.detail, .fuzzer.frames]]" "${report}" )" == "[[2,\"claim\",\"Some claim\",[]]]" ]'
+  '[ "$( jq -c "[.runs[0].groups[] | select(.type == \"not-replayed\") | [.count, .fuzzer.kind, .fuzzer.detail, .fuzzer.frames]]" "${report}" )" == "[[2,\"claim\",\"Mismatching session ids\",[]]]" ]'
+check 'a group: how long its replays ran, the fuzzer timeout, the sizes of its traces (the export listing)' \
+  '[ "$( jq -c "[.runs[0].groups[] | select(.type == \"security-violation\") | .timing]" "${report}" )" == "[{\"replay_ms\":[2400,2400],\"limit_ms\":5000,\"size\":[5,5]}]" ]'
 check 'what the run built: the first record of its run state, once, also under jq 1.6' \
   '[ "$( jq -c "[.runs[0].cli.build, .libraries[0].cli.build]" "${report}" )" == "[\"C harness, wolfssl540-asan\",\"C harness, wolfssl540-asan\"]" ]'
 check 'its traces next to the page, named in the report' \

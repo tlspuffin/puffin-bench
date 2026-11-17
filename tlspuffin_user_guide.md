@@ -378,10 +378,11 @@ validated](#known-bugs-how-a-find-is-validated).
 <!-- words:begin -->
 | term | meaning |
 |---|---|
-| **objective** | an input the fuzzer saved because its oracle fired: a crash (with an ASan report when the build has ASan), a violated claim of the protocol, a panic |
+| **objective** | an input the fuzzer saved because its oracle fired: a crash (with an ASan report when the build has ASan), a violated claim of the protocol, a panic, or an execution that ran past the time the fuzzer gives one (a timeout) |
 | **bug** | the objectives with the same failure: the same ASan report type and top stack frames, or the same violated claim |
 | **reproduced** | a replay of the objective, on the build of its own run, gave that failure again (else: not reproduced, or a replay error when the replay could not run) |
 | **fuzzer only** | the fuzzer's own log recorded the failure when it saved the objective, but no replay reproduces it (the fuzzer runs every input in one process: state, memory layout) |
+| **timeout under load** | a timeout of the fuzzer that no replay reproduces: each replay, alone on a core, ran under the time the fuzzer gives an execution (5 s); puffin's (a large trace on a loaded machine), not a bug of the library, never counted as a bug; the pages show the size of its traces and how long their replays ran. A replay past that time makes it the bug "timeout" of its configuration, a possible denial of service |
 | **signature** | how tlspuffin's catalogue recognises a known bug (its oracle): a crash with a given ASan report type or signal, a violated claim with its message, a panic with its message; for a crash, also its place: the first frames of the stack of its witness, else its top frames in the catalogue |
 | **strong signature** | a crash with the bug's ASan report type whose stack has the bug's own place: its first 3 frames, outside the sanitizer runtime, libc and the fuzzer, are those of the bug's witness (validation runs it, symbolized), else its top frames in the catalogue, in order: as well as a signature can tell (only a patch is certain); green |
 | **weak signature** | a signature without stack: a claim or a panic (one message, which several bugs can share: Authentication bypass is CVE-2021-3336's, SIG's and SKIP's), or a crash told by its ASan report type or signal alone (neither top frames in the catalogue nor a witness's stack, or a stack without them): it names a bug without telling it apart from another failure of the same kind; yellow |

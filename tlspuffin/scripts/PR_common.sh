@@ -739,8 +739,10 @@ ExperimentSaveLogStats() {
 # Signature of an objective replay output (stdin): "<type>\t<frame1 < frame2 < frame3>\t<SUMMARY line>\t<line of
 # the report start>". Type: the AddressSanitizer error (heap-buffer-overflow, SEGV, ...), "security-violation"
 # when the security oracle of the trace execution flags a claim violation (frames: its message, e.g.
-# "Authentication bypass"; such objectives do not crash), "panic", "replay-error" when the fuzzer could not run or
-# the replay timed out, or "no-crash" when the replay did not reproduce; frames: first functions of the first stack outside the
+# "Authentication bypass"; such objectives do not crash), "panic", "timeout" when the replay ran past the time the
+# fuzzer gives an execution (the report says both, ReplayTimed: the fuzzer's timeout reproduced), "replay-error" when
+# the fuzzer could not run or the replay timed out (that time unknown), or "no-crash" when the replay did not
+# reproduce; frames: first functions of the first stack outside the
 # sanitizer runtime and the libc memory functions (<module>+<offset> when the stack is not symbolized).
 # Where the fuzzer of the tested commit writes its own logs: the commits since 24f7f1 (2026-01) in <experiment>/log
 # (error.log, warn.log, ...), archived as <attempt>-log. Older ones write them elsewhere, looked at when that folder has
@@ -779,10 +781,14 @@ ArchivedFuzzerLogDir() {
 }
 
 # The fuzzer's own record of its objectives, from its logs (FuzzerLogDir): the crashes it caught ("Crashed with SIG…",
-# the input it saved, the backtrace of its crash handler, error.log) and the claim violations (the WARN line the
-# harness logs when the security oracle fires, warn.log); both in tlspuffin.log for the older commits.
-# FuzzerRecords <log dir> prints one record per line, sorted by time: <epoch ms> TAB crash|warn TAB <signal or
-# message> TAB <top frames "a < b < c"> TAB <time as logged> TAB <input file saved, crashes>.
+# the input it saved, the backtrace of its crash handler, error.log), its timeouts ("Timeout in fuzz run.", error.log)
+# and the claim violations (the WARN line the harness logs when the security oracle fires, warn.log: a message of
+# tlspuffin's security policies only, see FuzzerRecordsOf); all of them in tlspuffin.log for the older commits. From the
+# broker's stderr: the ASan reports, and the restarts of the clients ("Spawning next client": a client ended by a crash or
+# a timeout, the one record of an objective whose lines the clients' logs lost; their files rotate, each client on its
+# own, and lose lines then).
+# FuzzerRecords <log dir> prints one record per line, sorted by time: <epoch ms> TAB crash|timeout|warn|asan|restart TAB
+# <signal or message> TAB <top frames "a < b < c"> TAB <time as logged> TAB <input file saved, crashes>.
 FuzzerRecords() {
   local dir="$1" f;
   for f in "${dir}"/error.log "${dir}"/error.*.gz "${dir}"/warn.log "${dir}"/warn.*.gz "${dir}"/tlspuffin.log; do
@@ -828,10 +834,16 @@ AWK
 # every running attempt every few minutes; a run can write several hundred MB of them).
 FuzzerRecordsOf() {
   local f="$1" what="$2" cached='';
+  # The messages of tlspuffin's security policies (tlspuffin/src/tls/violation.rs, sshpuffin/src/violation.rs, every
+  # branch since 2021), which the harness logs alone at WARN when the security oracle fires (log::warn!("{}", msg)): the
+  # only WARN lines that are claims. Any other warning is not (bit-level mutations that fail, "mutation::MakeMessage
+  # failed …", hundreds of thousands a run with --with-bit, were taken for claims: the timeouts they were paired with
+  # showed as 🚨 new security violations, campaigns of 2026-11-16). A message a policy adds must be added here.
+  local claims="Authentication bypass|Could not choose exactly one server and client|Encrypt-then-MAC used without having been negotiated|Encrypt-then-MAC was silently downgraded to MAC-then-Encrypt|Mismatching ciphers|Mismatching client random|Mismatching encrypt-then-MAC|Mismatching ephemeral kex method|Mismatching groups|Mismatching master secrets|Mismatching server certificate|Mismatching server certificate hash|Mismatching server random|Mismatching session ids|mismatching signature algorithms|Mismatching versions|Negotiated cipher is not in agent's configured ciphers list|Negotiated signature algorithm is not in agent's configured signature algorithms list|Not the best cipher choosen|Resumed session under a different SNI|Server Done not found in server claims|transport handshake completed with a null/none cipher|transport handshake completed without a key exchange|Version undefined after handshake";
   # only a file that no longer changes: a rotated .gz, or one not modified for 5 minutes (an ended attempt)
   if [ -n "${FUZZER_RECORDS_CACHE:-}" ] && { [[ "${f}" == *.gz ]] || (( $( date +%s ) - $( stat -c %Y "${f}" ) > 300 )); }; then
-    # (v4: the version of the records; a change of what is recorded makes a new key)
-    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v5 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
+    # (v6: the version of the records; a change of what is recorded makes a new key)
+    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v6 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
     [ -f "${cached}" ] && { cat "${cached}"; return; };
   fi
   { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } |
@@ -841,7 +853,8 @@ FuzzerRecordsOf() {
     # made each check of a new objective slow: at its low priority on the fuzzer's cores, the monitor saw the expected
     # bug up to 17 minutes late, and a run that found it near its timeout ended by the timeout
     LC_ALL=C grep -av $'^[0-9][^\t]*\tWARN\t\\[' |
-    LC_ALL=C TZ=UTC awk -v kind="${f##*/}" '
+    LC_ALL=C TZ=UTC awk -v kind="${f##*/}" -v claimlist="${claims}" '
+      BEGIN { n = split(claimlist, c, "|"); for (i = 1; i <= n; i++) claim[c[i]] = 1 }
       # ISO 8601 time (2026-10-08T14:37:11.123456789+02:00) -> ms since the epoch, without a process per record (any awk:
       # mktime of POSIX awks takes local time, here UTC by TZ; seconds by %.0f, as mawk prints %d of 2^31 and over as
       # 2147483647)
@@ -859,12 +872,12 @@ FuzzerRecordsOf() {
       /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+\t/ {
         if (match($0, /\tERROR\tCrashed with [A-Z0-9]+/)) { flush(); ts = $1; sig = substr($0, RSTART + 20, RLENGTH - 20); next }
         if (ts != "" && match($0, /\tERROR\tinput: "[^"]+"/)) { inp = substr($0, RSTART + 15, RLENGTH - 16); next }
-        # a WARN line is a claim violation, except the messages of the fuzzer itself: tagged "[module] ..." (e.g.
-        # [RNG], [reservoir_sample], hundreds of thousands per run), and those of a client start (minimizer, seed
-        # inputs; "File ... was not interesting, skipped." of LibAFL 0.11); an unknown claim stays a record (the
-        # messages of the security oracle are plain sentences)
-        if (kind ~ /^(warn|tlspuffin)/ && $2 == "WARN") { m = $0; sub(/^[^\t]*\t[^\t]*\t/, "", m); gsub(/\t/, " ", m);
-                                              if (m !~ /^(\[|Running without minimizer is unsupported|Input \/|File ".*" was not interesting)/) printf "%s\twarn\t%s\t\t%s\t\n", iso2ms($1), m, $1 }
+        # a timeout: the client stops the execution, logs it, saves the objective tens of ms later and restarts (a crash
+        # being captured goes on: the lines of the clients interleave)
+        if ($0 ~ /\tERROR\tTimeout in fuzz run/) { printf "%s\ttimeout\tTimeout in fuzz run.\t\t%s\t\n", iso2ms($1), $1; next }
+        # a WARN line is a claim violation when its message is one of the security policies (claims, above)
+        if (kind ~ /^(warn|tlspuffin)/ && $2 == "WARN") { m = $0; sub(/^[^\t]*\t[^\t]*\t/, "", m); sub(/[ \r]+$/, "", m);
+                                              if (m in claim) printf "%s\twarn\t%s\t\t%s\t\n", iso2ms($1), m, $1 }
         next }
       ts != "" && /^ *[0-9]+: / { f = $0; sub(/^ *[0-9]+: /, "", f); sub(/ +$/, "", f);
                                   if (!skip(f) && n < 3) fr[++n] = f; next }
@@ -894,15 +907,22 @@ FuzzerRecordsOf() {
                                            if (!skip(f) && n < 3) { fr = fr (n ? " < " : "") f; n++ } next }
       inb && /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+/ { ts = $0; sub(/[ \t].*/, "", ts);
                                            for (i = 1; i <= np; i++) printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), pt[i], pf[i], ts;
-                                           printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), t, fr, ts; np = 0; inb = 0 }';
+                                           printf "%s\tasan\t%s\t%s\t%s\t\n", iso2ms(ts), t, fr, ts; np = 0; inb = 0 }
+      # the broker restarting a client that ended (a crash or a timeout), dated to the second
+      /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+\tSpawning next client/ {
+        rt = $0; sub(/\t.*/, "", rt); rm = $0; sub(/^[^\t]*\t/, "", rm); sub(/[ \r]+$/, "", rm);
+        printf "%s\trestart\t%s\t\t%s\t\n", iso2ms(rt), rm, rt }';
   fi |
   if [ -n "${cached}" ]; then mkdir -p "${FUZZER_RECORDS_CACHE}"; tee "${cached}.tmp"; mv "${cached}.tmp" "${cached}" 2> /dev/null; else cat; fi;
 }
 
 # FuzzerVerdict <records (FuzzerRecords)> <objective name, <UTC yyyymmdd-HHMMSSmmm>-<hash>>: the record the
-# objective came from, "crash TAB <signal> TAB <frames> TAB <time as logged>" or "claim TAB <message> TAB TAB <time>".
-# A crash names the input it saved: the same hash, close in time (its file name gets a later time). Otherwise by time:
-# the objective is saved about 80 ms after a crash, at once after a claim. Empty when no record matches.
+# objective came from, "crash TAB <signal> TAB <frames> TAB <time as logged>", "timeout TAB <message> TAB TAB <time>"
+# or "claim TAB <message> TAB TAB <time>". A crash names the input it saved: the same hash, close in time (its file
+# name gets a later time). Otherwise by time: the objective is saved about 80 ms after a crash, 30 to 70 ms after a
+# timeout, at once after a claim. Without any of them, a client the broker restarted within seconds: a crash when an
+# ASan report dates from that restart, else a timeout (the client's lines were lost: its logs rotate). Empty when no
+# record matches.
 FuzzerVerdict() {
   local records="$1" name="$2";
   local t; t=$( date -u -d "$( sed -E 's/^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3}).*/\1-\2-\3 \4:\5:\6.\7/' <<< "${name}" )" +%s%3N 2> /dev/null ) || return 0;
@@ -912,9 +932,12 @@ FuzzerVerdict() {
     function fn(f,   n) { if (match(f, /^_Z[0-9]+/)) { n = substr(f, 3, RLENGTH - 2) + 0; f = substr(f, RLENGTH + 1, n) } sub(/\(.*/, "", f); return f }
     $2 == "crash" && $6 != "" && index($6, hash) && $1 <= t + 2000 && t - $1 <= 5000 { named = $0 }
     $2 == "crash" && $1 <= t && t - $1 <= 2000 { crash = $0 }
+    $2 == "timeout" && $1 <= t && t - $1 <= 1000 { tmo = $0 }
     $2 == "warn" && $1 <= t && t - $1 <= 500 { warn = $0 }
     $2 == "warn" && $1 <= t + 2000 && t - $1 <= 6000 { warns[++nw] = $0 }
     $2 == "asan" { asan[++na] = $0 }
+    # the first restart in the seconds after the objective (the broker logs it to the second)
+    $2 == "restart" && $1 >= t - 1000 && $1 - t <= 3000 && (rst == "" || $1 < rstms) { rst = $0; rstms = $1 }
     END { if (named != "") crash = named;
           # the harness aborting on a claim violation (tlspuffin before ac3b89aff logs the claim, then aborts): the claim
           if (crash != "") { split(crash, c, "\t");
@@ -929,7 +952,12 @@ FuzzerVerdict() {
               k++; split(x[4], xf, " < "); if (!pick && (c[4] == "" || fn(xf[1]) == fn(cf[1]))) pick = i } }
             if (pick && (c[4] != "" || k == 1)) { split(asan[pick], x, "\t"); c[3] = c[3] " · ASan " x[3]; if (x[4] != "") c[4] = x[4] }
             printf "crash\t%s\t%s\t%s\n", c[3], c[4], c[5] }
-          else if (warn != "") { split(warn, w, "\t"); printf "claim\t%s\t\t%s\n", w[3], w[5] } }' <<< "${records}";
+          else if (tmo != "") { split(tmo, o, "\t"); printf "timeout\t%s\t\t%s\n", o[3], o[5] }
+          else if (warn != "") { split(warn, w, "\t"); printf "claim\t%s\t\t%s\n", w[3], w[5] }
+          else if (rst != "") { split(rst, r, "\t"); pick = 0;
+            for (i = 1; i <= na; i++) { split(asan[i], x, "\t"); if (x[1] >= r[1] - 1000 && x[1] - r[1] <= 1000) pick = i }
+            if (pick) { split(asan[pick], x, "\t"); printf "crash\tASan %s\t%s\t%s\n", x[3], x[4], x[5] }
+            else printf "timeout\tno line logged, the client restarted\t\t%s\n", r[5] } }' <<< "${records}";
 }
 
 # Claims of the security oracle that are not the target of VulnA/VulnB: a known CVE of the old library versions those
@@ -1076,12 +1104,14 @@ TargetMatches() {
 # ObjectiveTargeted <records (FuzzerRecords)> <objective name> [<expected target>]: from the fuzzer's record of the
 # objective, 0 targeted (the expected bug; without target declared: any bug but OBJECTIVES_NOT_TARGETED), 1 not
 # targeted (OBJECTIVES_NOT_TARGETED, but in an experiment looking for that very bug: target_bug), 2 no record of it in
-# the fuzzer's logs (yet), 3 another bug than the expected one, 4 its place could not be checked (HasPlace could not
-# run: the bench's tools incomplete), never taken for another bug
+# the fuzzer's logs (yet), 3 another bug than the expected one, or a timeout (a bug only when its replay runs past the
+# fuzzer's timeout too, ObjectiveSignature: the replay at the end of the run tells; never the end of an experiment), 4
+# its place could not be checked (HasPlace could not run: the bench's tools incomplete), never taken for another bug
 ObjectiveTargeted() {
   local verdict; verdict=$( FuzzerVerdict "$1" "$2" );
   [ -n "${verdict}" ] || return 2;
   local kind detail frames apart=''; IFS=$'\t' read -r kind detail frames _ <<< "${verdict}";
+  [ "${kind}" == timeout ] && return 3;
   # a claim set apart for what this run built (./.build_info, written by the experiment step), unless it is the bug the
   # experiment names (a custom benchmark of CVE-2024-5814 on wolfSSL < 5.7.2)
   if [ "${kind}" == claim ]; then apart=$( NotTargetedCVE "${detail}" "$( cat ./.build_info 2> /dev/null )" ) || apart=''; fi
@@ -1118,11 +1148,14 @@ FuzzerVerdicts() {
     FNR == NR { if ($0 != "") { m++; ms[m] = $1 + 0; kind[m] = $2; what[m] = $3; fr[m] = $4; raw[m] = $5; inp[m] = $6 } next }
     { t = $1 + 0; name = $2; hash = name; sub(/^.*-/, "", hash)
       while (lo <= m && ms[lo] < t - 5000) lo++
-      named = crash = warn = 0
-      for (i = lo; i <= m && ms[i] <= t + 2000; i++) {
-        if (kind[i] == "crash" && inp[i] != "" && index(inp[i], hash)) named = i
+      named = crash = warn = tmo = rst = 0
+      for (i = lo; i <= m && ms[i] <= t + 3000; i++) {
+        if (kind[i] == "crash" && inp[i] != "" && index(inp[i], hash) && ms[i] <= t + 2000) named = i
         if (kind[i] == "crash" && ms[i] <= t && t - ms[i] <= 2000) crash = i
+        if (kind[i] == "timeout" && ms[i] <= t && t - ms[i] <= 1000) tmo = i
         if (kind[i] == "warn" && ms[i] <= t && t - ms[i] <= 500) warn = i
+        # the first restart of a client in the seconds after the objective (records by time)
+        if (kind[i] == "restart" && ms[i] >= t - 1000 && !rst) rst = i
       }
       if (named) crash = named
       # the harness aborting on a claim violation (tlspuffin before ac3b89aff logs the claim, then aborts): the claim
@@ -1137,7 +1170,14 @@ FuzzerVerdicts() {
           k++; split(fr[i], xf, " < "); if (!pick && (s == "" || fn(xf[1]) == fn(cf[1]))) pick = i }
         if (pick && (s != "" || k == 1)) { d = d " · ASan " what[pick]; if (fr[pick] != "") s = fr[pick] }
         printf "%s\tcrash\t%s\t%s\t%s\n", name, d, s, raw[crash] }
+      else if (tmo) printf "%s\ttimeout\t%s\t\t%s\n", name, what[tmo], raw[tmo]
       else if (warn) printf "%s\tclaim\t%s\t\t%s\n", name, what[warn], raw[warn]
+      # no line of the client, which the broker restarted: a crash when an ASan report dates from that restart, else a
+      # timeout, as FuzzerVerdict
+      else if (rst) { pick = 0
+        for (i = lo; i <= m && ms[i] <= ms[rst] + 1000; i++) if (kind[i] == "asan" && ms[i] >= ms[rst] - 1000) pick = i
+        if (pick) printf "%s\tcrash\tASan %s\t%s\t%s\n", name, what[pick], fr[pick], raw[pick]
+        else printf "%s\ttimeout\tno line logged, the client restarted\t\t%s\n", name, raw[rst] }
       else printf "%s\t\t\t\t\n", name }' <( printf '%s\n' "${records}" | sort -t$'\t' -k1,1n ) - |
   # an objective whose record is gone (the fuzzer's logs rotate: 20 files kept, a run crashing 7 times a second keeps its
   # last minutes only) takes the verdict of an objective with the same input (the hash ending its name): same input,
@@ -1149,20 +1189,24 @@ FuzzerVerdicts() {
                        if (f[2] == "" && (hash[i] in known)) print name[i] "\t" known[hash[i]]; else print line[i] } }' OFS='\t';
 }
 
-# FuzzerExcerpt <log dir> <time as logged> <crash|claim>: the fuzzer's log of that record, for the objectives pages:
-# a crash with its input, signal and backtrace (without the registers and memory maps), or the claim line.
+# FuzzerExcerpt <log dir> <time as logged> <crash|timeout|claim>: the fuzzer's log of that record, for the objectives
+# pages: a crash with its input, signal and backtrace (without the registers and memory maps), the timeout or claim
+# line, or the broker's restart of the client (a timeout without its line). The files in turn until one has it.
 FuzzerExcerpt() {
-  local dir="$1" ts="$2" kind="$3" f;
+  local dir="$1" ts="$2" kind="$3" f base;
   [ -n "${ts}" ] || return 0;
-  for f in "${dir}"/$( [ "${kind}" == crash ] && echo error || echo warn ).log "${dir}"/$( [ "${kind}" == crash ] && echo error || echo warn ).*.gz "${dir}"/tlspuffin.log; do
+  case "${kind}" in crash|timeout) base=error;; *) base=warn;; esac;
+  for f in "${dir}/${base}.log" "${dir}/${base}".*.gz "${dir}"/tlspuffin.log "${dir}"/*stderr*.log; do
     [ -e "${f}" ] || continue;
     { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } | LC_ALL=C awk -v ts="${ts}" -v kind="${kind}" '
       !on && index($0, ts) == 1 { on = 1; print; if (kind != "crash") exit; next }
       !on { next }
       /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { if (++stamped > 2) exit; print; next }
       /━━/ { section = $0; keep = (section ~ /CRASH|BACKTRACE/); if (keep) print; next }
-      keep && ++n <= 60 { print }' && break;
+      keep && ++n <= 60 { print }
+      END { exit !on }' && break;
   done
+  return 0;
 }
 
 # Major version of puffin-bench's measurements, per kind of job (TYPE of its flow), recorded with every result
@@ -1197,6 +1241,41 @@ SummaryAddBench() {
   return 0;
 }
 
+# FuzzerTimeoutMs <checkout>: the time the fuzzer of that commit gives an execution before it is a timeout, in ms: the
+# first Duration after InProcessExecutor::with_timeout( (TimeoutExecutor::new( before 2024) in
+# puffin/src/fuzzer/libafl_setup.rs, 5 s since tlspuffin's first fuzzer; nothing when the sources do not say
+FuzzerTimeoutMs() {
+  local f="${1%/}/puffin/src/fuzzer/libafl_setup.rs";
+  [ -r "${f}" ] || return 0;
+  awk '/with_timeout\(|TimeoutExecutor::new\(/ { on = 1 }
+       on && match($0, /Duration::new\( *[0-9]+ *, *[0-9]+ *\)/) { split(substr($0, RSTART + 14, RLENGTH - 15), a, ",");
+                                                                printf "%d\n", a[1] * 1000 + int(a[2] / 1000000); exit }
+       on && match($0, /Duration::from_secs\( *[0-9]+ *\)/) { printf "%d\n", substr($0, RSTART + 20, RLENGTH - 21) * 1000; exit }
+       on && match($0, /Duration::from_millis\( *[0-9]+ *\)/) { printf "%d\n", substr($0, RSTART + 22, RLENGTH - 23) + 0; exit }' "${f}";
+}
+
+# The command of a replay writes its start, then runs the binary (ReplayStamp: the shell words to put before its exec,
+# run inside the replay's shell); ReplayTimed <report> <the fuzzer's timeout in ms (FuzzerTimeoutMs), empty: unknown>,
+# at its end, adds to the report how long it ran and that timeout, "replay time: <ms> ms", "fuzzer timeout: <ms> ms":
+# ObjectiveSignature calls a replay past that timeout a timeout reproduced, and the pages show the time beside the size
+# of the trace. The start and the exit of the binary are in that time (tenths of a second): a replay just under the
+# limit counts as a timeout, never the other way. ReplayMsOf <report>: "<replay ms> TAB <timeout ms>", each empty when
+# the report does not say.
+ReplayStamp() {
+  printf '%s' 'echo "replay started at $( date +%s%3N )" >&2;';
+}
+ReplayTimed() {
+  local report="$1" limit="${2:-}" started;
+  started=$( sed -n 's/^replay started at \([0-9][0-9]*\)$/\1/p' "${report}" 2> /dev/null | tail -n 1 );
+  [ -n "${started}" ] || return 0;
+  echo "replay time: $(( $( date +%s%3N ) - started )) ms" >> "${report}";
+  [ -n "${limit}" ] && echo "fuzzer timeout: ${limit} ms" >> "${report}";
+  return 0;
+}
+ReplayMsOf() {
+  awk '/^replay time: [0-9]+ ms$/ { r = $3 } /^fuzzer timeout: [0-9]+ ms$/ { l = $3 } END { printf "%s\t%s\n", r, l }' "$1" 2> /dev/null || printf '\t\n';
+}
+
 ObjectiveSignature() {
   awk '
     function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor)/ ||
@@ -1227,6 +1306,9 @@ ObjectiveSignature() {
     /AddressSanitizer: nested bug in the same thread/ { nested = $0 }
     # killed by timeout (124, or 137 after -k): the objective was not replayed, which is not "no-crash"
     replayerr == "" && /^exit status: (124|137)$/ { replayerr = "replay timed out (" $0 ")" }
+    # how long the replay ran, and the time the fuzzer gives an execution (ReplayTimed)
+    /^replay time: [0-9]+ ms$/ { rms = $3 + 0 }
+    /^fuzzer timeout: [0-9]+ ms$/ { lim = $3 + 0 }
     # the forked execution died of SIGSEGV or SIGABRT ("execution finished with status Crashed", tlspuffin since
     # 482ebfe1e): reproduced, but without sanitizer report nor claim message (e.g. a library built without ASAN)
     crashed == "" && /execution finished with status Crashed/ { crashed = $0; sub(/^[^\t]*\t/, "", crashed); cstart = NR }
@@ -1241,6 +1323,12 @@ ObjectiveSignature() {
       else if (violation != "") { sub(/[ \r]+$/, "", violation); gsub(/\t/, " ", vline); printf "security-violation\t%s\t%s\t%d\n", violation, vline, vstart }
       else if (panic != "") printf "panic\t%s\t\t0\n", panic
       else if (crashed != "") printf "crash\t\t%s (SIGSEGV or SIGABRT, no sanitizer report)\t%d\n", crashed, cstart
+      # a replay that ran past the time the fuzzer gives an execution (killed by its own limit, or ended later): the
+      # timeout of the fuzzer, reproduced (seconds without a decimal point of the locale: mawk prints 7,2 under fr_FR)
+      else if (lim > 0 && replayerr !~ /error while loading|binary not found|could not compile|binary changed/ &&
+               (rms >= lim || replayerr ~ /^replay timed out/)) {
+        ran = (rms > 0) ? sprintf("replay ran %d.%d s", int(rms / 1000), int(rms / 100) % 10) : "replay killed by its time limit";
+        printf "timeout\t\t%s, past the fuzzer timeout (%d.%d s)\t0\n", ran, int(lim / 1000), int(lim / 100) % 10 }
       else if (replayerr != "") printf "replay-error\t\t%s\t0\n", replayerr
       else if (diverged != "") { key = diverged; sub(/ *-->/, "", key); sub(/ *\(.*/, "", key); gsub(/\t/, " ", diverged)
                                  printf "no-crash\t%s\t%s\t%d\n", key, diverged, dstart }
@@ -1286,7 +1374,8 @@ ExperimentReplayObjectives() {
     local asanCmd='unset ASAN_OPTIONS;';
     [ "${LAUNCH_ASAN_SET}" == true ] && printf -v asanCmd 'export ASAN_OPTIONS=%q;' "${LAUNCH_ASAN_OPTIONS}";
     local quotedBinary; printf -v quotedBinary '%q' "${LAUNCH_BINARY}";
-    launch="${asanCmd} exec ${LAUNCH_PREFIX} ${quotedBinary} ${LAUNCH_FLAGS}";
+    # (its start written first: ReplayTimed)
+    launch="${asanCmd} $( ReplayStamp ) exec ${LAUNCH_PREFIX} ${quotedBinary} ${LAUNCH_FLAGS}";
     if [ -n "${LAUNCH_SHA256}" ] && [ "$( sha256sum "${LAUNCH_BINARY}" 2> /dev/null | cut -d' ' -f1 )" != "${LAUNCH_SHA256}" ]; then
       changed="binary changed since the experiment: ${LAUNCH_BINARY} (not replayed, it would run another binary)";
     fi
@@ -1298,6 +1387,9 @@ ExperimentReplayObjectives() {
   # seconds of retries for the whole attempt.
   local replayTries="${REPLAY_TRIES:-5}";
   local retryDeadline=$(( SECONDS + ${REPLAY_RETRY_BUDGET:-120} ));
+  # the time the fuzzer gives an execution (the commit's, the task's clone): a replay past it reproduces a timeout
+  # (ReplayTimed)
+  local fuzzerTimeout; fuzzerTimeout=$( FuzzerTimeoutMs "${THEJOB_OUT_PATH:-.}/repo" );
   local obj;
   while IFS= read -r -d '' obj; do
     local name=$( basename "${obj}" .trace );
@@ -1315,6 +1407,7 @@ ExperimentReplayObjectives() {
       elif [ -n "${launch}" ]; then
         RUST_LOG=info timeout -k 10 "${replayTimeout}" ${LAUNCH_NOASLR} nix-shell --run "${launch} execute ${quoted}" < /dev/null > "${report}" 2>&1;
         echo "exit status: $?" >> "${report}";
+        ReplayTimed "${report}" "${fuzzerTimeout}";
       else
         RUST_LOG=info timeout -k 10 "${replayTimeout}" $( NoAslrPrefix ) nix-shell --run "${cmd} -- execute ${quoted}" < /dev/null > "${report}" 2>&1;
         echo "exit status: $?" >> "${report}";

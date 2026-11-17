@@ -32,7 +32,7 @@ STATE="${PB_ROOT}/data/objectives-live"
 RUNS="${PB_ROOT}/data/runs"
 API="${PB_SCHEDULER_API:-http://127.0.0.1:10082}"
 TOOLS="$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )"
-source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${TOOLS}/../PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p;/^FuzzerTimeoutMs()/,/^}/p;/^ReplayStamp()/,/^}/p;/^ReplayTimed()/,/^}/p;/^ReplayMsOf()/,/^}/p' "${TOOLS}/../PR_common.sh" )
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)
 declare -gA OBJECTIVES_NOT_TARGETED=()
 source <( jq -r '"OBJECTIVES_NOT_TARGETED=(", (._not_targeted // {} | to_entries[] | "  [\(.key | @sh)]=\("\(.value.cve)|\(.value.library // "")|\(.value.below // "")" | @sh)"), ")"' "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" 2> /dev/null )
@@ -75,12 +75,13 @@ Symbolizer() {
   ls -1d /nix/store/*-llvm-*/bin/llvm-symbolizer 2> /dev/null | sort -V | tail -1;
 }
 
-# Replay <step dir> <trace> <report>: exactly the launch of the fuzzer when it was recorded (.currentlaunch, see
-# ExperimentSaveExecution in PR_common.sh: same binary file, options, prefixes and ASAN_OPTIONS; not replayed when
-# the binary changed since), in a working directory of its own, inside the commit's nix-shell when possible.
-# Older experiments: the binary of .currentcmd, without options.
+# Replay <step dir> <trace> <report> [<the fuzzer's timeout, ms>]: exactly the launch of the fuzzer when it was recorded
+# (.currentlaunch, see ExperimentSaveExecution in PR_common.sh: same binary file, options, prefixes and ASAN_OPTIONS; not
+# replayed when the binary changed since), in a working directory of its own, inside the commit's nix-shell when
+# possible; the report says how long it ran and the fuzzer's timeout (ReplayTimed: a replay past it reproduces a
+# timeout). Older experiments: the binary of .currentcmd, without options.
 Replay() {
-  local dir="$1" trace="$2" report="$3";
+  local dir="$1" trace="$2" report="$3" limit="${4:-}";
   local LAUNCH_BINARY='' LAUNCH_SHA256='' LAUNCH_PREFIX='' LAUNCH_NOASLR='' LAUNCH_FLAGS='' LAUNCH_ASAN_SET='' LAUNCH_ASAN_OPTIONS='';
   local bin asan noAslr='';
   if [ -r "${dir}/.currentlaunch" ]; then
@@ -107,7 +108,7 @@ Replay() {
   local quotedBinary quotedTrace;
   printf -v quotedBinary '%q' "${bin}";
   printf -v quotedTrace '%q' "${trace}";
-  local run="${asanCmd} export RUST_LOG=info; exec ${LAUNCH_PREFIX} ${quotedBinary} ${LAUNCH_FLAGS} execute ${quotedTrace}";
+  local run="${asanCmd} export RUST_LOG=info; $( ReplayStamp ) exec ${LAUNCH_PREFIX} ${quotedBinary} ${LAUNCH_FLAGS} execute ${quotedTrace}";
   local status=1;
   # a replay never runs past the budget of the call (the next cron call would be skipped by the lock)
   local left; left=$( BudgetLeft );
@@ -130,6 +131,7 @@ Replay() {
     status=$?;
   fi
   echo "exit status: ${status}" >> "${report}";
+  ReplayTimed "${report}" "${limit}";
   rm -rf "${work}";
 }
 
@@ -268,6 +270,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
   mkdir -p "${taskState}";
   # state of the format before <library>-<attempt> (keyed by step directory, e.g. 1-0-2): the same attempts again
   rm -f "${taskState}"/[0-9]*-[0-9]*-[0-9]*.*;
+  # the time the fuzzer gives an execution (the task's clone): a replay past it reproduces a timeout (ReplayTimed)
+  fuzzerTimeout=$( FuzzerTimeoutMs "${taskDir}/output/repo" );
   # An attempt is kept under <library>-<attempt>, the name of its archive (see below), so that it is counted
   # once whether it was seen running, archived, or both.
   # Running attempts: <step dir>/experiments/<name>/objective; the two runs of a twin step (TwinExperiment, PR_perf.sh):
@@ -306,7 +310,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
       tries=0; sig='';
       while (( tries < REPLAY_TRIES )); do
         tries=$(( tries + 1 ));
-        Replay "${runDir}" "${trace}" "${report}";
+        Replay "${runDir}" "${trace}" "${report}" "${fuzzerTimeout}";
         [ -e "${trace}" ] || break;
         sig=$( ObjectiveSignature < "${report}" );
         [ "${sig%%$'\t'*}" == no-crash ] && ! OverBudget || break;
@@ -315,7 +319,9 @@ for taskDir in "${RUNS}"/[0-9]*; do
       verdict=$( FuzzerVerdict "${records}" "${name}" ); [ -n "${verdict}" ] || verdict=$'\t\t\t';
       FuzzerExcerpt "${logDir}" "$( cut -f4 <<< "${verdict}" )" "$( cut -f1 <<< "${verdict}" )" | cut -c1-300 \
           > "${taskState}/${id}-${name}.fuzzer.txt" 2> /dev/null;
-      printf '%s\t%s\t%s\t%s\t%s\n' "${name}" "${found}" "${sig}" "${verdict}" "${tries}/${REPLAY_TRIES}" >> "${tsv}";
+      # then how long the replay ran, the fuzzer's timeout (ReplayMsOf: two columns) and the size of the trace
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${name}" "${found}" "${sig}" "${verdict}" "${tries}/${REPLAY_TRIES}" \
+          "$( ReplayMsOf "${report}" )" "$( stat -c %s "${trace}" 2> /dev/null )" >> "${tsv}";
     done < "${taskState}/${id}.all";
   done < <( find "${taskDir}" -maxdepth 6 -type d -path '*/experiments/*/objective' 2> /dev/null )
 
@@ -350,7 +356,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
           > "${taskState}/${id}-${name}.fuzzer.txt" 2> /dev/null;
       # tries of the experiment's replay, recorded by job scripts since they retry (last column of .signatures.tsv)
       tries=$( awk -F'\t' -v n="${name}" '$1 == n && $NF ~ /^[0-9]+\/[0-9]+$/ { print $NF; exit }' "${objDir}-reports/.signatures.tsv" 2> /dev/null );
-      printf '%s\t%s\t%s\t%s\t%s\n' "${name}" "${found}" "$( ObjectiveSignature < "${reportTxt}" )" "${verdict}" "${tries}" >> "${tsv}.tmp";
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${name}" "${found}" "$( ObjectiveSignature < "${reportTxt}" )" "${verdict}" "${tries}" \
+          "$( ReplayMsOf "${reportTxt}" )" "$( stat -c %s "${trace}" 2> /dev/null )" >> "${tsv}.tmp";
     done < "${taskState}/${id}.all";
     mv "${tsv}.tmp" "${tsv}";
   done
@@ -382,7 +389,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
     groups=$( jq -R -s '
       split("\n") | map(select(length > 0) | split("\t")
         | { trace: .[0], found: (.[1] | tonumber? // 0), type: .[2], frames: .[3], summary: .[4], start: ((.[5] // "0") | tonumber? // 0),
-            fkind: (.[6] // ""), fdetail: (.[7] // ""), fframes: (.[8] // ""), tries: (.[10] // "") })
+            fkind: (.[6] // ""), fdetail: (.[7] // ""), fframes: (.[8] // ""), tries: (.[10] // ""),
+            rms: (.[11] // ""), lim: (.[12] // ""), size: (.[13] // "") })
       | def unconfirmed: .type == "no-crash" or .type == "replay-error" or .type == "not-replayed";
         # confirmed by the replay: by its signature; not confirmed: by what the fuzzer saw, the replay reasons inside
         # and always by the fuzzer record, so that the page can merge them into the bug the fuzzer saw
@@ -396,7 +404,13 @@ for taskDir in "${RUNS}"/[0-9]*; do
                        frames: (.[0].fframes | if . == "" then [] else split(" < ") end) } end),
             replay_reasons: (if $u then (group_by(.frames) | map({ reason: .[0].frames, count: length }) | sort_by(-.count))
                              else null end),
-            tries: ([.[].tries | select(. != "")] | if length == 0 then null else (group_by(.) | map({ tries: .[0], count: length })) end) })
+            tries: ([.[].tries | select(. != "")] | if length == 0 then null else (group_by(.) | map({ tries: .[0], count: length })) end),
+            # how long their replays ran (the last try of each), the timeout of the fuzzer, the sizes of their
+            # traces: a timeout the replays do not reproduce is shown with them (bugs.js, report.js)
+            timing: ([.[] | select(.rms != "" or .size != "")] | if length == 0 then null else {
+                replay_ms: ([.[].rms | select(. != "") | tonumber] | if length > 0 then [min, max] else null end),
+                limit_ms: ([.[].lim | select(. != "") | tonumber] | if length > 0 then max else null end),
+                size: ([.[].size | select(. != "") | tonumber] | if length > 0 then [min, max] else null end) } end) })
       | sort_by(-.count)' "${page}" ) || groups='[]';
     n=$( jq length <<< "${groups}" );
     for (( i = 0; i < n; i++ )); do

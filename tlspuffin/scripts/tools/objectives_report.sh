@@ -25,7 +25,7 @@ OUT="${PB_ROOT}/data/html/objectives"
 # traces of each group of objectives kept next to its page, for download (<task>-traces/<library>/<run>/)
 TRACES_PER_GROUP=50
 SCRIPTS="$( cd "$( dirname "$( realpath "${BASH_SOURCE[0]}" )" )/.." && pwd )"
-source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p' "${SCRIPTS}/PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^ObjectiveSignature()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p;/^NotTargetedJSON()/,/^}/p;/^ReplayMsOf()/,/^}/p' "${SCRIPTS}/PR_common.sh" )
 # the expected bugs of the Vuln jobs and the CVEs set apart (the one file to edit)
 TARGETS_JSON="${SCRIPTS}/../data/html/jobsscripts/tlspuffin/vuln_targets.json"
 # the claims set apart (vuln_targets.json _not_targeted): claim -> "CVE|library|below" (see NotTargetedCVE)
@@ -74,6 +74,9 @@ Report() {
     # the fuzzer's own record of each objective (its logs, <attempt>-log; older commits: ArchivedFuzzerLogDir): what it
     # saw when it saved it; how many log files and records there were, for the objectives left without category (the
     # page says why)
+    # the size of each objective's trace (the export's listing): shown with its replay's time (a timeout)
+    unzip -l "${Z}" "artefacts/${lib}/${attempt}-objective/*.trace" 2> /dev/null |
+        awk -v p="artefacts/${lib}/${attempt}-objective/" '$1 ~ /^[0-9]+$/ && index($4, p) == 1 { n = substr($4, length(p) + 1); sub(/\.trace$/, "", n); print n "\t" $1 }' > "${tmp}/sizes";
     rm -rf "${tmp}/arch" "${tmp}/log"; mkdir -p "${tmp}/arch";
     unzip -q -o "${Z}" "artefacts/${lib}/${attempt}-log/*" "artefacts/${lib}/${attempt}-log_root/*" "artefacts/${lib}/${attempt}-tlspuffin.log" -d "${tmp}/arch" > /dev/null 2>&1;
     logDir=$( ArchivedFuzzerLogDir "${tmp}/arch/artefacts/${lib}/${attempt}-log" "${tmp}/log" );
@@ -86,8 +89,11 @@ Report() {
         local sig verdict; sig=$( ObjectiveSignature < "${tmp}/block.${k}" );
         verdict=$( FuzzerVerdict "${records}" "$( basename "${b}" .txt )" );
         [ -n "${verdict}" ] || verdict=$'\t\t\t';
-        # last column: the objective (its report is named after its trace)
-        printf '%s\t%s\t%s\t%s\n' "${k}" "${sig}" "${verdict}" "$( basename "${b}" .txt )" >> "${tmp}/sig.tsv";
+        # then the objective (its report is named after its trace), how long its replay ran, the fuzzer's timeout and
+        # the size of its trace
+        local objective; objective=$( basename "${b}" .txt );
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${k}" "${sig}" "${verdict}" "${objective}" "$( ReplayMsOf "${tmp}/block.${k}" )" \
+            "$( awk -F'\t' -v n="${objective}" '$1 == n { print $2; exit }' "${tmp}/sizes" )" >> "${tmp}/sig.tsv";
         k=$(( k + 1 ));
       done <<< "${reports}";
       replayed="${k}";
@@ -137,7 +143,8 @@ Report() {
     local max="${TRACES_PER_GROUP}";
     groups=$( jq -R -s --argjson max "${max}" '
       split("\n") | map(select(length > 0) | split("\t") | { block: .[0], type: .[1], frames: .[2], summary: .[3],
-          fkind: (.[5] // ""), fdetail: (.[6] // ""), fframes: (.[7] // ""), fts: (.[8] // ""), trace: (.[9] // "") })
+          fkind: (.[5] // ""), fdetail: (.[6] // ""), fframes: (.[7] // ""), fts: (.[8] // ""), trace: (.[9] // ""),
+          rms: (.[10] // ""), lim: (.[11] // ""), size: (.[12] // "") })
       | def unconfirmed: .type == "no-crash" or .type == "replay-error" or .type == "not-replayed";
         # confirmed by the replay: by its signature; not confirmed: by what the fuzzer saw, the replay reasons inside
         # and always by the fuzzer record, so that the page can merge them into the bug the fuzzer saw
@@ -152,7 +159,12 @@ Report() {
               fuzzer: (if .[0].fkind == "" then null else { kind: .[0].fkind, detail: .[0].fdetail,
                          frames: (.[0].fframes | if . == "" then [] else split(" < ") end), ts: .[0].fts } end),
               replay_reasons: (if $u then (group_by(.frames) | map({ reason: .[0].frames, count: length }) | sort_by(-.count))
-                               else null end) })
+                               else null end),
+              # how long their replays ran, the timeout of the fuzzer, the sizes of their traces (as the live pages)
+              timing: ([.[] | select(.rms != "" or .size != "")] | if length == 0 then null else {
+                  replay_ms: ([.[].rms | select(. != "") | tonumber] | if length > 0 then [min, max] else null end),
+                  limit_ms: ([.[].lim | select(. != "") | tonumber] | if length > 0 then max else null end),
+                  size: ([.[].size | select(. != "") | tonumber] | if length > 0 then [min, max] else null end) } end) })
       | sort_by(-.count)' "${tmp}/sig.tsv" );
     local i;
     for (( i = 0; i < $( jq length <<< "${groups}" ); i++ )); do
