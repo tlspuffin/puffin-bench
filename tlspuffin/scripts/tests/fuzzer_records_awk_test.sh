@@ -6,7 +6,9 @@
 # What they record: a crash, a timeout ("Timeout in fuzz run."), a claim (a message of tlspuffin's security policies
 # only: a bit-level mutation that failed, "mutation::MakeMessage failed …", is no claim, campaigns of 2026-11-16), an
 # ASan report, a restart of a client by the broker (a timeout whose line the clients' logs lost; a crash when an ASan
-# report dates from it; not the first spawn of each client, id 0).
+# report dates from it; not the first spawn of each client, id 0). The same from the clients' own folders (tlspuffin's
+# per-client logs: log/client-<id>/, each client rolling its own files), and FuzzerLogDir and ArchivedFuzzerLogDir find
+# those logs there.
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 work=$( mktemp -d ); trap 'rm -rf "${work}"' EXIT
@@ -15,7 +17,7 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; return
 # what was expected and what came, for a failed check (never fails itself)
 differs() { diff <( echo "$1" ) <( echo "$2" ) | sed 's/^/     /' || true; }
 # the functions that read the fuzzer's logs, as objectives_report.sh takes them
-source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p' "${here}/../PR_common.sh" )
+source <( sed -n '/^AsanTypeAwk()/,/^}/p;/^FuzzerLogDir()/,/^}/p;/^ArchivedFuzzerLogDir()/,/^}/p;/^FuzzerRecords()/,/^}/p;/^FuzzerRecordsOf()/,/^}/p;/^FuzzerVerdict()/,/^}/p;/^FuzzerVerdicts()/,/^}/p;/^FuzzerExcerpt()/,/^}/p' "${here}/../PR_common.sh" )
 
 # the logs of a run, as the fuzzer writes them: a crash with its sections (error.log: the backtrace in the third), a
 # claim (warn.log), a timeout (both), warnings that are no claim, ASan reports and restarts of clients (the broker's stderr)
@@ -54,6 +56,12 @@ expected_verdicts=$( printf '%s\n' $'20261111-000000003-aaaa\tcrash\tSIGABRT · 
   $'20261111-000030029-dddd\t\t\t' $'20261111-000040230-eeee\ttimeout\tno line logged, the client restarted\t' \
   $'20261111-000050600-ffff\tcrash\tASan SEGV\tDoHandShakeMsgType' )
 expected_one=$( sed 's/\t*$//' <<< "${expected_verdicts}" )
+# the same run with each client in its own folder (log/client-<id>/): the crash in a file client 0 rolled, the claim
+# and the timeout in client 1's files; the broker's stderr where it was
+mkdir -p "${work}/clog/client-0" "${work}/clog/client-1"
+head -n 12 "${work}/log/error.log" | gzip > "${work}/clog/client-0/error.1.gz"; : > "${work}/clog/client-0/error.log"
+tail -n 2 "${work}/log/error.log" > "${work}/clog/client-1/error.log"; command cp -f "${work}/log/warn.log" "${work}/clog/client-1/warn.log"
+command cp -f "${work}/log/puffin_main_broker_stderr.log" "${work}/clog/"
 
 # each awk of the machine, gawk made unavailable (as on pesto): its own folder first in PATH
 awks=()
@@ -87,5 +95,24 @@ for entry in "${awks[@]}"; do
   check "${label}: the excerpt of a timeout, its line" '[ "$( cut -f3 <<< "${excerpt}" )" == "Timeout in fuzz run." ]' || true
   excerpt=$( LANG=fr_FR.UTF-8 PATH="${dir}:${PATH}" FuzzerExcerpt "${work}/log" 2026-11-11T01:00:41+01:00 timeout 2> /dev/null ) || true
   check "${label}: the excerpt of a timeout known by its restart, the broker's line" '[ "$( cut -f2 <<< "${excerpt}" )" == "Spawning next client (id 1)" ]' || true
+  records=$( LANG=fr_FR.UTF-8 PATH="${dir}:${PATH}" FuzzerRecords "${work}/clog" 2> "${work}/err" | cut -f1-4 ) || true
+  check "${label}: the same records from the clients' own folders, a rolled file among them" '[ "${records}" == "${expected_records}" ]' ||
+    { differs "${expected_records}" "${records}"; sed 's/^/     /' "${work}/err" | head -5 || true; }
+  excerpt=$( LANG=fr_FR.UTF-8 PATH="${dir}:${PATH}" FuzzerExcerpt "${work}/clog" 2026-11-11T01:00:00.002000000+01:00 crash 2> /dev/null ) || true
+  check "${label}: the excerpt of the crash, from the file its client rolled" \
+    '[ "$( head -1 <<< "${excerpt}" | cut -f3 )" == "Crashed with SIGABRT" ] && grep -q "4: DoTls13HandShakeMsg" <<< "${excerpt}"' || true
+  excerpt=$( LANG=fr_FR.UTF-8 PATH="${dir}:${PATH}" FuzzerExcerpt "${work}/clog" 2026-11-11T01:00:09.000000000+01:00 claim 2> /dev/null ) || true
+  check "${label}: the excerpt of the claim, from its client's warn.log" '[ "$( cut -f3 <<< "${excerpt}" )" == "Authentication bypass" ]' || true
 done
+# where the logs are: an experiment whose clients log each to its own folder, under a working directory whose ./log
+# has the error.log of an older commit (FuzzerLogDir looks there when the experiment has none)
+mkdir -p "${work}/w/experiments/x/log/client-0" "${work}/w/log"
+touch "${work}/w/experiments/x/log/client-0/error.log" "${work}/w/log/error.log"
+check 'FuzzerLogDir: the log folder of an experiment whose clients log each to its own folder' \
+  '[ "$( FuzzerLogDir "${work}/w/experiments/x" )" == "${work}/w/experiments/x/log" ]'
+# the same archived (<attempt>-log), next to the <attempt>-log_root of the working directory
+mkdir -p "${work}/a/lib/0-log/client-0" "${work}/a/lib/0-log_root"
+touch "${work}/a/lib/0-log/client-0/warn.log" "${work}/a/lib/0-log_root/error.log"
+check 'ArchivedFuzzerLogDir: the archived folder itself, not the older layout next to it' \
+  '[ "$( ArchivedFuzzerLogDir "${work}/a/lib/0-log" "${work}/scratch" )" == "${work}/a/lib/0-log" ]'
 exit "${fail}"

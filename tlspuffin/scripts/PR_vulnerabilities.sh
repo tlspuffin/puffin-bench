@@ -256,7 +256,7 @@ ExperimentEnd() {
 
   local logDir; logDir=$( FuzzerLogDir "${experiment_base}" );
   local errorFilePresent='false';
-  grep -qs "Timeout in fuzz run" "${logDir}/error.log" "${logDir}/tlspuffin.log" && errorFilePresent='true';
+  grep -qs "Timeout in fuzz run" "${logDir}/error.log" "${logDir}/tlspuffin.log" "${logDir}"/client-*/error.log && errorFilePresent='true';
   
   # every objective up to 100 (as Perf), the targeted ones first: on 2,616 VulnA/VulnB runs of cassis, pesto and cacio a
   # run found at most 33 (99 % at most 11), and a replay costs ~4 s (up to ~16 s when retried): the cap of 10 left

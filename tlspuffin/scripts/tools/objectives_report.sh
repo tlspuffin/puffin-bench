@@ -81,7 +81,9 @@ Report() {
     unzip -q -o "${Z}" "artefacts/${lib}/${attempt}-log/*" "artefacts/${lib}/${attempt}-log_root/*" "artefacts/${lib}/${attempt}-tlspuffin.log" -d "${tmp}/arch" > /dev/null 2>&1;
     logDir=$( ArchivedFuzzerLogDir "${tmp}/arch/artefacts/${lib}/${attempt}-log" "${tmp}/log" );
     local records; records=$( FuzzerRecords "${logDir}" );
-    local logFiles; logFiles=$( find -L "${logDir}" -maxdepth 1 -type f 2> /dev/null | wc -l );
+    # (the files of its folder, and of its clients' own folders, client-<id>/, for the commits whose clients have one)
+    local logFiles; logFiles=$( { find -L "${logDir}" -maxdepth 1 -type f 2> /dev/null;
+        find -L "${logDir}" -mindepth 2 -maxdepth 2 -type f -path '*/client-*/*' 2> /dev/null; } | wc -l );
     local recordCount; recordCount=$( grep -c . <<< "${records}" );
     if [ -n "${reports}" ]; then
       while IFS= read -r b; do
