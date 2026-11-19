@@ -54,28 +54,76 @@
 //   custom/config.js, whose answer is not null.
 // A filter is applied to every task shown, whatever its project: match() returns false for a task its plugin does
 // not know, so that a task of another project is left out while the filter is on. Active filters combine (and).
+//
+// What could not be loaded is told to the user (frame.js shows it in the top bar), not only in the console:
+// - noProject: custom/config.js is absent, or names no project: a scheduler without project (a neutral mention);
+// - failedPlugins: [{ name, message }], name being 'config.js' (present but broken: not a module, no list of
+//   projects) or a project whose plugin.js is missing or does not load (a warning). When a file plugin.js imports is
+//   missing, Firefox's error names that file, Chrome's names plugin.js only: the console has it.
 
 const link = document.createElement('link');
 link.rel  = 'stylesheet';
 link.href = new URL('./launchers.css', import.meta.url);
 document.head.appendChild(link);
 
-async function LoadProjects() {
+export const failedPlugins = [];
+export let noProject = false;
+
+function Fail(name, message) {
+  failedPlugins.push({ name, message });
+}
+
+const ErrorText = (error) => String(error?.message || error);
+
+// after a failed import: whether the file itself is absent (404), rather than broken or missing one of its imports
+async function Missing(path) {
   try {
-    const { config } = await import('./custom/config.js');
-    return Array.isArray(config?.projects) ? config.projects : [];
+    const response = await fetch(new URL(path, import.meta.url), { cache: 'no-store' });
+    return response.status === 404;
   } catch (error) {
-    // no project installed
-    return [];
+    // no answer: the import's own error says more
+    return false;
   }
 }
 
-async function LoadPlugin(name) {
+async function LoadProjects() {
+  let module;
   try {
-    const module = await import(`./custom/${name}/plugin.js`);
+    module = await import('./custom/config.js');
+  } catch (error) {
+    if (await Missing('./custom/config.js')) {
+      noProject = true;
+    } else {
+      console.warn('Plugins: custom/config.js could not be loaded', error);
+      Fail('config.js', ErrorText(error));
+    }
+    return [];
+  }
+  const projects = module.config?.projects;
+  if (!Array.isArray(projects)) {
+    Fail('config.js', 'it does not export config = { projects: [\'<name>\', …] }');
+    return [];
+  }
+  if (projects.length === 0) noProject = true;
+  return projects;
+}
+
+async function LoadPlugin(name) {
+  const path = `./custom/${name}/plugin.js`;
+  try {
+    const module = await import(path);
     return { ...(module.default ?? {}), name };
   } catch (error) {
     console.warn(`Plugins: the plugin of ${name} could not be loaded`, error);
+    if (await Missing(path)) {
+      Fail(name, `custom/${name}/plugin.js is missing`);
+    } else if (/dynamically imported module|importing a module script failed/i.test(ErrorText(error))) {
+      // the browser's message for a file of the graph that could not be fetched: plugin.js is there, so one of the
+      // files it imports is missing or unreadable
+      Fail(name, `a file it imports is missing or unreadable (${ErrorText(error)})`);
+    } else {
+      Fail(name, ErrorText(error));
+    }
     return null;
   }
 }

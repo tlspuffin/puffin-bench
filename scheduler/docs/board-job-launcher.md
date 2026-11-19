@@ -32,10 +32,14 @@ A page loads `frame.js` once, as its first script. The pages of the scheduler al
 
 On load (at once, or on `DOMContentLoaded`) it builds a bar `nav.pb-nav` at the top of the body, unless the page is
 shown inside another one (an iframe) or already has a bar. The bar has, from left to right: a place `start` for the
-plugins, a spacer, a place `end` for the plugins, the status light (when the page names a scheduler), 🔄 and ❔. It
-sets `--pb-nav-height: 34px` on the document, for the sticky headers of the pages
+plugins, a spacer, a place `end` for the plugins, the state of the plugins, the status light (when the page names a
+scheduler), 🔄 and ❔. It sets `--pb-nav-height: 34px` on the document, for the sticky headers of the pages
 (`top: var(--pb-nav-height, 0px)`). Then it imports `plugins.js` and calls `frame.barItems` of every plugin and adds
 their `frame.helpTabs` to the help panel.
+
+The state of the plugins is a pill shown only when something is off, with the details on click: a grey
+`no project` when `custom/config.js` is absent or names no project (`noProject` of `plugins.js`), an orange
+`⚠ <names> not loaded` for the entries of `failedPlugins` (and for `plugins.js` itself when it does not load).
 
 `ShowSchedulerHealth(url = window.location.origin)` (exported) shows the status light of the scheduler at `url` and makes
 it the scheduler of `CheckScheduler`. The pages of the scheduler call it with their own origin, which stays right
@@ -77,10 +81,14 @@ the page by default); `frame.js`'s `ShowSchedulerHealth` calls it.
 On load it:
 
 1. injects `launchers.css`;
-2. imports `./custom/config.js` and reads `config.projects`, the names of the projects in order; absent or invalid:
-   no plugin, and no error;
+2. imports `./custom/config.js` and reads `config.projects`, the names of the projects in order. Absent (404, checked
+   by a `fetch` after the import failed) or an empty list: no plugin, `noProject` is true. Present but broken (not a
+   module, no list of projects): no plugin, an entry `{ name: 'config.js', message }` in `failedPlugins`;
 3. imports `./custom/<name>/plugin.js` for each name and takes its default export; a plugin that does not load is
-   left out with a warning in the console;
+   left out, with a warning in the console and an entry `{ name, message }` in `failedPlugins`: `plugin.js is
+   missing` (404), `a file it imports is missing or unreadable` (plugin.js is there, but the browser could not fetch
+   a module of its graph: Firefox's error names the missing file, Chrome's names plugin.js only, the console of
+   both names it), or the error's message (a syntax error, an error thrown on load);
 4. merges the `helpTexts` of the plugins (a key defined twice: warning, the last one wins).
 
 The launcher of a plugin is created on first use only (its form is built then), so that the pages of other services

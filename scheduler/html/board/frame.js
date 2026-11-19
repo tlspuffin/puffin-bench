@@ -1,6 +1,7 @@
 // Frame of the pages: a bar on top of the page with the refresh (🔄), the help (❔) and, on the pages that name a
 // scheduler, its status light; the plugins of the projects add their own items to it (frame.barItems, see
-// plugins.js) and their tabs to the help panel (frame.helpTabs).
+// plugins.js) and their tabs to the help panel (frame.helpTabs). Before the status light, a pill tells when no
+// project is installed, or which plugins could not be loaded.
 // A page includes it once, as its first script (<script type="module" src="…/board/frame.js"></script>, or
 // import './frame.js'). Nothing is shown in a page shown inside another one (an iframe), or when a bar is already
 // there.
@@ -31,11 +32,11 @@ const style = `
 .pb-nav .pb-btn.on { background: #1f2937; border-color: #58a6ff; }
 .pb-nav .pb-btn.gold { background: #ffc400; border-color: #ffc400; }
 .pb-nav .pb-btn.spin { animation: pb-spin .6s linear; }
-.pb-nav .pb-health { margin-left: 10px; display: flex; gap: 4px; align-items: center; padding: 2px 7px;
-  border: 1px solid #333; border-radius: 999px; background: #161616; font-size: 11px; color: #8b8b8b;
+.pb-nav .pb-health, .pb-nav .pb-plugins { margin-left: 10px; display: flex; gap: 4px; align-items: center;
+  padding: 2px 7px; border: 1px solid #333; border-radius: 999px; background: #161616; font-size: 11px; color: #8b8b8b;
   cursor: default; }
 .pb-nav .pb-health.down { border-color: #a33; color: #ff9b9b; }
-.pb-nav .pb-health.warn { border-color: #a97; color: #ffd089; }
+.pb-nav .pb-health.warn, .pb-nav .pb-plugins.warn { border-color: #a97; color: #ffd089; }
 @keyframes pb-spin { to { transform: rotate(360deg); } }
 `;
 
@@ -55,6 +56,29 @@ export function ShowSchedulerHealth(url = window.location.origin) {
     healthShown = true;
     slots.health.appendChild(HealthPill());
   }
+}
+
+// The state of the plugins (plugins.js), before the status light: nothing when they all loaded, a grey "no project"
+// when none is installed, an orange warning naming those that could not be loaded; the details on click (tips.js).
+function PluginsPill(failed, noProject) {
+  if (!failed.length && !noProject) return null;
+  const pill = document.createElement('span');
+  if (failed.length) {
+    pill.className = 'pb-plugins warn';
+    pill.textContent = `⚠ ${failed.map(entry => entry.name).join(', ')} not loaded`;
+    pill.dataset.clickTip = [
+      'Plugins not loaded',
+      ...failed.map(entry => `⚠ ${entry.name}: ${entry.message}`),
+      'The pages work without what they add (launcher, task titles, filters…).',
+      'Details in the console of the browser.',
+    ].join('\n');
+  } else {
+    pill.className = 'pb-plugins';
+    pill.textContent = 'no project';
+    pill.dataset.clickTip = 'No project installed\n' +
+        'custom/config.js is absent or names no project: the tasks are shown as they are, without launcher.';
+  }
+  return pill;
 }
 
 function Build() {
@@ -142,11 +166,20 @@ function Build() {
   document.body.prepend(nav);
   document.documentElement.style.setProperty('--pb-nav-height', '34px');
 
-  // the items and help tabs of the plugins, once they are loaded (the bar is shown meanwhile)
-  import('./plugins.js').then(({ FrameBarItems, FrameHelpTabs }) => {
+  // the items and help tabs of the plugins, once they are loaded (the bar is shown meanwhile), and what could not be
+  // loaded
+  const ShowPlugins = (failed, noProject) => {
+    const pill = PluginsPill(failed, noProject);
+    if (pill) nav.insertBefore(pill, health);
+  };
+  import('./plugins.js').then(({ FrameBarItems, FrameHelpTabs, failedPlugins, noProject }) => {
+    ShowPlugins(failedPlugins, noProject);
     FrameBarItems({ bar: nav, start, end });
     for (const tab of FrameHelpTabs()) AddHelpTab(tab);
-  }).catch(error => console.warn('Frame: the plugins could not be loaded', error));
+  }, error => {
+    console.warn('Frame: the plugins could not be loaded', error);
+    ShowPlugins([{ name: 'plugins.js', message: String(error?.message || error) }], false);
+  });
 }
 
 if (document.body) Build();
