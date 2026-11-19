@@ -612,14 +612,18 @@ the maintainer may relaunch it.
   kept when the global record is there. Tested on PR@02a930-VulnA CDOS run 3 (1791638444378): before "Error with
   stats.json", now success, time to find 238 s, execs to find 105,525, clients_lost [1]; two normal runs give
   byte-identical summaries. Runs that ended before the deploy keep no summary (exports are not rewritten).
-- Pending: whether Perf runs with one client per physical core (SMT_MODE=one) is worth about 1.5× the physical
-  cores: A/B on 142599, three Perf tasks per mode (1791638282853, 1791791696230, 1791791696329 pairs;
-  1791638282897, 1791791696281, 1791791696378 one), compared on the spread between same-commit tasks.
+- Perf placement, decided 2026-11-10 after A/B tests on cassis, cacio and pesto (twin, 4-client and 2-client runs
+  on the same cores, then builds slowed by 2 % and 5 %): twin, two one-client runs per physical core and one build
+  per library (PR_perf.sh BuildOnce, TwinExperiment), 20 runs per library, Perf major version 2. Smallest change seen
+  between two tasks: 6–15 % per library, about 6 % for all libraries at once (5 % caught in 3 of 4 comparisons on
+  pesto, no false alarm in 10), against 15–41 % before; 2 % is out of reach. The earlier A/B of SMT_MODE=one (tasks
+  1791638282853, 1791791696230, 1791791696329 pairs; 1791638282897, 1791791696281, 1791791696378 one) is superseded.
 
 ### After merge (maintainer, 2026-10-09)
 - Noise floors (regression_floors.json) to measure again from new same-commit pairs on cacio and pesto once the
   scheduler allocates physical cores (smt "pairs"/"one", see the isolation audit): the floors of 2026-10-07 come from
-  runs that shared physical cores with other campaigns (execs: cassis 33 %, pesto 41 %, cacio 15 %).
+  runs that shared physical cores with other campaigns (execs: cassis 33 %, pesto 41 %, cacio 15 %). Perf: from its
+  twin runs (major version 2), per machine and library (`per_machine_library`, `by_major`).
 
 ### Phase 6 — original estimates
 

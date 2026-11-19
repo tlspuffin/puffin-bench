@@ -95,20 +95,36 @@ export class Graph {
     return `${prefix ?? ''} ${String(commitId ?? '').substring(0, 14)}`;
   }
 
+  // color of the commits whose results come from an older major version of puffin-bench than the newest in the graph
+  static olderMajorColor = '#b48ead';
+
   // Hover of the tick labels (full commit id, PR, date, message); plotly redraws the ticks: call it on plotly_afterplot
-  // The commits without data in this graph are dimmed. A click on the commit (its first link, not its PR) shows its
-  // card on the Results page: the event pb-show-commit closes the chart's window (graph-modal) and summary.js scrolls
-  // to the card; with Ctrl, Shift or the middle button, the link opens the commit on GitHub as before.
+  // The commits without data in this graph are dimmed. The commits whose results come from an older major version of
+  // puffin-bench than the newest one of the graph (trace meta.major, see #BuildDataPointTraces) are colored
+  // (olderMajorColor) and their hover says so: their results don't compare with the newer ones. A click on the commit
+  // (its first link, not its PR) shows its card on the Results page: the event pb-show-commit closes the chart's window
+  // (graph-modal) and summary.js scrolls to the card; with Ctrl, Shift or the middle button, the link opens the commit
+  // on GitHub as before.
   static DecorateGraphXTicks(container) {
     const withData = new Set((container.data ?? []).flatMap(trace => trace.x ?? []));
+    const majors = new Map((container.data ?? []).filter(trace => trace.meta?.major)
+        .flatMap(trace => (trace.x ?? []).map(x => [x, trace.meta.major])));
+    const newest = Math.max(1, ...majors.values());
     container.querySelectorAll('.xaxislayer-above .xtick text').forEach(el => {
         const raw = el.getAttribute('data-unformatted') ?? '';
         const sha = /\/commit\/([0-9a-f]{40})/i.exec(raw)?.[1];
         if (sha) el.style.opacity = withData.has(sha) ? '' : '0.5';
+        const major = majors.get(sha);
+        if (major < newest) {
+          el.style.fill = Graph.olderMajorColor;
+          el.querySelectorAll('a').forEach(link => { link.style.fill = Graph.olderMajorColor; });
+        }
         if (!sha || el.querySelector('title')) return;
         const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        const older = major < newest ? `measured with puffin-bench major version ${major}, older than the newest here `
+            + `(${newest}): its results don't compare with those of version ${newest}\n` : '';
         title.textContent = commitTooltip(knownCommit(sha) ?? describeCommit({ id: sha }),
-            'click on the commit: its card on this page\nCtrl+click: the commit on GitHub');
+            older + 'click on the commit: its card on this page\nCtrl+click: the commit on GitHub');
         el.appendChild(title);
         el.querySelector('a')?.addEventListener('click', event => {
           if (event.ctrlKey || event.metaKey || event.shiftKey || (event.button !== 0)) return;
@@ -165,7 +181,8 @@ export class Graph {
           boxmean: 'sd',
           boxpoints: false,
           marker: { color: dataPoint.status },
-          hoverinfo: 'y'
+          hoverinfo: 'y',
+          meta: { major: dataPoint.major ?? 1 }
       });
     } else {
       traces.push({
@@ -174,7 +191,8 @@ export class Graph {
           type: 'scatter',
           mode: 'markers',
           marker: { color: dataPoint.status, symbol: 'diamond', size: 10 },
-          hoverinfo: 'y'
+          hoverinfo: 'y',
+          meta: { major: dataPoint.major ?? 1 }
       });
     }
 

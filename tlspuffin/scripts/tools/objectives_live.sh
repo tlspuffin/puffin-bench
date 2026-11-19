@@ -35,6 +35,19 @@ source <( jq -r '"OBJECTIVES_NOT_TARGETED=(", (._not_targeted // {} | to_entries
 declare -F ObjectiveSignature > /dev/null || { echo "ObjectiveSignature not found" >&2; exit 1; }
 mkdir -p "${OUT}" "${STATE}" || exit 1
 
+# nix-shell, where cron's PATH does not have it (pesto: in /nix/var/nix/profiles/default/bin; cassis: /usr/bin): the
+# replays run in the checkout's shell.nix, with its llvm-symbolizer; without it they run directly, unsymbolized (their
+# crashes then have no stack, so no place to check)
+NixInPath() {
+  command -v nix-shell > /dev/null && return 0;
+  local d;
+  for d in ${NIX_BIN_DIRS:-/nix/var/nix/profiles/default/bin ${HOME:-/nonexistent}/.nix-profile/bin}; do
+    [ -x "${d}/nix-shell" ] && { PATH="${PATH}:${d}"; return 0; };
+  done
+  return 1;
+}
+NixInPath || true
+
 # one call at a time
 exec 9> "${STATE}/.lock"
 flock -n 9 || exit 0
@@ -133,7 +146,7 @@ TaskActive() {
 StepLibrary() {
   local stateJSON="$1" key="$2" expName="$3";
   local lib;
-  lib=$( jq -r --arg k "/${key}" '[.. | objects | select(.name? == "ExperimentWithCargo" or .name? == "Experiment")
+  lib=$( jq -r --arg k "/${key}" '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment"))
       | select((.executor_data.run_path // "") | endswith($k)) | .id][0] // empty' <<< "${stateJSON}" 2> /dev/null );
   [ -n "${lib}" ] || lib=$( grep -oiE 'boringssl|openssl|libressl|wolfssl|libssh' <<< "${expName}" | tail -1 );
   echo "${lib:-${expName}}";
@@ -157,14 +170,20 @@ for taskDir in "${RUNS}"/[0-9]*; do
   rm -f "${taskState}"/[0-9]*-[0-9]*-[0-9]*.*;
   # An attempt is kept under <library>-<attempt>, the name of its archive (see below), so that it is counted
   # once whether it was seen running, archived, or both.
-  # Running attempts: <step dir>/experiments/<name>/objective
+  # Running attempts: <step dir>/experiments/<name>/objective; the two runs of a twin step (TwinExperiment, PR_perf.sh):
+  # <step dir>/twin0 and twin1, each with its run number (.step_run)
   while IFS= read -r objDir; do
     expDir=$( dirname "${objDir}" );
-    stepDir=$( dirname "$( dirname "${expDir}" )" );
+    runDir=$( dirname "$( dirname "${expDir}" )" );
+    stepDir="${runDir}"; run='';
+    if [[ "$( basename "${runDir}" )" == twin[01] ]]; then
+      stepDir=$( dirname "${runDir}" );
+      read -r run _ < "${runDir}/.step_run" 2> /dev/null || continue;
+    fi
     key=$( basename "${stepDir}" );
     expName=$( basename "${expDir}" );
     library=$( StepLibrary "${taskJSON}" "${key}" "${expName}" );
-    id="${library}-${key##*-}";
+    id="${library}-${run:-${key##*-}}";
     tsv="${taskState}/${id}.tsv";
     touch "${tsv}";
     echo "${library}" > "${taskState}/${id}.lib";
@@ -185,7 +204,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
       tries=0; sig='';
       while (( tries < REPLAY_TRIES )); do
         tries=$(( tries + 1 ));
-        Replay "${stepDir}" "${trace}" "${report}";
+        Replay "${runDir}" "${trace}" "${report}";
         [ -e "${trace}" ] || break;
         sig=$( ObjectiveSignature < "${report}" );
         [ "${sig%%$'\t'*}" == no-crash ] && ! OverBudget || break;
@@ -318,7 +337,8 @@ for taskDir in "${RUNS}"/[0-9]*; do
       --argjson targets "$( jq -c --slurpfile t "${TOOLS}/../../data/html/jobsscripts/tlspuffin/vuln_targets.json" '[.task.steps | (if type == "object" then [.[]] else . end)[]
           | select(.name == "ExperimentWithCargo") | { (.id): (.args.vendor // "") }] | add // {} | with_entries(.value = $t[0][.value]) | with_entries(select(.value != null))' <<< "${taskJSON}" 2> /dev/null || echo '{}' )" \
       --argjson libraries "$( jq -c '[.task.steps | (if type == "object" then [.[]] else . end)[]
-          | select(.name == "ExperimentWithCargo")] | group_by(.id) | map({ library: .[0].id, runs: length })' <<< "${taskJSON}" 2> /dev/null || echo '[]' )" \
+          | select(.name | IN("ExperimentWithCargo", "TwinExperiment"))] | group_by(.id)
+          | map({ library: .[0].id, runs: (map(if .name == "TwinExperiment" then 2 else 1 end) | add) })' <<< "${taskJSON}" 2> /dev/null || echo '[]' )" \
       '{ task: $task, task_url: $taskUrl, commit: $commit, name: $name, job_type: $jobType, live: true, updated: $updated,
          not_targeted: (if $jobType | test("^vuln-") then $nt else {} end), targets: $targets, cves: $cves,
          # every configuration with its number of runs, also the runs without objective yet (the 🎯 count: k/runs)
@@ -327,7 +347,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
       <<< "${runs}" > "${OUT}/live-${task}.json";
   bash "${TOOLS}/objectives_report.sh" --render "${OUT}/live-${task}.json" "${OUT}/live-${task}.html";
   # row of live.html and of the top bar pill (board/custom/tlspuffin/bar.js): counts of the task; configurations = its experiment steps
-  nconf=$( jq '[.. | objects | select(.name? == "ExperimentWithCargo" or .name? == "Experiment") | .id] | unique | length' \
+  nconf=$( jq '[.. | objects | select(.name? | IN("ExperimentWithCargo", "Experiment", "TwinExperiment")) | .id] | unique | length' \
       <<< "${taskJSON}" 2> /dev/null ) || nconf=0;
   liveTasks=$( jq --slurpfile t "${OUT}/live-${task}.json" --arg url "live-${task}.html" --argjson nconf "${nconf:-0}" '
       ($t[0]) as $l

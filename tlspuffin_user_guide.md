@@ -41,7 +41,10 @@ Ports above are the installer's defaults (`--port-git`/`--port-scheduler`/`--por
 ## Prerequisites on the machine running campaigns
 
 - The scheduler must be running (and reachable from wherever you submit jobs); publisher/git_restapi/vis_comparator are only needed if you want results browsing/history/comparison.
-- **Nix** must be installed — the job scripts run inside a Nix shell.
+- **Nix** must be installed — the job scripts run inside a Nix shell (the live tool, run by cron, looks for `nix-shell` in
+  the Nix profile, `/nix/var/nix/profiles/default/bin`, when cron's `PATH` lacks it, as on pesto).
+- Any `awk` (gawk, or mawk: Debian's default) and jq 1.6 or later: the job scripts and the cron tools run on both (pesto
+  has mawk 1.3.4 and jq 1.6, cassis gawk 5 and jq 1.7); their awk programs run under `LC_ALL=C`, times in UTC by `TZ`.
 - Enough CPU cores: performance/vulnerability configurations each reserve a fixed core count per attempt (see the retry×timeout table below) — the scheduler's `schedule.executors.local.nbCores` bounds how many attempts run in parallel.
 
 ---
@@ -112,6 +115,48 @@ Full endpoint reference: [scheduler/docs/api.md](scheduler/docs/api.md).
 | `vendor` | flow JSON, per configuration | Vendor preset in format `library:version` (e.g. `wolfssl:wolfssl580-asan`). |
 | `experiment` | flow JSON, per configuration | Experiment name passed to `tlspuffin experiment`. |
 | `required_features` | flow JSON, per configuration | Extra cargo feature the `Experiment*` step requires present (e.g. `introspection`, used by every `PR_perf_cargo.json` entry). |
+| `SMT_MODE` | `args[SMT_MODE]` (launcher: **CPU sharing**) | How the scheduler chooses the CPUs of each run, see below; the machine's default (`smt` of the executor, `pairs`) when absent. Perf fixes its own. |
+
+### CPU sharing (hardware threads)
+
+The machines have two hardware threads per physical core (SMT). A fuzzer client runs slower when the other thread of
+its physical core is busy: measured on cassis, wolfSSL clients made ~22 % fewer execs/s with a busy twin thread, and
+before 2026-10-10 13:18 UTC the scheduler gave logical CPUs without regard to it (on cacio, 80 % of the fuzzing time ran on a
+physical core shared with another run). Each run now gets:
+
+- **default (`pairs`)**: whole physical cores, all their threads to the run, on one NUMA node when possible. Its
+  clients share cores only with each other, the same way in every run: results are comparable between runs and tasks.
+  A run of 3 CPUs takes 2 physical cores (4 CPUs, one idle).
+- **one client per physical core (`one`)**: each client alone on its core, the other threads reserved and idle.
+  Faster per client (0–30 % depending on the library) and closest to a machine running nothing else, but twice the CPUs:
+  fewer runs at once. For absolute figures (e.g. a paper).
+- **logical CPUs (`any`)**: as before, two runs may share a physical core; to reproduce older conditions.
+
+**Perf: twin**, fixed by the Perf job (the choice at launch does not apply to its runs):
+
+- each library is built once; then each step holds the two threads of one physical core and runs two one-client runs
+  of that build, one per thread (runs 2k and 2k+1 of step k): 20 runs of each library on 10 physical cores, each next
+  to another run of the same build;
+- why: a run varies by about 12 % from its fuzzing path alone, so more runs on the same cores make a change visible.
+  Measured in 2026-11 on cassis, cacio and pesto, the smallest change Results sees between two tasks is 6–15 % per
+  library and about 6 % for all libraries at once, against 15–41 % per library before (5 runs of 3 clients on 2
+  physical cores);
+- the price: a one-client run does a quarter of the work of a 4-client run in the same time and shares no corpus: at
+  70 minutes it reaches 0.5–2.6 % less coverage (the same at equal work);
+- its runs record the CPU sharing `twin` and Perf's major version 2: Results marks the Perf results of the earlier
+  runs (major version 1) as not comparable (a task with twin runs counts as major version 2, also when its job scripts
+  did not record one); a commit run again is measured the new way.
+
+The CPUs of the runs are also kept from the other processes of the machine (users, services, Docker containers),
+when the scheduler's sudo rules allow it (see the scheduler's configuration), and from the scheduler's own threads (e.g.
+the archiver compressing a task's artefacts while other steps run). Each run records its CPUs, the mode,
+its NUMA nodes and whether a thread of its cores was outside it (`cli.cpus`); Results marks two runs compared with a
+different mode or sharing, or with a mode recorded on one side only (runs before 2026-10-10 13:18 UTC recorded none: logical
+CPUs), as ⚠ not comparable: their changes are shown faint, never ▲/▼, and not counted in the line above the table;
+the Runs page tests none of their differences. Runs in different modes are not comparable for speed (execs, time to
+find). A task Results compares that ran before a compat rule its commit gets today is noted there ("run before compat
+rule X … (to run again)"), and `/html/runs/stale_rules.json` lists those tasks, to run again. The noise floors of Results were measured before this and are to be measured again (Perf: from its twin
+runs, under major version 2).
 
 ---
 
@@ -129,6 +174,8 @@ Init
  ForcedBuild
   └─ cargo build --release --features=… inside nix-shell, fresh checkout, no cache
   └─ seed + help once, to warm/validate the binary
+  (Perf: BuildOnce, one ForcedBuild per library before its runs; then TwinExperiment and TwinExperimentEnd, two
+   runs per step in its folders twin0 and twin1, each as below)
 
  Experiment / ExperimentWithCargo   (monitored — see below)
   └─ reserve a loopback TCP port (embedded reserve_port tool)
@@ -148,7 +195,7 @@ CleanAllRepo
 
 ### Perf vs Vuln termination
 
-- **Perf**: the fuzzer runs for the full `timeout` — reaching it without dying counts as `success`; dying earlier (crash, hang-kill) counts as `fail`. Default `70m` in `PR_perf_cargo.json`, 5 retries.
+- **Perf**: the fuzzer runs for the full `timeout` — reaching it without dying counts as `success`; dying earlier (crash, hang-kill) counts as `fail`. Default `70m` in `PR_perf_cargo.json`, 10 twin steps of 2 runs per library (see CPU sharing).
 - **Vuln**: a VulnA run stops when the fuzzer records the **expected bug** of its configuration (declared in `vuln_targets.json`, see [Expected bugs](#expected-bugs-and-new-bugs)); other objectives are kept, and the known CVE-2024-5814 is set apart on wolfSSL < 5.7.2 (it never ends a run there; elsewhere its claim is a bug). A configuration without declared target (VulnB) stops at its first objective that is not set apart. A run is `success` only if the task reached `Done` **and** the expected bug (any objective without target) was found — a plain timeout is `fail`. Default `190m`/5 retries (group A) or up to `2890m` (~48h)/90 retries (group B).
 
 ---
@@ -177,7 +224,7 @@ monitor's own bash). Assignments and `export`s are commands too: what set a vari
 internals" hides tests, `echo`, `read`, local variables and the like; `export`, `source`, `exec` and every program stay.
 A program started by a command does not trace its own commands (e.g. the setup of a `nix-shell`): its command line, with
 the commands given to it (`--run "…"`), is the line. The file is `logs/commands.<step>.txt` of the task, archived with
-stdout and stderr; steps that ran before 2026-10-12 have none (the tab is grey). Via API:
+stdout and stderr; steps that ran before 2026-10-10 13:21 UTC have none (the tab is grey). Via API:
 ```bash
 curl "http://localhost:10082/api/task/<taskID>/<stepUUID>/<stepID>/output/stdout/65536/0"
 # also output/stderr/… and output/commands/…
@@ -301,7 +348,9 @@ No target is declared for group B: a run ends at its first objective that is not
 
 - **The file to edit**: `tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json` — the expected bug of each VulnA preset (`cve`, `kind`: `crash` with `match` among the top 3 frames of the fuzzer's backtrace or of the replay's stack, or `claim` with the violation message; `note`: where the rule comes from) and, under `_not_targeted`, the claims of known CVEs that are never a target, each with its scope (CVE-2024-5814: set apart only on wolfSSL < 5.7.2, which all have it; on any other library or version the claim is a bug like any other); under `_cves`, the reference table of the CVEs of the Vuln jobs (alias, CVSS, type, version, TLS), with an optional signature (`kind`, `match`) for a CVE no target names. `scripts/build.sh` writes both into the job scripts (`PR_targets.sh`); new tasks and the objectives reports written afterwards use them.
 - **To read it**: the **🎯 Bugs reference** page, `http://<host>:10083/html/publisher/bugs.html` (linked from the help of Results, from every objectives report and from the guide of the bench): the targets, the CVEs set apart, and the bugs found so far per library.
-- **On the pages**: 🎯 expected (VulnA: `🎯 k/n` on Results and on the objectives report, the same count: runs that found it; `· k untimed`: those of them that did not succeed, e.g. ended by their timeout or without end-of-run summary: counted, but without a time to find in the statistics (which come from the end-of-run summaries), why on click of the row's status icon and listed on the report; green every run, amber every configuration but not every run, red a configuration in no run; the report's banner, the 🎯 pill of the task on the scheduler's history page and the Runs page give the conclusion with the same counts (one verdict, `bugs.js`, written into the report; `check_verdicts.py` checks them all after each cron pass); a task whose job scripts had no target (before 2026-10-07) is marked "before targets": its runs succeeded on any objective; a faint `· no replay` when no replay reproduced it in some runs, the fuzzer's log being the evidence; the failed-runs row of Results lists the runs without end-of-run summary), ⦸ set apart, ⚠ unexpected (another bug of a configuration with a target), 📋 known (a CVE tlspuffin declares for the build of a plain version), 🚨 **new bug**.
+- **On the pages**: 🎯 expected (VulnA: `🎯 k/n` on Results and on the objectives report, the same count: runs that found it; `· k untimed`: those of them that did not succeed, e.g. ended by their timeout or without end-of-run summary: counted, but without a time to find in the statistics (which come from the end-of-run summaries), why on click of the row's status icon and listed on the report; green every run, amber every configuration but not every run, red a configuration in no run; the report's banner, the 🎯 pill of the task on the scheduler's history page and the Runs page give the conclusion with the same counts (one verdict, `bugs.js`, written into the report; `check_verdicts.py` checks them all after each cron pass: a run whose
+report counts it while its step's summary did not end, an attempt the report counts untimed, is explained there, not a
+failure, and `--explained` lists them); a task whose job scripts had no target (before 2026-10-07) is marked "before targets": its runs succeeded on any objective; a faint `· no replay` when no replay reproduced it in some runs, the fuzzer's log being the evidence; the failed-runs row of Results lists the runs without end-of-run summary), ⦸ set apart, ⚠ unexpected (another bug of a configuration with a target), 📋 known (a CVE tlspuffin declares for the build of a plain version), 🚨 **new bug**.
 - **New bugs**: `scripts/tools/known_bugs.js` (run by `objectives_report.sh --all`) rebuilds `/html/objectives/known_bugs.json` from every final objectives report, oldest first: `<library>|<signature>` → the first task with it, the signature being the claim or the top function of the crash. A real bug (fuzzer record or replay), neither expected nor set apart, is marked 🚨 NEW BUG on its report and 🚨🚨🚨 on Results:
   - in a configuration with an expected bug (an alias: BUF, SKIP…), when no earlier task had its signature in that configuration, whatever the job (VulnA, VulnB, Perf, campaigns);
   - in a plain version (e.g. Perf's wolfSSL 5.8.0, a campaign on wolfssl540), when it is none of the CVEs tlspuffin declares for that build — the build's `vendorinfo.sh` (puffin-build): known vulnerabilities of the version (the library's `builder.cmake`) minus those the preset fixes, recorded by `ForcedBuild` as `cli.vulnerabilities` — whose signature `vuln_targets.json` gives (a CVE's own `kind`/`match` in `_cves`, else its target's, else its claim in `_not_targeted`; `objectives_page/cve_signatures.jq`). Such a bug is shown as 📋 known · CVE; any other is new on every task until it is added to the file. A run without declaration (built before puffin-build, Rust harness, job scripts before 2026-10-09): next item.
@@ -310,7 +359,7 @@ No target is declared for group B: a run ends at its first objective that is not
 
 ## Performance configurations
 
-`PR_perf_cargo.json` runs four libraries in parallel, 5 retries × 70-minute timeout each, all requiring the `introspection` cargo feature:
+`PR_perf_cargo.json` runs four libraries in parallel, each built once, then 20 one-client runs of 70 minutes (10 twin steps, two runs per physical core, see CPU sharing), all requiring the `introspection` cargo feature:
 
 | Config | Vendor preset |
 |--------|---------------|

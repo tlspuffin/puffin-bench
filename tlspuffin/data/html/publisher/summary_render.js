@@ -996,13 +996,30 @@ function RegressionData() {
   ]);
   return regressionData;
 }
-function RegressionFloor(floors, machine, type, library, metric) {
-  const m = floors?.per_machine?.[machine]?.[type]?.[metric];
-  if (typeof m === 'number') return [m, `${machine}`];
-  const l = floors?.per_library?.[type]?.[library]?.[metric];
-  if (typeof l === 'number') return [l, `${library}`];
-  const d = floors?.floors?.[type]?.[metric];
-  return typeof d === 'number' ? [d, 'default'] : [null, 'none'];
+// The floor of a metric and where it comes from: per_machine_library[machine][type][library], else
+// per_machine[machine][type], else per_library[type][library], else floors[type]; library null: the comparison over
+// all libraries at once (pooled_per_machine[machine][type], else pooled[type]). Results of a major version above 1 take
+// the floors of by_major[major] (same structure), else those of major 1, which are wider (noisier setup) and say so.
+function RegressionFloor(floors, machine, type, library, metric, major = 1) {
+  const num = (x) => typeof x === 'number' ? x : undefined;
+  const look = (src) => {
+    if (!src) return null;
+    const found = library === null
+        ? [[num(src.pooled_per_machine?.[machine]?.[type]?.[metric]), `${machine}, all libraries`],
+           [num(src.pooled?.[type]?.[metric]), 'all libraries']]
+        : [[num(src.per_machine_library?.[machine]?.[type]?.[library]?.[metric]), `${machine}, ${library}`],
+           [num(src.per_machine?.[machine]?.[type]?.[metric]), `${machine}`],
+           [num(src.per_library?.[type]?.[library]?.[metric]), `${library}`],
+           [num(src.floors?.[type]?.[metric]), 'default']];
+    return found.find(([value]) => value !== undefined) ?? null;
+  };
+  if (major > 1) {
+    const own = look(floors?.by_major?.[major]);
+    if (own) return [own[0], `${own[1]}, major ${major}`];
+    const older = look(floors);
+    return older ? [older[0], `${older[1]}, of major version 1: not measured yet for ${major}`] : [null, 'none'];
+  }
+  return look(floors) ?? [null, 'none'];
 }
 // the details of a change or a value: the small window of the bench (tips.js: closed by a click elsewhere, Esc, or
 // another click on it), with the colours of the details of Results
@@ -1017,7 +1034,8 @@ async function ApplyRegression(table, commit, type) {
   if (!entry || !floors) return;
   const pMax = floors.rule?.p_max ?? 0.016;
   const fields = REGRESSION_FIELDS[type];
-  let up = 0, down = 0, warned = 0;
+  // compared: the cells given a change (a configuration of the card with results on the base, a metric of both)
+  let up = 0, down = 0, warned = 0, compared = 0;
   const changes = [], warnings = [];  // for the hover of the line: what was flagged, what is not comparable
   for (const row of table.querySelectorAll('tr.lib-row')) {
     const lib = entry.libs?.[row.dataset.library];
@@ -1032,8 +1050,11 @@ async function ApplyRegression(table, commit, type) {
       const m = lib.metrics?.[metric];
       const cell = row.querySelector(`td[data-field="${field}"]`);
       if (!m || !cell) continue;
-      const [floor, from] = RegressionFloor(floors, data.machine, type, row.dataset.library, metric);
-      const flagged = m.p !== null && m.p <= pMax && floor !== null && Math.abs(m.delta) > floor;
+      compared++;
+      const [floor, from] = RegressionFloor(floors, data.machine, type, row.dataset.library, metric, entry.major ?? 1);
+      // a library not comparable with its base (⚠: another build, CPU sharing, major version) is never flagged nor
+      // counted: its change is shown faint, as runs_report.py leaves it out of the pooled change
+      const flagged = !warn.length && m.p !== null && m.p <= pMax && floor !== null && Math.abs(m.delta) > floor;
       const better = LOWER_IS_BETTER.has(metric) ? m.delta < 0 : m.delta > 0;
       if (flagged) better ? up++ : down++;
       if (flagged) changes.push({ lib: row.dataset.library, metric, delta: m.delta, better, p: m.p });
@@ -1043,6 +1064,7 @@ async function ApplyRegression(table, commit, type) {
       const pass = { p: m.p !== null && m.p <= pMax, floor: floor !== null && Math.abs(m.delta) > floor };
       const verdict = flagged
           ? `<span class="${better ? 'reg-better' : 'reg-worse'}">${better ? '▲ improvement' : '▼ regression'}</span>`
+          : warn.length ? '<span class="reg-faint">not flagged: not comparable (⚠ below)</span>'
           : `<span class="reg-faint">not flagged: ${!pass.p ? `p = ${m.p === null ? '—' : m.p.toFixed(3)} &gt; ${pMax}` : ''}${!pass.p && !pass.floor ? ' and ' : ''}${!pass.floor ? `|${Math.abs(m.delta).toFixed(1)} %| ≤ floor ${floor ?? '—'} %` : ''}</span>`;
       const label = metric.replace(/_/g, ' ');
       const title = `<div class="rd-title">${E(label)} <span class="rd-sub">vs ${E(entry.base.slice(0, 7))} · ${entry.gap} commits earlier</span></div>`
@@ -1064,19 +1086,36 @@ async function ApplyRegression(table, commit, type) {
       cell.appendChild(span);
     }
   }
+  // all libraries at once (Perf: runs_report.py's pooled changes, over the comparable libraries): sees a change that
+  // hits every library, e.g. in the fuzzer's core, about twice smaller than one library alone
+  const pooledRows = Object.entries(entry.pooled ?? {}).filter(([metric]) => fields[metric]).map(([metric, m]) => {
+    const [floor, from] = RegressionFloor(floors, data.machine, type, null, metric, entry.major ?? 1);
+    const flagged = m.p !== null && m.p <= pMax && floor !== null && Math.abs(m.delta) > floor;
+    const better = LOWER_IS_BETTER.has(metric) ? m.delta < 0 : m.delta > 0;
+    return { metric, ...m, floor, from, flagged, better };
+  });
+  const pooledFlagged = pooledRows.filter(r => r.flagged);
   // short line: "vs 1957fba: 1 ▲ · 5 ⚠ · 4 ⚙"; a click gives the details, formatted
   const E = EscapeAttribute;
   const notes = entry.notes ?? [];
   const head = document.createElement('div');
   head.className = 'reg-head';
+  // nothing compared (no configuration of the card has results on the base): said, never "≈" (no change)
   head.innerHTML = `vs <span class="mono">${E(entry.base.slice(0, 7))}</span>: `
-      + (up || down ? `${up ? `<b class="reg-better">${up} ▲</b>` : ''}${up && down ? ' ' : ''}${down ? `<b class="reg-worse">${down} ▼</b>` : ''}` : '<span class="reg-faint">≈</span>')
+      + (!compared && !pooledRows.length ? '<span class="reg-faint">nothing to compare</span>'
+         : up || down ? `${up ? `<b class="reg-better">${up} ▲</b>` : ''}${up && down ? ' ' : ''}${down ? `<b class="reg-worse">${down} ▼</b>` : ''}` : '<span class="reg-faint">≈</span>')
       + (warned ? ` · <span class="reg-warn">${warned} ⚠</span>` : '')
+      + (pooledFlagged.length ? ` · all: ${pooledFlagged.map(r => `<b class="${r.better ? 'reg-better' : 'reg-worse'}">${r.better ? '▲' : '▼'} ${E(r.metric.replace(/_/g, ' '))}</b>`).join(' ')}` : '')
       + (notes.length ? ` · <span class="reg-notes">${notes.length} ⚙</span>` : '');
   const metricName = (metric) => metric.replace(/_/g, ' ');
   const details = `<div class="rd-title">vs ${E(entry.base.slice(0, 7))} <span class="rd-sub">nearest ancestor with ${E(type)} results · ${entry.gap} commits earlier · task ${E(entry.task)} vs ${E(entry.base_task)}</span></div>`
-      + `<div class="rd-section">${changes.length ? `${changes.length} flagged change${changes.length > 1 ? 's' : ''} <span class="rd-sub">(▲ better, ▼ worse)</span>` : '≈ nothing flagged'} <span class="rd-sub">(p ≤ ${pMax} and beyond the noise floor)</span></div>`
+      + (!compared && !pooledRows.length
+          ? `<div class="rd-section">nothing to compare <span class="rd-sub">(no configuration of this card has results on ${E(entry.base.slice(0, 7))})</span></div>`
+          : `<div class="rd-section">${changes.length ? `${changes.length} flagged change${changes.length > 1 ? 's' : ''} <span class="rd-sub">(▲ better, ▼ worse)</span>` : '≈ nothing flagged'} <span class="rd-sub">(p ≤ ${pMax} and beyond the noise floor)</span></div>`)
       + (changes.length ? `<div class="rd-grid">${changes.map(c => `<span>${E(c.lib)}</span><span><span class="${c.better ? 'reg-better' : 'reg-worse'}">${c.better ? '▲' : '▼'} ${E(metricName(c.metric))} ${c.delta >= 0 ? '+' : ''}${c.delta.toFixed(1)} %</span> <span class="rd-sub">p = ${c.p.toFixed(3)}</span></span>`).join('')}</div>` : '')
+      + (pooledRows.length ? `<div class="rd-section">all libraries at once <span class="rd-sub">(${pooledRows[0].libs} comparable; a change that hits every library)</span></div><div class="rd-grid">`
+          + pooledRows.map(r => `<span>${E(metricName(r.metric))}</span><span><span class="${r.flagged ? (r.better ? 'reg-better' : 'reg-worse') : 'reg-faint'}">${r.flagged ? (r.better ? '▲ ' : '▼ ') : ''}${r.delta >= 0 ? '+' : ''}${r.delta.toFixed(1)} %</span> <span class="rd-sub">${r.p < 0.001 ? 'p &lt; 0.001' : `p = ${r.p.toFixed(3)}`} · ${r.floor === null ? 'no floor set: never flagged' : `floor ${r.floor} % (${E(r.from)})`}</span></span>`).join('')
+          + `</div>` : '')
       + (warnings.length ? `<div class="rd-section reg-warn">⚠ ${warnings.length} not comparable</div><div class="rd-grid">${warnings.map(([lib, w]) => `<span>${E(lib)}</span><span class="rd-warn-text">${w.map(E).join('<br>')}</span>`).join('')}</div>` : '')
       + (notes.length ? `<div class="rd-section reg-notes">⚙ ${notes.length} setting${notes.length > 1 ? 's' : ''} differ${notes.length > 1 ? '' : 's'} <span class="rd-sub">(a change may come from the bench)</span></div><ul class="rd-list">${notes.map(n => `<li>${E(n)}</li>`).join('')}</ul>` : '')
       + `<div class="rd-note">Click a % for its details.</div>`;

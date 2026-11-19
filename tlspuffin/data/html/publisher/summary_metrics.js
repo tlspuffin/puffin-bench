@@ -61,8 +61,8 @@ class Metrics {
                 this.#metricsData[type][regularLibName] = {};
               }
 
-              const cputs = typeData?.status[libName]?.cli?.cputs === true ? 
-                  '⚙C' : (typeData?.status[libName]?.cli?.cputs === false ? '🦀' : '❓');
+              const libStatus = typeData.status?.[libName];
+              const cputs = libStatus?.cli?.cputs === true ? '⚙C' : (libStatus?.cli?.cputs === false ? '🦀' : '❓');
               this.#commitNames[commit.id][regularLibName] = cputs;
 
               for (const [metricName, runsData] of Object.entries(metrics)) {
@@ -74,7 +74,8 @@ class Metrics {
                     commit_id: commit.id,
                     values: runsData.flat(),
                     status: metricName.startsWith('fail_') ? Metrics.#metricStatusFail : status,
-                    cputs
+                    cputs,
+                    major: libStatus?.major ?? 1
                 });
               }
 

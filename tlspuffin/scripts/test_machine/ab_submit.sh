@@ -20,8 +20,12 @@ JOBS="${PB_ROOT}/data/html/jobsscripts/tlspuffin"
 OUT="${HOME}/ab-${COMMIT:0:9}"
 mkdir -p "${OUT}"
 
-# one attempt per library, stored outside the dashboard
-jq '.flow[1][0].configuration.nb_retry = 1
+# one attempt per library (the group of the runs, found by its step: since the twin flow, a TwinExperiment of two runs;
+# the build is another group), stored outside the dashboard
+jq -e '(.flow | to_entries | map(select((.value | type) == "array"
+          and any(.value[]; (.step? // "") | IN("TwinExperiment", "Experiment", "ExperimentWithCargo")))) | first | .key) as $runs
+    | if $runs == null then error("no group of runs in the flow") else . end
+    | .flow[$runs][0].configuration.nb_retry = 1
     | .publish.storage = "${PACKAGE}/AB/${COMMIT_ID}/Perf/" | .publish.goal = "A/B ${COMMIT_ID}"
     | .name = "AB - ${COMMIT_ID}"' "${JOBS}/PR_perf_cargo.json" > "${OUT}/PR_perf_ab.json"
 

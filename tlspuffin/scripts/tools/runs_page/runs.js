@@ -59,7 +59,8 @@ function Phi(z) { // normal CDF (Abramowitz-Stegun 7.1.26)
 
 function Version(task) {
   const js = task.jobscripts;
-  const deployed = task.bench?.commit ? ` · deployed ${task.bench.commit.slice(0, 7)}` : '';
+  const deployed = (task.bench?.commit ? ` · deployed ${task.bench.commit.slice(0, 7)}` : '')
+      + ` · major version ${task.bench?.major ?? 1}`;
   if (js?.commit) {
     const how = js.from === 'md5' ? 'its job script matched to this commit (md5)' : 'recorded by the run';
     return `<a class="mono" href="${REPO}/commit/${esc(js.commit)}" target="_blank" rel="noopener" title="job scripts ${esc(js.commit)} (${esc(how)})${esc(deployed)}">${esc(js.commit.slice(0, 7))}</a>`
@@ -78,6 +79,22 @@ function SettingChanges(a, b) {
   if (JSON.stringify(s1.cores) !== JSON.stringify(s2.cores)) out.push(`cores ${(s1.cores ?? []).join(',')} → ${(s2.cores ?? []).join(',')}`);
   if ((s1.compat ?? '') !== (s2.compat ?? '')) out.push(`compat rules “${esc(s1.compat || 'none')}” → “${esc(s2.compat || 'none')}”`);
   if ((s1.libafl ?? '') !== (s2.libafl ?? '')) out.push(`LibAFL ${esc(s1.libafl || '?')} → ${esc(s2.libafl || '?')}`);
+  return [...out, ...NotComparable(a, b).map(why => `${why} (not comparable)`)];
+}
+// NotComparable(a, b): why the measurements of two tasks do not compare (as runs_report.py marks ⚠ on Results); empty
+// when they do. Their differences are then not tested: a difference there says nothing of the commit
+function NotComparable(a, b) {
+  const out = [];
+  // the major version of puffin-bench's measurements (runs_report.py major: tasks without it 1, a twin run 2): two of
+  // them don't compare
+  const major = (t) => t.bench?.major ?? 1;
+  if (major(a) !== major(b)) out.push(`puffin-bench major version ${major(a)} → ${major(b)}`);
+  // how the CPUs of each library's runs were chosen (cpus, recorded since 2026-10-10; before, the scheduler gave
+  // logical CPUs): another mode, or one recorded and one not, does not compare (runs_report.py cpu_sharing)
+  const sharing = (t, lib) => { const c = t.cpus?.[lib]; return c ? c.smt + (c.shared ? ', cores shared with others' : '') : 'not recorded (logical CPUs)'; };
+  const libs = Object.keys(a.metrics ?? {}).filter(lib => b.metrics?.[lib]);
+  const changes = [...new Set(libs.filter(lib => sharing(a, lib) !== sharing(b, lib)).map(lib => `${sharing(a, lib)} → ${sharing(b, lib)}`))];
+  if (changes.length) out.push(`CPU sharing ${changes.map(esc).join('; ')}`);
   return out;
 }
 
@@ -229,9 +246,15 @@ async function Render() {
       const what = changed
           ? `⚙ job scripts ${esc(versionLabel(versionKey(prev)))} → ${esc(versionLabel(versionKey(t)))}` + (prev.jobscripts?.commit && t.jobscripts?.commit ? ` · <a href="${REPO}/compare/${esc(prev.jobscripts.commit)}...${esc(t.jobscripts.commit)}" target="_blank" rel="noopener">compare ↗</a>` : '')
           : 'same job scripts';
+      // two tasks that do not compare (NotComparable): no difference of theirs is called significant, as Results never
+      // flags a library marked ⚠; what the test gives is in the hover only
+      const tested = !(prev.metrics && t.metrics) ? ''
+          : NotComparable(prev, t).length
+            ? ` · <span class="m" data-click-tip="${esc(`Not tested: the two tasks do not compare.${sig.length ? ` p < 0.05 for: ${sig.join(', ')}` : ''}`)}">differences not tested (not comparable)</span>`
+          : sig.length ? ` · significant: ${sig.join(', ')}` : ' · no significant difference';
       if (changed || settings.length || sig.length) {
         rows.push(`<tr class="sep${changed ? '' : ' same'}"><td colspan="${3 + libs.length}">${what}${settings.length ? ' · ' + settings.join(' · ') : ''}`
-          + (prev.metrics && t.metrics ? (sig.length ? ` · significant: ${sig.join(', ')}` : ' · no significant difference') : '') + '</td></tr>');
+          + tested + '</td></tr>');
       }
     }
     const cells = t.metrics ? libs.map(lib => type === 'Vuln' ? VulnCell(t, lib) : PerfCell(t, lib)).join('')
