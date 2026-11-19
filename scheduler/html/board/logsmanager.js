@@ -160,7 +160,7 @@ class LogsManager {
 
       modal.querySelector(`#modal-close`).onclick = () => this.CloseModal();
       modal.querySelector(`#modal-refresh`).onclick = () => this.Refresh();
-      // keys of the top bar (board/nav.js): Esc closes the logs, Cmd/Ctrl+R refreshes them instead of the page
+      // keys of the top bar (board/frame.js): Esc closes the logs, Cmd/Ctrl+R refreshes them instead of the page
       const shown = () => modal.classList.contains('show');
       window.addEventListener('pb-escape', (event) => {
         if ((event.detail?.layer !== 'modal') || event.defaultPrevented || !shown()) return;

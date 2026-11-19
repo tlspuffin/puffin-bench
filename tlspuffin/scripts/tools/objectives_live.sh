@@ -326,7 +326,7 @@ for taskDir in "${RUNS}"/[0-9]*; do
          runs: sort_by(.library, .attempt) }' \
       <<< "${runs}" > "${OUT}/live-${task}.json";
   bash "${TOOLS}/objectives_report.sh" --render "${OUT}/live-${task}.json" "${OUT}/live-${task}.html";
-  # row of live.html and of the top bar pill (nav.js): counts of the task; configurations = its experiment steps
+  # row of live.html and of the top bar pill (board/custom/tlspuffin/bar.js): counts of the task; configurations = its experiment steps
   nconf=$( jq '[.. | objects | select(.name? == "ExperimentWithCargo" or .name? == "Experiment") | .id] | unique | length' \
       <<< "${taskJSON}" 2> /dev/null ) || nconf=0;
   liveTasks=$( jq --slurpfile t "${OUT}/live-${task}.json" --arg url "live-${task}.html" --argjson nconf "${nconf:-0}" '
@@ -381,7 +381,7 @@ for dir in "${OUT}"/live-[0-9]*-traces; do
       rm -rf "${OUT:?}/live-${id}-traces";
 done
 # index of the running tasks with objectives: live.json, shown by live.html (objectives_page/live.js, same look as the
-# task pages) and by the pill of the top bar on every page (nav.js; not for VulnA/VulnB, where objectives are expected)
+# task pages) and by the pill of the top bar on every page (custom/tlspuffin/bar.js of the board; not for VulnA/VulnB, where objectives are expected)
 jq -n --argjson tasks "${liveTasks}" --arg updated "$( date '+%F %T' )" '{ updated: $updated, tasks: $tasks }' \
     > "${OUT}/live.json.tmp" && mv "${OUT}/live.json.tmp" "${OUT}/live.json";
 # the files of every objectives page, kept in sync with the checkout at each call (otherwise only a page being

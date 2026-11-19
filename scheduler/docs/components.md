@@ -8,22 +8,27 @@ html/
 │   ├── board.html / board.js / board.css     Entry point, refresh, the running and pending tasks in one
 │   │                                         horizontally scrolling row (running, waiting for cores,
 │   │                                         scheduled), Fold all / Unfold active / Unfold all
-│   ├── taskcard.html/js/css                  Task card component: state strip (state, steps, estimated
+│   ├── taskcard.js / taskcard.css            Task card component: state strip (state, steps, estimated
 │   │                                         start/end), steps with one square per attempt, log modal
 │   ├── task.html / task.js / task.css        Single-task detail view
 │   ├── history.html / history.js / history.css  Finished tasks of every user in one list grouped by day,
 │   │                                            filters, details of a task in a drawer
+│   ├── frame.js                              Frame of every page: top bar (🔄, ❔, status light, items of
+│   │                                         the plugins), keys, Esc layers; loads the plugins
+│   ├── plugins.js                            Loader of the plugins (custom/config.js, custom/<project>/
+│   │                                         plugin.js), routing of their hooks, the + button
+│   ├── launchers.css                         Style of the + button and its menu
+│   ├── health.js                             Status light of the scheduler, CheckScheduler()
+│   ├── help.js                               Hover helps and the help panel (tabs of the plugins)
+│   ├── tips.js                               One look for every hover: titles shown in a styled panel
 │   ├── terminal.js                           In-browser log viewer (stdout/stderr streaming)
 │   ├── logsmanager.js                        Log chunk streaming helpers
 │   ├── clipboard.js                          Copy-to-clipboard helper
 │   ├── dropmenu.js                           Drop-down menu widget (task actions)
-│   ├── help.js                               Help texts of the board's hovers
-│   ├── tips.js                               One look for every hover: titles shown in a styled panel
-│   └── launchers/
-│       ├── launchers.css / launchers.js      Generic launcher menu; reads project list from
-│       │                                     ./config.js, dynamically imports
-│       │                                     ./<project>/joblauncher.js (not shipped here)
-│       └── <project>/...                     Per-deployment plugin, not part of this repo
+│   └── custom/                               Not shipped: created empty, written by the projects
+│       ├── config.js                         The projects whose plugins are loaded
+│       ├── <project>/plugin.js …             The plugin of a project (docs/board-job-launcher.md)
+│       └── header.html                       Optional header of the board (the machine's)
 
 src/scheduler/
 ├── main.cxx                    Entry point: parse CLI, load config, start server
@@ -196,7 +201,7 @@ The removal goes entry by entry and stops between two files when the process exi
 
 ## `DurationHistory` (`schedule/duration_history.hxx` / `.cxx`)
 
-Process-wide singleton (`Instance()`) that learns how long each kind of step takes, for the estimated start and end times of the board. `Load(exportPath)` reads `<exportPath>/step_durations.json` at start (from the `Schedule` constructor), or seeds it from `steps_done.json`; `Add(step)` records each finished step (from `ManageEndOfStep()`); `Estimate(step)` and `EstimatedEnd(step, now)` are used by `Executor::EstimatedStepsStartTime()`. The rules (kinds of steps, medians, timeouts) are in [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times".
+Process-wide singleton (`Instance()`) that learns how long each kind of step takes, for the estimated start and end times of the board. `Load(exportPath)` reads `<exportPath>/duration_history.json` at start (from the `Schedule` constructor), or seeds it from `steps_done.json`; `Add(step)` records each finished step (from `ManageEndOfStep()`); `Estimate(step)` and `EstimatedEnd(step, now)` are used by `Executor::EstimatedStepsStartTime()`. The rules (kinds of steps, duration contexts, medians, timeouts) are in [task-step-lifecycle.md](task-step-lifecycle.md), "Estimated start and end times". The duration context of a task is computed by `Task` (its `duration_context_`), not here.
 
 ---
 

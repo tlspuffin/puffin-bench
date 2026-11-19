@@ -11,8 +11,8 @@
 #include "embeded/scheduler/html/board/board_js.h"
 #include "embeded/scheduler/html/board/taskcard_css.h"
 #include "embeded/scheduler/html/board/taskcard_js.h"
-#include "embeded/scheduler/html/board/launchers/launchers_css.h"
-#include "embeded/scheduler/html/board/launchers/launchers_js.h"
+#include "embeded/scheduler/html/board/launchers_css.h"
+#include "embeded/scheduler/html/board/plugins_js.h"
 #include "embeded/scheduler/html/board/task_html.h"
 #include "embeded/scheduler/html/board/task_css.h"
 #include "embeded/scheduler/html/board/task_js.h"
@@ -20,10 +20,9 @@
 #include "embeded/scheduler/html/board/history_css.h"
 #include "embeded/scheduler/html/board/history_js.h"
 #include "embeded/scheduler/html/board/help_js.h"
-#include "embeded/scheduler/html/board/hostlinks_js.h"
+#include "embeded/scheduler/html/board/frame_js.h"
+#include "embeded/scheduler/html/board/health_js.h"
 #include "embeded/scheduler/html/board/tips_js.h"
-#include "embeded/scheduler/html/board/nav_js.h"
-#include "embeded/scheduler/html/board/navhelp_js.h"
 
 #include <fstream>
 #include <tuple>
@@ -95,7 +94,6 @@ void ns_Server::Config::Validate(bool forceInstall) const {
   std::error_code ec;
   std::filesystem::create_directory(html_/ "board", ec);
   std::filesystem::create_directory(html_/ "board" / "custom", ec);
-  std::filesystem::create_directory(html_/ "board" / "launchers", ec);
   std::filesystem::create_directory(html_/ "jobsscripts", ec);
   for(auto const& [ file, data, size ] : {
       std::tuple{ "board/logsmanager.js", LogsManager_JS_data, LogsManager_JS_size },
@@ -107,8 +105,8 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       std::tuple{ "board/board.js", Board_JS_data, Board_JS_size },
       std::tuple{ "board/taskcard.css", TaskCard_CSS_data, TaskCard_CSS_size },
       std::tuple{ "board/taskcard.js", TaskCard_JS_data, TaskCard_JS_size },
-      std::tuple{ "board/launchers/launchers.css", Launchers_CSS_data, Launchers_CSS_size },
-      std::tuple{ "board/launchers/launchers.js", Launchers_JS_data, Launchers_JS_size },
+      std::tuple{ "board/launchers.css", Launchers_CSS_data, Launchers_CSS_size },
+      std::tuple{ "board/plugins.js", Plugins_JS_data, Plugins_JS_size },
       std::tuple{ "board/task.html", Task_HTML_data, Task_HTML_size },
       std::tuple{ "board/task.css", Task_CSS_data, Task_CSS_size },
       std::tuple{ "board/task.js", Task_JS_data, Task_JS_size },
@@ -116,10 +114,9 @@ void ns_Server::Config::Validate(bool forceInstall) const {
       std::tuple{ "board/history.css", History_CSS_data, History_CSS_size },
       std::tuple{ "board/history.js", History_JS_data, History_JS_size },
       std::tuple{ "board/help.js", Help_JS_data, Help_JS_size },
-      std::tuple{ "board/hostlinks.js", HostLinks_JS_data, HostLinks_JS_size },
+      std::tuple{ "board/frame.js", Frame_JS_data, Frame_JS_size },
+      std::tuple{ "board/health.js", Health_JS_data, Health_JS_size },
       std::tuple{ "board/tips.js", Tips_JS_data, Tips_JS_size },
-      std::tuple{ "board/nav.js", Nav_JS_data, Nav_JS_size },
-      std::tuple{ "board/navhelp.js", NavHelp_JS_data, NavHelp_JS_size },
   }) {
     std::filesystem::path filePath = 
         std::filesystem::weakly_canonical(html_ / file);

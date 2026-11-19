@@ -95,7 +95,7 @@ bash "${SRC}/tlspuffin/scripts/build.sh" > /dev/null &&
 sed -i 's|"cgroupPath": "/sys/fs/cgroup/scheduler.service"|"cgroupPath": "/sys/fs/cgroup/puffin-scheduler.service"|' \
     "${PB_ROOT}/bin/config.json"
 
-# version shown by the navigation bar of every page (scheduler/html/board/nav.js)
+# version shown by the top bar of every page (the tlspuffin plugin of the board, custom/tlspuffin/bar.js)
 jq -n --arg commit "$( git -C "${SRC}" rev-parse HEAD )" \
       --arg branch "$( git -C "${SRC}" rev-parse --abbrev-ref HEAD )" \
       --arg date "$( git -C "${SRC}" log -1 --format=%cs )" \
@@ -103,7 +103,7 @@ jq -n --arg commit "$( git -C "${SRC}" rev-parse HEAD )" \
       --arg deployed "$( date -Iseconds )" \
       '{commit: $commit, branch: $branch, date: $date, dirty: $dirty, deployed: $deployed,
         repository: "https://github.com/tlspuffin/puffin-bench"}' \
-    > "${PB_ROOT}/data/html/board/version.json"
+    > "${PB_ROOT}/data/html/board/custom/tlspuffin/version.json"
 
 Step "Checks"
 status=0

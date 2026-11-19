@@ -6,7 +6,8 @@
 # For tasks run before the objective reports existed: their replays went to the step stdout (trace names) and
 # stderr (reports), so reports cannot be matched to their trace; the groups count reports.
 #
-# The scheduler's history page gets a 🐞 button on the card of every task with a page (board/custom/task_links.json).
+# The scheduler's history page gets a 🐞 button on the card of every task with a page (board/custom/tlspuffin/task_links.json,
+# read by the tlspuffin plugin of the board).
 #
 # Usage: bash objectives_report.sh <task id> [<task id> ...]
 #        bash objectives_report.sh --all     tasks with objectives whose page is missing or outdated (cron job)
@@ -309,11 +310,12 @@ AllTasks() {
   done | sort -k1,1n -k2,2nr | cut -d' ' -f2
 }
 
-# 🐞 button on the cards of the scheduler's history page (its optional board/custom/task_links.json): one per
-# task whose page lists objectives and whose export still exists. Rewritten on every call; a file whose entries
+# 🐞 button on the cards of the scheduler's history page (board/custom/tlspuffin/task_links.json, read by the tlspuffin
+# plugin of the board, custom/tlspuffin/history.js; urls relative to the history page): one per task whose page lists
+# objectives and whose export still exists. Rewritten on every call; a file whose entries
 # were not written by this script is left alone.
 TaskLinks() {
-  local links="${PB_ROOT}/data/html/board/custom/task_links.json";
+  local links="${PB_ROOT}/data/html/board/custom/tlspuffin/task_links.json";
   [ -d "$( dirname "${links}" )" ] || return 0;
   if [ -s "${links}" ] && ! jq -e 'all(.[][]; .source == "objectives_report")' "${links}" > /dev/null 2>&1; then
     echo "${links}: not written by this script, left alone" >&2;

@@ -42,6 +42,7 @@
     "TYPE": "perf"
   },
   "name" : "Performance - ${COMMIT_ID}",
+  "duration_context" : "${COMMIT_ID}",
   "flow" : [
     {
       "step": "Init"

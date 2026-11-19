@@ -689,7 +689,7 @@
   margin-bottom: 8px;
 }
 
-/* the COMMIT_ID argument once resolved: the commit line alone */
+/* the commit argument once resolved: the commit line alone */
 .card-task-args-commit > :first-child {
   display: none;
 }
@@ -887,8 +887,8 @@
   font-size: 15px;
 }
 
-/* attempt highlighted by its monitor summary (objective: the run found what it looks for) */
-.card-attempt-item.card-attempt-highlight.highlight-objective {
+/* attempt highlighted by its monitor summary (notable: e.g. the run found what it looks for; error) */
+.card-attempt-item.card-attempt-highlight.highlight-notable {
   background: rgba(255, 196, 0, 0.16);
   border: 1px solid #ffc400;
   border-left: 4px solid #ffc400;
@@ -899,7 +899,7 @@
   border-left: 4px solid #ff5252;
 }
 
-/* buttons of the state strip gathered from the attempts (e.g. live objectives) */
+/* buttons of the state strip gathered from the attempts (taskLink of the monitor summaries) */
 .card-task-links-strip {
   grid-column: 1 / -1;
   display: flex;
@@ -917,7 +917,7 @@
   color: white;
 }
 
-.card-task-link-badge.highlight-objective {
+.card-task-link-badge.highlight-notable {
   background: #ffc400;
   color: #1a1a1a;
   box-shadow: 0 0 8px rgba(255, 196, 0, 0.6);
@@ -928,7 +928,7 @@ a.card-task-link-badge:hover {
   text-decoration: underline;
 }
 
-.card-step-square.highlight-objective {
+.card-step-square.highlight-notable {
   background: #ffc400;
   box-shadow: 0 0 5px #ffc400;
 }

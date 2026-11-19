@@ -56,14 +56,14 @@ Search roots for OpenSSL are configurable via the cache variables `OPENSSL_SEARC
 All embedded resources today go through `EmbedTextFileScript`, declared in `CMakeLists.txt`:
 
 - Shell scripts: `scripts/executor.sh`, `scripts/functions.sh`
-- Board dashboard files: `html/board/logsmanager.js`, `terminal.js`, `clipboard.js`, `board.html`, `board.css`, `board.js`, `taskcard.css`, `taskcard.js`, `launchers/launchers.css`, `launchers/launchers.js`, `task.html`, `task.css`, `task.js`, `history.html`, `history.css`, `history.js`
+- Board dashboard files: `html/board/logsmanager.js`, `terminal.js`, `clipboard.js`, `dropmenu.js`, `board.html`, `board.css`, `board.js`, `taskcard.css`, `taskcard.js`, `launchers.css`, `plugins.js`, `task.html`, `task.css`, `task.js`, `history.html`, `history.css`, `history.js`, `help.js`, `frame.js`, `health.js`, `tips.js`
 
 Each generates a `<name>_h.h` header (`<VARPREFIX>_data`/`<VARPREFIX>_size`) under `embeded/scheduler/...`, `#include`d directly by the two `Validate()` implementations that extract them to disk:
 
-- `ns_Server::Config::Validate()` (`src/scheduler/server/config.cxx`) writes the board files listed above under `<server.html>/board/...`, and creates the empty directories `<server.html>/board/custom` and `<server.html>/jobsscripts` (both are user-populated extension points — see `docs/board-job-launcher.md`).
+- `ns_Server::Config::Validate()` (`src/scheduler/server/config.cxx`) writes the board files listed above under `<server.html>/board/...`, and creates the empty directories `<server.html>/board/custom` (the plugins of the projects) and `<server.html>/jobsscripts` (both are populated by the projects or the operator — see `docs/board-job-launcher.md`).
 - `ns_Executor::LocalConfig::Validate()` (`src/scheduler/schedule/executor/config.cxx`) writes `executor.sh` and `functions.sh` under `<executors.local.scriptPath>`.
 
-Extraction policy is the same for every one of these files, and it runs on **every startup**, not just the first: a file is (re)written if it doesn't exist yet, or unconditionally if the process was started with `--force-install`. There is currently no file that is exempt from `--force-install` — unlike an older revision of this doc set, the job-type/launcher registry is not an embedded resource at all (it isn't shipped by the server; see `docs/board-job-launcher.md` for how that extension point actually works).
+Extraction policy is the same for every one of these files, and it runs on **every startup**, not just the first: a file is (re)written if it doesn't exist yet, or unconditionally if the process was started with `--force-install`. There is currently no file that is exempt from `--force-install` — the job launchers and the other plugins of the projects are not embedded resources at all (they aren't shipped by the server, and `--force-install` never touches `<server.html>/board/custom/`; see `docs/board-job-launcher.md`).
 
 ## Build Targets
 

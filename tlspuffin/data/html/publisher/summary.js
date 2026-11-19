@@ -368,7 +368,7 @@ function ChangeTab(newTabIndex) {
     } else {
       document.getElementById('refresh-infos').classList.add('hidden');
     }
-    // the refresh button is the one of the top bar (nav.js)
+    // the refresh button is the one of the top bar (board/frame.js)
     window.dispatchEvent(new CustomEvent('pb-refresh-state',
         { detail: { level: ui.refreshInfos[tabIndex].type, title } }));
   } else {
@@ -831,7 +831,7 @@ async function Main() {
 
 Main();
 
-// Esc (top bar, board/nav.js): fold the unfolded 🐞 panels
+// Esc (top bar, board/frame.js): fold the unfolded 🐞 panels
 window.addEventListener('pb-escape', (event) => {
   if ((event.detail?.layer !== 'panel') || event.defaultPrevented) return;
   const open = document.querySelectorAll('tr.lib-panel-row:not([hidden])');

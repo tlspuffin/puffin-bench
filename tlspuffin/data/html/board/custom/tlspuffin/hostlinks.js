@@ -5,7 +5,7 @@
 // shorter alias, an SSH tunnel on localhost, …) they would leave it. Every link of the page whose host is
 // a loopback address, or whose port is one of the services' ports, is rewritten to the host of the page
 // when it is hovered, focused or clicked, so links added later are covered too.
-// A page includes it once: <script type="module" src="…/board/hostlinks.js"></script> (or imports it).
+// Imported by the top bar of the plugin (bar.js), on every page that loads board/frame.js.
 
 const servicePorts = new Set(['10081', '10082', '10083', '10084']);
 const loopbacks = new Set(['localhost', '127.0.0.1', '[::1]']);

@@ -1,25 +1,30 @@
-import './nav.js';
+import { ShowSchedulerHealth } from './frame.js';
 import { Help, helpTexts } from './help.js';
 import { TaskCard, ResultsLink } from './taskcard.js';
 import { Clipboard } from './clipboard.js';
-import * as Launchers from './launchers/launchers.js';
+import * as Plugins from './plugins.js';
+
+// the status light of this scheduler in the top bar
+ShowSchedulerHealth();
 
 // History: every finished task (done or cancelled) of every user in one list, newest first, grouped by day, with
 // filters; the details of a task in a drawer (actions, times, core-hours, arguments, configurations, task card).
 // Each task comes from /api/user/<user>/<job type>/tasks ({id, name, cancelled, publish_link, flag, end_timestamp,
 // args?, summary?}; args: the task arguments; summary, recorded by the scheduler when the task ends: steps by outcome, core-hours, first start and
-// last end). The project's launcher may describe the task (commit, PR, message: launchers.js DescribeTask), and
-// custom/task_links.json may add buttons to a task (e.g. 🐞 objectives).
+// last end). The plugin of its project may describe the task (title, words for the search, its arguments: plugins.js
+// DescribeTask), add buttons to it and a class to its row (HistoryCard), name its job type (HistoryTypeLabel); the
+// plugins add filters (HistoryFilters) and counts (HistoryStats), and read what they need with the list
+// (HistoryLoad).
 
-const taskCard = new TaskCard({ onRefresh: () => {}, launchers: Launchers.launchers, describeTask: Launchers.DescribeTask,
-    describeMonitor: Launchers.DescribeMonitor });
+const taskCard = new TaskCard({ onRefresh: () => {}, launchers: Plugins.launchers, describeTask: Plugins.DescribeTask,
+    describeMonitor: Plugins.DescribeMonitor });
 
 const ui = {
   list: document.getElementById('list'),
   drawer: document.getElementById('drawer'),
   stats: document.getElementById('header-stats'),
   search: document.getElementById('search'),
-  package: document.getElementById('filter-package'),
+  plugins: document.getElementById('filter-plugins'),
   users: document.getElementById('filter-users'),
   types: document.getElementById('filter-types'),
   states: document.getElementById('filter-states'),
@@ -28,10 +33,10 @@ const ui = {
 
 const state = {
   tasks: [],                 // finished tasks, with user and type
-  taskLinks: {},             // id -> [{label, url, title, level, count?, bugs?}] (custom/task_links.json)
-  descriptions: new Map(),   // id -> { title, commit, custom } of the project (DescribeTask)
-  filters: { search: '', package: '', users: new Set(), types: new Set(), states: new Set(), objectives: false },
-  packages: new Map(),  // task id -> its PACKAGE argument (final state; LoadPackages)
+  descriptions: new Map(),   // id -> { title, commit, custom, search, args } of the project (DescribeTask)
+  filters: { search: '', users: new Set(), types: new Set(), states: new Set() },
+  // filters of the plugins (HistoryFilters), by plugin and label: a set of the values selected, or on (true)
+  pluginFilters: new Map(),
   sort: 'end_timestamp',
   selected: null,
 };
@@ -89,25 +94,11 @@ async function LoadTasks() {
   return lists.flat().filter(task => !task.running);
 }
 
-// Optional extension point (like custom/header.html on the board): custom/task_links.json maps a task id to
-// buttons of the task, [{ "label": "…", "url": "…" (relative to this page), "title": "…", "level": "warning"
-// (optional: outlined), "count": objectives (optional), "bugs": distinct bugs (optional), "new": new bugs and
-// "headline": the title of the objectives report (optional: the task is highlighted, the title before the button) }].
-// Absent = none.
-async function LoadTaskLinks() {
-  try {
-    const response = await fetch('custom/task_links.json', { cache: 'no-store' });
-    return response.ok ? await response.json() : {};
-  } catch (error) {
-    return {};
-  }
-}
-
 async function DescribeTasks() {
-  await Launchers.PrefetchTasks(state.tasks).catch(() => {});
+  await Plugins.PrefetchTasks(state.tasks).catch(() => {});
   await Promise.all(state.tasks.map(async task => {
     if (state.descriptions.has(task.id)) return;
-    const description = await Launchers.DescribeTask({ name: task.name, type: task.type, args: task.args ?? [] })
+    const description = await Plugins.DescribeTask({ id: task.id, name: task.name, type: task.type, args: task.args ?? [] })
         .catch(() => null);
     state.descriptions.set(task.id, description);
   }));
@@ -164,62 +155,45 @@ function SearchText(task) {
   const description = state.descriptions.get(task.id);
   const div = document.createElement('div');
   div.innerHTML = description?.title ?? '';
-  const commit = div.querySelector('.commit-line')?.getAttribute('title') ?? '';
-  return [task.name, task.id, task.user, task.type, PackageOf(task) ?? '', div.textContent, commit].join(' ').toLowerCase();
+  return [task.name, task.id, task.user, task.type, TypeOf(task).label, div.textContent, description?.search ?? '']
+      .join(' ').toLowerCase();
 }
 
-const TypeLabel = (type) => ({ 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campaign': 'Camp' })[type] ?? type;
+// the job type as its project names it ({ label, cls }), else as it is
+const TypeOf = (task) => Plugins.HistoryTypeLabel(task) ?? { label: task.type, cls: '' };
 
-// objectives of VulnA/VulnB tasks are their expected outcome: their button is plain, not gold
-const ObjectivesExpected = (task, link) => (link.source === 'objectives_report') && ['vuln-a', 'vuln-b'].includes(task.type);
-
-// a task whose objectives report found new bugs (task_links.json "new"): highlighted, with the title of the report
-const HasNewBugs = task => (state.taskLinks[task.id] ?? []).some(link => link.new > 0);
-
+// the buttons of the task's project (HistoryCard)
 function LinkButtons(task, cls) {
-  return (state.taskLinks[task.id] ?? []).map(link => {
-    const count = link.count != null ? `${link.label} ${Number(link.count).toLocaleString('en-US')}` : link.label;
-    const label = link.new > 0 && link.headline ? `${link.headline} · ${count}` : count;
-    // level: warning, or expected-all / expected-partial / expected-none (🎯: green, amber, red, never plain)
-    const level = link.level === 'warning' ? 'warning' : /^expected-(all|partial|none|provisional)$/.test(link.level ?? '') ? link.level : '';
-    const plain = (ObjectivesExpected(task, link) && !level.startsWith('expected-')) ? 'plain' : '';
-    return `<a class="${cls} ${plain} ${level} ${link.new > 0 ? 'new-bugs' : ''}" href="${esc(new URL(link.url, window.location.href))}"
-        target="_blank" rel="noopener" title="${esc(link.title ?? '')}">${esc(label)}</a>`;
-  }).join('');
+  return (Plugins.HistoryCard(task)?.buttons ?? []).filter(button => button?.url).map(button =>
+    `<a class="${cls} ${esc(button.cls ?? '')}" href="${esc(new URL(button.url, window.location.href))}"
+        target="_blank" rel="noopener" title="${esc(button.title ?? '')}">${esc(button.label ?? '')}</a>`).join('');
 }
 
 // ── List ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-// the package of a task: its PACKAGE argument (tasks without one: tlspuffin); null while not read yet
-const PACKAGES = ['tlspuffin', 'sshpuffin'];
-const PackageOf = task => state.packages.get(String(task.id)) ?? null;
+const FilterKey = (filter) => `${filter.plugin}\u0000${filter.label}`;
 
-// the packages of the finished tasks, from their final state (the lists do not carry it), kept by the browser: a
-// finished task does not change
-async function LoadPackages() {
-  let cache = {};
-  try { cache = JSON.parse(localStorage.getItem('pb-history-packages') ?? '{}') ?? {}; } catch (error) {}
-  for (const [id, pkg] of Object.entries(cache)) state.packages.set(id, pkg);
-  const missing = state.tasks.filter(task => !state.packages.has(String(task.id)));
-  await InBatches(missing, async task => {
-    try {
-      const response = await fetch(`http://${window.location.host}/api/task/${task.id}/final_state`);
-      if (!response.ok) return;
-      const json = await response.json();
-      const pkg = (json?.task?.args ?? json?.data?.task?.args ?? []).find(arg => arg.key === 'PACKAGE')?.value || 'tlspuffin';
-      state.packages.set(String(task.id), pkg);
-    } catch (error) { /* left unknown: shown under all only */ }
-  });
-  try { localStorage.setItem('pb-history-packages', JSON.stringify(Object.fromEntries(state.packages))); } catch (error) {}
+// a filter of a plugin, as selected: the task matches one of its values (or the filter when it has none); a task its
+// plugin does not know does not match (see plugins.js)
+function MatchesPluginFilter(task, filter, selected) {
+  try {
+    return (selected === true) ? !!filter.match(task) : [...selected].some(value => filter.match(task, value));
+  } catch (error) {
+    console.warn('history filter', filter.plugin, filter.label, error);
+    return false;
+  }
 }
 
 function Visible(task) {
   const f = state.filters;
-  if (f.package && PackageOf(task) !== f.package) return false;
   if (f.users.size && !f.users.has(task.user)) return false;
   if (f.types.size && !f.types.has(task.type)) return false;
   if (f.states.size && !f.states.has(StateOf(task))) return false;
-  if (f.objectives && !(state.taskLinks[task.id]?.length)) return false;
+  for (const filter of Plugins.HistoryFilters()) {
+    const selected = state.pluginFilters.get(FilterKey(filter));
+    if (!selected || (selected !== true && selected.size === 0)) continue;
+    if (!MatchesPluginFilter(task, filter, selected)) return false;
+  }
   if (f.search && !f.search.split(/\s+/).every(word => SearchText(task).includes(word))) return false;
   return true;
 }
@@ -228,10 +202,11 @@ function RenderStats() {
   const since = Date.now() - 30 * DAY_MS;
   const recent = state.tasks.filter(task => End(task) >= since);
   const hours = recent.reduce((sum, task) => sum + (task.summary?.core_hours ?? 0), 0);
-  const objectives = recent.filter(task => state.taskLinks[task.id]?.length).length;
-  // compact, at the end of the filter row (explained by its hover, help.js history.stats)
+  // compact, at the end of the filter row (explained by its hover, help.js history.stats); then the counts of the
+  // plugins over the same tasks
   ui.stats.innerHTML = `<b>${state.tasks.length}</b> tasks · 30 d: <b>${recent.length}</b>` +
-      (hours > 0 ? ` · <b>${CoreHours(hours)}</b> core-h` : '') + ` · <b>${objectives}</b> 🐞`;
+      (hours > 0 ? ` · <b>${CoreHours(hours)}</b> core-h` : '') +
+      Plugins.HistoryStats(recent).map(html => ` · ${html}`).join('');
 }
 
 function RenderList() {
@@ -275,14 +250,16 @@ function TaskRow(task, key) {
   row.dataset.help = 'history.card';
   row.dataset.id = task.id;
   if (state.selected === task.id) row.classList.add('selected');
-  if (HasNewBugs(task)) row.classList.add('new-bugs');
+  // a class of its project (e.g. a task to look at)
+  const rowClass = Plugins.HistoryCard(task)?.cls;
+  if (rowClass) row.classList.add(...String(rowClass).split(/\s+/).filter(Boolean));
   if (task.flag?.color) row.style.setProperty('--flag-color', task.flag.color);
   const steps = Steps(task);
   const artefacts = `http://${window.location.host}/api/task/${task.id}/artefacts`;
   row.innerHTML = `
     <span class="time">${esc(Time(key(task)))}</span>
     <span class="dur" title="from ${esc(DateTime(Start(task)))} to ${esc(DateTime(End(task)))}">${esc(Duration(End(task) - Start(task)))}</span>
-    <div class="title"><span class="type ${esc(task.type)}">${esc(TypeLabel(task.type))}</span>${TitleHTML(task)}
+    <div class="title"><span class="type ${esc(TypeOf(task).cls ?? '')}">${esc(TypeOf(task).label)}</span>${TitleHTML(task)}
       <div class="sub">${esc(task.user)} · task ${esc(task.id)} · ${task.cancelled ? 'cancelled' : 'finished'}</div></div>
     <div class="badges">
       ${LinkButtons(task, 'link-badge')}
@@ -374,44 +351,94 @@ function Picker(container, values, set, label, name) {
   container.replaceChildren(picker);
 }
 
-// a click outside an open drop-down closes it
-// Esc (top bar, board/nav.js): close the drawer of a task
+// Esc (top bar, board/frame.js): close the drawer of a task
 window.addEventListener('pb-escape', (event) => {
   if ((event.detail?.layer !== 'panel') || event.defaultPrevented || ui.drawer.hidden) return;
   event.preventDefault();
   ui.drawer.querySelector('.close')?.click();
 });
 
+// a click outside an open drop-down closes it
 document.addEventListener('click', event => {
   document.querySelectorAll('details.picker[open]').forEach(picker => {
     if (!picker.contains(event.target)) picker.open = false;
   });
 });
 
-function RenderFilters() {
-  // package: one of all | tlspuffin | sshpuffin (and any other package found)
-  const packages = [...new Set([...PACKAGES, ...state.tasks.map(PackageOf).filter(Boolean)])];
-  ui.package.replaceChildren(...['', ...packages].map(value => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = `chip ${state.filters.package === value ? 'on' : ''}`;
-    chip.textContent = value || 'all';
-    chip.onclick = () => { state.filters.package = value; RenderFilters(); RenderList(); };
-    return chip;
-  }));
-  Chips(ui.users, [...new Set(state.tasks.map(task => task.user))].sort(), state.filters.users, undefined, 'Users');
-  Chips(ui.types, [...new Set(state.tasks.map(task => task.type))].sort(), state.filters.types, TypeLabel, 'Types');
-  Chips(ui.states, ['done', 'cancelled'], state.filters.states);
-  const objectives = document.createElement('button');
-  objectives.type = 'button';
-  objectives.className = `chip ${state.filters.objectives ? 'on' : ''}`;
-  objectives.textContent = '🐞 with objectives';
-  objectives.onclick = () => {
-    state.filters.objectives = !state.filters.objectives;
-    objectives.classList.toggle('on', state.filters.objectives);
+// one chip on or off
+function ToggleChip(filter, key) {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = `chip ${state.pluginFilters.get(key) === true ? 'on' : ''}`;
+  chip.textContent = filter.label;
+  chip.onclick = () => {
+    const on = state.pluginFilters.get(key) !== true;
+    on ? state.pluginFilters.set(key, true) : state.pluginFilters.delete(key);
+    chip.classList.toggle('on', on);
     RenderList();
   };
-  ui.states.appendChild(objectives);
+  return chip;
+}
+
+// one value at a time: "all" first (the filter does not filter), then its values
+function SingleChips(container, values, selected) {
+  if (selected.size && !values.includes([...selected][0])) selected.clear();
+  const current = selected.size ? [...selected][0] : '';
+  container.replaceChildren(...['', ...values].map(value => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `chip ${current === value ? 'on' : ''}`;
+    chip.textContent = value || 'all';
+    chip.onclick = () => {
+      selected.clear();
+      if (value) selected.add(value);
+      container.querySelectorAll('.chip').forEach((other, i) => other.classList.toggle('on', ['', ...values][i] === value));
+      RenderList();
+    };
+    return chip;
+  }));
+}
+
+// the filters of the plugins: chips of their values (any of those selected; with single, one of them or all), or one
+// chip on or off; in the zone of the plugins at the start of the row, or in a group of History (group)
+function RenderPluginFilters() {
+  const own = [];
+  const groups = { users: ui.users, types: ui.types, states: ui.states };
+  for (const filter of Plugins.HistoryFilters()) {
+    const key = FilterKey(filter);
+    let element;
+    if (filter.values == null) {
+      element = ToggleChip(filter, key);
+    } else {
+      let values = [];
+      try {
+        values = (typeof filter.values === 'function' ? filter.values(state.tasks) : filter.values) ?? [];
+      } catch (error) {
+        console.warn('history filter values', filter.plugin, filter.label, error);
+      }
+      if (!(state.pluginFilters.get(key) instanceof Set)) state.pluginFilters.set(key, new Set());
+      element = document.createElement('span');
+      element.className = 'chips';
+      element.dataset.help = 'history.filter';
+      if (filter.single) SingleChips(element, [...values].map(String), state.pluginFilters.get(key));
+      else Chips(element, [...values].map(String), state.pluginFilters.get(key), undefined, filter.label);
+    }
+    if (groups[filter.group]) groups[filter.group].appendChild(element);
+    else own.push(element);
+  }
+  ui.plugins.replaceChildren(...own);
+  ui.plugins.hidden = own.length === 0;
+  ui.plugins.nextElementSibling.hidden = own.length === 0;
+}
+
+function RenderFilters() {
+  Chips(ui.users, [...new Set(state.tasks.map(task => task.user))].sort(), state.filters.users, undefined, 'Users');
+  const types = [...new Map(state.tasks.map(task => [task.type, TypeOf(task).label]))].sort((a, b) => a[0].localeCompare(b[0]));
+  const typeLabels = new Map(types);
+  Chips(ui.types, types.map(([type]) => type), state.filters.types, type => typeLabels.get(type) ?? type, 'Types');
+  Chips(ui.states, ['done', 'cancelled'], state.filters.states);
+  // after the groups of History: a filter of a plugin may join one of them
+  RenderPluginFilters();
 }
 
 // ── Drawer ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -447,14 +474,17 @@ function RenderDrawer(task, finalTask, error) {
   const summary = task.summary;
   const steps = Steps(task);
   const relaunch = finalTask?.launcher?.project
-      ? Launchers.launchers.find(launcher => launcher.label === finalTask.launcher.project) : null;
-  const args = (finalTask?.args ?? []).filter(arg => !(arg.key === 'COMMIT_ID' && description?.commit))
-      .map(arg => arg.key === 'PACKAGE' ? arg.value : `${arg.key}=${arg.value}`);
+      ? Plugins.launchers.find(launcher => launcher.label === finalTask.launcher.project) : null;
+  // the arguments as the project shows them: not those its title shows, a bare value for those it marks so
+  const options = description?.args ?? {};
+  const args = (finalTask?.args ?? []).filter(arg => arg?.key)
+      .filter(arg => !(options[arg.key]?.hidden || (options[arg.key]?.inTitle && description?.commit)))
+      .map(arg => options[arg.key]?.bare ? arg.value : `${arg.key}=${arg.value}`);
   const configs = finalTask ? Configurations(finalTask) : [];
   const waited = summary?.start_timestamp ? summary.start_timestamp - task.id : 0;
   ui.drawer.hidden = false;
   ui.drawer.innerHTML = `
-    <div class="top"><span class="type ${esc(task.type)}">${esc(TypeLabel(task.type))}</span>
+    <div class="top"><span class="type ${esc(TypeOf(task).cls ?? '')}">${esc(TypeOf(task).label)}</span>
       <button type="button" class="close">✖ close</button></div>
     <h2>${TitleHTML(task)}</h2>
     <div class="actions">
@@ -543,8 +573,9 @@ async function DeleteTask(task) {
 async function Refresh() {
   DisableUI();
   try {
-    [state.tasks, state.taskLinks] = await Promise.all([LoadTasks(), LoadTaskLinks()]);
-    await LoadPackages();
+    state.tasks = await LoadTasks();
+    // what the plugins read with the list (e.g. the buttons of the tasks)
+    await Plugins.HistoryLoad(state.tasks);
     RenderStats();
     RenderFilters();
     RenderList();
@@ -552,14 +583,14 @@ async function Refresh() {
     console.error(`Unable to load the history: ${e}`);
   }
   EnableUI();
-  // the descriptions (commit, PR, message) come afterwards
+  // the descriptions of the projects come afterwards
   await DescribeTasks();
   RenderList();
 }
 
 function Main() {
-  // hovers of the outlined elements; the help panel and the refresh are in the top bar (nav.js)
-  new Help({ ...helpTexts, ...Launchers.helpTexts });
+  // hovers of the elements outlined by the help; the help panel and the refresh are in the top bar (frame.js)
+  new Help({ ...helpTexts, ...Plugins.helpTexts });
   window.addEventListener('pb-refresh', (event) => { event.preventDefault(); Refresh(); });
   state.sort = ui.sort.value;
   ui.sort.onchange = () => { state.sort = ui.sort.value; RenderList(); };

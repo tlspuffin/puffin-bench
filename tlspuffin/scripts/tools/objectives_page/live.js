@@ -1,8 +1,8 @@
 // Page of the running tasks with objectives (objectives/live.html, written by objectives_live.sh every 5 minutes):
 // one row per task, from live.json next to it ({ updated, tasks: [{ task, name, commit, job_type, found, replayed,
 // reproduced, bugs, hit: [configurations], configurations, url, task_url }] }). Same look as the objectives pages
-// (report.css). The top bar (nav.js) also shows a pill for these tasks, except VulnA/VulnB ones.
-import '../board/nav.js';
+// (report.css). The top bar (the tlspuffin plugin of board/frame.js) also shows a pill for these tasks, except VulnA/VulnB ones.
+import '../board/frame.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
 
 const help = document.createElement('template');

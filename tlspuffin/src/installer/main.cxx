@@ -4,8 +4,8 @@
 #include <embeded/installer/binary/gitrestapi_binary.h>
 #include <embeded/installer/binary/viscomparator_binary.h>
 #include <embeded/installer/config/scheduler_config_json.h>
-#include <embeded/installer/html/board/launchers/config_js.h>
-#include <embeded/installer/html/board/launchers/tlspuffin/config_js.h>
+#include <embeded/installer/html/board/custom/config_js.h>
+#include <embeded/installer/html/board/custom/tlspuffin/config_js.h>
 #include <embeded/installer/config/git_restapi_config_json.h>
 #include <embeded/installer/config/publisher_config_json.h>
 #include <embeded/installer/html/publisher/summary_config_js.h>
@@ -290,8 +290,8 @@ int main(int argc, char* argv[]) {
 
   for(auto const& [ file, data ] : { 
       std::tuple{ binaryPath / "config.json", (char const*)SchedulerConfig_JSON_data },
-      std::tuple{ dataPath / "html" / "board" / "launchers" / "config.js", (char const*)LaunchersConfig_JS_data },
-      std::tuple{ dataPath / "html" / "board" / "launchers" / "tlspuffin" / "config.js", (char const*)LaunchersTLSPuffinConfig_JS_data },
+      std::tuple{ dataPath / "html" / "board" / "custom" / "config.js", (char const*)PluginsConfig_JS_data },
+      std::tuple{ dataPath / "html" / "board" / "custom" / "tlspuffin" / "config.js", (char const*)TLSPuffinPluginConfig_JS_data },
       std::tuple{ binaryPath / "git_restapi-config.json", (char const*)GitRestAPIConfig_JSON_data },
       std::tuple{ binaryPath / "publisher_config.json", (char const*)PublishConfig_JSON_data },
       std::tuple{ dataPath / "html" / "publisher" / "summary_config.js", (char const*)PublishSummaryConfig_JS_data },

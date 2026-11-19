@@ -1,15 +1,15 @@
 // Bugs reference: the expected bug of each Vuln configuration and the CVEs set apart (vuln_targets.json, the file to
 // edit), and the registry of the bugs found so far per library (known_bugs.json, written by tools/known_bugs.js)
-import '../board/nav.js';
+import '../board/frame.js';
 
 const esc = text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TARGETS = '/html/jobsscripts/tlspuffin/vuln_targets.json';
 const KNOWN = '/html/objectives/known_bugs.json';
-// the file in the repository at the deployed commit (board/version.json, written by deploy.sh), else on main
+// the file in the repository at the deployed commit (board/custom/tlspuffin/version.json, written by deploy.sh), else on main
 const REPO_FILE = 'tlspuffin/data/html/jobsscripts/tlspuffin/vuln_targets.json';
 
 const load = url => fetch(url, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
-const [targets, known, version] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/version.json')]);
+const [targets, known, version] = await Promise.all([load(TARGETS), load(KNOWN), load('/html/board/custom/tlspuffin/version.json')]);
 const REPO = `${version?.repository ?? 'https://github.com/tlspuffin/puffin-bench'}/blob/${/^[0-9a-f]{40}$/.test(version?.commit ?? '') ? version.commit : 'main'}/${REPO_FILE}`;
 
 const presets = Object.entries(targets ?? {}).filter(([key]) => !key.startsWith('_'));

@@ -1,8 +1,11 @@
-import './nav.js';
+import { ShowSchedulerHealth } from './frame.js';
 import { Help, helpTexts } from './help.js';
 import { TaskCard } from './taskcard.js';
 import { OpenClickTip } from './tips.js';
-import * as Launchers from './launchers/launchers.js';
+import * as Plugins from './plugins.js';
+
+// the status light of this scheduler in the top bar
+ShowSchedulerHealth();
 
 let taskCard;
 
@@ -227,9 +230,10 @@ async function RefreshBoard() {
 }
 
 function Main() {
-  Launchers.BuildUI();
-  // hovers of the outlined elements, the launchers' fields too; the help panel and the refresh are in the top bar (nav.js)
-  new Help({ ...helpTexts, ...Launchers.helpTexts });
+  Plugins.BuildUI();
+  // hovers of the elements outlined by the help, the launchers' fields too; the help panel and the refresh are in the
+  // top bar (frame.js)
+  new Help({ ...helpTexts, ...Plugins.helpTexts });
   window.addEventListener('pb-refresh', (event) => { event.preventDefault(); RefreshBoard(); });
 
   fetch('custom/header.html')
@@ -238,8 +242,8 @@ function Main() {
       document.getElementById('custom_header').innerHTML = data;
     });
 
-  taskCard = new TaskCard({ onRefresh: RefreshBoard, launchers: Launchers.launchers, describeTask: Launchers.DescribeTask,
-    describeMonitor: Launchers.DescribeMonitor });
+  taskCard = new TaskCard({ onRefresh: RefreshBoard, launchers: Plugins.launchers, describeTask: Plugins.DescribeTask,
+    describeMonitor: Plugins.DescribeMonitor });
 
   document.getElementById('fold-button').onclick = () => FoldAll(true);
   document.getElementById('unfold-button').onclick = () => FoldAll(false);
@@ -250,14 +254,16 @@ function Main() {
 
 Main();
 
-// #launch=<project>&job=<job type>&commit=<sha>: the launcher of that project opened pre-filled (Results' "no Perf run")
+// #launch=<project>&<key>=<value>…: the launcher of that project opened with the other parameters, which the project
+// reads (e.g. a page of the project that proposes a launch)
 {
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
   const project = params.get('launch');
-  const entry = project && Launchers.launchers.find(launcher => launcher.label === project);
+  const entry = project && Plugins.launchers.find(launcher => launcher.label === project);
   if (entry) {
     history.replaceState(null, '', window.location.pathname + window.location.search);
-    entry.open({ jobType: params.get('job') || null, commit: params.get('commit') || null });
+    params.delete('launch');
+    entry.open(Object.fromEntries(params));
   }
 }
 

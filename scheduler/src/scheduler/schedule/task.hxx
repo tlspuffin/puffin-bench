@@ -76,6 +76,7 @@ public:
 
   int64_t priority_;
 
+  std::string duration_context_;
   uint64_t estimatedEndTime_;
 
   std::string launcher_;

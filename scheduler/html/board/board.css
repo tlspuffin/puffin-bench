@@ -262,7 +262,7 @@ body.board-page {
 }
 
 /* board header: one compact row (counters, executors, fold buttons); the title, refresh and help are in the
-   top bar of the bench (nav.js) */
+   top bar of the pages (frame.js) */
 .board-page .header {
   padding: 4px 14px;
   border-bottom-width: 1px;

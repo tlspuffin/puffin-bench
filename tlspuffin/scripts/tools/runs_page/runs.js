@@ -1,7 +1,7 @@
 // Runs of a commit: every task the publisher keeps for a tlspuffin commit, per category and type (runs_report.py
 // writes /html/runs/<commit>-<category>-<type>.json and index.json). #commit=<sha>&tab=<category>/<type> (a fragment:
 // the publisher answers 404 to a URL with a query string)
-import '../board/nav.js';
+import '../board/frame.js';
 import { resolveCommits, commitLineHTML } from '../common/commitinfo.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

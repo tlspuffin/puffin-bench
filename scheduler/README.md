@@ -113,7 +113,7 @@ The dashboard polls `GET /api/tasks/running` automatically and shows running tas
 
 **Submit a job from the dashboard:**
 
-The `+` button opens `html/board/launchers/launchers.js`, a generic per-project plugin loader — not a fixed job launcher. It reads a project registry from `./config.js` (`config.projects`) and dynamically imports a `joblauncher.js` module per project. Neither `config.js` nor any project subfolder ships in this repository; you supply them yourself under `html/board/launchers/<project>/` to add a launcher UI without recompiling the server. See `docs/board-job-launcher.md` for the exact plugin contract, and `samples/jobs/tests/*.json` for example flow JSON that any launcher (or a plain `curl` to `POST /api/task/new`) can submit.
+The scheduler ships no job launcher: the `+` button, and everything a project adds to the pages (descriptions of its tasks, buttons, filters, help, the top bar of its bench), come from the **plugins** of the projects, loaded by `html/board/plugins.js` from `html/board/custom/config.js` (`config.projects`) and `html/board/custom/<project>/plugin.js`. The scheduler does not ship them and never overwrites them; the installer of a project writes its own (tlspuffin: `tlspuffin/data/html/board/custom/`). Without any plugin the pages work on their own and show no `+` button. See `docs/board-job-launcher.md` for the plugin contract, and `samples/jobs/tests/*.json` for example flow JSON that any launcher (or a plain `curl` to `POST /api/task/new`) can submit.
 
 See `docs/configuration.md` for the full configuration reference.
 

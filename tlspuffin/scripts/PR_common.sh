@@ -1024,11 +1024,11 @@ FuzzerExcerpt() {
 }
 
 # SummaryAddBench <summary.json>: the puffin-bench version that produced the results (version.json, written by
-# deploy.sh next to the board, beside the tools of the job), recorded in each library of the summary: the publisher
+# deploy.sh in the tlspuffin plugin of the board, board/custom/tlspuffin/, beside the tools of the job), recorded in each library of the summary: the publisher
 # merges the results per library (the newest task of each), so a commit's results can come from several versions.
 # Shown by the Results page ("run on … · bench d10↗"). Leaves the summary as it is when anything is missing.
 SummaryAddBench() {
-  local summary="$1" version="${THEJOB_TOOLS_PATH}/../html/board/version.json";
+  local summary="$1" version="${THEJOB_TOOLS_PATH}/../html/board/custom/tlspuffin/version.json";
   [ -s "${summary}" ] && [ -r "${version}" ] || return 0;
   # bench: the deployed version (services, board); jobscripts: the commit of these job scripts (build.sh), which a
   # hot copy can change without a deploy

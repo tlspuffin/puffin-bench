@@ -1591,7 +1591,7 @@ a.lib-objectives { margin-left: 4px; text-decoration: none; }
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
-   Dark layout: the bench navigation bar on top (board/nav.js), one toolbar row below it (tabs, search, filters,
+   Dark layout: the top bar of the bench (board/frame.js), one toolbar row below it (tabs, search, filters,
    counter, graphs, refresh), the commits right under it; on wide screens one column per result type (Perf on the
    left, Vuln on the right), so that the columns of every commit line up.
    --------------------------------------------------------------------------------------------------------------- */

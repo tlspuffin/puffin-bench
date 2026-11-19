@@ -10,8 +10,8 @@
 <body>
   <div class="filters">
     <input id="search" class="search" type="search" data-help="history.search"
-        placeholder="Search: commit, #PR, message, task name, id, user…">
-    <span id="filter-package" class="chips" data-help="history.filter" title="Package of the tasks (its PACKAGE argument; tasks without one: tlspuffin)"></span>
+        placeholder="Search: task name, id, user, type…">
+    <span id="filter-plugins" class="chips"></span>
     <span class="sep"></span>
     <span id="filter-users" class="chips" data-help="history.filter"></span>
     <span class="sep"></span>
@@ -39,17 +39,17 @@
     <p>Every finished task (done or cancelled) of every user, newest first, grouped by day (of its end or start, see <b>Sort by</b>), with the number of tasks and the core-hours of each day.</p>
     <h2>A task</h2>
     <ul>
-      <li>time and duration, type, the task (commit, PR and message when the project describes it), user and id</li>
+      <li>time and duration, type, the task (as its project describes it, else its name), user and id</li>
       <li><b>ok/total</b>: steps that ended well out of all its steps (hover: failed, timed out, cancelled)</li>
-      <li>buttons of the task (e.g. 🐞 objectives), 📊 published results, ⬇️ artefacts; dot: <span style="color:#4CAF50">●</span> done, <span style="color:#f44336">●</span> cancelled</li>
+      <li>the buttons its project adds, 📊 published results, ⬇️ artefacts; dot: <span style="color:#4CAF50">●</span> done, <span style="color:#f44336">●</span> cancelled</li>
     </ul>
     <p>Click a task for its details on the right: actions, times, core-hours, arguments, its configurations and its full task card.</p>
     <h2>Filters</h2>
-    <p>The search matches the commit, PR, message, name, id, user, type and package. <b>all | tlspuffin | sshpuffin</b>: the package of the tasks (read from each task, kept by the browser; a task without one is tlspuffin). Chips filter users, types and states; with none selected in a group, the group does not filter. <b>🐞 with objectives</b>: the tasks with an objectives page.</p>
+    <p>The search matches the name, id, user and type of the tasks, and what their project shows of them (all the words). Chips filter users, types and states; with none selected in a group, the group does not filter. The projects add their own filters, first in the row: a task of another project does not match them.</p>
     <h2>Deleting a task</h2>
     <p>💣 removes the archived results on this server and asks the publish server to drop its copy. It cannot be undone.</p>
     <h2>Refresh</h2>
-    <p>The list is read when the page opens; <b>🔄</b> in the top bar reads it again (tasks finished since, new objectives pages).</p>
+    <p>The list is read when the page opens; <b>🔄</b> in the top bar reads it again (tasks finished since, and what their projects add).</p>
     <p>Details: an element with the <span style="cursor:context-menu;text-decoration:underline dotted">box cursor</span> (an arrow with a small box) opens a small window on <b>click</b> (Esc or a click elsewhere closes it); an element with the <span style="cursor:help;text-decoration:underline dotted">? cursor</span>, a link or a button explains itself on <b>hover</b> (after half a second). Press <b>?</b> to toggle this panel.</p>
   </template>
 

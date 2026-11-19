@@ -48,7 +48,7 @@ Ports above are the installer's defaults (`--port-git`/`--port-scheduler`/`--por
 
 ## Job types
 
-The following job types are declared in `jobsconfig.json`, served with the rest of the tlspuffin job-launcher UI (installed under `<datapath>/html/board/launchers/tlspuffin/` — see [installer/docs/web-assets.md](installer/docs/web-assets.md)):
+The following job types are declared in `jobsconfig.json`, served with the rest of the tlspuffin job-launcher UI, part of the tlspuffin plugin of the board (installed under `<datapath>/html/board/custom/tlspuffin/` — see [tlspuffin/docs/web-assets.md](tlspuffin/docs/web-assets.md)):
 
 | Label in UI | Job type key | Flow JSON | Purpose |
 |-------------|--------------|-----------|---------|
@@ -97,7 +97,7 @@ curl -X POST http://localhost:10082/api/task/new \
   -F "job_type=perf"
 ```
 
-`config` and `script` are required; `files[]`/`args[KEY]`/`runtime[RUNTIME_KEY]` are repeatable and optional (note the `runtime[]` field name must include the `RUNTIME_` prefix inside the brackets, e.g. `runtime[RUNTIME_TIMEOUT]`); `user`/`job_type` default to `"anonymous"`/`"unknown"` if omitted. The response contains the task ID **as a string**:
+`config` and `script` are required; `files[]`/`args[KEY]`/`runtime[RUNTIME_KEY]` are repeatable and optional (note the `runtime[]` field name must include the `RUNTIME_` prefix inside the brackets, e.g. `runtime[RUNTIME_TIMEOUT]`); `user`/`job_type` default to `"anonymous"`/`"unknown"` if omitted. `-F 'runtime[RUNTIME_LAUNCHER]={"project":"tlspuffin"}'` (optional) records the task as one of tlspuffin: the scheduler's pages then ask only the tlspuffin plugin for it. The response contains the task ID **as a string**:
 ```json
 { "success": true, "task_id": "1713240000000" }
 ```

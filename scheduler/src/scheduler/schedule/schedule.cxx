@@ -157,6 +157,38 @@ uint64_t ns_Schedule::Schedule::AddTask(std::string const& name,
         " byte " + std::to_string(stepsJSON.GetErrorOffset())
     );
   }
+  if (!stepsJSON.IsObject()) {
+    throw std::runtime_error("task is expected as a JSON object");
+  }
+  if (stepsJSON.HasMember("launcher")) {
+    throw std::runtime_error("task is expected as a JSON object without launcher field");
+  }
+
+  {
+    rapidjson::Document launcherJSON(&stepsJSON.GetAllocator());
+    auto const it = runtimeConfig.find("LAUNCHER");
+    if (it != runtimeConfig.end()) {
+      launcherJSON.Parse(it->second.c_str());
+      if (launcherJSON.HasParseError()) {
+        throw std::runtime_error(
+            std::string("Parsing RUNTIME_LAUNCHER JSON Error : ") +
+            rapidjson::GetParseError_En(launcherJSON.GetParseError()) +
+            " byte " + std::to_string(launcherJSON.GetErrorOffset())
+        );
+      }
+      if (!launcherJSON.IsObject()) {
+        throw std::runtime_error(
+            "runtime[RUNTIME_LAUNCHER]: a JSON object with a non-empty string project is expected");
+      }
+      auto projectIT = launcherJSON.FindMember("project");
+      if ((projectIT == launcherJSON.MemberEnd()) || (!projectIT->value.IsString()) || 
+          (projectIT->value.GetStringLength() == 0)) {
+        throw std::runtime_error(
+            "runtime[RUNTIME_LAUNCHER]: a JSON object with a non-empty string project is expected");
+      }
+      stepsJSON.AddMember("launcher", launcherJSON, stepsJSON.GetAllocator());
+    }
+  }
 
   ns_Schedule::Task* task = 
       tasksManager_.CreateTask(name, stepsJSON, functions, files, args, user, jobType, *this);

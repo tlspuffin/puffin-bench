@@ -77,7 +77,7 @@
       <div class="header-right">
         <button class="refresh-btn" id="overview-graph-btn" onclick="DisplayOverviewGraph()" title="📊 Overview&#10;shows: each metric of each library over the commits of the tab">📊 Overview</button>
         <button class="refresh-btn" id="metrics-graph-btn" onclick="DisplayMetricsGraph()" title="📈 Metrics&#10;shows: one metric, chosen libraries, over the commits of the tab">📈 Metrics</button>
-        <!-- the refresh is the 🔄 of the top bar (nav.js); these keep the state it shows -->
+        <!-- the refresh is the 🔄 of the top bar (board/frame.js); these keep the state it shows -->
         <div class="refresh-btn-wrapper hidden">
           <button class="refresh-btn" id="refresh-btn" onclick="BtnRefreshData()">🔄</button>
           <div id="refresh-infos" class="hidden"></div>
@@ -165,7 +165,7 @@
 <p><b>Cmd/Ctrl+R</b>: refresh · <b>Esc</b>: close a panel · <b>g</b> then <b>s/r/a/h</b>: Scheduler, Results, Analyzer, History · <b>?</b>: this help.</p>
 </template>
 
-  <script type="module" src="/html/board/nav.js"></script>
+  <script type="module" src="/html/board/frame.js"></script>
   <script type="module" src="/html/publisher/summary.js"></script>
 </body>
 </html>
