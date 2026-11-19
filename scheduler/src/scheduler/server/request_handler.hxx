@@ -64,5 +64,8 @@ REQUESTHANDLER(UserTasksList, std::string const, std::string const);
 REQUESTHANDLER(CachePut, std::string const);
 REQUESTHANDLER(CacheGet, std::string const);
 REQUESTHANDLER(Files, std::string const);
+REQUESTHANDLER(BenchmarksList, std::string const);
+REQUESTHANDLER(BenchmarkSave, std::string const, std::string const);
+REQUESTHANDLER(BenchmarkDelete, std::string const, std::string const);
 
 };

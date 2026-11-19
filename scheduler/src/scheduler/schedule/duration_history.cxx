@@ -76,10 +76,11 @@ void ns_Schedule::DurationHistory::Load(std::filesystem::path const& exportPath)
   file_ = exportPath / "duration_history.json";
   durations_.clear();
 
-  // { key: [ { "ms", "context", "nb_cores", "timed_out" }, ... ] }; missing or unreadable: seeded from the log of
-  // the finished steps
+  // { "#format": 2, key: [ { "ms", "context", "nb_cores", "timed_out" }, ... ] }; missing, unreadable or of a former
+  // format (without "#format": its samples may hold failed runs): seeded from the log of the finished steps
   rapidjson::Document doc;
-  if (std::filesystem::exists(file_) && ReadJSONFile(file_.string(), doc) && doc.IsObject()) {
+  if (std::filesystem::exists(file_) && ReadJSONFile(file_.string(), doc) && doc.IsObject() &&
+      doc.HasMember("#format") && doc["#format"].IsInt() && (doc["#format"].GetInt() == format_)) {
     for (auto const& entry : doc.GetObject()) {
       if (!entry.value.IsArray()) {
         continue;
@@ -124,6 +125,12 @@ bool ns_Schedule::DurationHistory::Seed(std::filesystem::path const& stepsDone) 
     if ((state != "Done") && (state != "TimedOut")) {
       continue;
     }
+    // a run that ended (exit status 0) or timed out; not a failed one (see the header)
+    uint64_t const exitCode = step.HasMember("exit_code") && step["exit_code"].IsUint64() ? step["exit_code"].GetUint64() : 0;
+    bool const timedOut = (state == "TimedOut") || ((exitCode & Step::exitCode_Timedout_) != 0);
+    if ((exitCode != 0) && !timedOut) {
+      continue;
+    }
     if (!step.HasMember("time_points_ms") || !step["time_points_ms"].IsArray() ||
         (step["time_points_ms"].Size() != 2) || !step["time_points_ms"][0].IsUint64() ||
         !step["time_points_ms"][1].IsUint64()) {
@@ -155,7 +162,7 @@ bool ns_Schedule::DurationHistory::Seed(std::filesystem::path const& stepsDone) 
     }
     std::string const name = step.HasMember("name") && step["name"].IsString() ? step["name"].GetString() : "";
     uint32_t const nbCores = step.HasMember("nb_cores") && step["nb_cores"].IsUint() ? step["nb_cores"].GetUint() : 0;
-    AddSample(Key(jobType, name, args), Sample{ end - start, context, nbCores, state == "TimedOut" });
+    AddSample(Key(jobType, name, args), Sample{ end - start, context, nbCores, timedOut });
     ++count;
   }
   LOGI << "Step durations: " << count << " finished steps learned from " << stepsDone.string() << Log::Flags::End;
@@ -169,6 +176,7 @@ void ns_Schedule::DurationHistory::Save() const {
   rapidjson::Document doc;
   doc.SetObject();
   auto& alloc = doc.GetAllocator();
+  doc.AddMember("#format", format_, alloc);
   for (auto const& [key, samples] : durations_) {
     rapidjson::Value values(rapidjson::kArrayType);
     for (auto const& sample : samples) {
@@ -187,12 +195,16 @@ void ns_Schedule::DurationHistory::Save() const {
 }
 
 void ns_Schedule::DurationHistory::Add(ns_Schedule::Step const& step) {
-  // Done (success or failure) and timed out steps; cancelled and launch errors have no run time
+  // steps that ended (exit status 0) or timed out; not a failed one (see the header); cancelled steps and launch
+  // errors have no run time
   uint64_t const durationMs = static_cast<uint64_t>(step.RunTime().count());
   if (durationMs == 0) {
     return;
   }
   if (step.task_ == nullptr) {
+    return;
+  }
+  if ((step.exit_code_ != 0) && !step.IsTimedOut()) {
     return;
   }
   std::lock_guard lock(lock_);

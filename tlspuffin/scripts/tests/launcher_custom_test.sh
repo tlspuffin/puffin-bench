@@ -1,0 +1,413 @@
+#!/bin/bash
+# launcher_custom_test.sh <tlspuffin clone with the catalogue> [<commit>]: the whole launcher (joblauncher.js with its
+# custom benchmark panel, custombench.js) in a headless Chrome, on the catalogue and presets of the commit
+# (git_restapi's scripts), the scheduler's store of saved benchmarks answered in the page:
+#   - Load sets everything the benchmark was saved with: its bugs, attempts, cores per attempt, and the launcher's own
+#     timeout and CPU sharing;
+#   - 💾 Save keeps the launcher's timeout and CPU sharing with the panel's settings;
+#   - a timeout loaded stays when the job type changes and comes back;
+#   - Load of a benchmark saved before the launcher kept the timeout: the job's default, and a note saying so (the one
+#     set here kept when one was set);
+#   - the board's summary of a monitor message (describeMonitor): objectives counted, coloured only by the level of the
+#     task's objectives report (live.json, task_links.json): red with 🚨 new, gold unexpected, plain known or unjudged;
+#   - the panel asks for a commit first; then the saved benchmarks, the launcher's timeout, attempts and cores, its CPU
+#     sharing, the bugs (those without witness hidden by default); the timeout goes back to its place for other jobs;
+#   - Vuln group A and B are built-in benchmarks (their configurations: bugs, presets as they are, attempts, cores,
+#     timeout), listed first, never removed, their names not saved over;
+#   - a campaign's latest-asan gets the asan cargo feature only at a commit without tlspuffin 854dbaa11 (git_restapi's
+#     asan_link false): at a commit with it, the ASAN runtime comes with the preset (tlspuffin 838bd9588 has no such
+#     feature: the build failed);
+#   - latest-asan is the release presets.toml declares ([library] latest, git_restapi's latest: BoringSSL 0.20260508.0),
+#     else the highest version name (1.1.1g+git.… for BoringSSL, whose names do not sort);
+#   - a campaign's configuration is named after its build's dashed name, however its vendor is written (wolfssl:584,asan:
+#     wolfssl584-asan, the library once), as written when the presets do not have its version;
+#   - the launcher shows a vendor short (its preset line, a task's settings), the vendor as written in their tooltip:
+#     wolfssl:wolfssl584-asan is wolfSSL · 5.8.4 · ASan, ASan as its preset has it (wolfssl540-heap); without its preset
+#     (a task launched before the launcher recorded it), as written: wolfssl:584,asan is wolfSSL · 584 · ASan;
+#   - a campaign's configuration is named after its build's slug, its bugs by their aliases (5.4.0,only-SDOS2:
+#     wolfssl540-asan-no-postauth-only-SDOS2; 5.4.0,no-asan,fix-all: wolfssl540-fix-all; gcov: no-sancov written);
+#   - at a commit with puffin-build's names of builds, the picker composes the build: a version gives its build with
+#     ASan (wolfssl:5.4.0,asan), ASan can be turned off; only <bug> by its alias (only-HEAP: the info line says what is
+#     patched), fix-all; a bug that needs an option sets it (SDOS2: no-postauth), the option turned back drops the bug's
+#     choice; the aliases of presets.toml say what they are (heap: 5.4.0 · ASan · only HEAP; sdos2: what it leaves), a
+#     modifier on an alias keeps it (wolfssl540-heap,gcov); a
+#     name typed by hand is read back, and what mk_vendor would refuse is said (no false "not a preset"); the presets are
+#     shown from the start; a preset, a comma, only-<bug> is shown with ASan as mk_vendor builds it, with dashes without;
+#     a bug named alone, launched, records its bug (the task page says "only HEAP").
+# The scheduler's health check is left out (board/health.js: a stub).
+set -euo pipefail
+here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+bench=$( cd "${here}/../../.." && pwd )
+clone="${1:?usage: launcher_custom_test.sh <tlspuffin clone> [<commit>]}"; commit="${2:-HEAD}"
+chrome=$( command -v google-chrome || command -v chromium || command -v chromium-browser || true )
+[ -n "${chrome}" ] || { echo "SKIP: no Chrome or Chromium"; exit 0; }
+work=$( mktemp -d ); server=
+trap '[ -n "${server}" ] && kill "${server}" 2> /dev/null; rm -rf "${work}"' EXIT
+sha=$( git -C "${clone}" rev-parse "${commit}" )
+mkdir -p "${work}/html/board/custom/tlspuffin" "${work}/html/common" "${work}/git" "${work}/files/jobsscripts/tlspuffin"
+command cp -f "${bench}/tlspuffin/data/html/jobsscripts/tlspuffin/PR_vulnerabilities-group"[AB]"_cargo.json" "${work}/files/jobsscripts/tlspuffin/"
+# a campaign's job files, for a launch (the request is caught: the job script itself is not needed)
+command cp -f "${bench}/tlspuffin/data/html/jobsscripts/tlspuffin/"{PR_campaign.json,shell.nix,wolfssl_put.c.patch} "${work}/files/jobsscripts/tlspuffin/"
+echo '# the job script: not run here' > "${work}/files/jobsscripts/tlspuffin/PR_perf_full.sh"
+command cp -f "${bench}/tlspuffin/data/html/board/custom/tlspuffin/"*.{js,json,css} "${work}/html/board/custom/tlspuffin/"
+command cp -f "${bench}/tlspuffin/data/html/common/"*.js "${work}/html/common/"
+echo 'export async function CheckScheduler() { return {}; }' > "${work}/html/board/health.js"
+"${bench}/git_restapi/scripts/tlspuffin_catalogue.sh" "${clone}" "${sha}" > "${work}/git/catalogue.json"
+"${bench}/git_restapi/scripts/tlspuffin_presets.sh" "${clone}" "${sha}" > "${work}/git/presets.json"
+date=$( git -C "${clone}" log -1 --format=%cs "${sha}" )
+printf '{ "commits": [ { "id": "%s", "date": "%s", "comment": "the commit under test", "branch": "dev" } ], "branches": [], "PR": [] }\n' \
+  "${sha}" "${date}" > "${work}/git/history.json"
+cat > "${work}/html/test.html" <<EOF
+<!doctype html><html><head><meta charset="utf-8"><title>running</title>
+<link rel="stylesheet" href="board/custom/tlspuffin/joblauncher.css"></head><body><pre id="out"></pre>
+<script>globalThis.GIT_RESTAPI_PORT = 1; globalThis.SCHEDULER_PORT = 2; globalThis.VIS_COMPARATOR_PORT = 3; const SHA = '${sha}';</script>
+<script type="module">
+EOF
+cat >> "${work}/html/test.html" <<'EOF'
+const out = document.getElementById('out');
+let fail = 0;
+const check = (ok, what) => { out.textContent += `${ok ? 'ok  ' : 'FAIL'} ${what}\n`; if (!ok) fail = 1; };
+const LINKED = { ['a'.repeat(40)]: true, ['b'.repeat(40)]: false };
+const LATEST = { ['a'.repeat(40)]: { boringssl: '0.20260508.0' } };
+const store = {
+  VulnT: { saved_at: Date.now(), definition: { name: 'VulnT', description: 'saved with everything', others: 'patched',
+    catalogue: { source: 'commit', commit: SHA }, attempts: 2, cores: 7, timeout: { d: 0, h: 1, m: 5 }, smt: 'one',
+    experiments: [{ bug: 'CVE-2021-3336' }, { bug: 'CVE-2021-3449' }] } },
+  Old: { saved_at: Date.now() - 86400000, definition: { name: 'Old', description: 'saved before the timeout was kept', others: 'patched',
+    catalogue: { source: 'commit', commit: SHA }, attempts: 1, cores: 2, experiments: [{ bug: 'CVE-2021-3336' }] } },
+};
+const realFetch = window.fetch.bind(window);
+const launched = [];
+window.fetch = async (url, options = {}) => {
+  url = String(url);
+  const method = options.method ?? 'GET';
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  let m;
+  if (url.includes('/api/git/history/')) return realFetch('/git/history.json');
+  if (url.includes(`/api/git/presets/tlspuffin/${SHA}`)) return realFetch('/git/presets.json');
+  // two commits of the campaign case, with and without tlspuffin 854dbaa11 (asan_link), the presets of SHA otherwise
+  if ((m = /\/api\/git\/presets\/tlspuffin\/([0-9a-f]{40})$/.exec(url)) && m[1] in LINKED) {
+    const presets = await (await realFetch('/git/presets.json')).json();
+    return json(200, { ...presets, commit: m[1], asan_link: LINKED[m[1]], latest: LATEST[m[1]] ?? {} });
+  }
+  if (url.includes(`/api/git/catalogue/tlspuffin/${SHA}`)) return realFetch('/git/catalogue.json');
+  if (url.includes('/api/git/catalogue/tlspuffin/dev')) return json(200, { commit: '0'.repeat(40), format: 'none' });
+  if (url.endsWith('/api/benchmarks/tlspuffin')) return json(200, { success: true, data: structuredClone(store) });
+  if ((m = /\/api\/benchmarks\/tlspuffin\/([A-Za-z0-9-]+)$/.exec(url)) && method === 'PUT') {
+    store[m[1]] = { saved_at: Date.now(), definition: JSON.parse(options.body) };
+    return json(200, { success: true });
+  }
+  // a launch: what the launcher records in the task (task.launcher.custom)
+  if (url.endsWith('/api/task/new') && method === 'POST') {
+    launched.push(JSON.parse(options.body.get('runtime[RUNTIME_LAUNCHER]')).custom);
+    return json(200, { success: true, task_id: '1' });
+  }
+  if (url.endsWith('/objectives/live.json')) return json(200, { tasks: [{ task: 11, level: 'new', new: 1 }, { task: 12, level: 'known' }] });
+  if (url.endsWith('/custom/tlspuffin/task_links.json')) return json(200, { 13: [{ source: 'objectives_report', label: '🐞', count: 2, level: 'unexpected' }],
+                                                                   14: [{ source: 'objectives_report', label: '🐞', count: 2, level: 'warning' }] });
+  if (url.includes('/html/board/') || url.includes('/html/common/') || url.includes('/files/jobsscripts/')) return realFetch(url);
+  return new Response('', { status: 404 });
+};
+window.confirm = () => true;
+const settle = (ms = 400) => new Promise(resolve => setTimeout(resolve, ms));
+const until = async (test, ms = 8000) => { for (let t = 0; t < ms && !test(); t += 100) await settle(100); return test(); };
+const { JobLauncher } = await import('./board/custom/tlspuffin/joblauncher.js');
+const launcher = new JobLauncher();
+const $ = selector => document.querySelector(selector);
+const timeout = () => [...document.querySelectorAll('.jl-timeout-section input')].map(i => i.value).join(':');
+const smt = () => [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'pairs'));
+const before = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+const shown = el => !!el && el.getClientRects().length > 0;
+try {
+  // without a commit: the panel only asks for one; the launcher's timeout and CPU sharing are in its slots
+  launcher.open({ jobType: 'vuln-custom' });
+  await settle(800);
+  check($('.jl-custom').classList.contains('no-commit') && shown($('.jl-custom-first')) && !shown($('.jl-custom-main'))
+    && !shown($('.jl-timeout-section')), 'no commit yet: only the prompt for one (no timeout, no bugs)');
+  check($('.jl-custom-timeoutslot').contains($('.jl-timeout-section')) && $('.jl-custom-sharingslot').contains(smt()),
+    'the timeout and the CPU sharing are in the panel');
+  launcher.close();
+  // the launcher on the commit, job type Vuln — custom (as "New task…" opens it)
+  launcher.open({ jobType: 'vuln-custom', commit: SHA });
+  check(await until(() => document.querySelectorAll('.jl-custom-bugs tr[data-id]').length > 0), 'the custom panel lists the bugs of the commit');
+  check(await until(() => [...$('.jl-custom-saved').options].some(o => o.value === 'VulnT')), 'VulnT among the saved benchmarks');
+  check(!$('.jl-custom').classList.contains('no-commit') && shown($('.jl-custom-main')) && shown($('.jl-timeout-section')), 'a commit: the panel is shown');
+  check(before($('.jl-custom-savedrow'), $('.jl-timeout-section')) && before($('.jl-timeout-section'), $('.jl-custom-attempts'))
+    && before($('.jl-custom-attempts'), smt()) && before(smt(), $('.jl-custom-bugs')),
+    'order: saved benchmarks, timeout, attempts and cores, CPU sharing, the bugs');
+  check($('.jl-custom-hidewitness').checked && /hide bugs without witness/.test($('.jl-custom-hidewitness').parentElement.textContent),
+    'the bugs without witness are hidden by default ("hide bugs without witness" ticked)');
+  // without witness: with a patch and a signature (CALLB) it can be ticked, with a warning; without patch (Heartbleed,
+  // FREAK) it cannot
+  check(!document.querySelector('.jl-custom-bugs tr[data-id="CVE-2023-6936"]'), 'CALLB (no witness) hidden by default');
+  $('.jl-custom-hidewitness').click(); await settle();
+  const callb = document.querySelector('.jl-custom-bugs tr[data-id="CVE-2023-6936"]');
+  const heartbleed = document.querySelector('.jl-custom-bugs tr[data-id="CVE-2014-0160"]');
+  check(!!callb && callb.querySelector('input').disabled === !callb.querySelector('select'),
+    `CALLB shown once unticked, tickable where a preset has it (${callb?.querySelector('select') ? 'a preset' : 'no preset'})`);
+  check(!heartbleed || heartbleed.querySelector('input').disabled, 'Heartbleed (no witness, no patch): never tickable');
+  if (callb?.querySelector('select')) {
+    callb.querySelector('input').click(); await settle();
+    check(/CALLB<\/b> has no witness/.test($('.jl-custom-warnings').innerHTML), 'CALLB ticked: the warning that it has no witness');
+    callb.querySelector('input').click(); await settle();
+  }
+  $('.jl-custom-hidewitness').click(); await settle();
+  // the task's name: "Vuln C - <commit>" while the benchmark has the default name
+  check(/^Vuln C - /.test($('.jl-task-name').value), `the task is named Vuln C until the benchmark has a name (${$('.jl-task-name').value})`);
+  $('.jl-custom-saved').value = 'VulnT'; $('.jl-custom-saved').dispatchEvent(new Event('change'));
+  $('.jl-custom-open').click();
+  await settle();
+  const ticked = [...document.querySelectorAll('.jl-custom-bugs tr[data-id]')].filter(r => r.querySelector('input').checked).map(r => r.dataset.id);
+  check(ticked.sort().join() === 'CVE-2021-3336,CVE-2021-3449', `Load ticks its bugs (${ticked.join(', ')})`);
+  check(/^Vuln VulnT - /.test($('.jl-task-name').value), `then after its name (${$('.jl-task-name').value})`);
+  check($('.jl-custom-attempts').value === '2' && $('.jl-custom-cores').value === '7',
+    `Load sets attempts and cores per attempt (${$('.jl-custom-attempts').value} × ${$('.jl-custom-cores').value})`);
+  check(timeout() === '0:1:5', `Load sets the launcher's timeout (${timeout()})`);
+  check(smt()?.value === 'one', `Load sets the launcher's CPU sharing (${smt()?.value})`);
+  check($('.jl-custom-savedinfo').textContent.includes('timeout 1 h 05') && $('.jl-custom-savedinfo').textContent.includes('CPU sharing one'),
+    'the saved benchmark says its timeout and CPU sharing');
+
+  // 💾 Save keeps the launcher's fields with the panel's
+  const [d, h, m] = document.querySelectorAll('.jl-timeout-section input');
+  d.value = '1'; h.value = '2'; m.value = '30';
+  smt().value = 'pairs';
+  $('.jl-custom-attempts').value = '3';
+  $('.jl-custom-save').click();
+  await settle();
+  const saved = store.VulnT.definition;
+  check(saved.timeout?.d === 1 && saved.timeout?.h === 2 && saved.timeout?.m === 30 && saved.smt === 'pairs' && saved.attempts === 3,
+    `💾 Save keeps the timeout, the CPU sharing and the attempts (${JSON.stringify({ timeout: saved.timeout, smt: saved.smt, attempts: saved.attempts })})`);
+
+  // a timeout loaded stays when the job type changes and comes back
+  $('.jl-custom-saved').value = 'VulnT'; $('.jl-custom-open').click(); await settle();
+  const chip = value => document.getElementById(`jl-chip-${value}`);
+  chip('vuln-a').click(); await settle(200); chip('vuln-custom').click(); await settle();
+  check(timeout() === '1:2:30', `a timeout loaded stays across a change of job type (${timeout()})`);
+
+  // a benchmark saved before the launcher kept the timeout: the one set here is kept, said; on a fresh launcher, the
+  // job's default, said
+  $('.jl-custom-saved').value = 'Old'; $('.jl-custom-saved').dispatchEvent(new Event('change')); $('.jl-custom-open').click(); await settle();
+  check(timeout() === '1:2:30' && /saved without a timeout: the one set here is kept \(1 d 2 h 30\)/.test($('.jl-custom-savestatus').textContent),
+    `Old, after VulnT: the timeout set here kept, and said (${timeout()}: ${$('.jl-custom-savestatus').textContent})`);
+  launcher.close();
+  launcher.open({ jobType: 'vuln-custom', commit: SHA });
+  await until(() => document.querySelectorAll('.jl-custom-bugs tr[data-id]').length > 0);
+  await settle();
+  $('.jl-custom-saved').value = 'Old'; $('.jl-custom-saved').dispatchEvent(new Event('change')); $('.jl-custom-open').click(); await settle();
+  check(timeout() === '0:3:10' && /saved without a timeout: the job's default \(3 h 10\) is set/.test($('.jl-custom-savestatus').textContent),
+    `Old on a fresh launcher: the job's default, and said (${timeout()}: ${$('.jl-custom-savestatus').textContent})`);
+  // the built-in benchmarks: Vuln group A and B as configured, first, never removed
+  const names = [...$('.jl-custom-saved').options].map(o => o.value);
+  check(names[0] === 'VulnA' && names[1] === 'VulnB' && /built in/.test($('.jl-custom-saved').options[0].textContent),
+    `Vuln group A and B first, built in (${names.join(', ')})`);
+  $('.jl-custom-saved').value = 'VulnA'; $('.jl-custom-saved').dispatchEvent(new Event('change'));
+  check($('.jl-custom-remove').disabled && /built in/.test($('.jl-custom-savedinfo').textContent), 'a built-in benchmark cannot be removed');
+  $('.jl-custom-open').click(); await settle();
+  const rows = [...document.querySelectorAll('.jl-custom-bugs tr[data-id]')].filter(r => r.querySelector('input').checked);
+  const picked = Object.fromEntries(rows.map(r => [r.dataset.id, r.querySelector('select')?.value]));
+  check(picked['CVE-2022-39173'] === 'wolfssl540-buf' && picked['CVE-2022-38153'] === 'wolfssl530-cdos' && picked['CVE-2022-42905'] === 'wolfssl540-heap'
+    && picked['CVE-2022-38152'] === 'wolfssl540-sdos2' && picked['CVE-2022-25640'] === 'wolfssl510-skip' && rows.length === 5,
+    `VulnA: its five bugs on the group's presets (${JSON.stringify(picked)})`);
+  check($('.jl-custom-attempts').value === '5' && $('.jl-custom-cores').value === '4' && timeout() === '0:3:10'
+    && document.querySelector('input[name="jl-custom-others"][value="preset"]').checked,
+    `VulnA: 5 attempts × 4 cores, 3 h 10, the presets as they are (${$('.jl-custom-attempts').value} × ${$('.jl-custom-cores').value}, ${timeout()})`);
+  $('.jl-custom-saved').value = 'VulnB'; $('.jl-custom-saved').dispatchEvent(new Event('change')); $('.jl-custom-open').click(); await settle();
+  check($('.jl-custom-attempts').value === '90' && $('.jl-custom-cores').value === '1' && timeout() === '2:0:10',
+    `VulnB: 90 attempts × 1 core, 2 d 0 h 10 (${$('.jl-custom-attempts').value} × ${$('.jl-custom-cores').value}, ${timeout()})`);
+  $('.jl-custom-name').value = 'VulnA'; $('.jl-custom-save').click(); await settle();
+  check(!store.VulnA && /built in/.test($('.jl-custom-savestatus').textContent), `a built-in name is not saved over (${$('.jl-custom-savestatus').textContent})`);
+  // another job: the timeout and the CPU sharing back in their place, outside the panel
+  document.getElementById('jl-chip-vuln-a').click(); await settle(200);
+  check(!$('.jl-custom').contains($('.jl-timeout-section')) && !$('.jl-custom').contains(smt()) && shown($('.jl-timeout-section')),
+    'another job: the timeout and the CPU sharing back in their place');
+  document.getElementById('jl-chip-vuln-custom').click(); await settle();
+
+  // the board's summary of a monitor message: coloured by the level of the task's objectives report only
+  const message = '# Experiment: WolfSSL\n    ==> 🐞 Objective: 3 file(s), last modified: 2 minutes ago - x.trace';
+  const describe = (id, job_type) => launcher.describeMonitor({ id, job_type, steps: {} }, message);
+  const n = describe(11, 'vuln-a'), k = describe(12, 'perf'), u = describe(13, 'perf'), w = describe(14, 'perf'), x = describe(15, 'perf');
+  check(n.highlight === 'error' && n.taskLink.highlight === 'error' && /🚨 🐞 3 obj/.test(n.summary) && n.summary.includes('tp-mon-objective-new'),
+    `a new bug (live report), even in a Vuln job: red, 🚨 (${n.highlight}: ${n.taskLink.label})`);
+  check(k.highlight === null && k.taskLink.highlight === null && /🐞 3 obj/.test(k.summary) && !k.summary.includes('🎉'),
+    `known bugs (live report): counted, no colour, no 🎉 (${k.taskLink.label})`);
+  check(u.highlight === 'notable' && u.taskLink.highlight === 'notable', 'unexpected (final report): gold');
+  check(w.highlight === null && w.summary.includes('nothing reproduced') && x.highlight === null && x.summary.includes('not judged yet'),
+    'nothing reproduced (final report), or no report yet: no colour, said');
+  // the objectives chip links to the live page while the task runs, to the final report once it ended
+  const json = '#MONITOR_JSON ' + JSON.stringify({ objectives: { count: 8, age_min: 0, live: 'http://h:10083/html/objectives/live-16.html' } });
+  const running = launcher.describeMonitor({ id: 16, job_type: 'vuln-custom', steps: { s: { state: 'Running' } } }, json);
+  const ended = launcher.describeMonitor({ id: 16, job_type: 'vuln-custom', steps: { s: { state: 'TimedOut' } } }, json);
+  check(/objectives\/live-16\.html/.test(running.summary) && /objectives\/16\.html/.test(ended.summary) && !/live-16/.test(ended.summary),
+    'the objectives chip: the live page while the task runs, its final report once it ended');
+  // a campaign on latest-asan: the asan cargo feature only where the commit lacks tlspuffin 854dbaa11
+  for (const [commit, link] of Object.entries(LINKED)) {
+    launcher.close();
+    launcher.open({ jobType: 'campaign', commit });
+    await until(() => !!$('.jl-preset-btn'));
+    const latest = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent)));
+    latest?.click(); await settle();
+    const features = document.querySelector('.jl-features-row input, input[placeholder^="e.g. introspection"]')?.value ?? '';
+    check(!!latest && /:latest-asan$/.test($('.jl-vendor-line input')?.value ?? '') && features.split(/[\s,]+/).includes('asan') === !link,
+      `a campaign on latest-asan at a commit ${link ? 'with' : 'without'} tlspuffin 854dbaa11: ${link ? 'no' : 'the'} asan feature (features "${features}")`);
+  }
+  // BoringSSL's latest-asan: the release presets.toml declares, else the highest version name
+  for (const commit of Object.keys(LINKED)) {
+    const declared = !!LATEST[commit];
+    launcher.close();
+    launcher.open({ jobType: 'campaign', commit });
+    await until(() => !!$('.jl-preset-btn'));
+    const boring = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === 'BoringSSL'));
+    boring?.click(); await settle();
+    const latest = await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent)));
+    check(!!boring && !!latest && (latest.textContent === 'latest-asan · 0.20260508.0') === declared,
+      `BoringSSL's latest-asan ${declared ? 'as presets.toml declares it' : 'without a declared one: the highest name'} (${latest?.textContent})`);
+  }
+  // a campaign's configuration: its build's dashed name, however the vendor is written
+  const { CampaignConfigurationName } = await import('./board/custom/tlspuffin/joblauncher.js');
+  const presetsAtSha = await (await realFetch('/git/presets.json')).json(), vendorsAtSha = presetsAtSha.vendors;
+  const catalogueAtSha = await (await realFetch('/git/catalogue.json')).json();
+  // the build's slug (as mk_vendor), its bugs by their aliases: what only-<bug> brings written (5.4.0,only-SDOS2), a
+  // no-<modifier> that restates a default not (5.4.0,no-asan,fix-all), gcov's no-sancov written; a bug alone its
+  // reference build; an alias with a modifier, the build it is
+  const named = Object.entries({
+    'wolfssl:584,asan': 'wolfssl584-asan', 'wolfssl:5.8.4,asan': 'wolfssl584-asan', 'wolfssl:584-asan': 'wolfssl584-asan',
+    'wolfssl:wolfssl584-asan': 'wolfssl584-asan', 'openssl:341,asan': 'openssl341-asan', 'libressl:421,asan': 'libressl421-asan',
+    'boringssl:0.20260508.0,asan': 'boringssl20260508-asan', 'wolfssl:5.4.0,only-BUF': 'wolfssl540-asan-only-BUF',
+    'wolfssl:9.9.9,asan': '9.9.9,asan', 'wolfssl540': 'wolfssl540', 'wolfssl:5.4.0,asan,only-HEAP': 'wolfssl540-asan-only-HEAP',
+    'wolfssl:5.4.0,asan,no-postauth,only-SDOS2': 'wolfssl540-asan-no-postauth-only-SDOS2',
+    'wolfssl:5.4.0,only-SDOS2': 'wolfssl540-asan-no-postauth-only-SDOS2', 'wolfssl:5.4.0,no-asan,fix-all': 'wolfssl540-fix-all',
+    'wolfssl:5.4.0,gcov': 'wolfssl540-no-sancov-gcov', 'wolfssl:wolfssl540-heap,gcov': 'wolfssl540-asan-no-sancov-gcov-fix-BUF',
+    'wolfssl:HEAP': 'wolfssl540-asan-only-HEAP', 'wolfssl:wolfssl530-cdos,fix-BUF': 'wolfssl530-cdos',
+  }).map(([vendor, want]) => { const lib = vendor.split(':')[0]; return [vendor, CampaignConfigurationName(vendor, vendorsAtSha[lib],
+    presetsAtSha.modifiers?.[lib] ?? null, catalogueAtSha.vendors?.[lib]?.entries ?? null), want]; });
+  check(named.every(([, got, want]) => got === want),
+    `a campaign's configuration named after its build (${named.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || `${named.length} spellings`})`);
+  // a vendor shown short: from its preset at the commit, else as written
+  const { VendorLabel } = await import('./board/custom/tlspuffin/joblauncher.js');
+  const presetOf = vendor => vendorsAtSha[vendor.split(':')[0]]?.find(p => p.name === vendor.split(':')[1]) ?? null;
+  const labels = [
+    ...Object.entries({ 'wolfssl:wolfssl584-asan': 'wolfSSL · 5.8.4 · ASan', 'wolfssl:wolfssl540-heap': 'wolfSSL · 5.4.0 · heap · ASan',
+      'wolfssl:wolfssl540-asan-perf': 'wolfSSL · 5.4.0 · perf · ASan', 'wolfssl:wolfssl540': 'wolfSSL · 5.4.0',
+      'boringssl:boringssl20260508-asan': 'BoringSSL · 0.20260508.0 · ASan' }).map(([vendor, want]) => [vendor, presetOf(vendor), want]),
+    ['wolfssl:wolfssl540-heap,gcov', { version: '5.4.0', asan: true }, 'wolfSSL · 5.4.0 · heap · gcov · ASan'],
+    ...Object.entries({ 'wolfssl:wolfssl584-asan': 'wolfSSL · 584 · ASan', 'wolfssl:584,asan': 'wolfSSL · 584 · ASan',
+      'wolfssl:latest-asan': 'wolfSSL · latest · ASan', 'wolfssl540': 'wolfssl540',
+      'wolfssl:5.4.0,asan,only-HEAP': 'wolfSSL · 5.4.0 · only HEAP · ASan', 'wolfssl:5.4.0,asan,fix-all': 'wolfSSL · 5.4.0 · fix-all · ASan',
+      'wolfssl:5.4.0,asan,no-postauth,only-SDOS2': 'wolfSSL · 5.4.0 · postauth off · only SDOS2 · ASan',
+      'wolfssl:wolfssl540-asan-only-CVE-2022-42905': 'wolfSSL · 540 · only CVE-2022-42905 · ASan' }).map(([vendor, want]) => [vendor, null, want]),
+    // a bug named alone: its reference build, only that bug left, its name (not its ID cut at its dashes)
+    ['wolfssl:HEAP', { version: '5.4.0', asan: true, bug: 'HEAP' }, 'wolfSSL · 5.4.0 · only HEAP · ASan'],
+    ['wolfssl:CVE-2022-42905', { version: '5.4.0', asan: true, bug: 'HEAP' }, 'wolfSSL · 5.4.0 · only HEAP · ASan'],
+  ].map(([vendor, preset, want]) => [vendor, VendorLabel(vendor, preset), want]);
+  check(labels.every(([, got, want]) => got === want),
+    `a vendor shown short (${labels.filter(([, got, want]) => got !== want).map(([v, got]) => `${v}: ${got}`).join('; ') || `${labels.length} vendors`})`);
+  const settingsRow = custom => launcher.describeSettings({ launcher: { custom }, args: [] }).find(r => r.label === 'vendor')?.html;
+  const ran = settingsRow({ vendor: 'wolfssl:latest-asan', vendorResolved: 'wolfssl:wolfssl584-asan', vendorPreset: { version: '5.8.4', asan: true } });
+  const older = settingsRow({ vendor: 'wolfssl:584,asan' });
+  check(ran === '<span title="wolfssl:latest-asan → wolfssl:wolfssl584-asan">wolfSSL · 5.8.4 · ASan (latest release)</span>'
+    && older === '<span title="wolfssl:584,asan">wolfSSL · 584 · ASan</span>', `a task's settings: the vendor shown short, as written in its tooltip (${ran}; ${older})`);
+  launcher.close();
+  launcher.open({ jobType: 'campaign', commit: Object.keys(LATEST)[0] });
+  await until(() => !!$('.jl-preset-btn'));
+  (await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === 'BoringSSL')))?.click(); await settle();
+  (await until(() => [...document.querySelectorAll('.jl-preset-chip')].find(b => /^latest-asan/.test(b.textContent))))?.click(); await settle();
+  const line = $('.jl-presets-info b');
+  check(line?.textContent === 'BoringSSL · 0.20260508.0 · ASan' && line.title === 'boringssl:latest-asan → boringssl:boringssl20260508-asan'
+    && line.parentElement.textContent.includes('(latest release)'), `the preset line: the vendor shown short, as written in its tooltip (${line?.parentElement.textContent}; ${line?.title})`);
+  // the picker of builds, at a commit with puffin-build's names (the commit under test)
+  launcher.close();
+  launcher.open({ jobType: 'campaign', commit: SHA });
+  await until(() => !!$('.jl-preset-btn'));
+  check($('.jl-presets')?.classList.contains('open') && $('.jl-preset-btn')?.textContent.startsWith('－'),
+    'the presets of the commit shown from the start, without a click');
+  const chipOf = text => [...document.querySelectorAll('.jl-preset-chip')].find(b => b.textContent === text);
+  const field = () => $('.jl-vendor-line input')?.value ?? '';
+  const info = () => $('.jl-presets-info')?.textContent ?? '';
+  (await until(() => chipOf('wolfSSL')))?.click(); await settle();
+  (await until(() => chipOf('5.4.0')))?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan' && chipOf('ASan')?.classList.contains('on'),
+    `the picker of builds: a version gives its build with ASan, in puffin-build's short form (${field()})`);
+  chipOf('ASan')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0' && /no ASan/.test(info()), `ASan can be turned off (${field()}; ${info()})`);
+  chipOf('ASan')?.click(); await settle();
+  (await until(() => chipOf('only HEAP')))?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan,only-HEAP' && info().includes('only HEAP · ASan') && /patched: BUF/.test(info()),
+    `only one known bug, by its alias: the others with a patch patched, said (${field()}; ${info()})`);
+  chipOf('fix-all')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan,fix-all' && /patched: BUF, HEAP|patched: HEAP, BUF/.test(info()), `fix-all (${field()}; ${info()})`);
+  chipOf('only SDOS2')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan,no-postauth,only-SDOS2' && !chipOf('postauth')?.classList.contains('on'),
+    `a bug that needs an option (SDOS2: postauth off): the option set (${field()})`);
+  chipOf('postauth')?.click(); await settle();
+  check(field() === 'wolfssl:5.4.0,asan' && chipOf('as released')?.classList.contains('on'),
+    `that option turned back: the bug's choice dropped (${field()})`);
+  const heap = chipOf('heap 5.4.0'), sdos2 = chipOf('sdos2 5.4.0');
+  check(!!heap && heap.title.includes('the build 5.4.0 · ASan · only HEAP'), `an alias: what it is (${heap?.title})`);
+  check(!!sdos2 && !sdos2.title.includes('the build') && /left: .*HEAP/.test(sdos2.title),
+    `an alias that is not only its own bug: what it leaves (${sdos2?.title})`);
+  heap?.click(); await settle();
+  check(field() === 'wolfssl:wolfssl540-heap' && chipOf('heap 5.4.0')?.classList.contains('on'), `an alias picked: its name (${field()})`);
+  chipOf('gcov')?.click(); await settle();
+  check(field() === 'wolfssl:wolfssl540-heap,gcov' && chipOf('heap 5.4.0')?.classList.contains('on') && info().includes('heap · gcov')
+    && /patched: BUF/.test(info()), `a modifier on an alias: the alias with it, its patch kept (${field()}; ${info()})`);
+  check(!chipOf('sancov')?.classList.contains('on') && /gcov implies no-sancov/.test(chipOf('sancov')?.title ?? ''),
+    `gcov on: sancov shown off, as mk_vendor builds it, and why (${chipOf('sancov')?.title})`);
+  // a name typed by hand: read back; what mk_vendor would refuse, said
+  const typed = async value => {
+    const input = $('.jl-vendor-line input'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+    return $('.jl-vendor-note')?.textContent ?? '';
+  };
+  const good = await typed('wolfssl:584,asan');
+  check(!good.includes('⚠') && chipOf('5.8.4')?.classList.contains('on') && chipOf('ASan')?.classList.contains('on'),
+    `a good name typed (wolfssl:584,asan): read back (5.8.4, ASan), no warning (${good})`);
+  const bad = await typed('wolfssl:5.8.4,asaan');
+  check(bad.includes('⚠') && /asaan: not a modifier/.test(bad) && !/is not a preset/.test(bad), `a name mk_vendor would refuse: what is wrong said (${bad})`);
+  // as mk_vendor reads names: a bug alone is its reference build; a version written otherwise is that version; a bug
+  // that is not in the build is refused, and why
+  const alone = await typed('wolfssl:HEAP'), aloneInfo = info(), byId = (await typed('wolfssl:CVE-2022-42905'), info());
+  check(!alone.includes('⚠') && aloneInfo.startsWith('wolfSSL · 5.4.0 · only HEAP · ASan')
+    && byId.startsWith('wolfSSL · 5.4.0 · only HEAP · ASan'),
+    `a bug named alone: no warning, its reference build said (${alone}; ${aloneInfo}; ${byId})`);
+  const absent = await typed('wolfssl:5.4.0,only-CDOS');
+  check(absent.includes('⚠') && /does not affect 5\.4\.0/.test(absent),
+    `a bug not in the build: refused, why said (${absent})`);
+  const written = await typed('openssl:3.4');
+  check(!written.includes('⚠'), `a version written otherwise (openssl:3.4, 3.4.0): no warning (${written})`);
+  // what only-<bug> brings, as mk_vendor builds it: after a preset and a comma, what the bug needs, ASan
+  // (wolfssl540,only-HEAP is wolfssl540-asan-only-CVE-2022-42905); after a preset and dashes, nothing (wolfssl540-only-HEAP:
+  // no ASan)
+  await typed('wolfssl:wolfssl540,only-HEAP');
+  const commaInfo = info(), commaAsan = !!chipOf('ASan')?.classList.contains('on');
+  await typed('wolfssl:wolfssl540-only-HEAP');
+  const dashedInfo = info(), dashedAsan = !!chipOf('ASan')?.classList.contains('on');
+  check(commaAsan && commaInfo.includes('only HEAP · ASan') && !/no ASan/.test(commaInfo) && !dashedAsan,
+    `a preset, a comma, only-<bug>: with ASan, as mk_vendor builds it; with dashes, without (${commaInfo}; ${dashedInfo})`);
+  // a bug named alone, launched: the task records its bug, so its page says "only HEAP" (VendorLabel), not a plain 5.4.0
+  const user = [...document.querySelectorAll('input')].find(input => input.placeholder === 'your name');
+  user.value = 'tester'; user.dispatchEvent(new Event('input', { bubbles: true }));
+  await typed('wolfssl:HEAP');
+  $('.jl-launch-btn').click();
+  await until(() => launched.length > 0);
+  const recorded = launched[0]?.vendorPreset;
+  check(recorded?.bug === 'HEAP' && VendorLabel('wolfssl:HEAP', recorded) === 'wolfSSL · 5.4.0 · only HEAP · ASan',
+    `a bug named alone, launched: the task records its bug, its page says only HEAP (${JSON.stringify(recorded)}; launch: ${$('.jl-launch-btn').disabled ? 'disabled' : 'enabled'})`);
+} catch (err) {
+  check(false, `error: ${err.stack ?? err}`);
+}
+document.title = fail ? 'FAILED' : 'PASSED';
+</script></body></html>
+EOF
+port=$( python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' )
+python3 -I -m http.server "${port}" --bind 127.0.0.1 --directory "${work}" > /dev/null 2>&1 & server=$!
+for _ in $( seq 1 50 ); do python3 -I -c "import socket; socket.create_connection(('127.0.0.1', ${port}), 1)" 2> /dev/null && break; sleep 0.1; done
+dom=$( timeout 120 "${chrome}" --headless=new --disable-gpu --no-sandbox --user-data-dir="${work}/chrome" --window-size=1600,1000 \
+  --virtual-time-budget=30000 --dump-dom "http://127.0.0.1:${port}/html/test.html" 2> /dev/null )
+python3 -I -c '
+import html, re, sys
+dom = sys.stdin.read()
+m = re.search(r"<pre id=\"out\">(.*?)</pre>", dom, re.S)
+print(html.unescape(m.group(1)) if m else dom[:2000], end="")
+t = re.search(r"<title>(.*?)</title>", dom)
+print(t.group(1) if t else "no result")
+sys.exit(0 if t and t.group(1) == "PASSED" else 1)
+' <<< "${dom}"

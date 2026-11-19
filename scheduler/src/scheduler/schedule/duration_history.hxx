@@ -16,9 +16,12 @@ class Step;
 // Durations of the finished steps, to estimate how long a pending or running step will take (start and end
 // times of the board).
 // A kind of step is its task job type, its name and a digest of its arguments (the step's configuration, after the
-// overrides): "<job_type>|<name>|<digest>". The last samples_ finished runs of each kind (Done, failed or timed
-// out; not cancelled) are kept, oldest first, with their duration context, their number of cores and whether they
-// timed out, in <exportPath>/duration_history.json, seeded from <exportPath>/steps_done.json when it is missing.
+// overrides): "<job_type>|<name>|<digest>". The last samples_ runs of each kind that ended (exit status 0) or timed
+// out are kept, oldest first, with their duration context, their number of cores and whether they timed out, in
+// <exportPath>/duration_history.json ("#format": 2), seeded from <exportPath>/steps_done.json when it is missing or
+// of a former format. A failed run is not a sample: its duration says nothing of a run of that step (a campaign whose
+// build failed ended its experiments in a minute, and the next campaign of that configuration, running for hours, was
+// "ending in 1 min" for its whole run); nor a cancelled one.
 // The duration context of a run is the "duration_context" of its job, resolved with the task's arguments (e.g.
 // "${COMMIT_ID}"): runs with the same context are expected to last the same; empty when the job has none.
 // Estimate of a step, capped by its timeout; at each level, the samples with the step's number of cores are
@@ -54,6 +57,8 @@ private:
   static constexpr size_t sameContext_ = 5;
   static constexpr size_t minSamples_ = 2;
   static constexpr uint64_t defaultDurationMs_ = 600000;
+  // the format of duration_history.json: 2, runs that ended or timed out only (a file without it is seeded again)
+  static constexpr int format_ = 2;
 
   // "<job_type>|<name>|<digest of the arguments>"; the digest does not depend on the order of the arguments
   static std::string Key(std::string const& jobType, std::string const& name,

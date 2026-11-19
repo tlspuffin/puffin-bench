@@ -184,6 +184,11 @@ function Main() {
     result.expected_cve = scriptArgs[12];
     result.nb_objective_unexpected = Utils.IsNumeric(scriptArgs[11] ?? '') ? Number(scriptArgs[11]) : 0;
   }
+  // a run that ended on a find validation confirmed during the run (job scripts since 2026-11-10: experiments naming
+  // their bug, on commits with tlspuffin's catalogue): another monitor than the fuzzer's record (runs_report.py)
+  if (Utils.IsString(scriptArgs[13] ?? null) && scriptArgs[13] !== '') {
+    result.confirmed_by = scriptArgs[13];
+  }
   const start = result.global[0]?.t0?.time?.secs_since_epoch;
   if ((firstTargetedMs !== null) && (typeof start === 'number')) {
     result.first_targeted_objective_ms = firstTargetedMs;

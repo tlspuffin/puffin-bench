@@ -29,6 +29,10 @@ export class FakeEl {
     if (pos === 'beforeend') this.innerHTML += html; else if (pos === 'afterbegin') this.innerHTML = html + this.innerHTML; else throw new Error(`pos ${pos}`);
   }
   closest(sel) { return this.up?.[sel] ?? null; }
+  get previousElementSibling() { return this.before.at(-1) ?? null; }
+  get nextElementSibling() { return (this.afterEls ??= [])[0] ?? null; }
+  after(el) { (this.afterEls ??= []).unshift(el); }
+  remove() { this.removed = true; }
   append(...els) { this.children.push(...els); }
   appendChild(el) { this.children.push(el); return el; }
   insertBefore(el, ref) { if (ref) ref.before.push(el); else this.children.push(el); return el; }
@@ -56,7 +60,7 @@ export function Prepare(root, repo) {
   must("import { GraphCompare } from './summary_graphcompare.js';", 'const GraphCompare = class {};');
   must("import { MetricsCampaign } from './summary_metricscampaign.js';", 'const MetricsCampaign = { GetMetrics: () => null };');
   must("import('/html/objectives/bugs.js')", "import(new URL('../objectives/bugs.js', import.meta.url).href)");
-  src += '\nexport { RegressionFloor, ApplyRegression, ShowReportBugs, GetObjectivesButton };\n';
+  src += '\nexport { RegressionFloor, ApplyRegression, ShowReportBugs, ValidationLine, GetObjectivesButton, GetBuildCell, GetAsanBadge };\n';
   writeFileSync(join(html, 'publisher/summary_render.test.js'), src);
   return new URL(`file://${join(html, 'publisher/summary_render.test.js')}`).href;
 }

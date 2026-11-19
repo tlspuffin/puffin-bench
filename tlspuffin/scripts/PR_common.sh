@@ -168,6 +168,7 @@ FindFile() {
 # Mirrored for older results (no "build" in cli-<library>.json) by summary_render.js and objectives_report.sh.
 BuildDescription() {
   local cputs="$1" vendor="$2" features="$3" library="$4" version="$5";
+  [ -n "${vendor}" ] && vendor=$( VendorSlug "${vendor}" );   # the build by its own name (wolfssl:584,asan: wolfssl584-asan)
   if [ "${cputs}" == true ]; then
     echo "C harness, ${vendor#*:}";
     return 0;
@@ -215,7 +216,7 @@ ComputeBuildRuntimeInfo() {
     local library=$( echo "${vendor}" | cut -f 1 -d ':' )
     echo "version= ${version} library= ${library}";
     if [ -e "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/${library}/presets.toml" ]; then
-      grep -F -q "[${version}]" "${THEJOB_OUT_PATH}/repo/puffin-build/vendors/${library}/presets.toml" && 
+      KnownVendorBuild "${library}" "${version}" && 
           { [[ "${package}" != "tlspuffin" ]] || grep -E -q "^[[:space:]]*cputs[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/${package}/Cargo.toml"; } && {
             refcputs=true;
             [[ "${package}" == "tlspuffin" ]] && ref_features='cputs';
@@ -225,6 +226,17 @@ ComputeBuildRuntimeInfo() {
   CompatBuildRules "${package}" "${vendor}" "${refcputs}" ref_features || return 1;
   if [ -n "${required_features}" ]; then
     ref_features="${required_features},${ref_features}"
+  fi
+  # the asan cargo feature of an ASAN preset (the launcher gave it for the commits before tlspuffin 854dbaa11, which
+  # link the ASAN runtime only with it): tlspuffin 838bd9588 has no cargo features any more; at a commit without it, the
+  # ASAN preset builds and links ASAN itself, so the feature is dropped, said (else no ASAN build of a recent commit)
+  if [[ ",${ref_features}," == *,asan,* && "${vendor#*:}" =~ (^|[-,])asan([-,]|$) ]] &&
+      ! grep -E -q "^[[:space:]]*asan[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/${package}/Cargo.toml"; then
+    local feature requested=() kept=();
+    IFS=',' read -r -a requested <<< "${ref_features}";
+    for feature in "${requested[@]}"; do [ "${feature}" == asan ] || kept+=("${feature}"); done
+    ref_features=$( IFS=','; echo "${kept[*]}" );
+    echo "asan: no such cargo feature at this commit; the preset ${vendor#*:} builds the library with ASAN: dropped";
   fi
   for i in $( echo "${ref_features}" | sed 's/\([^,]\)[,$]/\1\n/g' ); do
     grep -E -q "^[[:space:]]*${i}[[:space:]]*=" "${THEJOB_OUT_PATH}/repo/${package}/Cargo.toml" || {
@@ -332,8 +344,9 @@ ExperimentSetupForCargo() {
   local library=$( echo "${vendor}" | cut -d: -f1 )
   local library_version='NA'
   if ${cputs}; then
-    # "wolfssl:wolfssl580-asan" → wolfssl + 580
-    library_version=$( echo "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
+    # "wolfssl:wolfssl580-asan" → wolfssl + 580; puffin-build's short form by its build's name (wolfssl:5.8.0,asan:
+    # wolfssl580-asan, VendorSlug)
+    library_version=$( VendorSlug "${vendor}" | cut -d: -f2 | cut -d- -f1 | sed "s/${library}//" )
   else
     # ",?wolfssl540,?" → wolfssl + 540
     # ",?libressl,?" → libressl + 333
@@ -379,12 +392,15 @@ ExperimentSetupForCargo() {
   local vendorVulnerabilities='null';
   [ -s ./.vendor_vulnerabilities.json ] && vendorVulnerabilities=$( < ./.vendor_vulnerabilities.json );
 
+  # the release the build is of, as puffin-build recorded it ("5.10.0": the compact version of the preset's name, 5100,
+  # cannot say it); null without it (a Rust harness, commits before puffin-build)
+  local library_release; library_release=$( VendorRelease "${vendor}" );
   local build;
   build=$( BuildDescription "${cputs}" "${vendor}" "${ref_esfc_features}" "${library}" "${library_version}" );
   echo "${build}" > ./.build_info;
   echo "Build: ${build}";
 
-  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\" }, \"build\": \"${build}\", \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ) }";
+  local jsonCompilInfos="{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${ref_esfc_features}\", \"flags\": \"${extra_flags}\", \"library\": { \"name\": \"${library}\", \"version\": \"${library_version}\", \"release\": $( [ -n "${library_release}" ] && echo "\"${library_release}\"" || echo null ) }, \"build\": \"${build}\", \"vendor_build\": $( VendorBuildJSON "${vendor}" ), \"asan\": ${asanInfo}, \"aslr\": $( [ -n "$( NoAslrPrefix )" ] && echo false || echo true ), \"compat\": $( CompatAppliedJSON ), \"compat_warning\": $( CompatWarningJSON ), \"vendor_sources\": ${vendorSources}, \"vulnerabilities\": ${vendorVulnerabilities}, \"cpus\": $( CpusInfo ), \"custom\": $( CustomExperimentJSON ) }";
   if ((THEJOB_STEP_ATTEMPT_ID == 0)); then
     echo "${jsonCompilInfos}" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json";
   fi
@@ -590,8 +606,12 @@ DetectAsan() {
   fi
   local -n ref_asan=$4;
 
-  local requested=false;
-  [[ ",${features}," == *",asan,"* || "${vendor}" == *-asan* ]] && requested=true;
+  # requested: the asan feature, the build's ASan as mk_vendor says it (ResolveVendor: wolfssl540-heap has it, its name
+  # does not say so), else its name, or a bug only seen with ASan
+  local requested=false resolved;
+  resolved=$( VendorBuildJSON "${vendor}" | jq -r '.asan | select(. != null)' 2> /dev/null );   # (not //: false is kept)
+  [[ ",${features}," == *",asan,"* || "${resolved}" == true || ( -z "${resolved}" && "${vendor}" =~ (^|[-,:])asan([-,]|$) )
+     || "${asan_build:-}" == true ]] && requested=true;
 
   local instrumented=null;
   local runtime='unknown';
@@ -784,6 +804,24 @@ FuzzerRecords() {
   done;
 }
 
+# AsanTypeAwk: the awk function asantype(<ERROR line>) of FuzzerRecordsOf and ObjectiveSignature: AddressSanitizer's
+# report type, the word after "AddressSanitizer:" (heap-buffer-overflow, SEGV, ...), or, for the reports that say
+# what was attempted, the type their SUMMARY line gives (bad-free for "attempting free on address which was not
+# malloc()-ed", double-free, ...). Both prefer the SUMMARY line when they read it (older records said "ASan
+# attempting", which no signature matches: the records cache key v5 renews them).
+AsanTypeAwk() {
+  cat <<'AWK'
+function asantype(s,   t) { t = s; sub(/.*AddressSanitizer: /, "", t);
+  if (t ~ /^attempting double-free/) return "double-free";
+  if (t ~ /^attempting free on address which was not malloc/) return "bad-free";
+  if (t ~ /^attempting to call malloc_usable_size/) return "bad-malloc_usable_size";
+  if (t ~ /^requested allocation size/) return "allocation-size-too-big";
+  if (t ~ /^(allocator is )?out of memory/) return "out-of-memory";
+  if (t ~ /^calloc parameters overflow/) return "calloc-overflow";
+  sub(/ on .*/, "", t); sub(/[ :(].*/, "", t); return t }
+AWK
+}
+
 # FuzzerRecordsOf <log file> <crash|asan>: the records of one log file, as FuzzerRecords prints them. With
 # FUZZER_RECORDS_CACHE (a directory), the records of a file are kept there by path, size and modification time: a file
 # that does not change (a rotated .gz, the logs of an ended attempt) is read once (the live page reads the logs of
@@ -793,7 +831,7 @@ FuzzerRecordsOf() {
   # only a file that no longer changes: a rotated .gz, or one not modified for 5 minutes (an ended attempt)
   if [ -n "${FUZZER_RECORDS_CACHE:-}" ] && { [[ "${f}" == *.gz ]] || (( $( date +%s ) - $( stat -c %Y "${f}" ) > 300 )); }; then
     # (v4: the version of the records; a change of what is recorded makes a new key)
-    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v4 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
+    cached="${FUZZER_RECORDS_CACHE}/$( printf 'v5 %s %s %s' "$( realpath "${f}" )" "$( stat -c '%s %Y' "${f}" )" "${what}" | md5sum | cut -c1-32 )";
     [ -f "${cached}" ] && { cat "${cached}"; return; };
   fi
   { case "${f}" in *.gz) zcat "${f}" 2> /dev/null;; *) cat "${f}";; esac; } |
@@ -845,10 +883,13 @@ FuzzerRecordsOf() {
         return sprintf("%.0f%03d", t, ms) }
       function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor|_ZN11__sanitizer|_ZN6__asan)/ ||
                                  f ~ /^(mem(cpy|move|set|cmp)|str(len|cpy|ncpy|cmp|ncmp|cat)|bcmp)$/) }
+      '"$( AsanTypeAwk )"'
       # the clients share this stderr: several reports can come before the next dated line, each makes a record (the
       # first ones were lost: a crash 1 s earlier then took the report of another client, campaign 1791638282947)
       /ERROR: AddressSanitizer: / { if (inb) { np++; pt[np] = t; pf[np] = fr }
-                                    t = $0; sub(/.*AddressSanitizer: /, "", t); sub(/ on .*/, "", t); sub(/ .*/, "", t); inb = 1; n = 0; fr = ""; next }
+                                    t = asantype($0); inb = 1; n = 0; fr = ""; next }
+      # the report type of its summary: the canonical one (the ERROR line of a bad-free says "attempting free on …")
+      inb && /^SUMMARY: AddressSanitizer: / { s = $0; sub(/.*AddressSanitizer: /, "", s); sub(/[ (].*/, "", s); if (s != "") t = s; next }
       inb && /^ *#[0-9]+ 0x[0-9a-f]+ in / { f = $0; sub(/^ *#[0-9]+ 0x[0-9a-f]+ in /, "", f); sub(/ .*/, "", f);
                                            if (!skip(f) && n < 3) { fr = fr (n ? " < " : "") f; n++ } next }
       inb && /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+[+-][0-9:]+/ { ts = $0; sub(/[ \t].*/, "", ts);
@@ -933,38 +974,121 @@ RecordLoad() {
   return 0;
 }
 
-# ExpectedTarget <vendor>: "cve|kind|match" of the preset's expected bug (VULN_TARGETS, generated by build.sh from
-# vuln_targets.json), empty when the preset has none declared
+# CustomExperimentJSON: the experiment of a custom benchmark (launcher: benchmark, target_bug, target_oracle,
+# catalogue_source), recorded in cli-<step>.json; null for the others (Vuln group A and B name their bug too)
+CustomExperimentJSON() {
+  [ -n "${target_bug:-}" ] && [ -n "${benchmark:-}" ] || { echo null; return 0; };
+  jq -cn --arg benchmark "${benchmark:-}" --arg bug "${target_bug}" --arg source "${catalogue_source:-commit}" \
+    --argjson oracle "${target_oracle:-null}" '{ benchmark: $benchmark, target: $bug, oracle: $oracle, catalogue: $source }' 2> /dev/null || echo null;
+}
+
+# KnownVendorBuild <library> <name>: true when mk_vendor builds <library>:<name> at this commit (the task's clone): a
+# build its presets.toml names (format 1: its tables; format 2, tlspuffin pr/vuln-catalogue: the build of each version
+# under its name, the aliases, and any name of puffin-build's grammar on these, <name>-<modifier>… or
+# <version>[,<modifier>…]: mk_vendor tells the rest), or a build derived from its catalogue (vulnerabilities.toml): <ID>
+# of an entry, <preset>-only-<IDs>, <preset>-fix-<IDs>, <preset>-fix-all (custom benchmarks)
+KnownVendorBuild() {
+  local dir="${THEJOB_OUT_PATH}/repo/puffin-build/vendors/$1";
+  [ -e "${dir}/presets.toml" ] || return 1;
+  python3 -I - "${dir}" "$2" <<'PY' 2> /dev/null
+import os, re, sys, tomllib
+directory, name = sys.argv[1], sys.argv[2]
+presets = tomllib.load(open(os.path.join(directory, 'presets.toml'), 'rb'))
+if presets.get('format') == 2:
+    template = (presets.get('library') or {}).get('name', os.path.basename(directory) + '{compact}')
+    names = [(entry or {}).get('name') or template.replace('{version_}', version.replace('.', '_'))
+             .replace('{compact}', version.replace('.', '')).replace('{version}', version)
+             for version, entry in (presets.get('versions') or {}).items()] + list(presets.get('aliases') or {})
+    if name in names or ',' in name or any(name.startswith(known + '-') for known in names):
+        sys.exit(0)
+else:
+    names = [key for key, value in presets.items() if isinstance(value, dict)]
+    if name in names:
+        sys.exit(0)
+try:
+    entries = tomllib.load(open(os.path.join(directory, 'vulnerabilities.toml'), 'rb'))
+except OSError:
+    sys.exit(1)
+base = re.sub(r'-(only|fix)-.*$', '', name)
+sys.exit(0 if name in entries or (base != name and base in names) else 1)
+PY
+}
+
+# ExpectedTarget <vendor>: "cve|kind|match" of the expected bug: that of a custom benchmark's experiment, a catalogue
+# entry (target_bug, its oracle in target_oracle: "<ID>|oracle|"), else that of the preset (VULN_TARGETS, generated by
+# build.sh from vuln_targets.json); empty when none is declared
 ExpectedTarget() {
+  [ -n "${target_bug:-}" ] && [ -n "${target_oracle:-}" ] && { echo "${target_bug}|oracle|"; return 0; };
   declare -p VULN_TARGETS > /dev/null 2>&1 || return 0;
   echo "${VULN_TARGETS[$1]:-}";
 }
 
+# OracleMatches <oracle (JSON: kind, signal, asan, violation, panic: a catalogue entry's)> <kind: crash|claim> <detail>:
+# true when a fuzzer's record (FuzzerVerdict: a claim and its message; a crash, its signal and " · ASan <report type>")
+# or a replay ("ASan <report type>") has that oracle's signature
+OracleMatches() {
+  jq -e --arg kind "$2" --arg detail "$3" '
+    . as $o | ($o.kind == $kind) and
+    (if $o.kind == "claim" then ($o.violation == null or $o.violation == $detail)
+     else (($o.signal == null or ($detail | startswith($o.signal)))
+           and ($o.asan == null or ([$detail | scan("ASan ([A-Za-z_-]+)")] | any(.[0] == $o.asan))
+                # ASan reports SEGV, BUS, FPE and ILL from its signal handler, which the fuzzer (LibAFL) replaces with
+                # its own: its record of such a crash has the signal only, which stands for the report (validation
+                # replays it with ASan)
+                or (($detail | test("ASan ") | not)
+                    and ({"SEGV": "SIGSEGV", "BUS": "SIGBUS", "FPE": "SIGFPE", "ILL": "SIGILL"}[$o.asan] as $signal
+                         | $signal != null and ($detail | startswith($signal)))))
+           and ($o.panic == null)) end)' <<< "$1" > /dev/null 2>&1;
+}
+
+# HasPlace <place "A < B < C"> <frames "a < b < c">: whether a crash's stack has a known bug's place, by the one rule of
+# the bench (common/signatures.js HasPlace, rule R3: its first frames outside the sanitizer runtime, libc and the fuzzer
+# are the place's, in order), asked of tools/js/has_place.js with the bench's qjs; the answers kept per place and frames
+# (a run can have thousands of objectives). 2 when it cannot be asked (said on stderr: never taken for "no")
+declare -gA HAS_PLACE_CACHE=();
+HasPlace() {
+  local key="$1"$'\t'"$2" rc;
+  if [ -z "${HAS_PLACE_CACHE[${key}]:-}" ]; then
+    "${THEJOB_TOOLS_PATH:-}/qjs" --std -m "${THEJOB_TOOLS_PATH:-}/js/has_place.js" "$1" "$2" 2> /dev/null; rc=$?;
+    if (( rc > 1 )); then echo "HasPlace: ${THEJOB_TOOLS_PATH:-}/js/has_place.js could not run (exit ${rc})" >&2; return 2; fi
+    HAS_PLACE_CACHE[${key}]=${rc};
+  fi
+  return "${HAS_PLACE_CACHE[${key}]}";
+}
+
 # TargetMatches <cve|kind|match> <kind: crash|claim> <detail> <frames "a < b < c">: true when that record (or replay
-# signature) is the expected bug: a crash with the frame among its top 3 frames, or the claim with that message
+# signature) is the expected bug: a crash whose stack has the target's place (match: "A < B < C", vuln_targets.json
+# place; HasPlace), or the claim with that message; a catalogue entry (kind "oracle"): its oracle (OracleMatches). 2:
+# the place could not be checked (HasPlace), neither yes nor no
 TargetMatches() {
   local cve kind match; IFS='|' read -r cve kind match <<< "$1";
   [ -n "${kind}" ] || return 1;
-  if [ "${kind}" == claim ]; then
+  if [ "${kind}" == oracle ]; then
+    OracleMatches "${target_oracle:-null}" "$2" "$3";
+  elif [ "${kind}" == claim ]; then
     [ "$2" == claim ] && [ "$3" == "${match}" ];
   else
     [ "$2" == crash ] || return 1;
-    local top; top=$( awk -F' < ' '{ for (i = 1; i <= NF && i <= 3; i++) print $i }' <<< "$4" );
-    grep -qF -- "${match}" <<< "${top}";
+    HasPlace "${match}" "$4";
   fi
 }
 
 # ObjectiveTargeted <records (FuzzerRecords)> <objective name> [<expected target>]: from the fuzzer's record of the
 # objective, 0 targeted (the expected bug; without target declared: any bug but OBJECTIVES_NOT_TARGETED), 1 not
-# targeted (OBJECTIVES_NOT_TARGETED), 2 no record of it in the fuzzer's logs (yet), 3 another bug than the expected one
+# targeted (OBJECTIVES_NOT_TARGETED, but in an experiment looking for that very bug: target_bug), 2 no record of it in
+# the fuzzer's logs (yet), 3 another bug than the expected one, 4 its place could not be checked (HasPlace could not
+# run: the bench's tools incomplete), never taken for another bug
 ObjectiveTargeted() {
   local verdict; verdict=$( FuzzerVerdict "$1" "$2" );
   [ -n "${verdict}" ] || return 2;
-  local kind detail frames; IFS=$'\t' read -r kind detail frames _ <<< "${verdict}";
-  # a claim set apart for what this run built (./.build_info, written by the experiment step)
-  [ "${kind}" == claim ] && NotTargetedCVE "${detail}" "$( cat ./.build_info 2> /dev/null )" > /dev/null && return 1;
+  local kind detail frames apart=''; IFS=$'\t' read -r kind detail frames _ <<< "${verdict}";
+  # a claim set apart for what this run built (./.build_info, written by the experiment step), unless it is the bug the
+  # experiment names (a custom benchmark of CVE-2024-5814 on wolfSSL < 5.7.2)
+  if [ "${kind}" == claim ]; then apart=$( NotTargetedCVE "${detail}" "$( cat ./.build_info 2> /dev/null )" ) || apart=''; fi
+  [ -n "${apart}" ] && [ "${apart}" != "${target_bug:-}" ] && return 1;
   [ -z "${3:-}" ] && return 0;
-  TargetMatches "$3" "${kind}" "${detail}" "${frames}" && return 0;
+  TargetMatches "$3" "${kind}" "${detail}" "${frames}";
+  case $? in 0) return 0;; 2) return 4;; esac
   return 3;
 }
 
@@ -1047,7 +1171,9 @@ FuzzerExcerpt() {
 #   perf  1: until 2026-11, 3 clients per run on 2 physical cores, one build per run.
 #         2: from 2026-11, two one-client runs per physical core (twin: 20 runs of each library on 10 physical cores),
 #            one build per library (PR_perf.sh TwinExperiment).
-#   vuln, campaign  1.
+#   vuln, campaign  1. (Since 2026-11 a Vuln run naming its bug ends on a find validation confirmed, on the commits
+#         with tlspuffin's catalogue only: told per run, its monitor "confirmed find" (confirmed_by), which Results and
+#         runs_report.py compare; the runs of the other commits end as before.)
 declare -gA PB_MAJOR_VERSION=( [perf]=2 )
 
 # SummaryAddBench <summary.json>: the puffin-bench version that produced the results (version.json, written by
@@ -1075,8 +1201,8 @@ ObjectiveSignature() {
   awk '
     function skip(f) { return (f ~ /^(__asan|__interceptor|__sanitizer|__lsan|__ubsan|___interceptor)/ ||
                                f ~ /^(mem(cpy|move|set|cmp)|str(len|cpy|ncpy|cmp|ncmp|cat)|bcmp)$/) }
-    type == "" && match($0, /ERROR: AddressSanitizer: [A-Za-z_-]+/) {
-      type = substr($0, RSTART + 25, RLENGTH - 25); start = NR; next }
+    '"$( AsanTypeAwk )"'
+    type == "" && /ERROR: AddressSanitizer: [A-Za-z_-]+/ { type = asantype($0); start = NR; next }
     type == "" && panic == "" && /panicked at / { panic = $0; sub(/.*panicked at /, "", panic); sub(/:$/, "", panic) }
     # security oracle (claims): "error because a security violation occurred. msg: <msg>" logged by the forked
     # execution, or "Failed to execute trace <path>: SecurityClaim(\"<msg>\")" on older commits
@@ -1092,7 +1218,8 @@ ObjectiveSignature() {
       f = $0; sub(/^[^(]*\(/, "", f); sub(/\).*/, "", f); sub(/.*\//, "", f);
       if (f !~ /^libclang_rt\.|^libasan/ && n < 3) frames[++n] = f; seen = 1; next }
     type != "" && seen && /^ *$/ { done = 1 }
-    type != "" && summary == "" && /^SUMMARY: AddressSanitizer:/ { summary = $0 }
+    type != "" && summary == "" && /^SUMMARY: AddressSanitizer:/ { summary = $0
+      t = $0; sub(/.*AddressSanitizer: /, "", t); sub(/[ (].*/, "", t); if (t != "") type = t }
     /error while loading shared libraries|binary not found:|^error: could not compile|^binary changed since the experiment/ { replayerr = $0 }
     # the sanitizer itself crashed while reporting ("AddressSanitizer: nested bug in the same thread"), with no stack:
     # the ASAN runtime of LLVM < 18 under more than 28 bits of mmap randomization (the replay ran with ASLR, see
@@ -1238,6 +1365,28 @@ ExperimentReplayObjectives() {
   return 0;
 }
 
+# StripDebugAranges <binary>: a binary built here without its .debug_aranges section, for ASan's symbolized stacks (the
+# replays, the live replays, validation). The section indexes the address ranges of each compile unit, and LLVM's tools,
+# ASan's llvm-symbolizer among them, trust it before the units' own ranges (DW_AT_ranges). In the builds of rustc 1.94
+# one entry is wrong: libafl_targets' unit claims [0x0, 0x3040000), the whole program, so every address was taken for it
+# and no frame had a file or a line (its function from the symbol table, its file from the nearest FILE symbol:
+# "AddPacketInfo cryptocb.c"). Without the section they read each unit's own ranges, as the fuzzer's backtraces do
+# (gimli's addr2line prefers them). The code does not change, nor the file's inode (target/release/<bin> and
+# target/release/deps/<bin>-<hash> are one file, which cargo keeps). A binary without the section, or one objcopy
+# cannot rewrite, is left as it is (said).
+StripDebugAranges() {
+  local binary="$1" stripped;
+  [ -f "${binary}" ] && readelf -S -W "${binary}" 2> /dev/null | grep -q '[[:space:]]\.debug_aranges[[:space:]]' || return 0;
+  stripped=$( mktemp "${binary}.XXXXXX" ) || return 0;
+  if objcopy --remove-section .debug_aranges "${binary}" "${stripped}" 2> /dev/null && cat "${stripped}" > "${binary}"; then
+    echo "StripDebugAranges: ${binary} without .debug_aranges (its symbolized stacks have files and lines)";
+  else
+    echo "StripDebugAranges: ${binary} kept as built, with .debug_aranges (its symbolized stacks may lack files and lines)" >&2;
+  fi
+  rm -f "${stripped}";
+  return 0;
+}
+
 # CargoAsanOptions <repository>: the ASAN_OPTIONS of the [env] of its .cargo/config.toml, which cargo run gives the
 # fuzzer when the variable is not set (empty: none)
 CargoAsanOptions() {
@@ -1368,13 +1517,61 @@ DetectVendorSources() {
   ref_sources="[${ref_sources}]";
 }
 
+# Names of a vendor's build. The vendor (`<library>:<name>`, a step argument) is a preset of presets.toml, or, at a
+# commit whose puffin-build has its names (tlspuffin 54b07f490, 2026-11-10), any of them: puffin-build's short form
+# `wolfssl:5.8.4,asan`, `wolfssl:5.4.0,asan,only-HEAP`. Its build has one name of its own, its slug (`wolfssl584-asan`,
+# no comma): its folder (./vendor/<slug>) and PUT. The scripts name the build by it wherever a name is a path, a title or
+# a description: tlspuffin's build cuts paths at commas, and the records of earlier runs use it.
+#
+# ResolveVendor <vendor>: in the checkout, what mk_vendor says the build is (`mk_vendor list --json`, which builds
+# nothing): its slug, canonical name, version, ASan, and the base of a build derived from the catalogue; kept for the
+# task's other steps (VendorResolvedFile). Nothing at a commit whose mk_vendor does not say it (a preset: its own slug),
+# nor for a name it refuses (the build then says why: MakeVendor).
+ResolveVendor() {
+  local vendor="$1" file json;
+  [[ "${vendor}" == *:* ]] && [ -r "./puffin-build/vendors/${vendor%%:*}/presets.toml" ] && [ -x ./tools/mk_vendor ] || return 0;
+  file=$( VendorResolvedFile "${vendor}" ) || return 0;
+  json=$( nix-shell --run "./tools/mk_vendor list '${vendor}' --json" 2> /dev/null ) || return 0;
+  jq -e -c '{ slug, canonical, version, asan, base: (.derived.base // null) } | select((.slug | type) == "string" and .slug != "")' \
+      <<< "${json}" > "${file}.tmp" 2> /dev/null && mv -f "${file}.tmp" "${file}" || rm -f "${file}.tmp";
+  [ -s "${file}" ] && echo "The build of ${vendor}: $( jq -r '.slug' "${file}" ) ($( jq -r '.canonical // "?"' "${file}" ))";
+  return 0;
+}
+# VendorResolvedFile <vendor>: where ResolveVendor keeps what it found (the task's output folder); fails without one
+VendorResolvedFile() {
+  [ -n "${THEJOB_OUT_PATH:-}" ] && [ -n "$1" ] || return 1;
+  mkdir -p "${THEJOB_OUT_PATH}/vendor-builds" 2> /dev/null || return 1;
+  echo "${THEJOB_OUT_PATH}/vendor-builds/$( printf '%s' "$1" | md5sum | cut -c1-16 ).json";
+}
+# VendorSlug <vendor>: "<library>:<slug>", the vendor as its build is named (ResolveVendor); the vendor as given when
+# not resolved (a preset name, its own slug; a Rust harness feature)
+VendorSlug() {
+  local file slug='';
+  file=$( VendorResolvedFile "$1" ) && [ -s "${file}" ] && slug=$( jq -r '.slug // empty' "${file}" 2> /dev/null );
+  if [ -n "${slug}" ]; then echo "${1%%:*}:${slug}"; else echo "$1"; fi
+}
+# VendorBuildJSON <vendor>: what ResolveVendor found ({ slug, canonical, version, asan, base }), for the run's record;
+# null when not resolved
+VendorBuildJSON() {
+  local file; file=$( VendorResolvedFile "$1" ) && [ -s "${file}" ] && jq -c . "${file}" 2> /dev/null || echo null;
+}
+
+# VendorRelease <vendor preset "<library>:<name>">: the release of the library its build is of, dotted ("5.5.2"), from
+# puffin-build's record of the build (./vendor/<slug>/.vendor_config: [sources] version); nothing when not recorded
+VendorRelease() {
+  local name; name=$( VendorSlug "$1" ); name="${name#*:}"; local config;
+  config="./vendor/${name}/.vendor_config";
+  [ -n "${name}" ] && [ -r "${config}" ] || return 0;
+  awk -F' = ' '/^\[/ { s = ($0 == "[sources]") } s && $1 == "version" { gsub(/"/, "", $2); if ($2 ~ /^[0-9]+(\.[0-9]+)*[a-z]*$/) print $2; exit }' "${config}";
+}
+
 # DetectVendorVulnerabilities <vendor preset "<library>:<name>">: the vulnerabilities tlspuffin declares for that build,
 # from its vendorinfo.sh (puffin-build, written next to the build: KNOWN_VULNERABILITIES from the library's builder.cmake
 # for its version, FIXED_VULNERABILITIES patched by the preset's "fix" list), read without running it:
 # {"known": [...], "fixed": [...], "declared": known minus fixed}; null when the preset was not built here (Rust harness,
 # commits before puffin-build). The objectives pages do not flag a bug as new when it is one of the declared CVEs.
 DetectVendorVulnerabilities() {
-  local name="${1#*:}" info;
+  local name; name=$( VendorSlug "$1" ); name="${name#*:}"; local info;
   [ -n "${name}" ] && info=$( ls -1 ./vendor/"${name}"/build/vendorinfo.sh 2> /dev/null | head -1 );
   [ -n "${info}" ] && [ -r "${info}" ] || { echo null; return 0; }
   local known fixed;
@@ -1415,7 +1612,15 @@ ExperimentEndCommon() {
   ipcrm --all
 }
 
+# ExperimentTitle: the experiment's name for the fuzzer (its -d and -t, the name of its folder): the experiment's own,
+# its build's name when it is the vendor (a campaign's experiment is its vendor: wolfssl:5.8.4,asan is named
+# wolfssl:wolfssl584-asan, VendorSlug: no comma in the folder)
+ExperimentTitle() {
+  if [ -n "${vendor:-}" ] && [ "${experiment}" == "${vendor}" ]; then VendorSlug "${vendor}"; else echo "${experiment}"; fi
+}
+
 ExperimentRun() {
+  local title; title=$( ExperimentTitle );
   if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
     echo "Missing global variable AFL_CORES_GRAMMAR"
     return 1;
@@ -1468,7 +1673,7 @@ ExperimentRun() {
   # the objective replays run exactly this: binary, options, prefixes, ASAN_OPTIONS
   ExperimentSaveExecution "${binary}" "${extra_flags}" false
   ExperimentSaveLaunchInfo
-  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\"" &
   ref_tlspuffin_pid=$!
 
   ref_tlspuffin_killed=0
@@ -1480,7 +1685,38 @@ ExperimentRun() {
   return 0;
 }
 
+# ── One build per experiment ──
+# BuildOnce, the step of a group of the flow run once per configuration before its attempts (Perf, Vuln group A and B,
+# custom benchmarks, campaigns), builds the library and tlspuffin (ForcedBuild) in SharedBuildDir; each attempt (each
+# run) works from it (SharedRunDir), the binary run directly, as cargo run would. Before, every attempt of a Vuln
+# experiment or campaign made the same build, at the same time.
+SharedBuildDir() { echo "${THEJOB_OUT_PATH:-}/build-${THEJOB_STEP_ID:-}"; }
+
+BuildOnce() {
+  local dir; dir=$( SharedBuildDir )
+  rm -rf "${dir}" && mkdir -p "${dir}" || return 1
+  ( cd "${dir}" && ForcedBuild "${@}" )
+}
+
+# SharedRunDir: the folder of one attempt or run from the shared build: its binary, seeds, vendor libraries and cargo
+# configuration linked, its records and nix shell copied; the build's .unsupported copied when the experiment cannot
+# run (then nothing else)
+SharedRunDir() {
+  local build entry; build=$( SharedBuildDir )
+  [ -r "${build}/.unsupported" ] && { cp "${build}/.unsupported" .; return 0; }
+  [ -x "${build}/target/release/${PACKAGE:-tlspuffin}" ] ||
+      { echo "no build in ${build}: the experiment's build (BuildOnce) failed, its log says why"; return 1; }
+  for entry in seeds target vendor .cargo; do
+    [ -e "${build}/${entry}" ] && ln -sfn "${build}/${entry}" "./${entry}"
+  done
+  for entry in .asan_info.json .vendor_sources.json .vendor_vulnerabilities.json client_log_config.yml shell.nix; do
+    [ -e "${build}/${entry}" ] && cp -a "${build}/${entry}" .
+  done
+  return 0
+}
+
 ExperimentRunWithCargo() {
+  local title; title=$( ExperimentTitle );
   if [ -z "${AFL_CORES_GRAMMAR:+x}" ]; then
     echo "Missing global variable AFL_CORES_GRAMMAR"
     return 1;
@@ -1524,6 +1760,15 @@ ExperimentRunWithCargo() {
 
   echo "${THEJOB_STEP_UUID}" > .thejob_uuid
 
+  # the experiment's build, made once (BuildOnce): this attempt runs from it; else (a flow without it) from its own
+  # build (ForcedBuild in this folder), by cargo run
+  local shared=false;
+  if [ -d "$( SharedBuildDir )" ]; then
+    SharedRunDir || return 1;
+    [ -r ./.unsupported ] && { echo "Unsupported: $( < ./.unsupported )"; return 1; };
+    shared=true;
+  fi
+
   CompatApplyFlags extra_flags;
 
   local last_core=0;
@@ -1531,15 +1776,37 @@ ExperimentRunWithCargo() {
   CompatApplyFiles || return 1;
   local cores="";
   (( AFL_CORES_GRAMMAR == 0 )) && cores="0-${last_core}" || cores="${THEJOB_CORES}"
+  if ${shared}; then
+    # its binary run directly, with the ASAN_OPTIONS cargo run would give it (the build's cargo configuration)
+    local binary="./target/release/${PACKAGE}";
+    if [ -z "${ASAN_OPTIONS+x}" ]; then
+      local asan; asan=$( CargoAsanOptions "$( SharedBuildDir )" );
+      [ -n "${asan}" ] && export ASAN_OPTIONS="${asan}";
+    fi
+    echo "nix-shell --run exec ${PREFIX_FAKETIME} ${binary} --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\" (the experiment's build, BuildOnce; ASAN_OPTIONS=${ASAN_OPTIONS:-unset})"
+    echo "exec ${PREFIX_FAKETIME} ${binary}" > .currentcmd
+    ExperimentSaveExecution "${binary}" "${extra_flags}" false
+    ExperimentSaveLaunchInfo
+    $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} \"${binary}\" --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\"" &
+    ref_tlspuffin_pid=$!
+    echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
+    ref_tlspuffin_killed=0
+    if ! ExperimentPostLaunchSetup ref_stats "${ref_tlspuffin_pid}" "${saveData}" "${features:-none}"; then
+      echo "KILLING tlspuffin, experiment post launch setup failed" >&2
+      kill -9 "${ref_tlspuffin_pid}" 2>/dev/null;
+      ref_tlspuffin_killed=1
+    fi
+    return 0;
+  fi
   local featuresCLI='';
   [ -n "${features}" ] && featuresCLI="--features=${features}";
-  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\""
+  echo "nix-shell --run exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\""
   echo "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI}" > .currentcmd
   # the objective replays run exactly this: the binary cargo runs (built by ForcedBuild), options, prefixes,
   # ASAN_OPTIONS
   ExperimentSaveExecution "${CARGO_TARGET_DIR:-target}/release/${PACKAGE}" "${extra_flags}" true
   ExperimentSaveLaunchInfo
-  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${experiment}\" -t \"${experiment}\"" &
+  $( NoAslrPrefix ) nix-shell --run "exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- --cores ${cores} --port ${RESERVED_PORT} ${extra_flags} experiment -d \"${title}\" -t \"${title}\"" &
   ref_tlspuffin_pid=$!
   echo "tlspuffin monitored pid is ${ref_tlspuffin_pid}" >&2
 
@@ -1655,6 +1922,18 @@ Init () {
   return 0;
 }
 
+# MakeVendor <vendor> [--asan]: the vendor library of a build (mk_vendor make, in the checkout). Its failure stops the
+# build: tlspuffin built without the library has no PUT for it, and its experiments started on the fuzzer's default
+# PUT (tcp), every client exiting at once (the campaigns of 2026-11-15, whose build folder had a comma: mk_vendor's
+# patch step cut the path there). mk_vendor exits non-zero only on an error, in every version (2024-04 on).
+MakeVendor() {
+  local vendor="$1" asanFlag="${2:+$2 }";
+  echo "nix-shell --run \"./tools/mk_vendor make ${asanFlag}'${vendor}'\""
+  nix-shell --run "./tools/mk_vendor make ${asanFlag}'${vendor}'" && return 0;
+  echo "mk_vendor could not build ${vendor} (its error above): the build stops here";
+  return 1;
+}
+
 Build() {
   if [ -z "${features}" ] && [ -z "${vendor}" ]; then
     echo "Missing required global variable: features | vendor"
@@ -1686,12 +1965,13 @@ Build() {
     cp -apr "${THEJOB_OUT_PATH}/repo" . || return 1;
     cd repo || return 1;
     if ${cputs}; then
-      nix-shell --run "./tools/mk_vendor make '${vendor}'"
+      MakeVendor "${vendor}" || return 1;
     fi
     local featuresCLI='';
     [ -n "${features}" ] && featuresCLI="--features=${features}";
     nix-shell --run "cargo build --bin \"${PACKAGE}\" --release ${featuresCLI} -j ${THEJOB_NB_CORES}" || return 1
     binary=$( realpath "./target/release/${PACKAGE}" )
+    StripDebugAranges "${binary}";
     SetCache "${cache_id}" "${binary}"
   else
     echo "Found in cache"
@@ -1715,6 +1995,8 @@ ForcedBuild() {
 
   cp -apr "${THEJOB_OUT_PATH}/repo/." . || return 1;
   rm -f ./.unsupported
+  # the build's own name and facts, for the steps after this one (puffin-build's short form: wolfssl:5.8.4,asan)
+  ResolveVendor "${vendor}"
 
   local cputs=false
   ComputeBuildRuntimeInfo "${PACKAGE}" "${vendor}" features cputs || {
@@ -1734,14 +2016,38 @@ ForcedBuild() {
   [ -n "${features}" ] && featuresCLI="--features=${features}";
 
   if ${cputs}; then
+    # a custom benchmark on dev's catalogue: dev's vulnerabilities.toml files and patches replace the commit's
+    if [ "${catalogue_source:-}" == dev ]; then
+      local devCatalogue; devCatalogue=$( ValidationOverlayDev "${PWD}" "${THEJOB_OUT_PATH}/repo" ) || { echo "cannot read dev's catalogue"; return 1; };
+      echo "The catalogue of dev (${devCatalogue:0:10}) for the build of ${vendor}";
+    fi
     rm -rf ./vendor
-    echo "nix-shell --run \"./tools/mk_vendor make '${vendor}'\""
-    nix-shell --run "./tools/mk_vendor make '${vendor}'"
+    # a custom benchmark's experiment whose bug is only recognised with ASan (asan_build): ASan whatever the preset
+    local asanFlag=''; [ "${asan_build:-}" == true ] && asanFlag='--asan';
+    MakeVendor "${vendor}" ${asanFlag} || return 1;
+    # an experiment naming its bug (custom benchmarks, Vuln group A and B): its target must be in the library built
+    # (the launcher cannot know every PUT capability); a library the catalogue says is without it (unaffected, fixed)
+    # makes the attempt unsupported, as for the compat rules (a custom benchmark: anything but active). A commit without
+    # catalogue: as before
+    if [ -n "${target_bug:-}" ] && [ -r "./puffin-build/vendors/${vendor%%:*}/vulnerabilities.toml" ]; then
+      local targetState; targetState=$( nix-shell --run "./tools/mk_vendor list '${vendor}' --json" 2> /dev/null |
+          jq -r --arg id "${target_bug}" '[.entries[] | select(.id == $id) | .state][0] // "not in the catalogue"' );
+      if [ "${targetState}" == unaffected ] || [ "${targetState}" == fixed ] ||
+         { [ -n "${benchmark:-}" ] && [ "${targetState}" != active ]; }; then
+        local why="${target_bug} is not in ${vendor} (${targetState:-unknown}): nothing to look for";
+        echo "${why}"; echo "${why}" > ./.unsupported;
+        echo "{ \"package\": \"${PACKAGE}\", \"cputs\": ${cputs}, \"vendor\": \"${vendor}\", \"features\": \"${features}\", \"flags\": \"${extra_flags}\", \"unsupported\": \"${why}\", \"custom\": $( CustomExperimentJSON ) }" > "${THEJOB_OUT_PATH}/cli-${THEJOB_STEP_ID}.json"
+        echo "{ \"unsupported\": \"${why}\" }" >> "${THEJOB_USER_STATE_FILE}"
+        return 0;
+      fi
+    fi
   fi
 
   rm -rf ./seeds
   echo "nix-shell --run \"cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed\""
   $( NoAslrPrefix ) nix-shell --run "cargo run --release --bin \"${PACKAGE}\" ${featuresCLI} -j ${THEJOB_NB_CORES} -- seed" || return 1;
+  # the binary just built, for ASan's stacks with files and lines in the replays (StripDebugAranges)
+  StripDebugAranges "./target/release/${PACKAGE}";
 
   rm -rf ./experiments
   echo "nix-shell --run \"exec ${PREFIX_FAKETIME} cargo run --bin \"${PACKAGE}\" --release ${featuresCLI} -- help\""
@@ -1770,7 +2076,42 @@ Clean() {
 
 CleanAllRepo() {
   ipcrm --all
+  # the checkouts of the validations prepared once per configuration (their worktrees are in the repository)
+  declare -F ValidationCleanupShared > /dev/null && ValidationCleanupShared;
   rm -rf "${THEJOB_OUT_PATH}/repo*"
+}
+
+# ObjectivesPlaceholders: as soon as a run has an objective, the two objectives pages of the task exist, as placeholders
+# until the tools of the bench write them (the board and the run's monitor link them at once): live-<task>.html (its
+# first replays: objectives_live.sh, every OBJECTIVES_LIVE_EVERY seconds, at most OBJECTIVES_LIVE_BUDGET of replays)
+# and <task>.html (the final report: objectives_report.sh, every OBJECTIVES_REPORT_EVERY seconds once the task ended;
+# meanwhile the last live page). Never over a page already there; nothing when the pages' folder is not there.
+ObjectivesPlaceholders() {
+  local dir="${OBJECTIVES_PAGES_DIR:-${THEJOB_TOOLS_PATH}/../html/objectives}" task="${THEJOB_TASK_ID:-}";
+  [ -n "${task}" ] && [ -d "${dir}" ] && [ -w "${dir}" ] || return 0;
+  local board; board="http://$( hostname -f 2> /dev/null || hostname ):10082/files/board/task.html?id=${task}";
+  local json name kind;
+  for kind in live final; do
+    if [ "${kind}" == live ]; then name="live-${task}"; else name="${task}"; fi
+    [ -e "${dir}/${name}.json" ] || [ -e "${dir}/${name}.html" ] && continue;
+    json=$( jq -n --arg task "${task}" --arg commit "${COMMIT_ID:-}" --arg kind "${kind}" --arg board "${board}" \
+        --argjson first "$( date +%s )" --argjson live "${OBJECTIVES_LIVE_EVERY:-300}" \
+        --argjson budget "${OBJECTIVES_LIVE_BUDGET:-240}" --argjson report "${OBJECTIVES_REPORT_EVERY:-600}" \
+        '{ task: $task, commit: $commit, task_url: $board, placeholder: $kind, first_objective: $first,
+           refresh: { live_every_s: $live, live_budget_s: $budget, report_every_s: $report }, runs: [] }
+         + (if $kind == "live" then { live: true } else { pending_final: true, live_page: ("live-" + $task + ".html") } end)' ) || continue;
+    printf '%s\n' "${json}" > "${dir}/.${name}.json.$$" && mv -n "${dir}/.${name}.json.$$" "${dir}/${name}.json";
+    rm -f "${dir}/.${name}.json.$$";
+    cat > "${dir}/.${name}.html.$$" <<EOF_HTML
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Objectives ${task}</title><link rel="stylesheet" href="report.css"></head>
+<body><div id="report" data-json="${name}.json"><p style="padding:20px">Loading the objectives of task ${task}…</p></div>
+<script type="module" src="report.js"></script></body></html>
+EOF_HTML
+    mv -n "${dir}/.${name}.html.$$" "${dir}/${name}.html"; rm -f "${dir}/.${name}.html.$$";
+  done
+  return 0;
 }
 
 MonitorExperiment() {
@@ -1902,8 +2243,8 @@ MonitorExperiment() {
         local last_objective_time=$(find "$objective_dir" -type f -name "*.trace" ! -name ".*" -printf "%T@\n" | sort -nr 2>/dev/null | head -n1 | cut -d. -f1)
         local now=$(date +%s)
         last_objective_elapsed=$(( (now - last_objective_time) / 60 ))
-        local mark='🎉 '; [ "${OBJECTIVES_EXPECTED:-false}" == true ] && mark='';  # expected in VulnA/VulnB
-        echo "    ==> ${mark}Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> ${outfile}
+        # counted, not judged: whether they are news is their objectives report's (its level, on the board and History)
+        echo "    ==> 🐞 Objective: $objective_count file(s), last modified: $last_objective_elapsed minutes ago - $last_objective" >> ${outfile}
         # newest objectives; they are replayed and grouped by bug at the end of the run (ExperimentReplayObjectives)
         find "$objective_dir" -maxdepth 1 -type f -name '*.trace' ! -name '.*' -printf '%T@ %f\n' | sort -nr | head -n 5 |
         while read -r objective_time objective_name; do
@@ -1913,6 +2254,8 @@ MonitorExperiment() {
             sort -nr | head -n 5 | while read -r objective_time objective_name; do
               echo "$(( (now - ${objective_time%.*}) / 60 )) ${objective_name}"; done )
         liveURL="http://$( hostname -f 2> /dev/null || hostname ):10083/html/objectives/live-${THEJOB_TASK_ID}.html"
+        # the pages it names exist from now on, as placeholders until the bench's tools write them
+        ObjectivesPlaceholders;
         echo "        (live, grouped by bug: page objectives/live-${THEJOB_TASK_ID}.html of the publisher, ${liveURL}; at the end of the run: 🐞 on the dashboard)" >> ${outfile}
       else
         echo "    No objective yet ✓" >> ${outfile}

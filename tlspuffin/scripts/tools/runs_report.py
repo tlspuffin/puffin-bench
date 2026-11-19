@@ -167,10 +167,12 @@ def global_execs_at(z, name, time_ms):
     return None
 
 
-def set_apart_claims(vendor):
-    """the claims set apart (NOT_TARGETED) for what a run of that vendor preset builds ("wolfssl:wolfssl540-buf":
-    wolfssl 540), as NotTargetedCVE in PR_common.sh"""
-    m = re.search(r'([a-z]+)(\d{3,})', vendor.split(':')[-1])
+def set_apart_claims(vendor, build=None):
+    """the claims set apart (NOT_TARGETED) for what a run of that vendor builds, as NotTargetedCVE in PR_common.sh: its
+    library and version from its build's slug (the run's record, vendor_build: "wolfssl:5.4.0,asan" builds
+    wolfssl540-asan, wolfssl 540), else from the vendor as given (a preset's name is its slug:
+    "wolfssl:wolfssl540-buf")"""
+    m = re.search(r'([a-z]+)(\d{3,})', (build or {}).get('slug') or vendor.split(':')[-1])
     claims = set()
     for claim, e in NOT_TARGETED.items():
         if not e.get('library'):
@@ -254,7 +256,8 @@ def vuln_metrics(z, summary, report, targets, vendors):
                              'to_target': None, 'measured': None})
                 continue
             times = sorted(objs.get((lib, a), []))
-            warns, crashes = log_events(z, fuzzer_logs(z, lib, a), set_apart_claims(vendors.get(lib, ''))) if times else ([], [])
+            apart = set_apart_claims(vendors.get(lib, ''), (info.get('cli') or {}).get('vendor_build'))
+            warns, crashes = log_events(z, fuzzer_logs(z, lib, a), apart) if times else ([], [])
             targeted = []
             for t, name in times:
                 nt = any(abs(t - w) <= 500 for w in warns) and not any(-2000 <= t - c <= 2000 for c in crashes)
@@ -265,7 +268,10 @@ def vuln_metrics(z, summary, report, targets, vendors):
             first_any = (times[0][0] / 1000 - t0) if times else None
             first_targeted = (targeted[0] / 1000 - t0) if targeted else None
             new_monitor = d.get('nb_objective_targeted') is not None
-            if new_monitor:
+            if d.get('confirmed_by'):
+                # since 2026-11-10, on commits with tlspuffin's catalogue: the run ends on a find validation confirmed
+                monitors.add('confirmed find')
+            elif new_monitor:
                 monitors.add('targeted')
             elif d.get('state') == 'success':
                 monitors.add('first objective')
@@ -436,6 +442,48 @@ def ancestors_with_data(commits):
             out[c] = best
     write_json(path, cache)
     return out
+
+
+def bench_times(groups, repo=None):
+    """The time to find of each bug of Vuln group A and B, at the newest tlspuffin commit (committer date in the bench's
+    clone of tlspuffin, read-only) each ran on, from the latest task there: what the launcher shows beside each bug of
+    its custom benchmarks (/html/runs/bench_times.json): {source, bugs: {<experiment, the bug's alias>: {median_s,
+    found, runs, commit, date, task, job, cores, budget_s, asan}}}; median_s of the attempts that found the bug (null:
+    none); asan: whether that build had ASan (the run's record; null: not recorded)"""
+    repo = repo or os.environ.get('PB_TLSPUFFIN_REPO', f'{PB_ROOT}/data/repo/tlspuffin/repo')
+    dates = {}
+    def date(commit):
+        """(committer time in seconds since the epoch, to order; ISO 8601, to show)"""
+        if commit not in dates:
+            r = subprocess.run(['git', '-C', repo, '-c', 'gc.auto=0', 'log', '-1', '--format=%ct %cI', commit], capture_output=True, text=True)
+            epoch, _, iso = r.stdout.strip().partition(' ')
+            dates[commit] = (int(epoch), iso) if r.returncode == 0 and epoch.isdigit() else (0, '')
+        return dates[commit]
+    best = {}
+    for (category, ctype), commits in groups.items():
+        if category != 'PR' or ctype != 'Vuln':
+            continue
+        for commit, tasks in commits.items():
+            for t in tasks:
+                if t.get('job_type') not in ('vuln-a', 'vuln-b'):
+                    continue
+                settings = t.get('settings') or {}
+                for exp, m in (t.get('metrics') or {}).items():
+                    runs = (m or {}).get('runs') or []
+                    if not runs:
+                        continue
+                    key = (date(commit)[0], t.get('start') or 0)
+                    if exp in best and key <= best[exp][0]:
+                        continue
+                    found = [r['measured'] for r in runs if r.get('measured') is not None]
+                    best[exp] = (key, {'median_s': statistics.median(found) if found else None, 'found': len(found), 'runs': len(runs),
+                                       'commit': commit, 'date': date(commit)[1], 'task': t.get('id'), 'job': t.get('job_type'),
+                                       'cores': (settings.get('cores') or [None])[0], 'budget_s': (settings.get('timeout') or [None])[0],
+                                       'asan': ((t.get('builds') or {}).get(exp) or {}).get('asan')})
+    return {'source': 'Vuln group A and B: each bug at the newest tlspuffin commit it ran on (its latest task there), the median '
+                      'time to find of the attempts that found it and found/attempts, on the build of that group (with ASan or '
+                      'without, as said beside each time: a build with ASan runs slower)',
+            'bugs': {exp: value for exp, (key, value) in sorted(best.items())}}
 
 
 def task_values(task, ctype):
@@ -632,7 +680,8 @@ def measured_floors(groups):
                 for lib in set(va) & set(vb):
                     if (a.get('builds') or {}).get(lib) != (b.get('builds') or {}).get(lib):
                         continue
-                    # Vuln: the same monitor (since bf0392b a run ends on its targeted bug, before on any objective)
+                    # Vuln: the same monitor (since bf0392b a run ends on its targeted bug, before on any objective; on
+                    # commits with tlspuffin's catalogue, from 2026-11-10, on a find validation confirmed)
                     if ctype == 'Vuln' and va[lib].get('_monitor') != vb[lib].get('_monitor'):
                         continue
                     # the same CPU sharing (as the regressions: another mode, or one not recorded, is not comparable)
@@ -712,6 +761,8 @@ def main():
         write_json(f'{OUT}/stale_rules.json', {'updated': datetime.datetime.now().isoformat(timespec='seconds'),
                                                'tasks': [json.loads(t) for t in sorted({json.dumps(t, sort_keys=True) for t in STALE})]})
         write_json(f'{OUT}/regression_floors.measured.json', measured_floors(groups))
+        # the launcher's custom benchmarks: the bench's time to find of each bug
+        write_json(f'{OUT}/bench_times.json', bench_times(groups))
     else:
         old = json.load(open(f'{OUT}/index.json')) if os.path.exists(f'{OUT}/index.json') else {}
         old.update(index); write_json(f'{OUT}/index.json', old)

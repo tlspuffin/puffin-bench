@@ -66,5 +66,23 @@ check(any(n == f"run before compat rule reservoir_sample_warn: task 2 of {'c' * 
 withrule = task('2', 50); withrule['settings']['compat'] = 'reservoir_sample_warn'
 w, entry = warnings(task('1', 100), withrule)
 check(not any('run before' in n for n in entry['notes']) and 'stale_rules' not in entry, 'a task that ran with the rule: nothing noted')
+
+# the claims set apart for what a run built (the claim of CVE-2024-5814 on wolfSSL < 5.7.2): by its build's slug, from
+# the run's record (vendor_build), also when its vendor is in puffin-build's short form (no "wolfssl540" in its text)
+rr.NOT_TARGETED.update({"Negotiated cipher is not in agent's configured ciphers list":
+                        {'cve': 'CVE-2024-5814', 'library': 'wolfssl', 'below': '5.7.2'},
+                        'Everywhere': {'cve': 'CVE-0'}})
+def apart(*args):
+    try:
+        return sorted(rr.set_apart_claims(*args))
+    except TypeError:
+        return None
+cipher = "Negotiated cipher is not in agent's configured ciphers list"
+check(apart('wolfssl:wolfssl540-asan') == ['Everywhere', cipher], 'set apart by a preset name, as before')
+check(apart('wolfssl:5.4.0,asan', {'slug': 'wolfssl540-asan'}) == ['Everywhere', cipher],
+      'set apart by the build of a vendor in the short form (wolfssl:5.4.0,asan: wolfssl540-asan)')
+check(apart('wolfssl:5.8.4,asan', {'slug': 'wolfssl584-asan'}) == ['Everywhere'],
+      'not below its version: only the claims set apart everywhere')
+rr.NOT_TARGETED.clear()
 sys.exit(fail)
 PY

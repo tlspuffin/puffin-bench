@@ -28,8 +28,9 @@ declare -A COMPAT_RANGE=(
   # evaluation failures FnError::Codec (e.g. unparsable mutated key shares) logged at WARN with the whole
   # term, thousands of times per minute; open until the tlspuffin fix (pr/quiet-eval-errors) is merged
   [codec_warn]="2f38bf22aee802509663609fa4ca84b8634e5574 -"
-  # reseed failure of the wolfSSL Rust PUT logged at WARN before every execution; open, same fix
-  [wolfssl_reseed_warn]="29e90ea7816e582d84fd3928156b84b033808549 -"
+  # reseed failure of the wolfSSL Rust PUT logged at WARN before every execution; until dev removed the Rust
+  # harness (5d7156f55, tlspuffin#553)
+  [wolfssl_reseed_warn]="29e90ea7816e582d84fd3928156b84b033808549 5d7156f55b4a06c62b8d38b5f64c1819a79de862"
   # the wolfSSL PUT factory logs an ERROR for its unimplemented reseed before every execution (~100 MB per
   # 70 min run); the reseed is no longer exposed from a914ff56a
   [wolfssl_reseed_error]="2a0619f4ad4324cd264c76ead7e5ca208212d8c1 a914ff56a8e11acb158b7ebaa1afc007d28a1d5d"
@@ -38,8 +39,8 @@ declare -A COMPAT_RANGE=(
   [openssl_descriptor_info]="207ecfde6c81380b90b1c52e31c0aec547b896ae e13983d6a6e186cde04fffeb12914f06b4ff9b68"
   [wolfssl_descriptor_info]="15e32f80427ed753744b36d5e3c588ad4a85ce72 e13983d6a6e186cde04fffeb12914f06b4ff9b68"
   # the BoringSSL Rust PUT logs "does not support clearing mode" at INFO for every PUT it creates (~140,000 lines
-  # per 70 min run); open (also on dev, where benchmarks use the BoringSSL C harness)
-  [boringssl_clear_info]="8d799887b891b0fa7f8ae34f3b5152a4757bb4cb -"
+  # per 70 min run); until dev removed the Rust harness (5d7156f55, tlspuffin#553)
+  [boringssl_clear_info]="8d799887b891b0fa7f8ae34f3b5152a4757bb4cb 5d7156f55b4a06c62b8d38b5f64c1819a79de862"
   # build fix: mk_vendor installs toml-cli with the commit's toolchain and without --locked: its newest
   # dependencies need a newer rustc, and its locked ones (proc-macro2 1.0.47) do not build on the commit's
   # nightly, so the C vendor libraries (e.g. OpenSSL) fail to build; installed with --locked by the stable
@@ -369,7 +370,7 @@ CompatApplyFiles() {
 # perf experiments of LibreSSL must run with ASAN.
 #   $1 package, $2 vendor, $3 cputs (true|false), $4 reference to the features.
 # The Rust harness gets the "asan" feature if missing. Sets COMPAT_UNSUPPORTED (and returns 0) when
-# ASAN is impossible: C vendor preset without ASAN, or libressl-src without ASAN support (before cd649d6bf).
+# ASAN is impossible: a C vendor whose build has no ASAN, or libressl-src without ASAN support (before cd649d6bf).
 CompatBuildRules() {
   local package="$1";
   local vendor="$2";
@@ -382,8 +383,11 @@ CompatBuildRules() {
   CompatIsDisabled libressl_asan && return 0;
 
   if ${cputs}; then
-    [[ "${vendor}" == *-asan ]] ||
-        COMPAT_UNSUPPORTED="LibreSSL: ASAN unsupported (vendor ${vendor} is not an -asan preset)";
+    # ASAN as mk_vendor says the build has it (ResolveVendor), whatever the vendor's form (libressl:4.2.1,asan), else as
+    # a preset's name says it (-asan)
+    local asan; asan=$( VendorBuildJSON "${vendor}" | jq -r '.asan | select(. != null)' 2> /dev/null );
+    [[ "${asan}" == true || ( -z "${asan}" && "${vendor}" == *-asan ) ]] ||
+        COMPAT_UNSUPPORTED="LibreSSL: ASAN unsupported (vendor ${vendor}: its build has no ASAN)";
     return 0;
   fi
   if [[ ",${ref_cbr_features}," != *,asan,* ]]; then

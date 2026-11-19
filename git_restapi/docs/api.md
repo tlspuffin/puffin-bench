@@ -211,15 +211,22 @@ from the commit's `puffin-build/vendors/<vendor>/presets.toml` in the clone, wit
   "asan_link": true,
   "vendors": {
     "wolfssl": [ { "name": "wolfssl540-sdos2", "version": "5.4.0", "asan": false, "sancov": true,
-                   "fix": ["CVE-2022-39173"], "postauth": false } ]
-  }
+                   "fix": ["CVE-2022-39173"], "postauth": false, "kind": "alias",
+                   "spec": "5.4.0,no-postauth,fix-CVE-2022-39173" } ]
+  },
+  "latest": { "wolfssl": "5.8.4" },
+  "modifiers": { "wolfssl": { "asan": { "default": false, "doc": "AddressSanitizer: …" }, "postauth": { "default": true, "doc": "…" } } },
+  "names": true,
+  "derived": true
 }
 ```
 
 `format` is `none` (and `vendors` empty) for commits before the presets files (2024-09-12). `asan_link`: the commit
 contains tlspuffin 854dbaa11, from which an ASAN preset links the ASAN runtime by itself (before, only with the `asan`
-cargo feature). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
-not change); an abbreviated id is answered from the cache only when it names exactly one cached commit. An unknown
+cargo feature). `latest`: the newest release of each vendor that declares one (`presets.toml` format 2, `[library] latest`,
+one of its versions), which the launcher's `latest-asan` takes: the names of a vendor's versions need not sort (BoringSSL's
+`1.1.1g+git.<commit>` builds are older than `0.20260508.0`). `kind`: `version` (format 2: the build of a version, plain or with ASan), `alias` (format 2: a named build of `[aliases]`, its definition in `spec`), `preset` (format 1). `modifiers`: format 2's `[modifiers]` of each vendor (asan, sancov, gcov, llvm_cov, the builder's options: wolfSSL's postauth), with their default and doc. `names`: the commit's puffin-build has the names of builds (`puffin-build/src/catalogue/spec.rs`, tlspuffin 54b07f490: `<vendor>:<version>[,<modifier>…]` and a catalogue part, a preset followed by `-<modifier>`s and a catalogue part); `derived`: its mk_vendor builds the catalogue's derived builds (`<preset>-only-<IDs>`, `-fix-<IDs>`, `-fix-all`: tlspuffin 17a624fcc). Answers are cached per full commit in `<storage>/<name>/presets_cache.json` (a commit's presets do
+not change), by the script as it is (a cache written by another version of it is dropped: a deploy that changes the script takes effect on every commit); an abbreviated id is answered from the cache only when it names exactly one cached commit. An unknown
 commit triggers one `git fetch --all` (a commit pushed since the last fetch) before the 404.
 
 ### Errors
@@ -228,6 +235,71 @@ commit triggers one `git fetch --all` (a commit pushed since the last fetch) bef
 |---|---|
 | 404 | `:repo` not found in configuration, or the commit is not in the repository (also after a fetch). |
 | 500 | `tlspuffin_presets.sh` failed or did not print a JSON object with `commit`. |
+
+---
+
+## GET /api/git/catalogue/:repo/:commit
+
+The vulnerability catalogue of tlspuffin at a commit, read by `scripts/tlspuffin_catalogue.sh` from the commit's
+`puffin-build/vendors/<vendor>/vulnerabilities.toml` and patch files, without checking it out: the known bugs the bench
+validates objectives against (dev's head commit), or those of a PR's commit ("Load bugs from this commit").
+
+### Path Parameters
+
+| Parameter | Pattern | Description |
+|---|---|---|
+| `:repo` | `[0-9a-zA-Z-_.%]+` | Repository name as defined in configuration. |
+| `:commit` | `[0-9a-fA-F]{7,40}`, `dev`, `main` | Commit hash, full or abbreviated, or the head of `dev` or `main` as last fetched. |
+
+### Query Parameters
+
+| Parameter | Values | Description |
+|---|---|---|
+| `refresh` | `fetch` | Optional. For `dev` and `main`: `git fetch --all` first, so that they name their latest heads (the Bugs reference page's "Reload from the latest dev"). No GitHub API call. Ignored for a commit hash (an unknown one is fetched anyway). |
+
+Any other parameter or value returns HTTP 400.
+
+### Response — 200 OK
+
+```json
+{
+  "commit": "cc1f8d01cd5e7e959617ac9f89b70688d6afe010",
+  "date": "2026-11-09T22:54:19+01:00",
+  "subject": "[catalogue] ...",
+  "format": "vulnerabilities.toml",
+  "vendors": {
+    "wolfssl": {
+      "fingerprint": "<sha256>",
+      "repository": "https://github.com/wolfSSL/wolfssl",
+      "preamble": "# Known vulnerabilities of wolfSSL: ...",
+      "entries": {
+        "CVE-2022-39173": { "alias": "BUF", "summary": "...", "affected": "< 5.5.1",
+                            "oracle": { "kind": "crash", "asan": "stack-buffer-overflow" }, "patches": [...],
+                            "fingerprint": "<sha256>",
+                            "patch_hashes": { "patches/fix-CVE-2022-39173.patch": "<sha256>" },
+                            "toml": "[CVE-2022-39173]\nalias = \"BUF\"\n..." }
+      }
+    }
+  }
+}
+```
+
+The entries are the TOML tables as JSON (fields: puffin-build/README.md of tlspuffin), plus `fingerprint`, a hash of the
+entry's fields and patch files: two commits have the same entry when their fingerprints are equal; `patch_hashes`, the
+sha256 of each patch file; `toml`, the entry's text in the file with its comments (its tables, and the comment lines
+right above its first header), for people: not part of the fingerprint. Per vendor: `repository`, the `sources.repo` of
+its presets.toml (links to upstream fixes), and `preamble`, the comments heading the file. `date` and `subject`: the
+commit's committer date and subject. `format` is `none`
+(and `vendors` empty) for commits without catalogue. Cached per full commit in `<storage>/<name>/catalogue_cache.json`,
+like the presets (same rules for abbreviated ids and unknown commits); `dev` and `main` are resolved on every request
+(the answer of the commit they name is then cached as any other).
+
+### Errors
+
+| Code | Condition |
+|---|---|
+| 404 | `:repo` not found in configuration, or the commit is not in the repository (also after a fetch). |
+| 500 | `tlspuffin_catalogue.sh` failed (e.g. a catalogue that is not valid TOML) or did not print a JSON object with `commit`. |
 
 ---
 

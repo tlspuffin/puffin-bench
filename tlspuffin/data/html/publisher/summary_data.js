@@ -57,21 +57,25 @@ const dataDefinitions = {
   },
   Vuln: {
     // execs to find: the total execs when the objective that ended the run was saved (runs since 2026-10-07), else
-    // the execs of the clients when the run stopped (later: after the monitor saw it)
+    // the total execs of its clients when the run stopped (later: after the monitor saw it). One value per run, the
+    // same unit: a run without execs_to_find gave one value per client, averaged with the others' totals
     total_execs: {
       target: 'success',
       compute: {
         datapath: [ 'execs_to_find', 'clients.tEnd.total_execs' ],
-        value: (execsToFind, clients) => (typeof execsToFind?.[0] === 'number') ? [ execsToFind[0] ] : clients
+        value: (execsToFind, clients) => (typeof execsToFind?.[0] === 'number') ? [ execsToFind[0] ]
+            : (Array.isArray(clients) && clients.length) ? [ clients.reduce((sum, x) => sum + (Number(x) || 0), 0) ] : []
       }
     },
     // time to find: when the fuzzer saved the first targeted objective (time_to_find_s, results since 2026-10-06),
-    // else the duration of each client until the experiment was stopped (up to a minute after the objective)
+    // else how long the run's clients ran until the experiment was stopped (up to a minute after the objective): one
+    // value per run, as execs to find
     durations_s: {
       target: 'success',
       compute: {
         datapath: [ 'time_to_find_s', 'clients.tEnd.time.secs_since_epoch', 'clients.t0.time.secs_since_epoch' ],
-        value: (timeToFind, ends, starts) => (typeof timeToFind?.[0] === 'number') ? [ timeToFind[0] ] : DiffArray(ends, starts)
+        value: (timeToFind, ends, starts) => (typeof timeToFind?.[0] === 'number') ? [ timeToFind[0] ]
+            : (durations => durations.length ? [ Math.max(...durations) ] : [])(DiffArray(ends, starts) ?? [])
       }
     },
     fail_duration_s: {
@@ -171,7 +175,7 @@ function ExtractValue(path, obj) {
   }, acc).current;
 }
 
-function BuildDataSet(source, json) {
+export function BuildDataSet(source, json) {
   if (json?.data === undefined) {
     return {};
   }
@@ -269,6 +273,9 @@ function BuildDataSet(source, json) {
         unsupported: libraries[library]?.unsupported ?? libraries[library]?.cli?.unsupported,
         // objectives replayed and grouped by bug (see ExperimentReplayObjectives), absent for older results
         objectives: libraries[library]?.objectives,
+        // validation of the objectives against tlspuffin's catalogue (Utils.AttachValidation): the verdict line of the
+        // 🐞 panel (summary_render.js ValidationLine); absent before it
+        validation: libraries[library]?.validation ?? null,
         // each run by its attempt: its state in the summary ('success', 'fail', or none when its summary is missing)
         runs: libraries[library].data.map(attempt => ({ id: attempt?.id, state: attempt?.state ?? null }))
       };

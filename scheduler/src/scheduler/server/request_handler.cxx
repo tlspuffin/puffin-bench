@@ -877,3 +877,89 @@ void ns_Server::RequestHandlerFiles::handleRequest(Poco::Net::HTTPServerRequest&
     }
   }
 }
+
+// ── Saved benchmarks (api/benchmarks_api.hxx) ──────────────────────────────────
+
+namespace {
+
+// {"success": false, "error": "<why>"}, the reason escaped as a JSON string
+std::string BenchmarkError(std::string const& why) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("success");
+  writer.Bool(false);
+  writer.Key("error");
+  writer.String(why.c_str());
+  writer.EndObject();
+  return buffer.GetString();
+}
+
+void BenchmarkHeaders(Poco::Net::HTTPServerResponse& response) {
+  response.setContentType("application/json; charset=utf-8");
+  response.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.set("Pragma", "no-cache");
+}
+
+}
+
+void ns_Server::RequestHandlerBenchmarksList::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  BenchmarkHeaders(response);
+  try {
+    std::string const list = apis_->benchmarksAPI_.List(std::get<0>(args_));
+    response.send() << R"({"success": true, "data": )" << list << "}";
+  } catch (std::exception const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    response.send() << BenchmarkError(e.what());
+  }
+}
+
+void ns_Server::RequestHandlerBenchmarkSave::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  BenchmarkHeaders(response);
+  try {
+    // the definition, read up to one byte over the limit (the store refuses it then)
+    std::string body;
+    std::istream& stream = request.stream();
+    char buffer[8192];
+    while (body.size() <= ns_API::BenchmarksAPI::kMaxDefinitionSize && (stream.read(buffer, sizeof buffer) || stream.gcount() > 0)) {
+      body.append(buffer, static_cast<std::size_t>(stream.gcount()));
+    }
+    std::string error;
+    if (!apis_->benchmarksAPI_.Save(std::get<0>(args_), std::get<1>(args_), body, error)) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+      response.send() << BenchmarkError(error);
+      return;
+    }
+    response.send() << R"({"success": true})";
+  } catch (std::exception const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    response.send() << BenchmarkError(e.what());
+  }
+}
+
+void ns_Server::RequestHandlerBenchmarkDelete::handleRequest(Poco::Net::HTTPServerRequest& request,
+    Poco::Net::HTTPServerResponse& response) {
+  if (ManageCORS(request, response)) {
+    return;
+  }
+  BenchmarkHeaders(response);
+  try {
+    if (!apis_->benchmarksAPI_.Delete(std::get<0>(args_), std::get<1>(args_))) {
+      response.setStatus(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
+      response.send() << BenchmarkError("no saved benchmark " + std::get<1>(args_) + " for " + std::get<0>(args_));
+      return;
+    }
+    response.send() << R"({"success": true})";
+  } catch (std::exception const& e) {
+    response.setStatus(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+    response.send() << BenchmarkError(e.what());
+  }
+}

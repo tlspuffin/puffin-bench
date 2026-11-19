@@ -887,7 +887,8 @@
   font-size: 15px;
 }
 
-/* attempt highlighted by its monitor summary (notable: e.g. the run found what it looks for; error) */
+/* attempt highlighted by its monitor summary (notable: e.g. the run found what it looks for, or objectives its
+   project calls unexpected; error: an error, or what its project flags in red, e.g. tlspuffin's new bugs) */
 .card-attempt-item.card-attempt-highlight.highlight-notable {
   background: rgba(255, 196, 0, 0.16);
   border: 1px solid #ffc400;
@@ -923,6 +924,12 @@
   box-shadow: 0 0 8px rgba(255, 196, 0, 0.6);
 }
 
+.card-task-link-badge.highlight-error {
+  background: #d32f2f;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(255, 82, 82, 0.6);
+}
+
 a.card-task-link-badge:hover {
   filter: brightness(1.1);
   text-decoration: underline;
@@ -931,6 +938,11 @@ a.card-task-link-badge:hover {
 .card-step-square.highlight-notable {
   background: #ffc400;
   box-shadow: 0 0 5px #ffc400;
+}
+
+.card-step-square.highlight-error {
+  background: #ff5252;
+  box-shadow: 0 0 5px #ff5252;
 }
 /* logs viewer: an output without content */
 .tab-btn.empty, .tab-btn:disabled { opacity: .4; cursor: not-allowed; }
