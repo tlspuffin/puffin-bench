@@ -406,16 +406,20 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
     return;
   }
   const total = own.reduce((sum, entry) => sum + entry.count, 0);
-  // not reproduced by their replay, but those of the bugs known not to replay (CDOS: as expected)
-  const notReproduced = own.filter(entry => !(entry.bug.noReplay ?? []).length).reduce((sum, entry) => sum + entry.count - entry.reproduced - entry.notReplayed, 0);
+  // not reproduced by their replay, but those of the bugs known not to replay (CDOS: as expected) and the timeouts under
+  // load (bugs.js: puffin's, no bug)
+  const notReproduced = own.filter(entry => !(entry.bug.noReplay ?? []).length && !entry.bug.underLoad).reduce((sum, entry) => sum + entry.count - entry.reproduced - entry.notReplayed, 0);
   const strength = { strong: {}, weak: {} };
   const rows = own.map(({ bug, runs, count, reproduced, notReplayed }) => {
     const kind = bug.type;
-    const where = (bug.frames ?? []).map(EscapeAttribute).join(' &lt; ') || EscapeAttribute(bug.summary || '—');
+    // a timeout no replay reproduces: the size of its traces and how long their replays ran (bugs.js TimingText)
+    const where = bug.underLoad ? EscapeAttribute(module.TimingText?.(bug.timing) || 'replay time not measured')
+        : (bug.frames ?? []).map(EscapeAttribute).join(' &lt; ') || EscapeAttribute(bug.summary || '—');
     const missing = count - reproduced - notReplayed;
     // a bug known not to replay (the catalogue's replayable = false: CDOS): its objectives not reproduced, as expected
     const noReplay = (bug.noReplay ?? []).length > 0;
-    const badge = (noReplay && reproduced === 0 ? ` <span class="objective-validation validation-no-replay" title="${EscapeAttribute(`${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].tip}`)}">${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].word}</span>`
+    const badge = (bug.underLoad ? ` <span class="objective-not-replayed" title="A timeout of the fuzzer no replay reproduces (each replay ran under the time the fuzzer gives an execution): under the load of fuzzing, puffin's, not a bug of the library">⏱ puffin · timeout under load</span>`
+        : noReplay && reproduced === 0 ? ` <span class="objective-validation validation-no-replay" title="${EscapeAttribute(`${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].tip}`)}">${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].word}</span>`
         : (reproduced === 0 && bug.fuzzer && missing) ? ' <span class="objective-warn" title="The fuzzer recorded it; no replay reproduces it">⚠ not reproduced</span>'
         : missing ? ` <span class="objective-warn">⚠ ${missing} not reproduced</span>` : '')
         + (notReplayed ? ` <span class="objective-not-replayed" title="Beyond the replays of its experiment: the fuzzer's record tells the bug">${notReplayed === count ? 'not replayed' : `${notReplayed} not replayed`}</span>` : '')
@@ -451,7 +455,10 @@ async function ShowReportBugs(panel, button, taskID, library, status) {
   // the objectives of the bugs known not to replay (CDOS): not reproduced, as expected
   const noReplayTraces = new Set(own.filter(entry => (entry.bug.noReplay ?? []).length)
       .flatMap(entry => (entry.bug.objectives ?? []).filter(o => o.library === library).map(o => `${o.attempt}/${o.name}`)));
-  if (panel && own.length) panel.innerHTML = `<div class="lib-objectives-info">${total} objective(s), ${own.length} bug(s)`
+  // (the timeouts under load are no bug: counted apart)
+  const underLoad = own.filter(entry => entry.bug.underLoad).reduce((sum, entry) => sum + entry.count, 0);
+  if (panel && own.length) panel.innerHTML = `<div class="lib-objectives-info">${total} objective(s), ${own.filter(entry => !entry.bug.underLoad).length} bug(s)`
+      + (underLoad ? `, ${underLoad} timeout(s) under load (puffin's)` : '')
       + (notReproduced ? `, ${notReproduced} not reproduced by their replay` : '') + ` — as in the `
       + `<a class="lib-objectives-report" href="${ObjectivesPageURL(taskID)}" target="_blank" rel="noopener">objectives report ↗</a>`
       + ` (a bug is what the fuzzer recorded; the report has the replays and the fuzzer's logs).</div>`

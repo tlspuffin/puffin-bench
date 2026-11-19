@@ -21,7 +21,11 @@
 #   - an older task, whose tlspuffin had no catalogue, read against the latest one (PB_CATALOGUE_LATEST): its crash at
 #     the place of a known bug is recognised as that bug (strong, not validated), known; elsewhere, not;
 #   - a bug of tlspuffin's harness, given by commits: recognised in a commit without its fix (from git), not after it;
-#   - TaskLinks (objectives_report.sh) writes those levels into task_links.json.
+#   - timeouts: no replay past the time the fuzzer gives an execution, a timeout under load (puffin's: no bug, no
+#     level, ⏱ apart, with its traces' sizes and replay times); a replay past it, the bug "timeout" (new where none is
+#     declared);
+#   - TaskLinks (objectives_report.sh) writes those levels into task_links.json; timeouts under load are no bug there
+#     either (a task with them alone: its ⏱).
 set -euo pipefail
 here=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 qjs="${1:-/srv/puffin-bench/data/tools/qjs}"
@@ -75,6 +79,9 @@ mkdir -p "${work}/registry" && command cp -f "${work}/known.json" "${work}/regis
 "${qjs}" --std -m "${here}/../tools/known_bugs.js" "${work}/registry" > /dev/null
 check 'the registry of known bugs: the same key, not "a crash in memmove" (known_bugs.js)' \
   'jq -e "has(\"WolfSSL|crash|DoTls13ClientHello\") and (keys | map(select(test(\"memmove\"))) | length == 0) and .[\"WolfSSL|crash|DoTls13ClientHello\"].task == \"9\"" "${work}/registry/known_bugs.json" > /dev/null'
+check 'the registry: the bug validation confirmed (CVE-2022-42905, by task 9) and the version its run built; none for the one not patched' \
+  'jq -e ".[\"WolfSSL|crash|AddPacketInfo\"] | .confirmed == {\"CVE-2022-42905\": \"9\"} and .library.version == \"540\"" "${work}/registry/known_bugs.json" > /dev/null &&
+   jq -e ".[\"WolfSSL|crash|DoTls13ClientHello\"].confirmed == null" "${work}/registry/known_bugs.json" > /dev/null'
 
 report none perf "[$( run 0 '[]' "[${noCrash}]" )]"
 check 'Perf with objectives on a version that declares no known bug: unexpected, 🐞 gold' \
@@ -375,10 +382,43 @@ check 'a bug in what a run built: by its release when recorded (5.10.0), the com
   '[ "$( "${qjs}" --std -m "${work}/present.js" )" == "[true,false,false,true]" ]'
 # TaskLinks: the levels into task_links.json (objectives_report.sh, its function alone)
 mkdir -p "${work}/root/data/html/board/custom/tlspuffin" "${work}/out"
+# timeouts (the user's rule, 2026-11-17): the fuzzer's timeout of an objective whose replays run under the time it gives
+# an execution is a timeout under load, puffin's: no bug, no objective of the level, said apart (⏱); one whose replay
+# runs past it is the bug "timeout" of its configuration, new on a version that declares no known bug
+load='{ "type": "no-crash", "frames": ["error in PUT : decryption failed"], "count": 3, "traces": ["l1", "l2", "l3"],
+        "fuzzer": { "kind": "timeout", "detail": "Timeout in fuzz run.", "frames": [] },
+        "timing": { "replay_ms": [2100, 3900], "limit_ms": 5000, "size": [5196709, 7591124] } }'
+lost='{ "type": "no-crash", "frames": ["error in PUT : decryption failed"], "count": 2, "traces": ["m1", "m2"],
+        "fuzzer": { "kind": "timeout", "detail": "no line logged, the client restarted", "frames": [] },
+        "timing": { "replay_ms": [2400, 2600], "limit_ms": 5000, "size": [5196744, 5196833] } }'
+dos='{ "type": "timeout", "frames": [], "summary": "replay ran 7.2 s, past the fuzzer timeout (5.0 s)", "count": 1, "traces": ["t1"],
+       "fuzzer": { "kind": "timeout", "detail": "Timeout in fuzz run.", "frames": [] },
+       "timing": { "replay_ms": [7210, 7210], "limit_ms": 5000, "size": [612000, 612000] } }'
+report underload campaign "[$( run 0 '[]' "[${load},${lost}]" )]"
+check 'timeouts no replay reproduces: no bug, no level, said apart (⏱ 5 timeouts under load)' \
+  '[ "$( verdicts underload "[.verdicts.headline.level, .verdicts.headline.real, .verdicts.headline.new, .verdicts.headline.underLoad]" )" == "[null,0,0,5]" ] &&
+   verdicts underload .verdicts.headline.text | grep -q "⏱ 5 timeouts under load"'
+printf '%s\n' "import { AnalyseReport, TimingText, FuzzerText } from '${here}/../tools/objectives_page/bugs.js';" \
+  'const a = AnalyseReport(JSON.parse(std.loadFile(scriptArgs[1])));' \
+  'print(JSON.stringify(a.bugs.map(b => [b.key, b.type, !!b.underLoad, b.count, TimingText(b.timing), FuzzerText(b.fuzzer)])));' > "${work}/timeouts.js"
+check 'one bug of puffin per configuration, its traces and replay times (TimingText)' \
+  '[ "$( "${qjs}" --std -m "${work}/timeouts.js" "${work}/underload.json" )" == "[[\"timeout-under-load|WolfSSL\",\"timeout-under-load\",true,5,\"traces 5.2–7.6 MB · replays 2.1–3.9 s, start of the binary included (the fuzzer gives the execution 5.0 s)\",\"timeout (Timeout in fuzz run.)\"]]" ]'
+report dos campaign "[$( run 0 '[]' "[${load},${dos}]" )]"
+check 'a timeout a replay reproduces: the bug "timeout", new on a version that declares none; the others still apart' \
+  '[ "$( verdicts dos "[.verdicts.headline.level, .verdicts.headline.real, .verdicts.headline.new, .verdicts.headline.underLoad]" )" == "[\"new\",1,1,3]" ]'
+check 'its type and summary: the replay past the fuzzer timeout' \
+  '"${qjs}" --std -m "${work}/timeouts.js" "${work}/dos.json" | jq -e "map(select(.[0] == \"timeout|WolfSSL\" and .[1] == \"timeout\" and (.[2] | not) and .[3] == 1)) | length == 1" > /dev/null'
+# a bug of puffin itself: validation names a catalogue entry with a PUFFIN- id (LibreSSL's HKDFCLAIM), tagged so
+printf '%s\n' "import { PuffinIds } from '${here}/../tools/objectives_page/bugs.js';" \
+  'print(JSON.stringify([PuffinIds({ validation: { parts: [{ kind: "patch", ids: ["PUFFIN-LIBRESSL333-HKDF-CLAIM"] }, { kind: "signature", ids: ["CVE-2022-25640"] }] } }),' \
+  '  PuffinIds({ validation: { parts: [{ kind: "new", ids: ["PUFFIN-X"] }] } }), PuffinIds({})]));' > "${work}/puffin.js"
+check 'a bug validation names by a PUFFIN- entry is a bug of puffin (only by patch or signature)' \
+  '[ "$( "${qjs}" --std -m "${work}/puffin.js" )" == "[[\"PUFFIN-LIBRESSL333-HKDF-CLAIM\"],[],[]]" ]'
 command cp -f "${work}/known.json" "${work}/out/101.json"; command cp -f "${work}/none.json" "${work}/out/102.json"
 command cp -f "${work}/new.json" "${work}/out/103.json"; command cp -f "${work}/unclear.json" "${work}/out/104.json"
 command cp -f "${work}/cdos.json" "${work}/out/105.json"
-for id in 101 102 103 104 105; do touch "${work}/out/${id}.html"; done
+command cp -f "${work}/underload.json" "${work}/out/106.json"; command cp -f "${work}/dos.json" "${work}/out/107.json"
+for id in 101 102 103 104 105 106 107; do touch "${work}/out/${id}.html"; done
 (
   source <( sed -n '/^TaskLinks()/,/^}/p' "${here}/../tools/objectives_report.sh" )
   PB_ROOT="${work}/root" OUT="${work}/out"; TaskFile() { echo x; }
@@ -389,4 +429,11 @@ check 'TaskLinks: plain for known, gold for unexpected, red for new, warning for
   '[ "$( jq -c "[.\"101\"[0].level, .\"102\"[0].level, .\"103\"[0].level, .\"104\"[0].level, .\"103\"[0].label]" "${links}" )" == "[null,\"unexpected\",\"new\",\"warning\",\"🚨 🐞\"]" ]'
 check 'TaskLinks: plain for a known bug that no replay reproduces (CDOS, its 🎯 then its 🐞)' \
   '[ "$( jq -c "[.\"105\"[] | .level]" "${links}" )" == "[\"expected-all\",null]" ]'
+check 'TaskLinks: a task whose objectives are all timeouts under load: no bug, its ⏱, said so in its hover' \
+  '[ "$( jq -c "[.\"106\"[0] | .label, .level, .count, .bugs]" "${links}" )" == "[\"⏱\",null,5,0]" ] &&
+   jq -r ".\"106\"[0].title" "${links}" | grep -qx "🐞 5 objectives, 0 bugs, 0 objectives reproduced by a replay" &&
+   jq -r ".\"106\"[0].title" "${links}" | grep -qx "⏱ 5 timeouts under load (puffin.s, not bugs)"'
+check 'TaskLinks: a reproduced timeout among timeouts under load: one bug (the timeout), the others said apart' \
+  '[ "$( jq -c "[.\"107\"[0] | .label, .level, .count, .bugs]" "${links}" )" == "[\"🚨 🐞\",\"new\",4,1]" ] &&
+   jq -r ".\"107\"[0].title" "${links}" | grep -qx "⏱ 3 timeouts under load (puffin.s, not bugs)"'
 exit "${fail}"

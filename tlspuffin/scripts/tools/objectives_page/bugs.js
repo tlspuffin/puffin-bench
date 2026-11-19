@@ -12,7 +12,42 @@ export { FrameName };
 
 export const UNCONFIRMED = new Set(['no-crash', 'replay-error', 'not-replayed']);
 export const TYPE_LABELS = { 'no-crash': 'not reproduced', 'replay-error': 'replay error', 'not-replayed': 'not replayed', 'security-violation': 'security violation',
-  'crash': 'crash' };
+  'crash': 'crash', 'timeout': 'timeout', 'timeout-under-load': 'timeout under load' };
+
+// Timeouts (the fuzzer's record of an objective, PR_common.sh FuzzerVerdict: its client stopped an execution past the
+// time it gives one, 5 s): a bug, a possible denial of service, only when its replay runs past that time too (type
+// "timeout", ObjectiveSignature); otherwise a timeout under the load of fuzzing (bug.underLoad): puffin's, not the
+// library's, shown with how long its replays ran and how big its traces are (TimingText), never counted as a bug
+// (traces of several MB whose execution takes seconds, campaigns of 2026-11-16).
+// TimingText(timing): "traces 5.2–7.6 MB · replays 2.1–3.9 s, start of the binary included (the fuzzer gives the execution
+// 5.0 s)" of a group's or a bug's timing
+// ({ replay_ms: [min, max], limit_ms, size: [min, max] }), '' without one
+export function TimingText(timing) {
+  if (!timing) return '';
+  // a range in the unit of its larger end: "5.2–7.6 MB", "2.1–3.9 s"
+  const range = ([a, b], unit) => { const [d, u] = unit(b); return a === b ? `${d(a)} ${u}` : `${d(a)}–${d(b)} ${u}`; };
+  const bytes = n => n >= 1e6 ? [x => (x / 1e6).toFixed(1), 'MB'] : n >= 1e3 ? [x => String(Math.round(x / 1e3)), 'KB'] : [String, 'B'];
+  const secs = () => [x => (x / 1000).toFixed(1), 's'];
+  return [timing.size ? `trace${timing.size[0] === timing.size[1] ? '' : 's'} ${range(timing.size, bytes)}` : '',
+    // (a replay's time includes the start of the binary and the reading of the trace: the fuzzer's limit is for the
+    // execution alone, which tlspuffin's own timeout checks, PR_common.sh ReplayConfirm)
+    timing.replay_ms ? `replay${timing.replay_ms[0] === timing.replay_ms[1] ? '' : 's'} ${range(timing.replay_ms, secs)}, start of the binary included`
+        + (timing.limit_ms ? ` (the fuzzer gives the execution ${range([timing.limit_ms, timing.limit_ms], secs)})` : '') : 'replay time not measured']
+      .filter(Boolean).join(' · ');
+}
+// MergeTiming(into, timing): the ranges of both
+function MergeTiming(into, timing) {
+  if (!timing) return into;
+  const merge = (a, b) => !a ? b : !b ? a : [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
+  return { replay_ms: merge(into?.replay_ms, timing.replay_ms), size: merge(into?.size, timing.size),
+           limit_ms: Math.max(into?.limit_ms ?? 0, timing.limit_ms ?? 0) || null };
+}
+// PuffinIds(bug): the bugs of puffin itself (its harness, its policies) validation names for it: the catalogue's entries
+// with a PUFFIN- id (LibreSSL's HKDFCLAIM, PUFFIN-LIBRESSL333-HKDF-CLAIM), not the library's
+export function PuffinIds(bug) {
+  return [...new Set((bug.validation?.parts ?? []).filter(p => ['patch', 'signature'].includes(p.kind))
+      .flatMap(p => p.ids ?? []).filter(id => /^PUFFIN-/.test(id)))];
+}
 
 
 // notTargeted ({claim: CVE}, report.not_targeted): VulnA/VulnB claims that are not the target of the job (a known CVE
@@ -87,7 +122,9 @@ function OracleMatchesGroup(oracle, group) {
   const asanOk = !oracle.asan || group.type === oracle.asan || detail.includes(`ASan ${oracle.asan}`)
       || (!detail.includes('ASan ') && !!ASAN_SIGNAL[oracle.asan] && detail.includes(ASAN_SIGNAL[oracle.asan]));
   const signalOk = !oracle.signal || detail.includes(oracle.signal);
-  return asanOk && signalOk && (fz?.kind === 'crash' || !['no-crash', 'replay-error', 'security-violation', 'panic'].includes(group.type));
+  // (a timeout, recorded or replayed, is no crash)
+  return asanOk && signalOk && (fz?.kind === 'crash'
+      || (fz?.kind !== 'timeout' && !['no-crash', 'replay-error', 'security-violation', 'panic', 'timeout'].includes(group.type)));
 }
 
 // CustomTargets(runs, libraries): the targets of a custom benchmark's experiments (cli.custom, as the experiment recorded
@@ -319,10 +356,14 @@ function GroupKey(run, group, notTargeted, targets, jobType) {
   const confirmed = !UNCONFIRMED.has(group.type);
   // a fuzzer record by the first frame that locates it (its backtraces vary in depth and in mangling)
   const fzTop = fz?.kind === 'crash' ? LocationFrames(fz.frames)[0] : undefined;
-  const fzKey = fz ? (fz.kind === 'crash' ? `crash|${fzTop || run.library}` : `claim|${fz.detail}`) : '';
-  const same = fz && (!confirmed || group.type === 'crash'
+  const fzKey = fz ? (fz.kind === 'crash' ? `crash|${fzTop || run.library}` : fz.kind === 'timeout' ? `timeout|${run.library}` : `claim|${fz.detail}`) : '';
+  // a timeout of the fuzzer its replays do not reproduce: under the load of fuzzing, puffin's (TimingText above); one
+  // they reproduce is the bug "timeout" of its configuration, as a replay timing out without the fuzzer's record
+  const timeout = fz?.kind === 'timeout';
+  const underLoad = timeout && !confirmed;
+  const same = fz && (timeout ? (underLoad || group.type === 'timeout') : (!confirmed || group.type === 'crash'
       || (fz.kind === 'crash' && rFrames.length && fzTop && LocationFrames(rFrames)[0] === fzTop)
-      || (fz.kind === 'claim' && group.type === 'security-violation' && rFrames.join(' < ') === fz.detail));
+      || (fz.kind === 'claim' && group.type === 'security-violation' && rFrames.join(' < ') === fz.detail)));
   // a claim set apart (CVE-2024-5814) only where its scope says: the same claim elsewhere is another bug, a real one;
   // and only in a run that looks for a target, as the job scripts set it apart from what the run looks for
   // (PR_common.sh ObjectiveTargeted): a Vuln job, or a configuration with a target (a Vuln flow launched as another
@@ -338,13 +379,15 @@ function GroupKey(run, group, notTargeted, targets, jobType) {
   const abortOfClaim = fz?.kind === 'crash' && HarnessAbort(fz.frames) && group.type === 'security-violation';
   // a replay without the fuzzer's record of its objective: a crash by the first frame that locates it too, so that
   // it is the bug the fuzzer recorded at that place (as known_bugs.json: BugSignature), not another one
-  const rTop = !['security-violation', 'panic'].includes(group.type) ? LocationFrames(rFrames)[0] : undefined;
-  const key = (same ? fzKey
+  const rTop = !['security-violation', 'panic', 'timeout'].includes(group.type) ? LocationFrames(rFrames)[0] : undefined;
+  const key = (group.type === 'timeout' ? `timeout|${run.library}`
+      : underLoad ? `timeout-under-load|${run.library}`
+      : same ? fzKey
       : abortOfClaim ? `claim|${rFrames.join(' < ')}`
       : confirmed ? ((group.type === 'crash' && !rFrames.length) ? `crash|${run.library}`
                      : rTop ? `crash|${rTop}` : `${group.type}|${rFrames.join(' < ')}`)
       : `${group.type}|replay-only`) + scope;
-  return { key, same, apart, fz, rFrames, confirmed };
+  return { key, same, apart, fz, rFrames, confirmed, underLoad };
 }
 
 // SplitByPatch(entries, libraries, catalogue): one bug per bug validation confirms by patch: the groups of one key (a
@@ -381,7 +424,7 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
   const entries = [];
   for (const run of runs) for (const group of run.groups ?? []) entries.push({ run, group, ...GroupKey(run, group, notTargeted, targets, jobType) });
   SplitByPatch(entries, libraries, catalogue);
-  for (const { run, group, key, same, apart, fz, rFrames, confirmed } of entries) {
+  for (const { run, group, key, same, apart, fz, rFrames, confirmed, underLoad } of entries) {
     {
       let bug = bugs.get(key);
       if (!bug) {
@@ -391,6 +434,9 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
         bugs.set(key, bug);
       }
       if (apart) bug.apartCve = apart;
+      // a timeout its replays do not reproduce: puffin's, not counted as a bug (TimingText)
+      if (underLoad) bug.underLoad = true;
+      if (group.timing) bug.timing = MergeTiming(bug.timing, group.timing);
       const n = group.count ?? 0;
       bug.count += n;
       // every stack of the bug, with its objectives: the replay's when it reproduced the group, else the fuzzer's record
@@ -449,9 +495,11 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
     bug.notReproduced = bug.count - bug.reproduced - bug.notReplayed;
     // the most precise type: the replay's sanitizer/claim/panic signature, else what the fuzzer saw
     const precise = [...bug.types.keys()].find(t => t !== 'crash');
-    bug.type = precise ?? (bug.reproduced ? 'crash' : bug.fuzzer ? (bug.fuzzer.kind === 'crash' ? 'crash' : 'security-violation')
+    bug.type = bug.underLoad ? 'timeout-under-load'
+        : precise ?? (bug.reproduced ? 'crash' : bug.fuzzer ? (bug.fuzzer.kind === 'crash' ? 'crash' : bug.fuzzer.kind === 'timeout' ? 'timeout' : 'security-violation')
         : bug.replayType);
-    if (!bug.frames.length && bug.fuzzer) {
+    // a timeout has no frames: its summary says it (the replay's, or how long the replays ran)
+    if (!bug.frames.length && bug.fuzzer && bug.fuzzer.kind !== 'timeout') {
       bug.frames = bug.fuzzer.kind === 'crash' ? (bug.fuzzer.frames ?? []) : [bug.fuzzer.detail];
       bug.framesFromFuzzer = bug.fuzzer.kind === 'crash';
     }
@@ -468,11 +516,13 @@ export function Bugs(runs, notTargeted = {}, targets = {}, libraries = [], jobTy
 export function FuzzerText(fz) {
   if (!fz) return '';
   return fz.kind === 'crash' ? `crash (${fz.detail})${fz.frames?.length ? ' in ' + fz.frames.join(' < ') : ''}`
+      : fz.kind === 'timeout' ? `timeout (${fz.detail})`
       : `claim violated: ${fz.detail}`;
 }
 
-// the fuzzer saw a crash or a claim violation, but no replay confirms it: replays ran and none reproduced it
-export const Mismatch = (bug) => bug.reproduced === 0 && !!bug.fuzzer && bug.notReproduced > 0;
+// the fuzzer saw a crash or a claim violation, but no replay confirms it: replays ran and none reproduced it (a timeout
+// its replays do not reproduce is not one: under load, bug.underLoad)
+export const Mismatch = (bug) => bug.reproduced === 0 && !!bug.fuzzer && bug.notReproduced > 0 && !bug.underLoad;
 // none of its objectives was replayed (beyond the replays of its experiment): what the fuzzer saw is all there is
 export const NotReplayed = (bug) => bug.reproduced === 0 && bug.notReproduced === 0 && bug.notReplayed > 0;
 // a bug some of whose objectives were reproduced by their replay, and others not
@@ -487,6 +537,9 @@ export function Letter(i) {
 // not): the claim message, or the top function of the crash; null for a crash without location (it cannot be told
 // apart: it counts as uncategorised, never as a new bug)
 export function BugSignature(bug) {
+  // a timeout a replay reproduced: one bug per configuration, without location; one under load is no bug
+  if (bug.underLoad) return null;
+  if (bug.type === 'timeout') return 'timeout';
   const claim = bug.fuzzer?.kind === 'claim' ? bug.fuzzer.detail : (bug.type === 'security-violation' ? bug.frames?.[0] : null);
   if (claim) return `claim|${claim}`;
   const top = LocationFrames(bug.frames)[0];
@@ -535,7 +588,7 @@ export function NewBugs(bugs, known, task, report = null) {
   const out = [];
   const targets = ReportTargets(report);
   for (const bug of bugs) {
-    if (bug.notTarget || !(bug.reproduced > 0 || bug.fuzzer)) continue;
+    if (bug.notTarget || bug.underLoad || !(bug.reproduced > 0 || bug.fuzzer)) continue;
     // an objective validation found no known bug's signature for: the bug is new where it was, whatever its other
     // objectives say (one confirmed by patch beside it: another bug in the same function, grouped with it), and the
     // task's level is new
@@ -584,7 +637,12 @@ export function NewBugs(bugs, known, task, report = null) {
 //   null        no objective.
 // text: the marks of the level (LEVELS) with what was found; null without a real bug.
 export function BugsHeadline(bugs, newBugs, report) {
-  const real = bugs.filter(bug => !bug.notTarget && (bug.reproduced > 0 || bug.fuzzer));
+  // the timeouts no replay reproduces are puffin's, under the load of fuzzing: no bug, and no objective of the level
+  // (said apart: underLoad, "⏱ N timeouts under load")
+  const underLoadOf = lib => bugs.filter(bug => bug.underLoad).flatMap(bug => bug.runs)
+      .filter(run => lib == null || run.library === lib).reduce((sum, run) => sum + run.count, 0);
+  const underLoad = underLoadOf(null);
+  const real = bugs.filter(bug => !bug.notTarget && !bug.underLoad && (bug.reproduced > 0 || bug.fuzzer));
   const confirmed = bugs.filter(bug => bug.reproduced > 0 && !bug.notTarget).length;
   const allKnown = real.length > 0 && real.every(bug => KnownByValidation(bug) || [...new Set(bug.runs.map(run => run.library))]
       .every(lib => bug.expectedFor?.has(lib) || bug.knownCve?.[lib]));
@@ -593,9 +651,10 @@ export function BugsHeadline(bugs, newBugs, report) {
   const targets = ReportTargets(report);
   const declaredNone = lib => runs.filter(run => run.library === lib)
       .every(run => Array.isArray(run.cli?.vulnerabilities?.declared) && run.cli.vulnerabilities.declared.length === 0);
+  const foundIn = lib => runs.filter(run => run.library === lib).reduce((sum, run) => sum + (run.found ?? 0), 0);
   const nothingExpected = [...new Set(runs.filter(run => (run.found ?? 0) > 0).map(run => run.library))]
-      .filter(lib => !targets[lib] && declaredNone(lib));
-  const objectives = runs.reduce((sum, run) => sum + (run.found ?? 0), 0);
+      .filter(lib => !targets[lib] && declaredNone(lib) && foundIn(lib) > underLoadOf(lib));
+  const objectives = runs.reduce((sum, run) => sum + (run.found ?? 0), 0) - underLoad;
   const level = newBugs.length ? 'new'
       : nothingExpected.length ? 'unexpected'
       : !real.length ? (objectives > 0 ? 'unclear' : null)
@@ -605,8 +664,9 @@ export function BugsHeadline(bugs, newBugs, report) {
   const where = nothingExpected.length ? `${LEVELS.unexpected.mark} objectives where no known bug is expected (${nothingExpected.join(', ')})` : '';
   const found = real.length ? `${level === 'unexpected' && !where ? `${LEVELS.unexpected.mark} ` : ''}${plural(real.length, allKnown ? 'known bug' : 'bug')} found`
       + (confirmed < real.length ? ` (${confirmed} reproduced)` : '') : '';
-  return { real: real.length, confirmed, new: newBugs.length, allKnown, alarm, found, level, nothingExpected,
-           text: found || where ? [alarm, found, where].filter(Boolean).join(' · ') : null };
+  const load = underLoad ? `⏱ ${plural(underLoad, 'timeout')} under load (puffin's, not bugs)` : '';
+  return { real: real.length, confirmed, new: newBugs.length, allKnown, alarm, found, level, nothingExpected, underLoad,
+           text: found || where || load ? [alarm, found, where, load].filter(Boolean).join(' · ') : null };
 }
 
 // Uncategorised(runs): the objectives whose bug cannot be told, per configuration, with why: no replay confirmed it
@@ -640,7 +700,7 @@ export function Uncategorised(runs, live = false) {
             : logs.files === 0 ? 'no fuzzer log in the artefacts'
             : 'no record in the fuzzer\'s logs (rotated, or nothing logged)';
         add(run.library, `${what}, ${why}`, group.count);
-      } else if (!UNCONFIRMED.has(group.type) && group.type !== 'security-violation' && !(group.frames ?? []).length
+      } else if (!UNCONFIRMED.has(group.type) && !['security-violation', 'timeout'].includes(group.type) && !(group.frames ?? []).length
                  && !(group.fuzzer?.frames ?? []).length && group.fuzzer?.kind !== 'claim') {
         add(run.library, HarnessAbort(group.fuzzer?.frames ?? group.frames)
             ? 'the harness aborted: a security claim violation this fuzzer does not log (its replay tells which claim)'
@@ -676,12 +736,15 @@ export function UncategorisedText(entry, library = null, pending = false) {
 // build of a plain version (bug.knownCve, NewBugs) (its CVE id when the
 // table has no alias), else "Bug A", "Bug B"…; ShortName: the same without "Bug " (the badges). Anchors keep the letter.
 export function BugName(bug, cves = null) {
+  // timeouts no replay reproduces: no bug (puffin's)
+  if (bug.underLoad) return `Timeouts ${bug.letter}`;
   const cvesOf = bug.expected?.length ? bug.expected : bug.notTarget ? [bug.notTarget]
       : bug.knownCve ? [...new Set(Object.values(bug.knownCve))] : [];
   if (cvesOf.length) return cvesOf.map(cve => cves?.[cve]?.alias ?? cve).join(' / ');
   return `Bug ${bug.letter}`;
 }
 export function ShortName(bug, cves = null) {
+  if (bug.underLoad) return `⏱${bug.letter}`;
   const name = BugName(bug, cves);
   return name === `Bug ${bug.letter}` ? bug.letter : name.replace(/ \/ /g, '/');
 }
@@ -699,6 +762,8 @@ export function LoadCves() {
 
 // The signature of a bug, as the catalogue's oracles say it: a claim, or a crash with its report type and top frame
 export function BugSignatureOf(bug) {
+  // a timeout: no oracle of the catalogue is one
+  if (['timeout', 'timeout-under-load'].includes(bug.type)) return { kind: 'timeout' };
   const claim = bug.fuzzer?.kind === 'claim' ? bug.fuzzer.detail : (bug.type === 'security-violation' ? bug.frames?.[0] : null);
   if (claim) return { kind: 'claim', violation: claim };
   return { kind: 'crash', type: bug.type, top: LocationFrames(bug.frames)[0] ?? null };
@@ -709,7 +774,7 @@ export function OracleMatchesBug(entry, signature) {
   const o = entry?.oracle;
   if (!o) return false;
   if (signature.kind === 'claim') return o.kind === 'claim' && o.violation === signature.violation;
-  if (o.kind !== 'crash') return false;
+  if (signature.kind !== 'crash' || o.kind !== 'crash') return false;
   if (o.asan && o.asan !== signature.type) return false;
   const tops = entry.top_frames ?? [];
   return !tops.length || (signature.top != null && tops.some(f => FrameName(f) === signature.top));
@@ -720,7 +785,7 @@ export function SignatureEntries(bug, catalogue, vendor) {
   return Object.entries(catalogue?.vendors?.[vendor]?.entries ?? {}).filter(([, e]) => OracleMatchesBug(e, signature)).map(([id]) => id);
 }
 // the ASan report type of a bug: its replay's, else the fuzzer's record ("SIGABRT · ASan bad-free"); null without ASan
-const NOT_A_TYPE = new Set(['crash', 'no-crash', 'replay-error', 'not-replayed', 'security-violation', 'panic']);
+const NOT_A_TYPE = new Set(['crash', 'no-crash', 'replay-error', 'not-replayed', 'security-violation', 'panic', 'timeout', 'timeout-under-load']);
 function AsanTypeOfBug(bug) {
   const types = [...(bug.types?.keys() ?? []), bug.type, bug.replayType].filter(t => t && !NOT_A_TYPE.has(t));
   return types[0] ?? /ASan ([\w-]+)/.exec(String(bug.fuzzer?.detail ?? ''))?.[1] ?? null;

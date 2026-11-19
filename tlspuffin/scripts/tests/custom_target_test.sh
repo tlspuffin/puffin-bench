@@ -89,6 +89,13 @@ expect '3336 experiment: the claim is its oracle'   0 ObjectiveTargeted "${recor
 ObjectiveTargeted "${records}" 20261110-080000100-abcdef "$( ExpectedTarget x )"; rc=$?
 same '3336 experiment: the crash is another bug (3)' "${rc}" 3
 unset target_bug target_oracle
+# a timeout the fuzzer recorded (30 to 70 ms before the objective): a bug only when its replay runs past the fuzzer's
+# timeout too; never the end of an experiment, also without a target (where any bug ends it)
+timeouts=$( printf '%s\t%s\t%s\t%s\t%s\t%s\n' 1794297800050 timeout 'Timeout in fuzz run.' '' '2026-11-10T08:03:20.050+00:00' '' )
+ObjectiveTargeted "${timeouts}" 20261110-080320100-777777 ''; rc=$?
+same 'a timeout, no target: not a find (3), the replay at the end tells' "${rc}" 3
+ObjectiveTargeted "${timeouts}" 20261110-080320100-777777 "$( ExpectedTarget x )"; rc=$?
+same 'a timeout, with a target: not the find (3)' "${rc}" 3
 
 # the claim of CVE-2024-5814, set apart on wolfSSL < 5.7.2 (vuln_targets.json _not_targeted), in a run of wolfSSL 5.4.0
 CLAIM="Negotiated cipher is not in agent's configured ciphers list"

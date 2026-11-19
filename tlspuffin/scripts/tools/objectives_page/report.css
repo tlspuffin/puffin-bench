@@ -35,6 +35,8 @@ h2 { font-size:13px; margin:12px 0 6px; color:var(--muted) }
 .type { display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:700; color:#fff; white-space:nowrap }
 .type.asan { background:var(--red) } .type.sec { background:var(--purple) } .type.panic { background:var(--orange) }
 .type.none { background:var(--gray) }
+.type.tmo { background:#db6d28 }
+.puffin-tag { font-size:12px; padding:1px 6px; border-radius:4px; border:1px solid var(--gray); color:#c9d1d9; cursor:pointer }
 .frames { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .frames b { color:var(--red) }
 .where { display:flex; flex-wrap:wrap; gap:4px }

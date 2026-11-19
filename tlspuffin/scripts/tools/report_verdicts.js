@@ -13,7 +13,7 @@
 //                            pre_target (its job scripts had no target),
 //                            first_expected: { <attempt>: <name of its first objective of the expected bug> },
 //                            script_disagrees: [{ attempt, script, report }] } },
-//               bugs: { count, objectives, confirmed },
+//               bugs: { count (no timeout under load), objectives, confirmed, not_target, under_load },
 //               headline: BugsHeadline (the title of the report: { real, confirmed, new, allKnown, level,
 //                         nothingExpected, text }),
 //               history: { level, title }: the 🐞 of the history page, its colour (the level: new, unexpected,
@@ -113,15 +113,17 @@ for (const [library, o] of Object.entries(expected)) {
                    untimed: o.untimed.map(attempt => ({ attempt, why: why[attempt] ?? null })), level: o.level,
                    provisional: o.provisional, pre_target: o.preTarget, first_expected: firstExpected, script_disagrees: disagrees };
 }
-// the bugs of the task as the page lists them (reproduced by a replay, or recorded by the fuzzer)
+// the bugs of the task as the page lists them (reproduced by a replay, or recorded by the fuzzer), but its timeouts
+// under load: puffin's, no bug (BugsHeadline underLoad, said apart)
 const all = analysis.bugs;
-const bugs = all.filter(bug => bug.reproduced > 0 || bug.fuzzer);
+const bugs = all.filter(bug => !bug.underLoad && (bug.reproduced > 0 || bug.fuzzer));
 const { alarm, found, ...headline } = analysis.headline;
 // not_target: those of them set apart, not the target of a run that looks for one (CVE-2024-5814 in a Vuln job): the
 // title of the report leaves them out of its count and gives them a tile; History says them apart (one count of the bugs)
+// under_load: the objectives that are timeouts under load (History: its ⏱ when they are all of them)
 const counts = { count: bugs.length, objectives: runs.reduce((sum, run) => sum + (run.found ?? 0), 0),
                  confirmed: bugs.reduce((sum, bug) => sum + (bug.reproduced ?? 0), 0),
-                 not_target: bugs.filter(bug => bug.notTarget).length };
+                 not_target: bugs.filter(bug => bug.notTarget).length, under_load: headline.underLoad ?? 0 };
 // the 🐞 of the history page: its colour from the level (new: 🚨, unexpected: gold, nothing reproduced: warning, outlined;
 // known bugs: plain), its hover
 const level = headline.level ? LEVELS[headline.level] : null;
@@ -131,6 +133,7 @@ const history = {
     `🐞 ${counts.objectives} objective${counts.objectives === 1 ? '' : 's'}, ${counts.count} bug${counts.count === 1 ? '' : 's'}`
       + (counts.not_target ? ` (${counts.not_target} of them not the target: a known CVE set apart)` : '')
       + `, ${counts.confirmed} objective${counts.confirmed === 1 ? '' : 's'} reproduced by a replay`,
+    counts.under_load ? `⏱ ${counts.under_load} timeout${counts.under_load === 1 ? '' : 's'} under load (puffin's, not bugs)` : '',
     level ? `${level.mark ? `${level.mark} ` : ''}${level.word}: ${level.tip}` : '',
     headline.new ? `${alarm}: ${all.filter(bug => bug.isNew).map(bug => bug.frames?.[0] ?? bug.key).slice(0, 3).join(', ')}` : '',
     headline.nothingExpected?.length ? `no known bug expected in ${headline.nothingExpected.join(', ')}` : '',

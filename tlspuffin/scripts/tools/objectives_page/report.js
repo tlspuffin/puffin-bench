@@ -5,7 +5,7 @@
 
 import '../board/frame.js';
 import { resolveCommits, parseTaskName, commitLineHTML } from '../common/commitinfo.js';
-import { UNCONFIRMED, TYPE_LABELS, FuzzerText, Mismatch, NotReplayed, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, RunFailures, ExpectedConclusion, ExpectedChipTip, KnownByValidation, TargetText, AnalyseReport } from './bugs.js';
+import { UNCONFIRMED, TYPE_LABELS, FuzzerText, Mismatch, NotReplayed, Partly, Letter, Uncategorised, UncategorisedText, BugName, ShortName, LoadCves, RunFailures, ExpectedConclusion, ExpectedChipTip, KnownByValidation, TargetText, AnalyseReport, TimingText, PuffinIds } from './bugs.js';
 import { PlaceOf, FrameName } from '../common/signatures.js';
 import { TERMS, VERDICTS, VERDICT_ORDER, NO_VERDICT, TAGS, LEVELS, SignatureText, SignatureWithStack, BenchText } from '../common/verdicts.js';
 
@@ -222,6 +222,14 @@ help.innerHTML = `
       CVEs and the bugs found so far: <a href="${BUGS_PAGE}">🎯 Bugs reference</a>.</li>
   </ul>
 
+  <h2>⏱ Timeouts</h2>
+  <p>The fuzzer also saves an input whose execution runs past the time it gives one (5 s): a timeout. Its replay, alone on
+    a core, decides: past that time too, it is the bug <b>timeout</b> of its configuration (a possible denial of service,
+    in the library or in puffin), counted as any bug; under it, a <b>⏱ timeout under load</b>: puffin's, not a bug of the
+    library, not counted, shown with the size of its traces and how long their replays ran (traces of several MB take
+    seconds to execute, and longer under the load of fuzzing). A bug the catalogue gives a PUFFIN- id (a bug of puffin's
+    harness or policy, such as LibreSSL's HKDFCLAIM) is tagged <b>puffin bug</b>.</p>
+
   <h2>❓ Without category</h2>
   <p>The tile <b>❓ N without category</b> counts the objectives whose bug cannot be told: no replay reproduced them and the
     fuzzer's log has no record of them (no log in the artefacts, or the record lost to log rotation and no other
@@ -253,7 +261,8 @@ const PREFIXES = { 'perf': 'Perf', 'vuln-a': 'VulnA', 'vuln-b': 'VulnB', 'campai
 
 
 function TypeClass(type) {
-  if (UNCONFIRMED.has(type)) return 'none';
+  if (UNCONFIRMED.has(type) || type === 'timeout-under-load') return 'none';
+  if (type === 'timeout') return 'tmo';
   if (type === 'security-violation') return 'sec';
   if (type === 'panic') return 'panic';
   return 'asan';
@@ -438,7 +447,10 @@ function FailuresNote(libraries, expectedRuns) {
 
 // What the bug is for this task, under its symptom: the expected CVE, a CVE set apart, unexpected, new
 function BugTags(bug) {
+  const puffin = PuffinIds(bug);
   return (bug.notTarget ? NotTargetBadge(bug) : '')
+      + (bug.underLoad ? ` <span class="puffin-tag" data-click-tip="${esc(`A timeout of the fuzzer (its client stopped an execution past the time it gives one) that no replay reproduces: the replays ran under that time. A timeout under the load of fuzzing, puffin's, not a bug of the library; not counted as a bug. ${TimingText(bug.timing)}`)}">⏱ puffin · timeout under load</span>` : '')
+      + (puffin.length ? ` <span class="puffin-tag" data-click-tip="${esc(`A bug of puffin itself (its harness, its security policy), not of the library: the catalogue's ${puffin.join(', ')}`)}">puffin bug · ${esc(puffin.join(', '))}</span>` : '')
       + (bug.expected ? ` <span class="expected" data-click-tip="The bug this configuration is meant to find (its target): ${esc(bug.expected.join(', '))}">${TAGS.expected.mark} ${TAGS.expected.word} · ${esc(bug.expected.join(', '))}</span>` : '')
       + (bug.knownCve && !bug.validation?.kind ? ` <span class="known-cve" data-click-tip="${esc(bug.knownCveInferred
           ? `A CVE of the library this configuration built (${Object.keys(bug.knownCve).join(', ')}), whose signature in vuln_targets.json this bug matches: not a new bug.\nInferred: this build declared no CVEs (built before puffin-build), so the CVE comes from the CVE table of vuln_targets.json (library, signature), not from the build`
@@ -483,6 +495,11 @@ function ValidationNote(libraries) {
 function TypeBadges(bug) {
   const type = `<span class="type ${TypeClass(bug.type)}">${esc(TYPE_LABELS[bug.type] ?? bug.type)}</span>`;
   const why = 'The fuzzer runs every input in one process (state of the library, memory layout); a replay starts a fresh process.';
+  // a timeout no replay reproduces: puffin's, said by its tag (BugTags), no warning; one none of whose objectives was
+  // replayed yet (live page; beyond the replays of its experiment) says so: the replay decides
+  if (bug.underLoad) {
+    return NotReplayed(bug) ? `${type} <span class="muted" data-click-tip="None of these timeouts was replayed yet: a replay past the time the fuzzer gives an execution would make it a bug, one under it a timeout under load">not replayed yet</span>` : type;
+  }
   // a bug known not to replay (CDOS): as expected, no warning
   if (bug.noReplay?.length && !bug.reproduced) {
     return `${type}<span class="val val-no-replay" data-click-tip="${esc(`${VERDICTS['no-replay'].mark} ${VERDICTS['no-replay'].tip}`)}">${VERDICTS['no-replay'].mark} ${esc(VERDICTS['no-replay'].word)}</span>`;
@@ -584,12 +601,15 @@ function BugRow(bug, open) {
       .map(([reason, n]) => `${reason || 'ran without error'} ×${n}`);
   const tries = [...(bug.tries ?? new Map()).entries()].map(([t, n]) => `${t} ×${n}`).join(', ');
   // objectives the replay does not confirm: what the fuzzer saw is the evidence
-  const frames = bug.frames.length
+  const frames = bug.underLoad
+      // a timeout no replay reproduces: how big its traces are, how long their replays ran
+      ? `<span class="muted">${esc(TimingText(bug.timing) || 'replay time not measured')}</span>`
+      : bug.frames.length
       // a crash without sanitizer stack: the backtrace of the fuzzer's crash handler gives where it happened
       ? `${FramesHTML(bug.frames)}${bug.framesFromFuzzer ? ` <span class="muted">(fuzzer's backtrace, ${esc(fz.detail)})</span>` : ''}`
       : `<span class="muted">${esc(bug.summary || (bug.type === 'no-crash' ? 'the replay ran without crash nor violation' : ''))}</span>`;
   const replayed = bug.run?.replayed;
-  return `<details class="bug" id="bug-${esc(bug.letter)}" data-kind="${bug.notTarget ? 'not-target' : bug.reproduced ? 'confirmed' : bug.noReplay?.length ? 'no-replay' : bug.fuzzer ? 'fuzzer' : bug.type}" ${open ? 'open' : ''}>
+  return `<details class="bug" id="bug-${esc(bug.letter)}" data-kind="${bug.notTarget ? 'not-target' : bug.underLoad ? 'under-load' : bug.reproduced ? 'confirmed' : bug.noReplay?.length ? 'no-replay' : bug.fuzzer ? 'fuzzer' : bug.type}" ${open ? 'open' : ''}>
     <summary>
       <div class="count"><span class="bugletter"><span class="chev" title="Click: replay report and fuzzer log">▸</span> ${esc(DisplayName(bug))}</span>${count(bug.count)} <small>objective${bug.count > 1 ? 's' : ''}</small>${bug.notReproduced && bug.reproduced ? `<small class="nr">(${count(bug.notReproduced)} not reproduced)</small>` : ''}${bug.notReplayed && bug.notReplayed < bug.count ? `<small class="nr">(${count(bug.notReplayed)} not replayed)</small>` : ''}</div>
       <div>${TypeBadges(bug)}</div>
@@ -609,6 +629,7 @@ function BugRow(bug, open) {
         ${NamedBugs(bug).length ? `<div class="row" title="what validation recognises the bug by: its signature (oracle) and its place: a stack must crash there for a strong signature"><span>signature</span><span>${NamedBugs(bug).map(FullSignature).join('<br>')}</span></div>` : ''}
         ${fz ? `<div class="row"><span>fuzzer saw</span><span class="mono">${esc(FuzzerText(fz))}</span></div>` : ''}
         ${reasons.length ? `<div class="row"><span>not reproduced</span><span class="mono">${esc(reasons.join(', '))}</span></div>` : ''}
+        ${bug.timing || bug.underLoad || bug.type === 'timeout' ? `<div class="row" title="the size of its traces, how long their replays ran (each objective's last try), and the time the fuzzer gives an execution"><span>timing</span><span>${esc(TimingText(bug.timing) || 'replay time not measured')}</span></div>` : ''}
         ${tries ? `<div class="row"><span>replay tries</span><span>${esc(tries)}</span></div>` : ''}
         ${bug.summary && bug.reproduced ? `<div class="row"><span>summary</span><span class="mono">${esc(bug.summary)}</span></div>` : ''}
         ${replayed != null ? `<div class="row"><span>run ${esc(bug.run?.attempt)} of ${esc(bug.library)}</span><span>${count(bug.run?.found)} found, ${count(replayed)} replayed</span></div>` : ''}
@@ -775,8 +796,10 @@ async function Render() {
   const libraries = report.libraries?.length ? report.libraries.map(lib => lib.library) : [...new Set(runs.map(run => run.library))];
   // configurations with a bug: recorded by the fuzzer or reproduced by a replay (a bug that never replays, such as CDOS's
   // crash in the session cache, is still a bug found), and among them those a replay reproduced; CVEs set apart excluded
-  const real = bugs.filter(bug => !bug.notTarget && (bug.reproduced > 0 || bug.fuzzer));
+  const real = bugs.filter(bug => !bug.notTarget && !bug.underLoad && (bug.reproduced > 0 || bug.fuzzer));
   const hit = [...new Set(real.flatMap(bug => bug.runs.map(run => run.library)))];
+  // the timeouts no replay reproduces: puffin's (bugs.js), their own tile
+  const underLoadBugs = bugs.filter(bug => bug.underLoad);
   const hitConfirmed = [...new Set(real.flatMap(bug => bug.runs.filter(run => run.reproduced > 0).map(run => run.library)))];
   // objectives of bugs no replay confirms and the fuzzer did not record (no log, older tasks)
   const unconfirmedCount = (type) => bugs.filter(bug => !bug.reproduced && !bug.fuzzer && bug.type === type).reduce((sum, bug) => sum + bug.count, 0);
@@ -787,7 +810,7 @@ async function Render() {
   const knownNoReplay = bugs.filter(bug => !bug.notTarget && !bug.reproduced && bug.noReplay?.length);
   const fuzzerOnlyObjectives = fuzzerOnly.reduce((sum, bug) => sum + bug.count, 0);
   // every objective the replay does not reproduce while the fuzzer recorded it (also within reproduced bugs)
-  const notReproducedWithRecord = bugs.filter(bug => bug.fuzzer).reduce((sum, bug) => sum + bug.notReproduced, 0);
+  const notReproducedWithRecord = bugs.filter(bug => bug.fuzzer && !bug.underLoad).reduce((sum, bug) => sum + bug.notReproduced, 0);
 
   // the title: the new bugs, the real ones, with the marks of the task's level (bugs.js BugsHeadline)
   const news = ['new', 'unexpected'].includes(headline.level);
@@ -820,6 +843,7 @@ async function Render() {
       ${uncategorised.pending ? `<div class="tile pending-tile" data-click-tip="${esc(UncategorisedText(uncategorised, null, true))}"><b>⏳ ${count(uncategorised.pending)}</b> not processed yet</div>` : ''}
       ${fuzzerOnly.length ? `<div class="tile warn" data-click-tip="Objectives whose replay does not reproduce what the fuzzer saw (crash or claim violation, from its logs)"><b>${count(fuzzerOnly.length)}</b><span>seen only by the fuzzer (${count(fuzzerOnlyObjectives)} objectives)</span></div>` : ''}
         ${notTargetBugs.length ? `<div class="tile" data-click-tip="Bugs that are not the CVE this job looks for (${esc([...new Set(notTargetBugs.map(b => b.notTarget))].join(', '))}): listed after the targeted ones, not counted in the configurations hit"><b>${count(notTargetBugs.length)}</b><span>not the target (${count(notTargetObjectives)} objectives)</span></div>` : ''}
+        ${underLoadBugs.length ? `<div class="tile" data-click-tip="${esc(`Timeouts of the fuzzer that no replay reproduces (each replay ran under the time the fuzzer gives an execution): under the load of fuzzing, puffin's, not bugs of the library. ${underLoadBugs.map(b => `${b.runs.map(r => r.library).join(', ')}: ${TimingText(b.timing)}`).join('; ')}`)}"><b>⏱ ${count(headline.underLoad ?? 0)}</b><span>timeouts under load (puffin)</span></div>` : ''}
         <div class="tile"><b>${count(found)}</b><span>objectives found</span></div>
         <div class="tile"><b>${count(replayed)}</b><span>replayed · ${count(reproduced)} reproduced</span></div>
         ${Object.keys(expectedRuns).length ? '' /* the 🎯 tile says it (bugs found by the fuzzer, reproduced by a replay or not) */
@@ -860,6 +884,7 @@ async function Render() {
         ${fuzzerOnly.length ? `<button type="button" class="chip on" data-kind="fuzzer">⚠ seen only by the fuzzer (${fuzzerOnly.length})</button>` : ''}
         ${knownNoReplay.length ? `<button type="button" class="chip on" data-kind="no-replay" title="${esc(VERDICTS['no-replay'].tip)}">${VERDICTS['no-replay'].mark} ${esc(VERDICTS['no-replay'].word)} (${knownNoReplay.length})</button>` : ''}
         ${notTargetBugs.length ? `<button type="button" class="chip on" data-kind="not-target">not the target (${notTargetBugs.length})</button>` : ''}
+        ${underLoadBugs.length ? `<button type="button" class="chip on" data-kind="under-load" title="timeouts of the fuzzer no replay reproduces: puffin's, not bugs">⏱ timeouts under load (${underLoadBugs.length})</button>` : ''}
         <button type="button" class="chip ${confirmed.length || fuzzerOnly.length ? '' : 'on'}" data-kind="no-crash">not reproduced, no fuzzer record (${count(unconfirmedCount('no-crash'))})</button>
         <button type="button" class="chip ${confirmed.length || fuzzerOnly.length ? '' : 'on'}" data-kind="replay-error">replay errors (${count(unconfirmedCount('replay-error'))})</button>
         <span class="grow"></span>
@@ -868,7 +893,7 @@ async function Render() {
       <h2>Bugs, by number of objectives</h2>
       <div class="card" id="bugs">${bugs.map(bug => BugRow(bug, false)).join('')}</div>
       ` : ''}
-      ${UnconfirmedNote(found, replayed, bugs.reduce((sum, bug) => sum + (bug.replayType === 'no-crash' || bug.fuzzer ? bug.notReproduced : 0), 0), unconfirmedCount('replay-error'), confirmed.length, notReproducedWithRecord)}
+      ${UnconfirmedNote(found, replayed, bugs.filter(bug => !bug.underLoad).reduce((sum, bug) => sum + (bug.replayType === 'no-crash' || bug.fuzzer ? bug.notReproduced : 0), 0), unconfirmedCount('replay-error'), confirmed.length, notReproducedWithRecord)}
     </div>`;
 
   // filters: the kinds of bugs shown
@@ -881,7 +906,7 @@ async function Render() {
   allChip?.addEventListener('click', () => {
     const all = !allChip.classList.contains('on');
     kindChips.forEach(chip => {
-      const on = all || ['confirmed', 'fuzzer', 'no-replay'].includes(chip.dataset.kind);
+      const on = all || ['confirmed', 'fuzzer', 'no-replay', 'under-load'].includes(chip.dataset.kind);
       chip.classList.toggle('on', on);
       on ? shown.add(chip.dataset.kind) : shown.delete(chip.dataset.kind);
     });

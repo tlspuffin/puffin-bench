@@ -1,10 +1,12 @@
 // known_bugs.js <objectives dir>: the registry of the bugs found so far, per library, for the "🚨 new bug" alerts
 // (objectives_page/bugs.js NewBugs): "<library>|<signature>" (BugSignature: the claim, or the top function of the crash) -> { task, started, what } of the first task that had it,
-// with the library its configuration built (vendor: wolfssl…, from its run's record) and a custom experiment's target
+// with the library its configuration built (vendor: wolfssl…, from its run's record), a custom experiment's target
 // (target: the catalogue entry it looked for), which the Bugs reference needs (a configuration named custom2_SKIP),
-// from every final report (<task>.json) of the objectives pages, oldest first. Run by objectives_report.sh --all with
-// the qjs of the bench: qjs --std -m known_bugs.js <dir>
-import { Bugs, BugSignature } from './objectives_page/bugs.js';
+// the version its run built (library: { name, version, release }, the run's record: the bugs of the catalogue it can
+// be), and the bugs validation confirmed it is there (confirmed: { <ID>: <first task that confirmed it> }, from the
+// verdicts of its objectives, BugValidation, any task), from every final report (<task>.json) of the objectives pages,
+// oldest first. Run by objectives_report.sh --all with the qjs of the bench: qjs --std -m known_bugs.js <dir>
+import { Bugs, BugSignature, BugValidation } from './objectives_page/bugs.js';
 
 const dir = scriptArgs[1];
 const [names, err] = os.readdir(dir);
@@ -28,9 +30,16 @@ for (const r of reports) {
     for (const lib of new Set(bug.runs.map(run => run.library))) {
       const cli = bug.runs.find(run => run.library === lib)?.cli ?? r.runs.find(run => run.library === lib)?.cli ?? {};
       const vendor = String(cli.vendor ?? '').split(':')[0] || cli.library?.name || null;
-      known[`${lib}|${sig}`] ??= { task: String(r.task), started: r.started ?? null,
+      const library = cli.library?.name ? { name: cli.library.name, version: cli.library.version ?? null, release: cli.library.release ?? null } : null;
+      const entry = known[`${lib}|${sig}`] ??= { task: String(r.task), started: r.started ?? null,
         what: `${bug.type}: ${(bug.frames ?? []).join(' < ') || bug.summary || ''}`.slice(0, 200),
-        ...(vendor ? { vendor: vendor.toLowerCase() } : {}), ...(cli.custom?.target ? { target: cli.custom.target } : {}) };
+        ...(vendor ? { vendor: vendor.toLowerCase() } : {}), ...(cli.custom?.target ? { target: cli.custom.target } : {}),
+        ...(library ? { library } : {}) };
+      // the bugs validation confirmed this one is, by patch differential, in this configuration (its objectives there,
+      // BugValidation's kind "patch": a verdict whose control failed is none, as on the pages)
+      const here = { ...bug, runs: bug.runs.filter(run => run.library === lib), objectives: (bug.objectives ?? []).filter(o => o.library === lib) };
+      const validation = BugValidation(here, r.libraries ?? [], null, false);
+      if (validation?.kind === 'patch') for (const id of validation.ids) (entry.confirmed ??= {})[id] ??= String(r.task);
     }
   }
 }
