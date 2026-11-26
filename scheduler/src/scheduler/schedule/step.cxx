@@ -12,7 +12,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(source.rank_id_), 
     attempt_id_(attempt_id), run_id_(run_id), executor_data_(nullptr), 
     function_(source.function_), args_(source.args_), nb_cores_(source.nb_cores_), 
-    nb_retry_(source.nb_retry_), memory_max_(source.memory_max_), timeout_(source.timeout_), 
+    nb_cores_reserved_(source.nb_cores_reserved_), nb_retry_(source.nb_retry_), 
+    memory_max_(source.memory_max_), timeout_(source.timeout_), 
     next_(const_cast <ns_Schedule::Step *>(&source)), 
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
@@ -20,7 +21,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), 
     message_from_run_(""), state_(State::Pending), end_processed_(false),
     user_run_state_(""), group_status_(source.group_status_), readable_files_(source.readable_files_), 
-    estimatedStartTime_(0)
+    estimatedStartTime_(0), request_smt_mode_(source.request_smt_mode_)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -52,7 +53,8 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     group_id_(source.group_id_), step_id_(source.step_id_), rank_id_(rank_id), 
     attempt_id_(attempt_id), run_id_(run_id), executor_data_(nullptr), 
     function_(source.function_), args_(source.args_), nb_cores_(source.nb_cores_), 
-    nb_retry_(source.nb_retry_), memory_max_(source.memory_max_), timeout_(source.timeout_), 
+    nb_cores_reserved_(source.nb_cores_reserved_), nb_retry_(source.nb_retry_), 
+    memory_max_(source.memory_max_), timeout_(source.timeout_), 
     next_(const_cast <ns_Schedule::Step *>(&source)), 
     previous_(const_cast <ns_Schedule::Step *>(&source)), 
     dependencies_(source.dependencies_), depend_from_(source.depend_from_), 
@@ -60,7 +62,7 @@ ns_Schedule::Step::Step(ns_Schedule::Step const& source, uint64_t run_id,
     request_cancel_(false), monitor_(source.monitor_), monitor_path_(), message_from_run_(""), 
     state_(State::Pending), end_processed_(false), user_run_state_(""), 
     group_status_(source.group_status_), readable_files_(source.readable_files_), 
-    estimatedStartTime_(0)
+    estimatedStartTime_(0), request_smt_mode_(task_->default_smt_mode_)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -94,13 +96,14 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task, std::string const& name,
     : task_(task), name_(name), id_(), uuid_(++next_uuid_), group_id_(group_id), 
     step_id_(step_id), rank_id_(0), attempt_id_(0), run_id_(run_id), 
     executor_data_(nullptr), 
-    function_(name), args_(), nb_cores_(1), nb_retry_(0), memory_max_(0), 
+    function_(name), args_(), nb_cores_(1), nb_cores_reserved_(0), nb_retry_(0), memory_max_(0), 
     timeout_(0), next_(this), previous_(this), dependencies_(), 
     depend_from_(dependFrom), stdout_(), stderr_(), exit_code_(exitCode_NotSet_), 
     monitor_count_(0), request_cancel_(false), monitor_(), monitor_path_(), 
     message_from_run_(""), state_(State::Pending), end_processed_(false), 
     user_run_state_(""), group_status_(group_status), 
-    readable_files_(MergeStreamsConfig(streamsConfigJSON)), estimatedStartTime_(0)
+    readable_files_(MergeStreamsConfig(streamsConfigJSON)), estimatedStartTime_(0), 
+    request_smt_mode_(task_->default_smt_mode_)
 {
   if ((group_status_ == stepsGroup_In_) || (group_status_ == stepsGroup_End_)) {
     depend_from_.clear();
@@ -162,6 +165,7 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   }
 
   nb_cores_ = Get<uint64_t>(config, "nb_cores");
+  nb_cores_reserved_ = Get<uint64_t>(config, "nb_cores_reserved");
   nb_retry_ = Get<uint64_t>(config, "nb_retry");
   memory_max_ = Get<uint64_t>(config, "memory_max");
   timeout_ = Get<uint64_t>(config, "timeout");
@@ -244,6 +248,11 @@ ns_Schedule::Step::Step(ns_Schedule::Task* task,
   }
 
   estimatedStartTime_ = Get<uint64_t>(config, "estimated_start_time");
+
+  if (!ns_Schedule::SMT::Parse(GetOrDefault(config, "smt_mode", ""), request_smt_mode_)) {
+    request_smt_mode_ = task_->default_smt_mode_;
+  }
+
   //LOGE(__LINE__ << " Create step " << this << " " << uuid_ << " " << id_);
 }
 
@@ -288,6 +297,12 @@ void ns_Schedule::Step::ReadFromTaskJSON(
 
   if (group_status_ != stepsGroup_None_) {
     nb_retry_ = groupConfigurations.NbRetry(configName);
+  }
+
+  auto it = args_.find("SMT_MODE");
+  ns_Schedule::SMT::Mode parsed = ns_Schedule::SMT::Mode::UnSet;
+  if ((it != args_.end()) && ns_Schedule::SMT::Parse(it->second, parsed)) {
+    request_smt_mode_ = parsed;
   }
 }
 
@@ -357,6 +372,7 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember(rapidjson::StringRef("args"), argsObj, alloc);
 
   out.AddMember("nb_cores", nb_cores_, alloc);
+  out.AddMember("nb_cores_reserved", nb_cores_reserved_, alloc);
   out.AddMember("nb_retry", nb_retry_, alloc);
   out.AddMember("memory_max", memory_max_, alloc);
   out.AddMember("timeout", timeout_, alloc);
@@ -414,6 +430,8 @@ void ns_Schedule::Step::ToJSON(rapidjson::Value& out,
   out.AddMember("streams", streamsArray, alloc);
 
   out.AddMember("estimated_start_time", estimatedStartTime_, alloc);
+
+  out.AddMember("smt_mode", rapidjson::Value(ns_Schedule::SMT::Label(request_smt_mode_).c_str(), alloc), alloc);
 }
 
 void ns_Schedule::Step::UpdateStats() {

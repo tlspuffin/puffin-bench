@@ -120,6 +120,12 @@ ns_Schedule::Task::Task(uint64_t id, std::string const& name,
     }
   }
 
+  auto it = args_.find("SMT_MODE");
+  ns_Schedule::SMT::Mode parsed = ns_Schedule::SMT::Mode::UnSet;
+  if ((it != args_.end()) && ns_Schedule::SMT::Parse(it->second, parsed)) {
+    default_smt_mode_ = parsed;
+  }
+
   CreateStepsFromJson(configJSON);
 }
 
@@ -175,6 +181,8 @@ ns_Schedule::Task::Task(rapidjson::Value const& config,
         }
       }
     }
+
+    ns_Schedule::SMT::Parse(GetOrDefault(config, "smt_mode", ""), default_smt_mode_);
 
     std::list<ns_Schedule::Step*> loadedSteps;
     std::unordered_map<uint64_t, ns_Schedule::Step*> loadedStepsIndex;
@@ -541,6 +549,8 @@ void ns_Schedule::Task::ToJSON(rapidjson::Value& out,
   out.AddMember("estimated_end_time", estimatedEndTime_, alloc);
 
   out.AddMember("launcher", StringToJSON(alloc, launcher_), alloc);
+
+  out.AddMember("smt_mode", rapidjson::Value(ns_Schedule::SMT::Label(default_smt_mode_).c_str(), alloc), alloc);
 }
 
 bool ns_Schedule::Task::CreateRunFolders() {
@@ -797,9 +807,13 @@ void ns_Schedule::Task::CreateStepsFromJson(
             } else {
               step->ReadFromTaskJSON(configurationsStack, groupConfigurations, &run);
             }
-            if (!executor_->CanRun(step)) {
-              throw std::runtime_error("Step " + step->ID() + " require too much ressources");
+            ns_Schedule::SMT::Mode supportedSMTMode = ns_Schedule::SMT::Mode::UnSet;
+            uint64_t nbCores = executor_->CanRun(step, supportedSMTMode);
+            if (nbCores == 0) {
+              throw std::runtime_error("Step " + step->ID() + " requires too many resources");
             }
+            step->request_smt_mode_ = supportedSMTMode;
+            step->nb_cores_reserved_ = nbCores;
 
             current_stack.push_back(step);
             steps_.push_front(step);
@@ -813,9 +827,13 @@ void ns_Schedule::Task::CreateStepsFromJson(
             step = attemptStep;
           }
         } else {
-          if (!executor_->CanRun(step)) {
-            throw std::runtime_error("Step "+ step->ID() +" require too much ressources");
+          ns_Schedule::SMT::Mode supportedSMTMode = ns_Schedule::SMT::Mode::UnSet;
+          uint64_t nbCores = executor_->CanRun(step, supportedSMTMode);
+          if (nbCores == 0) {
+            throw std::runtime_error("Step "+ step->ID() +" requires too many resources");
           }
+          step->request_smt_mode_ = supportedSMTMode;
+          step->nb_cores_reserved_ = nbCores;
           current_stack.push_back(step);
           steps_.push_front(step);
           ns_Schedule::Step* attemptStep = step;

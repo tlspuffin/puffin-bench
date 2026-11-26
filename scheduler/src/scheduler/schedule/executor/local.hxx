@@ -3,7 +3,7 @@
 
 #include "executor.hxx"
 #include "../../system/linux.hxx"
-#include "../../system/cpu_topology.hxx"
+#include "../../system/linux_cores_topology.hxx"
 #include "output_ring.hxx"
 #include <cstdint>
 #include <vector>
@@ -44,9 +44,8 @@ public:
 
   std::vector<uint64_t> cores_;
   // the other threads of the step's physical cores, reserved by it and left idle (smt pairs/one), and the mode the
-  // CPUs were chosen with (see ns_System::SmtMode)
+  // CPUs were chosen with (see ns_Schedule::SMT::Mode)
   std::vector<uint64_t> idle_cores_;
-  std::string smt_mode_ = "any";
   std::filesystem::path run_path_;
   std::filesystem::path artefacts_file_;
   pid_t pid_;
@@ -70,6 +69,8 @@ public:
   std::vector<int8_t> os_cores_load_;
   int8_t os_memory_max_load_;
   int8_t os_cores_max_load_;
+
+  std::string smt_mode_;
 };
 
 class Local : public Executor {
@@ -78,7 +79,7 @@ public:
       ns_System::Linux& os);
   ~Local();
 
-  bool CanRun(ns_Schedule::Step* step) const;
+  uint64_t CanRun(ns_Schedule::Step* step, ns_Schedule::SMT::Mode& supportedMode) const;
 
   bool TaskPrepareToRun(ns_Schedule::Task* task);
   bool TaskFinalize(ExecutorTaskData* data, ns_Schedule::Task* task);
@@ -146,7 +147,10 @@ private:
 
   // the CPUs of a step: whole physical cores (smt pairs, one) or logical CPUs (any), in coresFree_ order
   // (mode: the one asked, set to any when whole physical cores could not be found)
-  ns_System::CpuAllocation AssignCores(ns_Schedule::Step const& step, ns_System::SmtMode& mode);
+  std::pair<uint64_t, std::vector<std::vector<uint64_t>>> SuggestCores(ns_Schedule::Step const& step, 
+      std::vector<bool> const& coresState, ns_Schedule::SMT::Mode mode) const;
+  std::pair<std::vector<uint64_t>, std::vector<uint64_t>> AssignCores(
+      ns_Schedule::Step const& step, ns_Schedule::SMT::Mode& mode);
   void ReAssignCores(std::vector<uint64_t> const& cores);
   void ReleaseCores(std::vector<uint64_t> const& cores);
   // the slices whose processes are kept off the CPUs of the steps (user.slice, system.slice, machine.slice): restricted to
@@ -156,17 +160,7 @@ private:
   // the scheduler's own cgroup (<cgroup root>/server): its threads on the CPUs no step holds; empty when not writable
   std::filesystem::path serverCgroup_;
 
-  // the layout of the CPUs (physical cores, NUMA nodes) and the mode of the configuration (smt: pairs by default)
-  ns_System::CpuTopology topology_;
-  ns_System::SmtMode smtMode_ = ns_System::SmtMode::Pairs;
-  // the mode of a step: SMT_MODE (pairs, one, any) of the step (its job's flow) or of its task, else the
-  // configuration's; a mode the pool can never satisfy (not enough whole physical cores in it, e.g. a pool of the
-  // second threads of cores) falls back to any
-  ns_System::SmtMode StepSmtMode(ns_Schedule::Step const& step) const;
-  // the CPUs a step consumes (given and idle): what it counts against the maximum of cores
-  uint64_t CpusConsumed(ns_Schedule::Step const& step) const;
-  // whether the executor's CPUs, all free, have whole physical cores for a step of nbCpus CPUs in that mode (pairs, one)
-  bool PoolCanPlace(ns_System::SmtMode mode, uint64_t nbCpus) const;
+  ns_Schedule::SMT::Mode defaultSMTMode_;
 
   std::vector<std::string> BuildExecutorArgs(ns_Schedule::Step const& step);
   int16_t CheckExternalProcessIsRunning(pid_t pid, 
@@ -184,6 +178,12 @@ private:
   static bool PinCoresToProcess(std::vector<uint64_t> const& cores_, bool inMainProcess);
   static void SaveArtefacts(ns_Schedule::Step& step);
   static uint64_t EstimatedFinishTime(ns_Schedule::Step const* step);
+
+#ifdef BUILD_TESTSUITS
+protected:
+#endif
+  static std::pair<uint64_t, std::vector<std::vector<uint64_t>>> ChooseCores(
+      ns_System::CoresTopologyView const& coresLoad, uint32_t resourcesWanted, ns_Schedule::SMT::Mode smtMode);
 };
 
 };

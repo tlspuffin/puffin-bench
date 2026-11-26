@@ -5,9 +5,9 @@
 #include <chrono>
 #include <algorithm>
 #include <stdexcept>
+#include <cstdlib>
 
-std::mutex ns_System::CoreStats::lock_;
-uint64_t ns_System::CoreStats::nb_cores__ = std::numeric_limits<uint64_t>::max();
+std::mutex ns_System::CoreStats::lock__;
 uint64_t ns_System::CoreStats::nb_values_per_core__ = std::numeric_limits<uint64_t>::max();
 
 ns_System::CoreStats::CoreStats()
@@ -74,12 +74,11 @@ void ns_System::CoreStats::ComputeRatio() {
   }
 }
 
-void ns_System::CoreStats::Init() {
-  nb_cores__ = 0;
+void ns_System::CoreStats::Init(std::string const& statsFilename) {
   nb_values_per_core__ = 0;
-  std::ifstream handler_stats("/proc/stat");
+  std::ifstream handler_stats(statsFilename);
   if (!handler_stats.is_open()) {
-    throw std::runtime_error("CoresStats: Failed to open /proc/stat");
+    throw std::runtime_error("CoresStats: Failed to open " + statsFilename);
   }
   std::string line;
   while (std::getline(handler_stats, line)) {
@@ -95,15 +94,16 @@ void ns_System::CoreStats::Init() {
       while (iss >> val) {
         ++nb_values_per_core__;
       }
-      continue;
+      return;
     }
-    ++nb_cores__;
   }
 }
 
+std::mutex ns_System::CoresStats::lock__;
+uint64_t ns_System::CoresStats::nb_cores__ = std::numeric_limits<uint64_t>::max();
 
-ns_System::CoresStats::CoresStats() 
-    : cores_infos_(CoreStats::NbCores()), cores_global_infos_()
+ns_System::CoresStats::CoresStats(std::string const& statsFilename) 
+    : statsFilename_(statsFilename), cores_infos_(CoresStats::NbCores()), cores_global_infos_()
 {}
 
 void ns_System::CoresStats::Swap(CoresStats&& other) {
@@ -112,12 +112,14 @@ void ns_System::CoresStats::Swap(CoresStats&& other) {
 }
 
 void ns_System::CoresStats::GatherInfos() {
-  std::ifstream handler_stats("/proc/stat");
+  std::ifstream handler_stats(statsFilename_);
   if (!handler_stats.is_open()) {
-     throw std::runtime_error("CoresStats::GatherInfos: Failed to open /proc/stat");
+     throw std::runtime_error("CoresStats::GatherInfos: Failed to open " + statsFilename_);
   }
 
-  cores_infos_.clear();
+  for(ns_System::CoreStats& coreStats: cores_infos_) {
+    coreStats.id_ = -1;
+  }
   std::string line;
   while (std::getline(handler_stats, line)) {
     if (line.find("cpu", 0) != 0) {
@@ -127,8 +129,11 @@ void ns_System::CoresStats::GatherInfos() {
       cores_global_infos_.Update(line);
       continue;
     }
-
-    cores_infos_.emplace_back(line);
+    char* end = nullptr;
+    uint64_t const id = std::strtoull(&line[3], &end, 10);
+    if ((end != &line[3]) && (id < nb_cores__)) {
+      cores_infos_[id].Update(line);
+    }
   }
 }
 
@@ -144,8 +149,12 @@ std::vector<ns_System::CoreStats> ns_System::CoresStats::CoresValuesRatio(
 
   std::vector<CoreStats> results = cores_infos_t1;
   for(size_t i=0; i<results.size(); ++i) {
-    results[i] -= cores_infos_[i];
-    results[i].ComputeRatio();
+    if ((results[i].id_ != -1) && (cores_infos_[i].id_ != -1)) {
+      results[i] -= cores_infos_[i];
+      results[i].ComputeRatio();
+    } else {
+      results[i].id_ = -1;
+    }
   }
 
   return results;
@@ -189,7 +198,13 @@ void ns_System::CoresStats::SortCoresValuesRatio(uint64_t sort_index,
   if (cores_included != nullptr) {
     for(size_t i=0; i<cores_infos.size(); ++i) {
       cores_infos[i].excluded_ = !(*cores_included)[i];
-      if (cores_infos[i].excluded_) {
+      if ((cores_infos[i].id_ == -1) || (cores_infos[i].excluded_)) {
+        --nb_elements;
+      }
+    }
+  } else {
+    for(size_t i=0; i<cores_infos.size(); ++i) {
+       if (cores_infos[i].id_ == -1) {
         --nb_elements;
       }
     }
@@ -197,6 +212,8 @@ void ns_System::CoresStats::SortCoresValuesRatio(uint64_t sort_index,
 
   std::sort(cores_infos.begin(), cores_infos.end(),
     [sort_index](CoreStats const& a, CoreStats const& b) {
+      if (a.id_ == -1) return false;
+      if (b.id_ == -1) return true;
       if (a.values_.size() <= sort_index || b.values_.size() <= sort_index) {
         return a.id_ < b.id_;
       }
@@ -209,35 +226,122 @@ void ns_System::CoresStats::SortCoresValuesRatio(uint64_t sort_index,
   cores_infos.resize(nb_elements, {});
 }
 
-ns_System::CoresMonitor::CoresMonitor() {
+void ns_System::CoresStats::Init(std::string const& cpumaxFilename) {
+  bool success = false;
+  if (cpumaxFilename.empty()) {
+    success = ReadSysFS("/sys/devices/system/cpu/possible") ||
+        ReadSysFS("/sys/devices/system/cpu/present") ||
+        ReadStat("/proc/stat");
+  } else {
+    success = ReadSysFS(cpumaxFilename) || ReadStat(cpumaxFilename);
+  }
+  if (!success) {
+    throw std::runtime_error("CoresStats::Init unable to get number of cores");
+  }
+}
+
+bool ns_System::CoresStats::ReadSysFS(std::string const& cpumaxFilename) {
+  std::ifstream ifs(cpumaxFilename);
+  if (!ifs.is_open()) {
+    std::cerr << "Warning CoresStats::ReadSysFS: Failed to open " << cpumaxFilename << std::endl;
+    return false;
+  }
+  std::string line;
+  std::getline(ifs, line);
+  ifs.close();
+  
+  if (line.empty()) {
+    return false;
+  }
+  size_t lineLength = line.size() - 1;
+  for(; ((lineLength > 0) && ((line[lineLength-1] >= '0') && (line[lineLength-1] <= '9')));
+      --lineLength);
+  char* end = nullptr;
+  uint64_t const maxCore = std::strtoull(&line[lineLength], &end, 10);
+  if (end == &line[lineLength]) {
+    return false;
+  }
+  nb_cores__ = maxCore + 1;
+  return true;
+}
+
+bool ns_System::CoresStats::ReadStat(std::string const& cpumaxFilename) {
+  std::ifstream handler_stats(cpumaxFilename);
+  if (!handler_stats.is_open()) {
+    std::cerr << "Warning CoresStats::ReadStat: Failed to open " << cpumaxFilename << std::endl;
+    return false;
+  }
+  int64_t maxID = -1;
+  std::string line;
+  while (std::getline(handler_stats, line)) {
+    if (line.find("cpu", 0) != 0) {
+      continue;
+    }
+    if (line[3] != ' ') {
+      char* end = nullptr;
+      int64_t const id = std::strtoll(&line[3], &end, 10);
+      if ((end != &line[3]) && (id > maxID)) {
+        maxID = id;
+      }
+    }
+  }
+  if (maxID == -1) {
+    return false;
+  }
+  nb_cores__ = ++maxID;
+  return true;
+}
+
+ns_System::CoresMonitor::CoresMonitor() : cores_topology_(CoresStats::NbCores()) {
 }
 
 ns_System::CoresMonitor::~CoresMonitor() {
 }
 
-uint64_t ns_System::CoresMonitor::NbCores() const {
-  return CoreStats::NbCores();
-}
-
-std::vector<uint64_t> ns_System::CoresMonitor::SelectMostIdleCores(uint64_t nb_cores, 
-    std::vector<bool> const* cores_included) const {
+ns_System::CoresTopologyView ns_System::CoresMonitor::SystemLoad(std::vector<bool> const* cores_included) const {
   std::vector<CoreStats> cores_values_ratio;
   {
     std::lock_guard<std::mutex> lock(lock_);
     cores_values_ratio = cores_ratio_infos_;
   }
-  CoresStats::SortCoresValuesRatio(CoreStats::IDLE_INDEX,
-      cores_values_ratio, cores_included);
+  CoresTopology result = cores_topology_;
+  for(CoresTopologyView::sNumaInfos& numaInfos: result.Nodes()) {
+    double nodeLoad = 0;
+    size_t nbNodeLoad = 0;
+    for(auto& [threadCount, coresInfos] : numaInfos.cores) {
+      double cpuLoad = 0;
+      size_t nbLoad = 0;
+      for(size_t i=0; i<coresInfos.size(); ++i) {
+        if (coresInfos[i].id < cores_values_ratio.size()) {
+          CoreStats& coreStats = cores_values_ratio[coresInfos[i].id];
+          if (coreStats.id_ != -1) {
+            double load = 1.0 - coreStats.values_[CoreStats::IDLE_INDEX];
+            coresInfos[i].load = load;
+            cpuLoad += load;
+            ++nbLoad;
 
-  nb_cores = std::min<uint64_t>(nb_cores, cores_values_ratio.size());
-
-  std::vector<uint64_t> core_ids;
-  core_ids.reserve(nb_cores);
-  for (size_t i=0; i<nb_cores; ++i) {
-    core_ids.push_back(cores_values_ratio[i].id_);
+            nodeLoad += load;
+            ++nbNodeLoad;
+          }
+        }
+        if ((i % threadCount.first) == (threadCount.first - 1)) {
+          if (nbLoad > 0) {
+            cpuLoad /= nbLoad;
+          } else {
+            cpuLoad = CoresTopologyView::InfiniteLoad;
+          }
+          coresInfos[i].cpuLoad = cpuLoad;
+          for(size_t j=(i+1-threadCount.first); j<i; ++j) {
+            coresInfos[j].cpuLoad = cpuLoad;
+          }
+          cpuLoad = 0;
+          nbLoad = 0;
+        }
+      }
+    }
+    numaInfos.load = nbNodeLoad > 0 ? nodeLoad / nbNodeLoad : CoresTopologyView::InfiniteLoad;
   }
-
-  return core_ids;
+  return CoresTopologyView(result.Nodes(), cores_included);
 }
 
 void ns_System::CoresMonitor::CoresValuesRatio(CoreStats& global, 
@@ -260,4 +364,3 @@ void ns_System::CoresMonitor::Update() {
   }
   t0_.Swap(std::move(t1_));
 }
-

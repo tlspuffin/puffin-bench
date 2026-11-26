@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.hxx"
+#include "../smt.hxx"
 #include "../../system/linux.hxx"
 #include "../../../utils/file.hxx"
 #include <string>
@@ -49,7 +50,8 @@ public:
 
   std::string Name() const;
 
-  virtual bool CanRun(ns_Schedule::Step* step) const = 0;
+  // step can run in supportedMode with returned value of cores (0 = can not run)
+  virtual uint64_t CanRun(ns_Schedule::Step* step, ns_Schedule::SMT::Mode& supportedMode) const = 0;
 
   virtual bool TaskPrepareToRun(ns_Schedule::Task* task) = 0;
   virtual bool TaskFinalize(ExecutorTaskData* data, ns_Schedule::Task* task) = 0;
