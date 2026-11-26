@@ -216,10 +216,12 @@ void ns_Executor::LocalData::ToJSON(rapidjson::Value& out,
 ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig const& config, 
     uint16_t serverPort, ns_System::Linux& os)
     : Executor(name), config_(config), os_(os), nbCoresUsed_(0), 
-      nbCoresMax_(config_.nbCores_), coresFree_(config_.cores_), nbChild_(0), 
+      nbCoresMax_(config_.nbCores_), nbCoresDefault_(0), nbCoresLimit_(0), nbCoresUntilMs_(0), 
+      coresFree_(config_.cores_), nbChild_(0), 
       serverPort_(serverPort), cgroupRoot_(config.cgroupPath_), 
       cgroupRootCapabilities_(0),
-      cpuMaxLoad_(config_.cpuMaxLoad_), memMinAllowed_(0)
+      cpuMaxLoad_(config_.cpuMaxLoad_), memMinAllowed_(0), 
+      defaultSMTMode_(config.defaultSMTMode_)
 {
   static int setProcessReaper = prctl(PR_SET_CHILD_SUBREAPER, 1);
   if (setProcessReaper < 0) {
@@ -232,12 +234,8 @@ ns_Executor::Local::Local(std::string const& name, ns_Executor::LocalConfig cons
   LOGI << "CGroup are " << (cgroupRoot_.empty() ? "des" : "") << "activated" << Log::Flags::End;
 
   // the layout of the CPUs, for the choice of whole physical cores (smt)
-  topology_ = ns_System::CpuTopology::Read(config_.cores_.size());
-  if (!ns_System::ParseSmtMode(config_.smt_, smtMode_)) {
-    smtMode_ = ns_System::SmtMode::Pairs;
-  }
-  LOGI << "CPUs: " << static_cast<uint64_t>(topology_.coreCpus_.size()) << " physical cores of up to " <<
-      topology_.ThreadsPerCore() << " threads; steps get " << ns_System::SmtModeName(smtMode_) <<
+  LOGI << "CPUs: " << os_.Cores().NbCPU() << " physical cores of up to " <<
+      os_.Cores().NbThreadPerCore() << " threads; steps get " << ns_Schedule::SMT::Label(defaultSMTMode_) <<
       " (smt) unless their task asks otherwise (SMT_MODE)" << Log::Flags::End;
 
   // The CPUs of the steps are kept from the other processes of the machine: users (user.slice), services and their
@@ -302,9 +300,23 @@ ns_Executor::Local::~Local() {
 
 }
 
- bool ns_Executor::Local::CanRun(ns_Schedule::Step* step) const {
-  // what the executor can run at all: a temporary maximum only delays a step
-  return CpusConsumed(*step) <= std::max(nbCoresDefault_, nbCoresMax_);
+ uint64_t ns_Executor::Local::CanRun(ns_Schedule::Step* step, ns_Schedule::SMT::Mode& supportedMode) const {
+  ns_Schedule::SMT::Mode smtMode = step->request_smt_mode_;
+  if (smtMode == ns_Schedule::SMT::Mode::UnSet) {
+    smtMode = defaultSMTMode_;
+  }
+  uint64_t nbCores = step->nb_cores_;
+  if (smtMode != ns_Schedule::SMT::Mode::Any) {
+    std::pair<uint64_t, std::vector<std::vector<uint64_t>>> cores = SuggestCores(*step, config_.cores_, smtMode);
+    if (cores.first != 0) {
+      nbCores = cores.first;
+    } else {
+      smtMode = ns_Schedule::SMT::Mode::Any;
+    }
+  }
+  bool success = (nbCores > 0) && (nbCores <= std::max(nbCoresDefault_, nbCoresMax_));
+  supportedMode = success ? smtMode : ns_Schedule::SMT::Mode::UnSet;
+  return success ? nbCores : 0;
 }
 
 bool ns_Executor::Local::SetMaxCores(uint64_t maxCores, uint64_t durationSec, std::string& error) {
@@ -460,26 +472,20 @@ std::list<ns_Schedule::Step*> ns_Executor::Local::FindRunnableSteps(
 
     // the CPUs it consumes (with the idle threads of its physical cores), and whether they can be found: the
     // allocations of the steps accepted before it are played on a copy of the free CPUs
-    ns_System::SmtMode const mode = StepSmtMode(*step);
-    uint64_t nbCoresRequired = ns_System::CpusConsumed(topology_, step->nb_cores_, mode);
     uint64_t memoryRequired = step->memory_max_;
-    bool placed = step->IsReady() && (nbCoresRequired <= nbCoresFree) &&
+    bool placed = step->IsReady() && 
         !((memoryRequired > 0) && (memoryRequired > freeMemory));
+    uint64_t nbCoresRequired = 0;
     if (placed) {
-      if (mode != ns_System::SmtMode::Any) {
-        ns_System::CpuAllocation allocation;
-        placed = ns_System::AllocatePhysicalCores(topology_, freeMap, step->nb_cores_, mode, allocation);
-        for (uint64_t core : allocation.cpus_) freeMap[core] = false;
-        for (uint64_t core : allocation.idle_) freeMap[core] = false;
-      } else {
-        uint64_t marked = 0;
-        for (size_t i = 0; (i < freeMap.size()) && (marked < step->nb_cores_); ++i) {
-          if (freeMap[i]) {
-            freeMap[i] = false;
-            ++marked;
+      auto [nbCoresUsed, cpus] = SuggestCores(*step, freeMap, step->request_smt_mode_);
+      nbCoresRequired = nbCoresUsed;
+      placed = (nbCoresRequired <= nbCoresFree) && (!cpus.empty());
+      if (placed) {
+        for(std::vector<uint64_t> const& cpu: cpus) {
+          for(uint64_t const coreID: cpu) {
+            freeMap[coreID] = false;
           }
         }
-        placed = (marked == step->nb_cores_);
       }
     }
     if (!placed) {
@@ -531,7 +537,7 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       continue;
     }
     if (step->IsPending()) {
-      if (CpusConsumed(*step) > nbCoresMax_) {
+      if (step->nb_cores_reserved_ > nbCoresMax_) {
         for(auto step : steps) {
           if (step->task_->executor_ != this) {
             continue;
@@ -550,9 +556,7 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
       }
     } else {
       if (step->IsRunning()) {
-        // what it holds: its given and idle CPUs
-        LocalData const* held = dynamic_cast<LocalData const*>(step->executor_data_);
-        uint64_t const consumed = held ? held->cores_.size() + held->idle_cores_.size() : CpusConsumed(*step);
+        uint64_t const consumed = step->nb_cores_reserved_;
         if (consumed > freeCores) {
           for(auto step : steps) {
             if (step->task_->executor_ != this) {
@@ -667,7 +671,7 @@ void ns_Executor::Local::EstimatedStepsStartTime(std::list<ns_Schedule::Step*> c
     for (ns_Schedule::Step* parent : step.depend_from_) {
       notStartBefore = std::max(notStartBefore, EstimatedFinishTime(parent));
     }
-    uint64_t const consumed = CpusConsumed(step);
+    uint64_t const consumed = step.nb_cores_reserved_;
     if ((consumed <= freeCores) && (minTime >= notStartBefore)) {
       step.estimatedStartTime_ = minTime;
       uint64_t const stepDuration = ns_Schedule::DurationHistory::Instance().Estimate(step);
@@ -811,11 +815,10 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   }
   if (!localData->fdCaptureThread_.AddFD(localData->pipeFDErr[0], 
       new ns_Executor::MemoryRing{step.stderr_, config_.logsSize_})) {
-    close(localData->pipeFDOut[0]);
+    localData->fdCaptureThread_.RemoveFD(localData->pipeFDOut[0]);
     close(localData->pipeFDOut[1]);
     close(localData->pipeFDErr[0]);
     close(localData->pipeFDErr[1]);
-    localData->fdCaptureThread_.RemoveFD(localData->pipeFDOut[0]);
     throw std::runtime_error(
         std::string("adding rotation log for stderr failed: ") + step.stderr_.c_str()
     );
@@ -829,16 +832,24 @@ void ns_Executor::Local::Execute(ns_Schedule::Step& step) {
   }
 
   {
-    ns_System::SmtMode mode = StepSmtMode(step);
-    ns_System::CpuAllocation const allocation = AssignCores(step, mode);
-    localData->cores_ = allocation.cpus_;
-    localData->idle_cores_ = allocation.idle_;
-    localData->smt_mode_ = ns_System::SmtModeName(mode);
+    ns_Schedule::SMT::Mode smt = ns_Schedule::SMT::Mode::UnSet;
+    std::tie(localData->cores_, localData->idle_cores_) = AssignCores(step, smt);
+    if (localData->cores_.empty()) {
+      localData->fdCaptureThread_.RemoveFD(localData->pipeFDOut[0]);
+      localData->fdCaptureThread_.RemoveFD(localData->pipeFDErr[0]);
+      close(localData->pipeFDOut[1]);
+      close(localData->pipeFDErr[1]);
+      throw std::runtime_error(std::string("Unable to allocate compute resources for ") + step.ID());
+    }
+    step.nb_cores_reserved_ = localData->cores_.size() + localData->idle_cores_.size();
+    localData->smt_mode_ = ns_Schedule::SMT::Label(smt);
   }
 
   pid_t pid = fork();
   if (pid == 0) {
     try {
+      // ToDo move out of fork
+
       pid = getpid();
 
 #ifdef UPDATE_CHILD_UMASK
@@ -1340,9 +1351,9 @@ void ns_Executor::Local::ToJSON(rapidjson::Value &root, rapidjson::MemoryPoolAll
   root.AddMember("nb_cores_used", nbCoresUsed_, alloc);
   root.AddMember("nb_cores_limit", nbCoresLimit_, alloc);
   // how the CPUs of the steps are chosen (smt), the cores of the machine, and the slices kept off the steps' CPUs
-  root.AddMember("smt", rapidjson::Value(ns_System::SmtModeName(smtMode_).c_str(), alloc), alloc);
-  root.AddMember("threads_per_core", topology_.ThreadsPerCore(), alloc);
-  root.AddMember("physical_cores", static_cast<uint64_t>(topology_.coreCpus_.size()), alloc);
+  root.AddMember("smt", rapidjson::Value(ns_Schedule::SMT::Label(defaultSMTMode_).c_str(), alloc), alloc);
+  root.AddMember("threads_per_core", os_.Cores().NbThreadPerCore(), alloc);
+  root.AddMember("physical_cores", os_.Cores().NbCPU(), alloc);
   rapidjson::Value slices(rapidjson::kArrayType);
   for (auto const& slice : slicesRestricted_) {
     slices.PushBack(rapidjson::Value(slice.c_str(), alloc), alloc);
@@ -1454,6 +1465,8 @@ pid_t ns_Executor::Local::RunShutdown(ns_Schedule::Step& step, LocalData* localD
 
   if (pid == 0) {
     try {
+      // ToDo move out of fork
+
       pid_t localPID = getpid();
 
 #ifdef UPDATE_CHILD_UMASK
@@ -1610,75 +1623,69 @@ void ns_Executor::Local::EndRun(ns_Schedule::Step& step, LocalData* localData, b
   std::filesystem::remove(localData->fatalerror_file_, ec);
 }
 
-ns_System::SmtMode ns_Executor::Local::StepSmtMode(ns_Schedule::Step const& step) const {
-  ns_System::SmtMode mode = smtMode_;
-  // the step's own (its job's flow, configuration args: a job whose runs need a mode), else its task's (launch)
-  auto asked = [&mode](std::unordered_map<std::string, std::string> const& args) {
-    auto it = args.find("SMT_MODE");
-    ns_System::SmtMode parsed;
-    if ((it != args.end()) && ns_System::ParseSmtMode(it->second, parsed)) {
-      mode = parsed;
-      return true;
-    }
-    return false;
-  };
-  if (!asked(step.args_) && (step.task_ != nullptr)) {
-    asked(step.task_->args_);
+std::pair<uint64_t, std::vector<std::vector<uint64_t>>> ns_Executor::Local::SuggestCores(ns_Schedule::Step const& step, 
+    std::vector<bool> const& coresState, ns_Schedule::SMT::Mode mode) const {
+  try {
+    return ChooseCores(os_.Cores().SystemLoad(&coresState), step.nb_cores_, mode);
+  } catch(std::runtime_error const& e) {
+    LOGE << "Fatal error SuggestCores for step: " << step.ID() << " : " << e.what() << Log::Flags::End;
+    return {};
   }
-  // a pool without enough whole physical cores for the step (e.g. only the second threads of cores): logical CPUs
-  if ((mode != ns_System::SmtMode::Any) && !PoolCanPlace(mode, step.nb_cores_)) {
-    mode = ns_System::SmtMode::Any;
-  }
-  return mode;
 }
 
-bool ns_Executor::Local::PoolCanPlace(ns_System::SmtMode mode, uint64_t nbCpus) const {
-  ns_System::CpuAllocation allocation;
-  return ns_System::AllocatePhysicalCores(topology_, config_.cores_, nbCpus, mode, allocation);
-}
-
-uint64_t ns_Executor::Local::CpusConsumed(ns_Schedule::Step const& step) const {
-  return ns_System::CpusConsumed(topology_, step.nb_cores_, StepSmtMode(step));
-}
-
-ns_System::CpuAllocation ns_Executor::Local::AssignCores(ns_Schedule::Step const& step, ns_System::SmtMode& mode) {
+std::pair<std::vector<uint64_t>, std::vector<uint64_t>> ns_Executor::Local::AssignCores(
+    ns_Schedule::Step const& step, ns_Schedule::SMT::Mode& mode) {
   std::lock_guard<std::mutex> lock(coresLock_);
-  ns_System::CpuAllocation result;
-  uint64_t nbCores = step.nb_cores_;
-  if (mode != ns_System::SmtMode::Any) {
-    if (!ns_System::AllocatePhysicalCores(topology_, coresFree_, nbCores, mode, result)) {
-      // checked by FindRunnableSteps: not reached, unless the cores changed in between; logical CPUs then
-      LOGW << "Step " << step.ID() << ": no " << nbCores << " CPUs on whole physical cores (" <<
-          ns_System::SmtModeName(mode) << "), logical CPUs instead" << Log::Flags::End;
-      result = ns_System::CpuAllocation();
-      mode = ns_System::SmtMode::Any;
-    }
+
+  mode = step.request_smt_mode_;
+  if (mode == ns_Schedule::SMT::Mode::UnSet) {
+    return {};
   }
-  if (mode == ns_System::SmtMode::Any) {
-    if (config_.nbCores_ == 0) {
-      for (size_t i=0; i<coresFree_.size(); ++i) {
-        if (coresFree_[i]) {
-          result.cpus_.push_back(i);
-          if (--nbCores == 0) {
-            break;
-          };
+  std::pair<uint64_t, std::vector<std::vector<uint64_t>>> allocated = SuggestCores(step, coresFree_, mode);
+  uint64_t& nbCores = allocated.first;
+  std::vector<std::vector<uint64_t>>& cpus = allocated.second;
+  if ((nbCores == 0) && (step.request_smt_mode_ != ns_Schedule::SMT::Mode::Any)) {
+    mode = ns_Schedule::SMT::Mode::Any;
+    auto const& [nbCoresAny, cpusAny] = SuggestCores(step, coresFree_, mode);
+    LOGW << "Step " << step.ID() << ": no " << step.nb_cores_ << " cores on whole CPU (" <<
+          ns_Schedule::SMT::Label(step.request_smt_mode_) << "), logical cores instead" << Log::Flags::End;
+    nbCores = nbCoresAny;
+    cpus = cpusAny;
+  }
+  std::vector<uint64_t> coresUsed, coresIdle;
+  for (std::vector<uint64_t> const& cores : cpus) {
+    for(size_t i=0; i<cores.size(); ++i) {
+      auto const& coreID = cores[i];
+      coresFree_[coreID] = false;
+      switch (mode)
+      {
+      case ns_Schedule::SMT::Mode::Any:
+        coresUsed.push_back(coreID);
+        break;
+      case ns_Schedule::SMT::Mode::One:
+        if (i == 0) {
+          coresUsed.push_back(coreID);
+        } else {
+          coresIdle.push_back(coreID);
         }
+        break;
+      case ns_Schedule::SMT::Mode::Whole:
+        if (coresUsed.size() < step.nb_cores_) {
+          coresUsed.push_back(coreID);
+        } else {
+          coresIdle.push_back(coreID);
+        }
+        break;
+      case ns_Schedule::SMT::Mode::UnSet:
+        break;
       }
-    } else {
-      result.cpus_ = os_.Cores().SelectMostIdleCores(nbCores, &coresFree_);
     }
   }
-  for (uint64_t core : result.cpus_) {
-    coresFree_[core] = false;
-  }
-  for (uint64_t core : result.idle_) {
-    coresFree_[core] = false;
-  }
-  nbCoresUsed_ += result.cpus_.size() + result.idle_.size();
+  nbCoresUsed_ += nbCores;
 
   UpdateSlicesCpuset();
 
-  return result;
+  return { coresUsed, coresIdle };
 }
 
 void ns_Executor::Local::ReAssignCores(std::vector<uint64_t> const& cores) {
@@ -1916,7 +1923,8 @@ void ns_Executor::Local::GatherStats() {
   stats_.cores = 100 - (global.values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
   stats_.perCores.resize(perCores.size());
   for(size_t i=0; i<perCores.size(); ++i) {
-    stats_.perCores[i] = 100 - (perCores[i].values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
+    stats_.perCores[i] =  perCores[i].id_ == -1 ? -1 : 
+        100 - (perCores[i].values_[ns_System::CoreStats::IDLE_INDEX] * 100.0);
   }
 }
 
@@ -2071,4 +2079,299 @@ inline uint64_t ns_Executor::Local::EstimatedFinishTime(ns_Schedule::Step const*
     return ns_Schedule::DurationHistory::Instance().EstimatedEnd(*step, nowMs);
   }
   return step->estimatedStartTime_ + ns_Schedule::DurationHistory::Instance().Estimate(*step);
+}
+
+std::pair<uint64_t, std::vector<std::vector<uint64_t>>> ns_Executor::Local::ChooseCores(
+      ns_System::CoresTopologyView const& coresLoad, uint32_t resourcesWanted, ns_Schedule::SMT::Mode smtMode) {
+
+  std::map<uint32_t, std::vector<uint32_t>> countsCPUFull;
+  std::map<uint32_t, std::vector<uint32_t>> countsCoresFull;
+  std::map<uint32_t, std::vector<uint32_t>> countsCore;
+  std::map<uint32_t, std::vector<uint32_t>> countsCores1Full;
+  std::map<uint32_t, std::vector<uint32_t>> countsCores2AndMoreFull;
+  for(auto const& node: coresLoad.nodes_) {
+    uint32_t nbCPUFull = 0;
+    uint32_t nbCoreFull = 0;
+    uint32_t nbCore = 0;
+    uint32_t nbCore1Full = 0;
+    uint32_t nbCore2AndMoreFull = 0;
+    for(auto const& [counts, coresInfos] : node.cores) {
+      if (counts.first == counts.second) {
+        uint32_t nbCPU = coresInfos.size() / counts.second;
+        nbCoreFull += coresInfos.size();
+        nbCPUFull += nbCPU;
+        if (counts.first == 1) {
+          nbCore1Full += coresInfos.size();
+        } else {
+          nbCore2AndMoreFull += coresInfos.size();
+        }
+      } else {
+        nbCore += coresInfos.size();
+      }
+    }
+    if (nbCoreFull > 0) {
+      countsCoresFull[nbCoreFull].push_back(node.id);
+      countsCPUFull[nbCPUFull].push_back(node.id);
+      if (nbCore1Full > 0) {
+        countsCores1Full[nbCore1Full].push_back(node.id);
+      }
+      if (nbCore2AndMoreFull > 0) {
+        countsCores2AndMoreFull[nbCore2AndMoreFull].push_back(node.id);
+      }
+    }
+    if (nbCore > 0) {
+      countsCore[nbCore].push_back(node.id);
+    }
+  }
+
+  std::vector<std::tuple<uint64_t, uint64_t, void*>> selectedNodes;
+
+  switch(smtMode) {
+    case ns_Schedule::SMT::Mode::One: {
+      uint32_t resourcesAllocated = 0;
+      for (auto const& [nbFree, nodes]: countsCPUFull) {
+        if (nbFree >= resourcesWanted) {
+          resourcesAllocated = resourcesWanted;
+          selectedNodes.emplace_back(nodes.front(), resourcesWanted, &countsCPUFull);
+          break;
+        }
+      }
+      if (resourcesAllocated == 0) {
+        for (auto it = countsCPUFull.rbegin(); it != countsCPUFull.rend(); ++it) {
+          for (auto const& nodeID: it->second) {
+            uint32_t allocating = std::min(it->first, resourcesWanted - resourcesAllocated);
+            resourcesAllocated += allocating;
+            selectedNodes.emplace_back(nodeID, allocating, &countsCPUFull);
+            if (resourcesAllocated >= resourcesWanted) {
+              break;
+            }
+          }
+          if (resourcesAllocated >= resourcesWanted) {
+            break;
+          }
+        }
+      }
+      if (resourcesAllocated != resourcesWanted) {
+        selectedNodes.clear();
+      }
+    }
+    break;
+    case ns_Schedule::SMT::Mode::Whole: {
+      uint32_t resourcesAllocated = 0;
+      for (auto const& [nbFree, nodes]: countsCoresFull) {
+        if (nbFree >= resourcesWanted) {
+          resourcesAllocated = resourcesWanted;
+          selectedNodes.emplace_back(nodes.front(), resourcesWanted, &countsCoresFull);
+          break;
+        }
+      }
+      if (resourcesAllocated == 0) {
+        for (auto it = countsCoresFull.rbegin(); it != countsCoresFull.rend(); ++it) {
+          for (auto const& nodeID: it->second) {
+            uint32_t allocating = std::min(it->first, resourcesWanted - resourcesAllocated);
+            resourcesAllocated += allocating;
+            selectedNodes.emplace_back(nodeID, allocating, &countsCoresFull);
+            if (resourcesAllocated >= resourcesWanted) {
+              break;
+            }
+          }
+          if (resourcesAllocated >= resourcesWanted) {
+            break;
+          }
+        }
+      }
+      if (resourcesAllocated != resourcesWanted) {
+        selectedNodes.clear();
+      }
+    }
+    break;
+    case ns_Schedule::SMT::Mode::Any: {
+      uint32_t resourcesAllocated = 0;
+      for (auto it = countsCore.rbegin(); it != countsCore.rend(); ++it) {
+        for (auto const& nodeID: it->second) {
+          uint32_t allocating = std::min(it->first, resourcesWanted - resourcesAllocated);
+          resourcesAllocated += allocating;
+          selectedNodes.emplace_back(nodeID, allocating, &countsCore);
+          if (resourcesAllocated >= resourcesWanted) {
+            break;
+          }
+        }
+        if (resourcesAllocated >= resourcesWanted) {
+          break;
+        }
+      }
+      if (resourcesAllocated != resourcesWanted) {
+        for (auto const& [nbFree, nodes]: countsCores1Full) {
+          for (auto const& nodeID: nodes) {
+            uint32_t allocating = std::min(nbFree, resourcesWanted - resourcesAllocated);
+            resourcesAllocated += allocating;
+            selectedNodes.emplace_back(nodeID, allocating, &countsCores1Full);
+            if (resourcesAllocated >= resourcesWanted) {
+              break;
+            }
+          }
+          if (resourcesAllocated >= resourcesWanted) {
+            break;
+          }
+        }
+      }
+      if (resourcesAllocated != resourcesWanted) {
+        for (auto const& [nbFree, nodes]: countsCores2AndMoreFull) {
+          for (auto const& nodeID: nodes) {
+            uint32_t allocating = std::min(nbFree, resourcesWanted - resourcesAllocated);
+            resourcesAllocated += allocating;
+            selectedNodes.emplace_back(nodeID, allocating, &countsCores2AndMoreFull);
+            if (resourcesAllocated >= resourcesWanted) {
+              break;
+            }
+          }
+          if (resourcesAllocated >= resourcesWanted) {
+            break;
+          }
+        }
+      }
+      if (resourcesAllocated != resourcesWanted) {
+        selectedNodes.clear();
+      }
+    }
+  }
+
+  if (selectedNodes.empty()) {
+    return {};
+  }
+
+  std::vector<std::vector<uint64_t>> coresID;
+  uint64_t nbCores = 0;
+  for(auto [nodeID, nbElt, src]: selectedNodes) {
+    ns_System::CoresTopologyView::sNumaInfos const* currentNode = nullptr;
+    for(auto const& node: coresLoad.nodes_) {
+      if (node.id == nodeID) {
+        currentNode = &node;
+        break;
+      }
+    }
+    if (currentNode == nullptr) {
+      throw std::runtime_error("currentNode is NULL, abording cores search");
+    }
+
+    if (src == &countsCPUFull) {
+      for(auto const& [threadsCount, coresInfo]: currentNode->cores) {
+        uint32_t nbThread = threadsCount.first;
+        if (nbThread != threadsCount.second) {
+          continue;
+        }
+        size_t maxElt = std::min(nbElt * nbThread, coresInfo.size());
+        nbElt -= maxElt / nbThread;
+        for(size_t i=0; i<maxElt; i+=nbThread) {
+          std::vector<uint64_t> cpuCoresID;
+          for(size_t j=0; j<nbThread; j++) {
+            cpuCoresID.push_back(coresInfo[i+j].id);
+            ++nbCores;
+          }
+          coresID.push_back(cpuCoresID);
+        }
+        if (nbElt == 0) {
+          break;
+        }
+      }
+    } else if (src == &countsCoresFull) {
+      for(auto it = currentNode->cores.rbegin(); it != currentNode->cores.rend(); ++it) {
+        auto const& [threadsCount, coresInfo] = *it;
+        uint32_t nbThread = threadsCount.first;
+        if (nbThread != threadsCount.second) {
+            continue;
+        }
+        size_t maxElt = std::min(nbElt, coresInfo.size());
+        nbElt -= maxElt;
+        if ((maxElt < coresInfo.size()) && ((maxElt % nbThread) != 0)) {
+          maxElt = ((maxElt / nbThread) + 1) * nbThread;
+        }
+        for(size_t i=0; i<maxElt; i+=nbThread) {
+          std::vector<uint64_t> cpuCoresID;
+          for(size_t j=0; j<nbThread; j++) {
+            cpuCoresID.push_back(coresInfo[i+j].id);
+            ++nbCores;
+          }
+          coresID.push_back(cpuCoresID);
+        }
+        if (nbElt == 0) {
+          break;
+        }
+      }
+    } else if (src == &countsCore) {
+      for(auto const& [threadsCount, coresInfo]: currentNode->cores) {
+        uint32_t nbThread = threadsCount.second;
+        if (threadsCount.first == nbThread) {
+            continue;
+        }
+        size_t maxElt = std::min(nbElt, coresInfo.size());
+        nbElt -= maxElt;
+        std::vector<uint64_t> cpuCoresID;
+        for(size_t i=0; i<maxElt; ++i) {
+          if ((i>0) && ((i%nbThread) == 0)) {
+            coresID.push_back(cpuCoresID);
+            cpuCoresID.clear();
+          }
+          cpuCoresID.push_back(coresInfo[i].id);
+          ++nbCores;
+        }
+        if (!cpuCoresID.empty()) {
+          coresID.push_back(cpuCoresID);
+        }
+        if (nbElt == 0) {
+          break;
+        }
+      }
+    } else if (src == &countsCores1Full) {
+      for(auto const& [threadsCount, coresInfo]: currentNode->cores) {
+        uint32_t nbThread = threadsCount.first;
+        if ((nbThread != 1) || (nbThread != threadsCount.second)) {
+            continue;
+        }
+        size_t maxElt = std::min(nbElt, coresInfo.size());
+        nbElt -= maxElt;
+        std::vector<uint64_t> cpuCoresID;
+        for(size_t i=0; i<maxElt; ++i) {
+          if ((i>0) && ((i%nbThread) == 0)) {
+            coresID.push_back(cpuCoresID);
+            cpuCoresID.clear();
+          }
+          cpuCoresID.push_back(coresInfo[i].id);
+          ++nbCores;
+        }
+        if (!cpuCoresID.empty()) {
+          coresID.push_back(cpuCoresID);
+        }
+        if (nbElt == 0) {
+          break;
+        }
+      }
+    } else if (src == &countsCores2AndMoreFull) {
+      for(auto const& [threadsCount, coresInfo]: currentNode->cores) {
+        uint32_t nbThread = threadsCount.first;
+        if ((nbThread == 1) || (nbThread != threadsCount.second)) {
+            continue;
+        }
+        size_t maxElt = std::min(nbElt, coresInfo.size());
+        nbElt -= maxElt;
+        std::vector<uint64_t> cpuCoresID;
+        for(size_t i=0; i<maxElt; ++i) {
+          if ((i>0) && ((i%nbThread) == 0)) {
+            coresID.push_back(cpuCoresID);
+            cpuCoresID.clear();
+          }
+          cpuCoresID.push_back(coresInfo[i].id);
+          ++nbCores;
+        }
+        if (!cpuCoresID.empty()) {
+          coresID.push_back(cpuCoresID);
+        }
+        if (nbElt == 0) {
+          break;
+        }
+      }
+    }
+  }
+
+  return { nbCores, coresID };
 }

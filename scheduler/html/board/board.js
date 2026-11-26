@@ -84,14 +84,18 @@ function CreateMetric(label, value, perCores, helpKey, thresholds = [50, 80]) {
         coreBar.classList.add('tooltip-core-bar');
         const coreFill = document.createElement('div');
         coreFill.classList.add('tooltip-core-fill');
-        coreFill.style.width = Math.min(load, 100) + '%';
-        if (load > 80) coreFill.classList.add('high');
-        else if (load > 50) coreFill.classList.add('medium');
+        if (load >= 0) {
+          coreFill.style.width = Math.min(load, 100) + '%';
+          if (load > 80) coreFill.classList.add('high');
+          else if (load > 50) coreFill.classList.add('medium');
+        } else {
+          coreFill.style.width = '0';
+        }
         coreBar.appendChild(coreFill);
 
         const coreVal = document.createElement('div');
         coreVal.classList.add('tooltip-core-value');
-        coreVal.textContent = load + '%';
+        coreVal.textContent = (load >= 0) ? load + '%' : 'offline';
 
         row.append(coreLbl, coreBar, coreVal);
         tooltip.appendChild(row);

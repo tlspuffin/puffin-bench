@@ -4,6 +4,7 @@
 #include "publish.hxx"
 #include "archiver.hxx"
 #include "ressources_summary.hxx"
+#include "smt.hxx"
 #include "executor/executors_provider.hxx"
 #include "executor/executor.hxx"
 #include "../system/linux.hxx"
@@ -82,6 +83,9 @@ public:
   std::string launcher_;
 
   std::mutex metadata_index_lock_;
+
+  ns_Schedule::SMT::Mode default_smt_mode_ = ns_Schedule::SMT::Mode::UnSet;
+
 
   Task(uint64_t id, std::string const& name, 
       rapidjson::Value const& configJSON, 

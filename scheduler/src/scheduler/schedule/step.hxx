@@ -130,6 +130,7 @@ public:
   std::string function_;
   std::unordered_map<std::string, std::string> args_;
   uint32_t nb_cores_;
+  uint32_t nb_cores_reserved_;
   uint32_t nb_retry_;
   uint64_t memory_max_;
   uint64_t timeout_;
@@ -157,6 +158,8 @@ public:
   std::vector<struct Stream> readable_files_;
 
   uint64_t estimatedStartTime_;
+
+  ns_Schedule::SMT::Mode request_smt_mode_ = ns_Schedule::SMT::Mode::UnSet;
 
 private:
   enum class State { 

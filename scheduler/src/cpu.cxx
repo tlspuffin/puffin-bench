@@ -6,14 +6,14 @@ int main() {
   ns_System::CoresStats t0;
   ns_System::CoresStats t1;
 
-  std::cout << "Nombre de CPUs logiques : " << ns_System::CoreStats::NbCores() << std::endl;
+  std::cout << "Nombre de CPUs logiques : " << ns_System::CoresStats::NbCores() << std::endl;
   t0.GatherInfos();
   std::this_thread::sleep_for(std::chrono::seconds(3));
   t1.GatherInfos();
 
-  std::vector<bool> excluded_cores(ns_System::CoreStats::NbCores(), false);
-  excluded_cores[0] = true;
-  std::vector<ns_System::CoreStats> r = t0.SortCoresValuesRatio(ns_System::CoreStats::IDLE_INDEX, t1, &excluded_cores);
+  std::vector<bool> included_cores(ns_System::CoresStats::NbCores(), true);
+  included_cores[0] = false;
+  std::vector<ns_System::CoreStats> r = t0.SortCoresValuesRatio(ns_System::CoreStats::IDLE_INDEX, t1, &included_cores);
 
   for(auto const& core_perf: r) {
     std::cout << core_perf.id_ << ": "
@@ -39,7 +39,7 @@ int main() {
   t1.GatherInfos();
 
   r = t0.CoresValuesRatio(t1);
-  ns_System::CoresStats::SortCoresValuesRatio(ns_System::CoreStats::IDLE_INDEX, r, &excluded_cores);
+  ns_System::CoresStats::SortCoresValuesRatio(ns_System::CoreStats::IDLE_INDEX, r, &included_cores);
   for(auto const& core_perf: r) {
     std::cout << core_perf.id_ << ": "
       << core_perf.values_[ns_System::CoreStats::IDLE_INDEX] << ", "

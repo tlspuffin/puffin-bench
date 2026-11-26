@@ -171,7 +171,7 @@ set(SCHEDULER_SRC
   src/scheduler/schedule/duration_history.cxx src/scheduler/schedule/folder_remover.cxx
   src/scheduler/schedule/executor/config.cxx src/scheduler/schedule/executor/executor.cxx src/scheduler/schedule/executor/local.cxx 
   src/scheduler/schedule/executor/output_ring.cxx
-  src/scheduler/system/linux_cores.cxx src/scheduler/system/cpu_topology.cxx src/scheduler/system/cpuset.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx
+  src/scheduler/system/linux_cores.cxx src/scheduler/system/linux_cores_topology.cxx src/scheduler/system/cpuset.cxx src/scheduler/system/linux_process.cxx src/scheduler/system/linux_memory.cxx
   src/scheduler/system/linux.cxx
   src/scheduler/api/schedule_api.cxx src/scheduler/api/users_api.cxx src/scheduler/api/benchmarks_api.cxx
   src/scheduler/cache/config.cxx src/scheduler/cache/cache.cxx
@@ -194,6 +194,13 @@ target_link_libraries(scheduler.lib PUBLIC ${RapidjsonTN} ${PocoTN} ${LibArchive
 target_include_directories(scheduler.lib PRIVATE ${CMAKE_SOURCE_DIR})
 add_dependencies(scheduler.lib generate_version)
 
+add_library(tests-scheduler.lib STATIC ${SCHEDULER_SRC})
+target_link_libraries(tests-scheduler.lib PUBLIC ${RapidjsonTN} ${PocoTN} ${LibArchiveTN})
+target_include_directories(tests-scheduler.lib PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(tests-scheduler.lib PUBLIC BUILD_TESTSUITS)
+add_dependencies(tests-scheduler.lib generate_version)
+
+
 add_executable(scheduler src/scheduler/main.cxx)
 target_link_libraries(scheduler PRIVATE scheduler.lib)
 
@@ -201,16 +208,21 @@ add_executable(scheduler-static src/scheduler/main.cxx)
 target_link_libraries(scheduler-static PRIVATE scheduler.lib)
 target_link_options(scheduler-static PRIVATE -static-libgcc -static-libstdc++)
 
-add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx)
+add_executable(testcpu src/cpu.cxx src/scheduler/system/linux_cores.cxx src/scheduler/system/linux_cores_topology.cxx)
 
 add_executable(testFilesRing src/test_files_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
 add_executable(testOutputRing src/test_output_ring.cxx src/scheduler/schedule/executor/output_ring.cxx src/utils/logs.cxx )
-add_executable(testCpuTopology src/test_cpu_topology.cxx src/scheduler/system/cpu_topology.cxx)
+add_executable(testCpuTopology src/test_cpu_topology.cxx src/scheduler/system/linux_cores_topology.cxx)
+target_compile_definitions(testCpuTopology PRIVATE BUILD_TESTSUITS)
 # the CPUs the scheduler keeps its own threads and the other processes on: build/scheduler/testCpuset
 add_executable(testCpuset src/test_cpuset.cxx src/scheduler/system/cpuset.cxx)
+add_executable(testChooseCores src/test_choose_cores.cxx)
+target_link_libraries(testChooseCores PRIVATE tests-scheduler.lib)
+
 # the step arguments as the executor writes them and functions.sh reads them: build/scheduler/testStepParameters
 add_executable(testStepParameters src/test_step_parameters.cxx)
 target_compile_definitions(testStepParameters PRIVATE FUNCTIONS_SH="${CMAKE_CURRENT_SOURCE_DIR}/scripts/functions.sh")
 # the saved benchmarks of the board: build/scheduler/testBenchmarksAPI
 add_executable(testBenchmarksAPI src/test_benchmarks_api.cxx src/scheduler/api/benchmarks_api.cxx src/utils/logs.cxx)
 target_link_libraries(testBenchmarksAPI PRIVATE ${RapidjsonTN})
+
